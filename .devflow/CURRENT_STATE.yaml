@@ -1,0 +1,23 @@
+schema_version: 1
+repository: kinoko34077/devflow-test
+updated_at: 2026-09-24
+
+workflow:
+  states:
+    - NEW
+    - NEEDS_AUDIT
+    - AUDITED
+    - WORK_ORDER_READY
+    - CODEX_QUEUED
+    - IMPLEMENTING
+    - AWAITING_REVIEW
+    - VERIFIED
+    - DONE
+  exception_states:
+    - BLOCKED
+    - SPEC_CHANGED
+    - NEEDS_REAUDIT
+
+active_items: []
+
+next_action: "Create and run the first test issue through the workflow."
