@@ -18,6 +18,16 @@ workflow:
     - SPEC_CHANGED
     - NEEDS_REAUDIT
 
-active_items: []
+active_items:
+  - issue: 1
+    title: "Test: devflow workflow end-to-end"
+    status: NEW
+    audit_base: null
+    work_order_ready: false
+    dispatched_to_codex: false
+    implementation_status: not_started
+    latest_commit: null
+    pull_request: null
+    verification_status: pending
 
-next_action: "Create and run the first test issue through the workflow."
+next_action: "Issue #1 のテスト用実装指示を作成し、WORK_ORDER_READY まで進める。"
