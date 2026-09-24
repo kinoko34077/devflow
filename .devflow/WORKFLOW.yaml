@@ -1,0 +1,35 @@
+schema_version: 1
+repository: kinoko34077/devflow-test
+
+canonical_operational_state:
+  issues: true
+  pull_requests: true
+  repository_files_duplicate_issue_state: false
+
+workflow:
+  states:
+    - NEW
+    - NEEDS_AUDIT
+    - AUDITED
+    - WORK_ORDER_READY
+    - READY_FOR_IMPLEMENTATION
+    - IMPLEMENTING
+    - AWAITING_REVIEW
+    - VERIFIED
+    - DONE
+  exception_states:
+    - BLOCKED
+    - SPEC_CHANGED
+    - NEEDS_REAUDIT
+
+required_work_order_fields:
+  - objective
+  - scope
+  - acceptance_criteria
+  - non_goals
+  - verification
+  - audit_base
+  - related_specs_or_decisions
+
+review_boundary: pull_request
+implementation_actor: unrestricted
