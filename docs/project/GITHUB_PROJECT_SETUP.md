@@ -3,6 +3,7 @@
 Status: User-admin setup guide
 Project role: Derived display / overview layer
 Canonical spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
+Tracking Issue: `#35`
 
 ## 1. Create the Project
 
@@ -31,8 +32,6 @@ Configure the built-in Status options to:
 - NEEDS_REAUDIT
 - PARKED
 - DONE
-
-This is required so GitHub Projects built-in workflows such as item-added, Issue-closed and PR-merged can update the same status field used by this control system.
 
 ### Repository State
 
@@ -82,9 +81,9 @@ Single select:
 - Next Action
 - Audit SHA
 
-Do not add a manually maintained `Last Audit` field unless a later requirement cannot derive the date from Audit SHA commit metadata.
+Do not add a manually maintained `Last Audit` field while its date can be derived from Audit SHA commit metadata.
 
-## 3. Views
+## 3. Create views
 
 ### Repository Overview
 
@@ -99,6 +98,8 @@ Show at least:
 - Audit SHA
 - Next Action
 
+Primary items are `[REPO] ...` Repository Control Issues.
+
 ### Work Queue
 
 Table or board view for active cross-repository work.
@@ -112,79 +113,112 @@ Show at least:
 - Risk
 - Next Action
 
-## 4. Items to display
+Primary items are non-Repository-Control cross-repository Issues in devflow.
 
-Primary Project items are:
+Do not require every repository-local Issue / PR to appear in this Project. Repository-local work remains canonical in its own repository and is linked from the Repository Control Issue when it changes the cross-repository state.
 
-- `[REPO] ...` Repository Control Issues from devflow;
-- cross-repository operational Issues from devflow.
+## 4. Initial item import
 
-Do not require every Issue / PR from every managed repository to be copied into this Project. Repository-local work remains canonical in the repository and is linked from its Control Issue when it materially affects the cross-repository state.
+At v0.1 setup time, manually add the currently open devflow Issues `#5` through `#35` to the Project.
 
-## 5. Built-in Project workflows
+Reason: enabling Auto-add does not retroactively add existing matching Issues. Auto-add only adds matching items after they are created or updated.
 
-GitHub Projects currently provides built-in workflows that update the built-in `Status` field for common events. Prefer these before adding custom Actions.
+Expected initial population:
 
-Configure as applicable:
+- `#5`–`#34`: 30 Repository Control Issues.
+- `#35`: current cross-repository Project setup Issue.
+- `pc-files` and `pc-files2`: absent because they intentionally have no Repository Control Issues.
 
-1. Item added to Project -> set built-in Status to the desired initial state.
-2. Issue closed -> set built-in Status to DONE.
-3. Pull request merged -> set built-in Status to DONE when PR items are used.
-4. Auto-archive completed items only when old completed work becomes visual noise.
-5. Auto-add devflow items if it reduces manual Project maintenance.
+## 5. Built-in workflows
 
-Auto-add only affects matching items when they are created or updated after the workflow is enabled; existing matching items may need an initial manual add/import.
+Prefer GitHub Projects built-in workflows before custom Actions.
 
-## 6. Auto-add strategy
+### Auto-add to project
 
-Use devflow as the primary Project feeder rather than configuring one workflow per managed repository.
+GitHub Free supports one Auto-add workflow. Use that single workflow for devflow.
 
-Preferred target:
+Configure:
 
-- Repository: the operational devflow repository (`devflow-test` until renamed)
-- Items: Repository Control Issues and cross-repository operational Issues
+- Repository: `kinoko34077/devflow-test` until the repository is renamed.
+- Filter: `is:issue is:open`
 
-If filtering is needed, introduce a stable machine-readable convention such as labels only after the label vocabulary is explicitly defined. Do not make Project correctness depend on labels that do not yet exist.
+This makes devflow the single Project feeder. New open Repository Control Issues and new open cross-repository Issues will enter the Project automatically without configuring every managed repository separately.
 
-## 7. Custom-field synchronization
+### Issue closed
 
-Built-in workflows do not infer arbitrary custom fields such as Risk, Repository State, Audit SHA or free-text Next Action from repository semantics.
+Enable:
 
-If manual Project field maintenance becomes burdensome, add a GitHub Actions synchronization workflow that:
+`Issue closed -> built-in Status = DONE`
 
-1. reads the canonical devflow Issue state;
-2. resolves the target Project and field IDs through the GitHub GraphQL API;
-3. updates the corresponding Project item fields;
-4. runs only from canonical state toward the Project.
+This is safe because devflow Issue closure represents completion or an explicitly recorded terminal outcome. If an Issue is closed as not planned, preserve that reason in the Issue even if the Project display status is DONE.
 
-Required authentication must be configured by the user/admin. Do not store tokens, secrets or credential values in repository files.
+### Pull request merged
 
-The exact synchronization workflow is a later implementation phase after the Project exists and its field names are confirmed.
+Enable `PR merged -> Status = DONE` only if Pull Requests are later added as Project items. PR items are not required for v0.1.
 
-## 8. Normal operating rule
+### Item added
 
-Normal operation:
+Do not rely on one universal `Item added -> Status = ...` rule for correctness in v0.1. Repository Control Issues and cross-repository Work Issues can require different current statuses, and devflow remains canonical.
+
+### Auto-archive
+
+Leave automatic archiving off initially. Add it later only if completed items become visual noise.
+
+## 6. v0.1 synchronization boundary
+
+Built-in workflows handle:
+
+- Project membership for newly created/updated open devflow Issues;
+- Issue close -> DONE;
+- optional PR merge -> DONE.
+
+Built-in workflows do **not** infer arbitrary custom fields such as:
+
+- Repository State;
+- Priority;
+- Risk;
+- Type;
+- Repository;
+- Next Action;
+- Audit SHA.
+
+Do not manually maintain these fields as a second source of truth merely to keep the dashboard perfect.
+
+For v0.1, the Issue itself remains authoritative. Project custom fields may be populated manually where useful, but correctness must not depend on them.
+
+After the Project exists and the actual field names/options have been verified, create a separate Work Order for a one-way GitHub Actions / GraphQL synchronizer if automatic custom-field projection is still useful.
+
+Required Project credentials are configured by the user/admin. Never store credential values in repository files.
+
+## 7. Normal operating rule
 
 ```text
 individual repository change
     -> repository Issue / PR / CURRENT_STATE as appropriate
     -> update devflow Control Issue only if cross-repository state changed
-    -> Project updates through built-in workflow / future Action
+    -> Project membership/lifecycle follows built-in workflows
+    -> future Action may project custom fields from devflow into Project
 ```
 
-Do not normally edit Project fields first and then attempt to back-propagate them into canonical state.
+Do not normally edit Project fields first and then back-propagate them into canonical state.
 
-## 9. Validation after manual setup
+## 8. Validation after manual setup
 
-After setup, verify:
+Verify all of the following:
 
-- Project title is exactly `KiNoTch. Development Control`;
-- visibility is Private;
-- the built-in `Status` field has the 10 approved Work Status options;
-- no duplicate custom `Work Status` field exists;
-- all other required fields and options exist;
-- `Repository Overview` exists;
-- `Work Queue` exists;
-- `pc-files` and `pc-files2` are not represented by Repository Control Issues;
-- Project workflows do not create a second source of truth;
-- no credentials are stored in repository files.
+- Project title is exactly `KiNoTch. Development Control`.
+- Visibility is Private.
+- Built-in `Status` has the 10 approved Work Status options.
+- No duplicate custom `Work Status` field exists.
+- Repository State, Priority, Risk and Type option sets match the canonical spec.
+- Repository, Next Action and Audit SHA text fields exist.
+- `Repository Overview` exists.
+- `Work Queue` exists.
+- Initial Items include `#5`–`#35`.
+- `pc-files` and `pc-files2` are absent.
+- One Auto-add workflow targets `kinoko34077/devflow-test` with `is:issue is:open`.
+- Issue-closed workflow sets built-in Status to DONE.
+- Project remains display-only.
+- No credential values are stored in repository files.
+
+After validation, update devflow `#35` with the Project link and observed configuration, then close `#35` only when the Project is usable as the intended display layer.
