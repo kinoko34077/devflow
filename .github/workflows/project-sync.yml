@@ -33,8 +33,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Keep Sync Health issue closed
+        if: github.event_name == 'issues' && github.event.issue.title == '[SYSTEM] GitHub Project Sync Health' && github.event.issue.state == 'open'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+
       - name: Sync issue event
-        if: github.event_name == 'issues'
+        if: github.event_name == 'issues' && github.event.issue.title != '[SYSTEM] GitHub Project Sync Health'
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
