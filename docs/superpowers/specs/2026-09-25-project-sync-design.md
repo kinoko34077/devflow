@@ -9,11 +9,11 @@ Project: `KiNoTch. Development Control` (`kinoko34077` Project #1)
 
 Automatically project canonical devflow Issue state into the display-only GitHub Project while keeping devflow and individual repositories authoritative.
 
-The synchronizer must also produce enough machine-readable evidence that a normal ChatGPT session, which cannot directly read the private Project through the current connector, can still determine whether synchronization is healthy without requiring Codex to inspect the UI on every run.
+The synchronizer must also produce machine-readable verification evidence so a normal ChatGPT session can judge Project-sync health without directly reading the private Project. Direct Project inspection by Codex or another Project-capable agent becomes an escalation/acceptance path rather than a routine dependency.
 
 ## 2. Authority boundary
 
-The authority direction is strictly one-way:
+Authority is strictly one-way:
 
 ```text
 individual repository state
@@ -25,17 +25,15 @@ individual repository state
 The synchronizer MUST NOT:
 
 - close or reopen canonical Issues because of Project field changes;
-- edit Issue bodies based on Project values;
+- edit canonical Issue content based on Project values;
 - treat Project custom fields as canonical state;
-- infer unsupported values merely to make the dashboard complete.
+- infer unsupported values merely to fill the dashboard.
 
-The existing built-in `Issue closed -> Status = DONE` Project workflow is compatible with this direction because the canonical Issue event drives the Project display.
+The existing `Issue closed -> Status = DONE` Project workflow is compatible because the canonical Issue event drives the display.
 
 ## 3. Canonical field mapping
 
-The synchronizer parses Markdown sections from devflow Issues and maps them as follows:
-
-| Canonical Issue section / state | Project field | Project field kind |
+| Canonical source | Project field | Kind |
 | --- | --- | --- |
 | Issue closed | Status = DONE | built-in single-select |
 | Work Status | Status | built-in single-select |
@@ -47,19 +45,9 @@ The synchronizer parses Markdown sections from devflow Issues and maps them as f
 | Next Action | Next Action | custom text |
 | Audit SHA | Audit SHA | custom text |
 
-Supported single-select values are taken from `.devflow/WORKFLOW.yaml` and the canonical cross-repository specification.
+Canonical select values come from `.devflow/WORKFLOW.yaml` and `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
 
-### 3.1 Missing sections
-
-Missing canonical sections are not guessed.
-
-- If an open Repository Control Issue has no `Work Status`, the synchronizer leaves Project `Status` unchanged unless a later canonical rule explicitly defines a value.
-- If a text field is absent, verification reports it as `NOT_APPLICABLE` rather than overwriting Project state with invented text.
-- If a present value is not one of the canonical select options, synchronization fails for that field and reports the invalid value.
-
-### 3.2 Closed Issues
-
-A closed Issue always projects `Status = DONE`, regardless of the last open-state `Work Status` text. Other canonical fields may still be synchronized for historical display if present.
+Missing sections are never guessed. For an open Issue, a missing field is `NOT_APPLICABLE` and is not cleared or overwritten in the Project. A present but invalid select value is a blocking validation error. A closed Issue always projects `Status = DONE`.
 
 ## 4. Components
 
@@ -70,145 +58,134 @@ Triggers:
 - `issues: [opened, edited, reopened, closed]`
 - `workflow_dispatch`
 
-Manual dispatch inputs:
+Manual inputs:
 
 - `mode`: `verify` or `reconcile`
-- optional `issue_number`: when present, limit work to one devflow Issue
+- optional `issue_number`
 
-The workflow MUST NOT use a periodic schedule in v1.
+No periodic schedule is added in v1.
 
-Event behavior:
+Behavior:
 
-- Issue event: synchronize only the changed Issue.
-- Manual `verify`: read canonical Issues and Project state; make no Project mutations.
-- Manual `reconcile`: compare all managed devflow Issues against Project state and repair drift.
+- normal Issue event -> synchronize only that Issue;
+- manual `verify` -> compare canonical devflow state with live Project, no Project mutation;
+- manual `reconcile` -> repair supported drift, then verify again.
+
+The workflow uses repository `GITHUB_TOKEN` only for devflow Issue/Health-Issue operations and `PROJECTS_TOKEN` only for Project GraphQL access.
 
 ### 4.2 `scripts/project_sync.py`
 
-A dependency-light Python CLI implementing:
+Dependency-light Python CLI implementing:
 
-- Markdown section parsing;
-- canonical value normalization without semantic inference;
-- GitHub GraphQL requests;
-- Project/field/option/item discovery;
-- single-Issue sync;
-- full verify;
-- full reconcile;
-- structured result production for workflow logs and health reporting.
+- exact Markdown section parsing;
+- canonical validation;
+- GitHub GraphQL Project discovery/read/write;
+- single-Issue event sync;
+- full verify/reconcile;
+- structured health result generation.
 
-Use Python standard library where practical. Additional runtime dependencies require explicit justification.
+Use Python standard library where practical.
 
 ### 4.3 `tests/test_project_sync.py`
 
-Tests cover parser behavior, mapping, validation, closed-Issue rules, drift comparison, idempotence-oriented planning, and error handling without requiring a live Project token.
+Unit tests cover parsing, mapping, validation, drift computation, mutation planning, health rendering, and failure behavior without requiring a live Project token.
 
 ### 4.4 `docs/project/PROJECT_SYNC.md`
 
-Operational documentation covering:
-
-- token setup;
-- workflow modes;
-- expected Sync Health Issue format;
-- troubleshooting;
-- when direct Project verification by Codex or another capable agent is required.
+Operations guide covering credentials, workflow modes, Sync Health interpretation, troubleshooting, and direct-verification escalation.
 
 ## 5. Project discovery
 
-No GraphQL node IDs are committed to the repository.
+No Project, field, option, or item node IDs are committed.
 
-Configuration uses stable human-facing identity:
+Stable configuration:
 
 - owner login: `kinoko34077`
 - Project number: `1`
 
-At runtime the synchronizer queries GitHub GraphQL to discover:
+At runtime GraphQL resolves:
 
-- Project node ID;
-- Project title and visibility where available;
-- Project fields and field IDs;
-- single-select option IDs by exact option name;
-- Project items and their content Issue node IDs;
+- Project node ID/title/visibility where exposed;
+- field IDs;
+- exact single-select option IDs;
+- item IDs and Issue content node IDs;
 - current Project field values.
 
-Field matching is exact and case-sensitive after trimming. Missing or duplicate expected fields are treated as verification failures rather than selecting an arbitrary match.
+Expected field/option names are exact after trimming. Missing or ambiguous matches are blocking errors; no nearest-name fallback is allowed.
 
-## 6. Project item membership
+## 6. Expected Project membership
 
-For a canonical devflow Issue:
+The current built-in Auto-add rule is `kinoko34077/devflow-test` + `is:issue is:open`. Therefore full verification defines the expected active set as:
 
-1. Query Project items for an item whose content node ID matches the Issue node ID.
-2. If present, reuse the Project item ID.
-3. If absent in `verify` mode, report drift and do not mutate.
-4. If absent in `reconcile` or event-sync mode, call `addProjectV2ItemById`.
-5. After membership exists, update supported fields in separate mutations.
+1. every open Issue in `kinoko34077/devflow-test`, except the Sync Health Issue itself;
+2. closed devflow Issues already present in the Project, when validating terminal `Status = DONE`.
 
-Adding and updating are separate GraphQL operations because GitHub does not support adding an item and updating its field values in the same mutation.
+This matches the actual feeder rule instead of relying on hard-coded Issue ranges or title conventions.
 
-The existing Project Auto-add workflow remains enabled as a convenience; the synchronizer does not depend on its timing for correctness.
+`pc-files` and `pc-files2` remain outside managed Repository Control scope, but this does not require special numeric Issue filtering.
+
+For each expected Issue:
+
+1. locate Project item by Issue content node ID;
+2. in `verify`, missing membership is drift only;
+3. in event-sync/reconcile, missing membership is repaired with `addProjectV2ItemById`;
+4. field updates occur only after membership exists.
+
+GitHub requires item addition and field update as separate operations. The existing Auto-add workflow remains a convenience; synchronizer correctness does not depend on its timing. citeturn715469search0turn715469search1
 
 ## 7. Field update behavior
 
-### 7.1 Single-select fields
+For single-select fields (`Status`, `Repository State`, `Priority`, `Risk`, `Work Type`):
 
-For `Status`, `Repository State`, `Priority`, `Risk`, and `Work Type`:
+- resolve field and desired option by exact name;
+- compare current versus desired;
+- mutate only on drift.
 
-- resolve the field by exact name;
-- resolve the option by exact canonical value;
-- compare current option ID/value with desired state;
-- mutate only when drift exists.
+For text fields (`Managed Repository`, `Next Action`, `Audit SHA`):
 
-### 7.2 Text fields
+- compare exact normalized text;
+- mutate only on drift;
+- absence does not imply clearing.
 
-For `Managed Repository`, `Next Action`, and `Audit SHA`:
-
-- compare current text with canonical parsed text;
-- mutate only when drift exists;
-- do not clear a Project field merely because the canonical section is absent unless the canonical specification later explicitly defines absence as clearing.
-
-This prevents partial Issue types from destructively erasing unrelated display state.
+`updateProjectV2ItemFieldValue` is used only for supported Project item field types. Built-in Repository remains read-only Issue ownership metadata and is not mutated. citeturn715469search1turn715469search2
 
 ## 8. Verify and reconcile
 
-### 8.1 `verify`
+### 8.1 Verify
 
-Read-only with respect to the Project.
+Project-read-only comparison producing, per field/item:
 
-It must report:
+- `MATCH`
+- `DRIFT`
+- `NOT_APPLICABLE`
+- `ERROR`
 
-- Project resolvable/not resolvable;
-- expected fields present/missing/duplicate;
-- expected select options present/missing;
-- each canonical Issue present/missing in Project;
-- each supported field `MATCH`, `DRIFT`, `NOT_APPLICABLE`, or `ERROR`;
-- unexpected fatal configuration errors;
-- verification coverage and counts.
+It also validates Project resolvability, expected fields/options, item membership, coverage, and blocking configuration errors.
 
-`verify` may update the Sync Health Issue because that Issue is the operational verification record, not Project state. If health reporting itself fails, the workflow must still fail visibly in Actions logs.
+Verify may update the Sync Health Issue because that Issue is the operational verification record, not Project state.
 
-### 8.2 `reconcile`
+### 8.2 Reconcile
 
-Runs the same comparison and then repairs supported drift from canonical devflow state.
+Runs the same comparison, repairs supported drift, then performs a fresh verify pass.
 
-After mutation it performs a second read-only verification pass. Reconcile succeeds only if the post-write verification has no blocking drift/errors.
-
-Repeated reconcile against unchanged canonical state must be effectively idempotent: no field mutation should be sent when current Project value already matches desired value.
+Success requires no blocking drift/errors after the second pass. Re-running reconcile against already matching state must produce no Project field mutations.
 
 ## 9. Sync Health Issue
 
-Create one persistent devflow Issue with exact title:
+Create one persistent Issue named exactly:
 
 `[SYSTEM] GitHub Project Sync Health`
 
-Its body is machine-maintained and contains only current verification state, not append-only logs.
+Its body is overwritten with current health, not used as an append-only log.
 
-Minimum body schema:
+Minimum schema:
 
 ```markdown
 ## Result
 PASS | DEGRADED | FAIL | NOT_CONFIGURED
 
 ## Last Verification
-<ISO-8601 UTC timestamp>
+<ISO-8601 UTC>
 
 ## Mode
 verify | reconcile | event-sync
@@ -228,152 +205,143 @@ verify | reconcile | event-sync
 - ...
 
 ## Run
-<GitHub Actions run URL or identifier>
+<Actions run URL>
 
 ## Direct Verification Requirement
 NONE | CODEX_REQUIRED
-<reason when required>
+<reason if required>
 ```
 
 Result semantics:
 
-- `PASS`: all API-verifiable requirements checked by the synchronizer match.
-- `DEGRADED`: canonical synchronization works but one or more non-blocking checks are unavailable.
-- `FAIL`: API-verifiable drift/error remains after verification/reconcile.
-- `NOT_CONFIGURED`: required Project credential is absent or Project access cannot be established.
+- `PASS`: every API-verifiable required check matches.
+- `DEGRADED`: synchronization works but non-blocking coverage is unavailable.
+- `FAIL`: API-verifiable drift/error remains.
+- `NOT_CONFIGURED`: Project credential/access is unavailable.
 
-The Health Issue must clearly distinguish what was verified by API from what is outside the synchronizer's visibility.
+### 9.1 Health-Issue recursion rule
+
+Because Auto-add currently accepts every open devflow Issue, the Health Issue may itself appear in the Project. That is acceptable for v1, but it is not canonical synchronization input.
+
+The workflow MUST detect the exact Health-Issue title and exit event-sync without Project-field synchronization. Updating its body therefore cannot recursively trigger another health update loop.
+
+Full verify/reconcile excludes the Health Issue from expected canonical field coverage even if Auto-add has placed it in the Project.
 
 ## 10. Direct Project verification escalation
 
-Normal operation should not require Codex/UI inspection when Sync Health is `PASS` and the relevant requirement is API-verifiable.
+Routine ChatGPT operation relies on:
 
-Set `Direct Verification Requirement = CODEX_REQUIRED` when any of the following applies:
+1. canonical devflow Issues;
+2. Sync Health Issue;
+3. Actions run/status/log evidence when needed.
 
-- Project structure was intentionally changed (field/view/workflow configuration change);
-- a required Project/UI property cannot be verified through the implemented GraphQL/API path;
-- machine verification and an observed UI result disagree;
-- Project/field discovery returns ambiguous data;
-- a migration changes Project owner/number or field names;
-- the user explicitly requests direct verification.
+Set `Direct Verification Requirement = CODEX_REQUIRED` when:
 
-Operational handoff for a capable agent:
+- Project structure/field/view/workflow configuration intentionally changed;
+- a required UI/property is not covered by implemented APIs;
+- API verification and observed UI disagree;
+- discovery is ambiguous;
+- owner/project number/field names migrate;
+- user explicitly requests direct Project verification.
 
-1. Read this design, canonical spec, `.devflow/WORKFLOW.yaml`, the Sync Health Issue, and relevant Work Order.
-2. Directly inspect Project #1 using available Project-capable API/UI tooling.
-3. Compare observed structure and values against canonical requirements.
-4. Record exact observed configuration and discrepancies in the active Work Order/verification Issue.
-5. Do not silently rewrite canonical requirements to match the UI; open/retain a blocking Issue when GitHub limitations require a design decision.
+A Project-capable agent must then:
 
-This makes direct Codex inspection an escalation path rather than the everyday source of truth.
+1. read canonical spec, `.devflow/WORKFLOW.yaml`, this design, Health Issue, and active Work Order;
+2. inspect live Project #1 directly;
+3. compare exact observed structure/values with canonical requirements;
+4. record evidence/discrepancies in the active Work Order;
+5. never silently alter canonical requirements to match UI limitations.
 
-## 11. Authentication and secrets
+This satisfies the requirement that Codex can act as a direct-verification substitute when the normal Chat connector cannot read Projects.
 
-The synchronizer reads the token from repository secret:
+## 11. Authentication
+
+Repository secret:
 
 `PROJECTS_TOKEN`
 
-No token value, derived credential, or authentication header is ever written to source files, Issues, logs, or health reports.
+GitHub's official Projects API documentation requires `read:project` for reads or `project` for Project queries/mutations when using a classic PAT; a GitHub App installation token is also supported. v1 uses a user-admin configured Project-capable token unless a later design replaces it with an App. citeturn715469search0
 
-The token must support reading and mutating the user-owned Project and reading devflow Issues. For the initial implementation, a user-admin configured credential is an explicit setup dependency.
+`devflow-test` is public, so Project access is the additional capability required for the Project operations themselves. Repository Issue updates use the workflow's `GITHUB_TOKEN` with explicit `issues: write` and `contents: read` permissions.
 
-If the token is missing:
+No credential value or authorization header may be written to source, Issues, logs, or health output.
 
-- workflow returns `NOT_CONFIGURED` where health reporting is still possible;
-- no Project mutation is attempted;
-- logs explain the missing secret name without exposing any value.
+If `PROJECTS_TOKEN` is absent:
 
-Credential creation/permission changes remain user-controlled because they are security-sensitive.
+- no Project request/mutation is attempted;
+- workflow reports `NOT_CONFIGURED` when possible;
+- logs name the missing secret only;
+- security-sensitive credential creation remains user-controlled.
 
-## 12. Error handling and safety
+## 12. Error handling
 
 Blocking failures include:
 
-- Project not found;
-- expected field missing or duplicated;
-- expected single-select option missing or duplicated;
+- Project not found/access denied;
+- expected field or select option missing/ambiguous;
 - invalid canonical select value;
-- GraphQL authorization failure;
-- Project item add/update failure;
+- Project membership/add/update failure;
 - post-reconcile drift remains.
 
-Safety rules:
+Rules:
 
-- stop mutating the affected item after a structural/configuration error is found;
-- do not guess IDs or nearest field/option names;
-- do not mutate canonical Issue state from Project values;
-- do not print secrets;
-- preserve partial-success details in the structured result/health report;
-- return non-zero exit status for blocking failure.
+- never guess IDs/names;
+- stop mutating affected item after structural error;
+- never mutate canonical Issue state from Project values;
+- redact secrets;
+- preserve partial-success details;
+- return non-zero for blocking failure.
 
-## 13. Issue selection for full verification
-
-Full verify/reconcile targets devflow Issues that represent Project items under the current v1 scope:
-
-- open Repository Control Issues (`[REPO] ...`);
-- open cross-repository operational/Work Order Issues intended for the Project;
-- closed Project-tracked Issues still present in the Project when needed to validate terminal Status.
-
-The implementation should prefer explicit repository/title/state rules over a hard-coded numeric Issue range. It must exclude the backup repositories `pc-files` and `pc-files2` according to canonical scope.
-
-The Sync Health Issue itself is not synchronized into Project display fields unless explicitly made a Project item later.
-
-## 14. Tests
+## 13. Tests
 
 Minimum automated tests:
 
-1. Parse each canonical Markdown section with CRLF/LF and surrounding whitespace.
-2. Ignore similarly named headings that are not exact canonical headings.
-3. Closed Issue overrides Status to DONE.
-4. Missing optional section becomes NOT_APPLICABLE, not guessed.
-5. Invalid select value is a blocking validation error.
-6. Canonical -> Project field-name mapping matches the current spec.
-7. Duplicate/missing field discovery fails deterministically.
-8. Duplicate/missing select option discovery fails deterministically.
-9. Verify computes MATCH/DRIFT without mutation planning side effects.
-10. Reconcile plans mutations only for drift.
-11. Reconcile post-verification detects remaining drift.
-12. Secret/token values are never included in rendered health/error messages.
+1. exact section parsing under LF/CRLF/whitespace;
+2. similarly named headings do not match;
+3. closed Issue overrides Status to DONE;
+4. missing field -> NOT_APPLICABLE;
+5. invalid select -> blocking error;
+6. canonical -> Project field mapping;
+7. missing/duplicate field and option discovery failures;
+8. verify is Project-read-only;
+9. reconcile plans only drift mutations;
+10. post-reconcile remaining drift fails;
+11. Health Issue event is ignored and does not recurse;
+12. full coverage excludes Health Issue while including ordinary open devflow Issues;
+13. secret values never appear in rendered output.
 
-Live integration verification after credential configuration:
+## 14. Rollout
 
-- run manual `verify`;
-- run `reconcile` if drift exists;
-- run `verify` again;
-- confirm Sync Health Issue result;
-- directly inspect Project through Codex only if health says CODEX_REQUIRED or during initial rollout acceptance.
+### Phase 1 — repository implementation
 
-## 15. Rollout
+- implement script/workflow/tests/docs;
+- unit-test without live secret;
+- verify workflow syntax/dry-run behavior;
+- PR/re-audit/merge.
 
-Phase 1 — repository implementation without live secret:
+### Phase 2 — user-admin credential
 
-- add parser/client/workflow/tests/docs;
-- run unit tests;
-- verify workflow syntax and dry-run behavior;
-- merge only after re-audit.
+- create Project-capable token;
+- store only as `PROJECTS_TOKEN` repository secret.
 
-Phase 2 — user-admin credential setup:
+### Phase 3 — live acceptance
 
-- create/configure Project-capable credential;
-- store only as repository secret `PROJECTS_TOKEN`.
+- manual verify;
+- reconcile if drift exists;
+- verify again;
+- confirm Health result;
+- perform one direct Codex Project inspection to validate initial API/UI agreement;
+- record evidence in Work Order #39 and Health Issue.
 
-Phase 3 — live acceptance:
+After acceptance, direct Project inspection is escalation-only.
 
-- run manual verify;
-- reconcile initial field drift;
-- confirm post-reconcile PASS;
-- perform one direct Codex Project inspection to validate initial rollout and API/UI agreement;
-- record evidence in Work Order #39 and Sync Health Issue.
+## 15. Completion criteria
 
-After Phase 3, routine ChatGPT verification reads devflow Issue state, Sync Health Issue, and Actions evidence. Direct Project inspection is escalation-only.
-
-## 16. Completion criteria
-
-Work Order #39 is complete only when:
+Work Order #39 completes only when:
 
 - implementation/tests/docs are merged;
-- required credential has been configured by the user/admin;
+- Project credential is configured;
 - live reconcile/verify succeeds;
-- Sync Health Issue reports PASS or an explicitly accepted DEGRADED state;
-- initial direct Project verification confirms no material API/UI mismatch;
-- `[REPO] devflow-test` Control Issue points to the new normal verification path.
+- Health Issue is `PASS` or explicitly accepted `DEGRADED`;
+- initial Codex/direct Project inspection finds no material API/UI mismatch;
+- `[REPO] devflow-test` points to the new verification path.
