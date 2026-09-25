@@ -3,7 +3,7 @@ repository:
   operational_name: devflow
   current_github_identity: kinoko34077/devflow
   previous_github_identity: kinoko34077/devflow-test
-  rename_state: phase_b_verification
+  rename_state: completed
 
 canonical_operational_state:
   issues: true
@@ -311,7 +311,7 @@ project_sync:
 repository_rename:
   previous: kinoko34077/devflow-test
   current: kinoko34077/devflow
-  state: phase_b_verification
+  state: completed
   phase_a_rename_ready:
     - logical_name_devflow
     - retain_explicit_current_identity_where_required
