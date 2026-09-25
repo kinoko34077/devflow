@@ -1,9 +1,9 @@
 schema_version: 4
 repository:
   operational_name: devflow
-  current_github_identity: kinoko34077/devflow-test
-  target_github_identity: kinoko34077/devflow
-  rename_state: pending_admin_rename
+  current_github_identity: kinoko34077/devflow
+  previous_github_identity: kinoko34077/devflow-test
+  rename_state: phase_b_verification
 
 canonical_operational_state:
   issues: true
@@ -264,8 +264,7 @@ project_display:
     - Work Queue
   enabled_project_workflows:
     - auto_add:
-        repository: kinoko34077/devflow-test
-        rename_verification_target: kinoko34077/devflow
+        repository: kinoko34077/devflow
         filter: is:issue is:open
     - issue_closed:
         status: DONE
@@ -310,8 +309,9 @@ project_sync:
       - explicit_user_request
 
 repository_rename:
-  target: kinoko34077/devflow
-  state: pending_admin_rename
+  previous: kinoko34077/devflow-test
+  current: kinoko34077/devflow
+  state: phase_b_verification
   phase_a_rename_ready:
     - logical_name_devflow
     - retain_explicit_current_identity_where_required

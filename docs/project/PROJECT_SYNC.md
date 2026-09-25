@@ -82,7 +82,7 @@ The Health Issue is kept closed so the Project Auto-add filter `is:issue is:open
 A normal ChatGPT session that cannot directly read the private Project should check, in order:
 
 1. `[SYSTEM] GitHub Project Sync Health`
-2. the devflow Repository Control Issue (currently `[REPO] devflow-test`; after accepted rename `[REPO] devflow`)
+2. the devflow Repository Control Issue `[REPO] devflow`
 3. active Work Order / relevant Repository Control Issue
 4. relevant Actions run/logs when Health is not `PASS`
 
@@ -166,27 +166,20 @@ Recorded evidence:
 
 Subsequent Issue changes use event-sync. Use targeted or full `reconcile` -> `verify` when structural changes, suspected drift, credential rotation, repository identity migration, or explicit verification require it.
 
-## 11. `devflow-test` -> `devflow` repository rename
+## 11. Repository rename acceptance
 
-The operational target identity is `kinoko34077/devflow`. Work Order `#46` owns migration acceptance.
+The GitHub repository was renamed from `kinoko34077/devflow-test` to `kinoko34077/devflow` on 2026-09-25. Work Order `#46` owns final migration acceptance.
 
-### Before admin rename
+Historical Issue/PR/commit references may retain the old repository name where they identify historical events. Current operational identity is `kinoko34077/devflow`.
 
-- Keep current exact repository identity `kinoko34077/devflow-test` where GitHub configuration or current links require it.
-- Use logical product/operational name `devflow` in agent/user-facing documentation.
-- Do not rewrite historical Issue/PR references that identify events under the old name.
-- `scripts/project_sync.py` still contains a local fallback default for `GITHUB_REPOSITORY`; Actions always supplies the live environment value. Update/remove that fallback as part of the post-rename current-identity cleanup rather than pretending the GitHub identity already changed.
-
-### After admin rename
-
-Require all of the following before declaring migration complete:
+The rename itself has been directly observed. Before Work Order #46 may close, require all of the following:
 
 1. repository metadata resolves as `kinoko34077/devflow`;
 2. Issues, PRs, Actions, default branch and branch protection remain usable;
 3. required repository secret/configuration remains effective without exposing secret values;
-4. Project Auto-add is directly verified to target the renamed repository identity;
+4. Project Auto-add is directly verified to target `kinoko34077/devflow`;
 5. full `reconcile` runs with no Issue number and succeeds;
 6. full `verify` runs with no Issue number and succeeds;
 7. Sync Health records expected full coverage, drift `0`, errors `0`, and no unresolved direct-verification requirement;
-8. `[REPO] devflow-test` is migrated to `[REPO] devflow`, current repository fields/references are updated, and Audit SHA is refreshed;
+8. Repository Control is migrated to `[REPO] devflow`, current repository fields/references are updated, and Audit SHA is refreshed;
 9. only then may Work Order #46 close as `DONE`.

@@ -6,7 +6,7 @@ KiNoTch.の複数Repositoryを横断して、監査・Current State・Work Order
 >
 > Managed repositoryで作業を始める場合、まず`AGENTS.md`を読み、対象の`[REPO] <repository>` Control Issueから対象repo自身の正本へ入る。
 
-現在のGitHub repository identityは、管理者によるrename完了までは`kinoko34077/devflow-test`。運用名とrename後の正式repository名は`kinoko34077/devflow`とする。renameが実際に確認されるまでは、旧identityがまだ存在することを隠さない。
+現在のGitHub repository identityは`kinoko34077/devflow`。旧名`kinoko34077/devflow-test`は2026-09-25のrename以前の履歴参照としてのみ扱う。
 
 実装主体は固定しない。ChatGPT、Codex、その他のAgent/実装者が同じGitHub上の正本・Issue・PR・検証証拠から再開できることを要件とする。
 

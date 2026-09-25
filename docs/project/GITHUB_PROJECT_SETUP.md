@@ -1,18 +1,19 @@
 # GitHub Project Setup Handoff
 
-Status: User-admin setup guide
+Status: Operational reference; initial setup completed
 Project role: Derived display / overview layer
 Canonical spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
-Tracking Issue: `#35`
+Initial tracking Issue: `#35` (completed)
+Current repository identity: `kinoko34077/devflow`
 
 ## 1. Project
 
-Create a user-owned GitHub Project with:
+User-owned GitHub Project:
 
 - Title: `KiNoTch. Development Control`
 - Visibility: Private
 
-The Project is a display layer, not an operational source of truth. Canonical state remains in devflow and the individual repositories. Do not add a custom field sync Action in v0.1.
+The Project is a display layer, not an operational source of truth. Canonical state remains in devflow and the individual repositories.
 
 ## 2. Concept-to-Project mapping
 
@@ -109,15 +110,17 @@ Table or board view for active cross-repository work. Show at least:
 - Risk
 - Next Action
 
-## 5. Initial items and scope
+## 5. Items and managed scope
 
-Add `devflow-test` Issues `#5` through `#35` as initial Project items. Exclude `pc-files` and `pc-files2`; they are outside managed scope.
+The original setup imported devflow Issues `#5` through `#35`; subsequent open canonical devflow Issues are handled by Auto-add and Project synchronization. Exclude `pc-files` and `pc-files2`; they remain outside managed scope.
 
-## 6. v0.1 workflows
+Historical references may mention the repository's former name `devflow-test`; current operational identity is `kinoko34077/devflow`.
+
+## 6. Project workflows
 
 Only the following workflows are enabled:
 
-1. Auto-add to project: repository `kinoko34077/devflow-test`, filter `is:issue is:open`.
+1. Auto-add to project: repository `kinoko34077/devflow`, filter `is:issue is:open`.
 2. Item closed / Issue closed: set built-in `Status` to `DONE`.
 
 The following remain disabled:
@@ -134,6 +137,8 @@ The following remain disabled:
 
 There is no normal Project-to-Issue reverse synchronization. Project automation must not close or otherwise mutate canonical devflow Issues.
 
-## 7. Validation and handoff
+## 7. Validation
 
-After setup, directly re-check the Project name, Private visibility, all Status options, custom fields and options, both views, initial items, workflow states, Auto-add repository/filter, and Issue-closed-to-DONE behavior. Record the Project URL, final configuration, canonical-document PR, merge commit, and verification result in `devflow-test#35`. Close `#35` only after all requirements pass; otherwise record the GitHub constraint and leave it open.
+After any structural Project or repository-identity change, directly re-check the Project name, Private visibility, Status options, custom fields/options, views, workflow states, Auto-add repository/filter, and Issue-closed-to-DONE behavior.
+
+For normal machine-verifiable operation, use `docs/project/PROJECT_SYNC.md`, full `reconcile` / `verify`, and `[SYSTEM] GitHub Project Sync Health`. Repository identity migrations require direct Project-capable verification of Auto-add before acceptance.
