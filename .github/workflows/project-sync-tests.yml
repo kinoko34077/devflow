@@ -1,0 +1,36 @@
+name: Project sync tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/project_sync.py'
+      - 'tests/**'
+      - '.github/workflows/project-sync*.yml'
+      - '.devflow/WORKFLOW.yaml'
+      - 'docs/project/**'
+      - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/project_sync.py'
+      - 'tests/**'
+      - '.github/workflows/project-sync*.yml'
+      - '.devflow/WORKFLOW.yaml'
+      - 'docs/project/**'
+      - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      - name: Unit tests
+        run: python -W error -m unittest discover -v
+      - name: Compile check
+        run: python -m py_compile scripts/project_sync.py

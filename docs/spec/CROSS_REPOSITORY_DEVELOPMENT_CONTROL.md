@@ -3,23 +3,35 @@
 Status: Canonical specification
 Approved: 2026-09-25
 Owner repository: `kinoko34077/devflow-test` (planned operational name: `devflow`)
-Tracking issue: `devflow-test#35`
+Project setup history: `devflow-test#35`
+Project synchronization work: `devflow-test#39`
 
 ## 1. Purpose and authority
 
-This specification defines a low-overhead GitHub-native control plane for cross-repository development. It must make repository state, active work, priority, risk, audit SHA, and next action discoverable without relying on chat history.
+This specification defines a low-overhead GitHub-native control plane for cross-repository development. Repository state, active work, priority, risk, audit SHA, and next action must be discoverable without relying on chat history.
 
-The canonical source of truth is devflow and the individual repositories:
+Canonical authority is split by responsibility:
 
-- devflow owns Repository Control Issues, cross-repository work Issues, workflow definitions, and this specification.
-- Each individual repository owns its implementation, repository-local Issues/PRs, and detailed current state.
-- The GitHub Project `KiNoTch. Development Control` is a display and overview layer only.
+- devflow owns Repository Control Issues, cross-repository work Issues, workflow definitions, and cross-repository control specifications;
+- each individual repository owns its implementation, repository-local Issues/PRs, and detailed current technical state;
+- GitHub Project `KiNoTch. Development Control` is a derived display / overview layer only.
 
-Project changes must not be treated as a second operational source of truth. No Project-to-Issue reverse synchronization or custom-field synchronization Action is part of v0.1. Project custom-field values may remain empty until a later, separately approved work order.
+Authority direction is one-way:
+
+```text
+individual repository state
+  -> devflow canonical operational state
+  -> Project synchronization
+  -> GitHub Project display
+```
+
+Project edits must not become a source of truth for canonical Issues or repository state. Project-to-Issue reverse synchronization is prohibited in normal operation.
 
 ## 2. Repository Control Issues
 
-Use one open Repository Control Issue per managed repository. Its canonical content includes:
+Each managed repository has one open Repository Control Issue in devflow unless the repository is intentionally retired.
+
+Canonical content:
 
 - Repository
 - Repository State
@@ -30,89 +42,107 @@ Use one open Repository Control Issue per managed repository. Its canonical cont
 - Next Action
 - Detailed Current State
 
-The managed-repository scope excludes `pc-files` and `pc-files2`. They must not be added as Project items or represented as managed repositories in this v0.1 setup.
+The Control Issue is an index/current-state summary and must not duplicate detailed repository specifications or implementation history.
 
-## 3. Work and repository state vocabulary
+Managed scope excludes:
+
+- `pc-files`
+- `pc-files2`
+
+New development/documentation repositories are managed by default unless explicitly excluded.
+
+## 3. State vocabulary
 
 ### 3.1 Work Status
 
-The work-status concept is represented by the GitHub Project built-in single-select field `Status`. Do not create a custom `Work Status` field. The exact ten options are:
+Allowed states:
 
-- NEEDS_AUDIT
-- AUDITED
-- WORK_ORDER_READY
-- READY_FOR_IMPLEMENTATION
-- IMPLEMENTING
-- AWAITING_REVIEW
-- BLOCKED
-- NEEDS_REAUDIT
-- PARKED
-- DONE
+- `NEEDS_AUDIT`
+- `AUDITED`
+- `WORK_ORDER_READY`
+- `READY_FOR_IMPLEMENTATION`
+- `IMPLEMENTING`
+- `AWAITING_REVIEW`
+- `BLOCKED`
+- `NEEDS_REAUDIT`
+- `PARKED`
+- `DONE`
+
+In GitHub Project this concept is represented by the built-in `Status` field. Do not create a duplicate custom `Work Status` field.
 
 ### 3.2 Repository State
 
-Custom single-select options:
+- `ACTIVE`
+- `PARKED`
+- `MAINTENANCE`
+- `DEPRECATED`
+- `CANCELLED`
 
-- ACTIVE
-- PARKED
-- MAINTENANCE
-- DEPRECATED
-- CANCELLED
+`BLOCKED` is a Work Status, not a Repository State.
 
-### 3.3 Priority and Risk
+### 3.3 Priority
 
-Custom single-select options:
+- `P0`
+- `P1`
+- `P2`
+- `P3`
 
-- Priority: P0, P1, P2, P3
-- Risk: LOW, MEDIUM, HIGH, CRITICAL
+### 3.4 Risk
 
-### 3.4 Work Type
+- `LOW`
+- `MEDIUM`
+- `HIGH`
+- `CRITICAL`
 
-The devflow concept `Type` is displayed in the Project as the custom single-select field `Work Type`. Its exact options are:
+### 3.5 Type
 
-- FEATURE
-- BUG
-- SPEC
-- AUDIT
-- REFACTOR
-- MAINTENANCE
-- RESEARCH
-- INFRA
-- DOCS
+Canonical devflow values:
 
-### 3.5 Project field mapping
+- `FEATURE`
+- `BUG`
+- `SPEC`
+- `AUDIT`
+- `REFACTOR`
+- `MAINTENANCE`
+- `RESEARCH`
+- `INFRA`
+- `DOCS`
+
+The Project displays this concept through custom single-select `Work Type` because `Type` is reserved by GitHub.
+
+## 4. Project field mapping
 
 | devflow concept | Project field | Kind |
 | --- | --- | --- |
 | Work Status | Status | GitHub built-in single-select |
-| Type | Work Type | Custom single-select |
-| Repository | Managed Repository | Custom text |
+| Repository State | Repository State | custom single-select |
+| Priority | Priority | custom single-select |
+| Risk | Risk | custom single-select |
+| Type | Work Type | custom single-select |
+| Repository | Managed Repository | custom text |
+| Next Action | Next Action | custom text |
+| Audit SHA | Audit SHA | custom text |
 
-The GitHub built-in `Repository` field identifies the Issue's owning repository. It may remain visible, but it is not the managed-repository field and must not be used as a substitute for `Managed Repository`.
+A closed canonical Issue projects `Status = DONE`.
 
-Custom text fields required by v0.1 are:
+GitHub built-in `Repository` identifies the repository containing the Issue. Because Repository Control Issues live in devflow, it is not a substitute for `Managed Repository`.
 
-- Managed Repository
-- Next Action
-- Audit SHA
+Missing canonical sections are not guessed. Unsupported/unknown select values are errors rather than approximate matches.
 
-Do not retain `Type` or `Repository` as the current names of custom Project fields for these concepts.
+## 5. GitHub Project configuration
 
-## 4. GitHub Project configuration
-
-Create a user-owned, Private Project:
+Project:
 
 - Title: `KiNoTch. Development Control`
 - URL: `https://github.com/users/kinoko34077/projects/1`
-- Project is display-only; devflow and repository files remain authoritative.
+- Visibility: Private
+- Role: display/overview only
 
-### 4.1 Views
-
-Create and maintain these views:
+### 5.1 Views
 
 #### Repository Overview
 
-A table view for Repository Control Issues. It must show at least:
+Show at least:
 
 - Managed Repository
 - Repository State
@@ -121,11 +151,9 @@ A table view for Repository Control Issues. It must show at least:
 - Audit SHA
 - Next Action
 
-The built-in Repository column may remain for Issue ownership.
-
 #### Work Queue
 
-A table or board view for active cross-repository work. It must show at least:
+Show at least:
 
 - Status
 - Priority
@@ -134,18 +162,14 @@ A table or board view for active cross-repository work. It must show at least:
 - Risk
 - Next Action
 
-### 4.2 Initial items
+### 5.2 Built-in Project workflows
 
-Add devflow Issues #5 through #35 as the initial Project items. Existing matching Issues are added manually because Auto-add is not a retroactive import mechanism. Do not add pc-files or pc-files2.
-
-## 5. v0.1 Project workflows
-
-Only the following workflows are enabled:
+Enabled:
 
 1. Auto-add: repository `kinoko34077/devflow-test`, filter `is:issue is:open`.
-2. Item closed / Issue closed: set the built-in `Status` field to `DONE`.
+2. Item closed / Issue closed -> built-in `Status = DONE`.
 
-The following workflows remain disabled:
+Disabled unless a later specification explicitly changes this:
 
 - Auto-close issue
 - Auto-add sub-issues
@@ -157,30 +181,143 @@ The following workflows remain disabled:
 - Code review approved
 - Item reopened
 
-Auto-archive is intentionally not enabled in v0.1. Project automation must not close, edit, or otherwise mutate canonical devflow Issues in the reverse direction.
+Built-in automation must not create a Project-to-Issue reverse authority path.
 
-## 6. Operating lifecycle
+## 6. Automated Project synchronization
 
-The normal boundary is:
+Implementation:
 
-1. Audit the repository and record the audit SHA in the Repository Control Issue.
-2. Prepare a work order with objective, scope, acceptance criteria, non-goals, verification, audit base, and related specifications.
-3. Implement on a dedicated branch in the affected repository.
-4. Verify the change, open a PR, and perform a re-audit before merge.
-5. Update canonical repository/devflow state and let the Project reflect only its display role.
+- `.github/workflows/project-sync.yml`
+- `scripts/project_sync.py`
+- `docs/project/PROJECT_SYNC.md`
+- tests in `tests/test_project_sync.py`
 
-A document or operating-definition change follows Issue -> dedicated branch -> verification -> PR -> re-audit -> merge. If a GitHub limitation prevents a required setting, record the requirement, actual limitation, and alternative in tracking Issue #35 and leave it open.
+The synchronizer is implemented under Work Order `#39`. Live Project access requires repository secret `PROJECTS_TOKEN`; until that credential is configured, implementation is present but live synchronization/verification reports `NOT_CONFIGURED`.
 
-## 7. Validation and handoff
+### 6.1 Event sync
 
-After any Project setup change, directly re-check the live Project rather than relying on prior reports:
+Issue events trigger synchronization for the affected devflow Issue:
 
-- title and Private visibility;
-- exactly the ten built-in Status options and no custom Work Status;
-- all custom fields and exact select options;
-- both view names and required columns;
-- initial items #5-#35 and absence of pc-files/pc-files2;
-- enabled/disabled workflows, Auto-add repository/filter, and Issue-closed -> DONE;
-- absence of Project-to-Issue reverse synchronization and custom-field sync Actions.
+- opened
+- edited
+- reopened
+- closed
 
-Record the Project URL, final fields, views, workflow states, canonical-document PR, merge commit, and verification result in devflow-test#35. Close #35 only after every requirement passes; otherwise document the GitHub constraint and keep it open.
+The dedicated Sync Health Issue is excluded before Project access to prevent recursive runs.
+
+### 6.2 Manual verification and reconciliation
+
+`workflow_dispatch` supports:
+
+- `verify`: Project comparison only; no Project mutation;
+- `reconcile`: repair supported drift from canonical devflow state and then verify again;
+- optional Issue number to limit scope.
+
+No periodic schedule exists in v1.
+
+### 6.3 Runtime discovery
+
+Do not commit GraphQL node IDs for Project, fields, options, or items.
+
+Stable configuration is:
+
+- owner: `kinoko34077`
+- Project number: `1`
+- exact canonical field/option names
+
+IDs are resolved dynamically through GitHub GraphQL. Missing/duplicated/wrong-type fields or select options are blocking configuration errors.
+
+### 6.4 Mutation boundary
+
+The synchronizer may:
+
+- add canonical devflow Issues to the display Project when missing;
+- update supported Project field values when canonical state differs;
+- remove the machine-maintained Sync Health Issue from the display Project if it was accidentally auto-added.
+
+The synchronizer must not:
+
+- close/reopen canonical Issues because of Project values;
+- rewrite Issue bodies from Project data;
+- infer values absent from canonical state;
+- expose credential values.
+
+## 7. Sync Health and indirect verification
+
+One machine-maintained Issue has exact title:
+
+`[SYSTEM] GitHub Project Sync Health`
+
+It is Current State evidence, not an append-only history log.
+
+Result values:
+
+- `PASS`: all implemented API-verifiable synchronization requirements match;
+- `DEGRADED`: synchronization works but a non-blocking check is unavailable;
+- `FAIL`: API-verifiable drift/error remains;
+- `NOT_CONFIGURED`: `PROJECTS_TOKEN` is absent or Project access is unavailable before live activation.
+
+It records:
+
+- last verification time;
+- mode;
+- Project identity;
+- coverage/counts;
+- drift/errors;
+- Actions run reference;
+- whether direct Project verification is required.
+
+After live acceptance, normal ChatGPT sessions that cannot directly read the private Project should use Sync Health + relevant devflow Issues + Actions evidence as the normal verification path.
+
+## 8. Direct Project verification escalation
+
+Direct inspection by Codex or another Project-capable agent is required when:
+
+- initial live rollout is accepted;
+- Project fields/views/workflows are structurally changed;
+- API coverage cannot verify a required UI property;
+- Sync Health requests `CODEX_REQUIRED`;
+- API result and observed UI disagree;
+- owner/project number/field names migrate;
+- user explicitly requests direct Project verification.
+
+The direct verifier must compare live Project state against this specification and record exact observations/discrepancies in the active Work Order/verification Issue. GitHub UI limitations must not silently rewrite canonical requirements.
+
+## 9. Authentication boundary
+
+Project access uses repository Actions secret:
+
+`PROJECTS_TOKEN`
+
+Credential creation, permission grants, and secret registration are user-admin/security-sensitive actions.
+
+Token values must never appear in repository files, Issue bodies, comments, logs, or health output.
+
+Repository `GITHUB_TOKEN` is used only for repository-scoped Issue reads/health updates and is not treated as the Project credential.
+
+## 10. Operating lifecycle
+
+Normal repository work:
+
+`audit -> Work Order -> dedicated branch -> implementation -> verification -> PR -> re-audit -> merge`
+
+Update devflow only when cross-repository summary state changes. Project display follows built-in workflows and the synchronizer.
+
+Agent confirmation remains required for release/deploy/publication/destructive operations/security-sensitive permission changes. Low-risk merge may proceed when already authorized by the user and rollback remains available through a revert PR.
+
+## 11. Verification after Project/control changes
+
+For synchronization implementation changes:
+
+```text
+unit tests
+-> compile/workflow validation
+-> PR diff review
+-> merge
+-> live reconcile/verify after credential availability
+-> one direct Project acceptance on initial rollout
+```
+
+For Project structural changes, direct Project inspection is required in addition to machine verification.
+
+Work Order #39 is complete only after code/docs are merged, `PROJECTS_TOKEN` is configured by the user/admin, live reconcile/verify succeeds, Sync Health reaches accepted state, and initial direct Project acceptance confirms no material API/UI mismatch.
