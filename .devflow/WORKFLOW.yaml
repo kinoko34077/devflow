@@ -1,5 +1,9 @@
-schema_version: 3
-repository: kinoko34077/devflow-test
+schema_version: 4
+repository:
+  operational_name: devflow
+  current_github_identity: kinoko34077/devflow-test
+  target_github_identity: kinoko34077/devflow
+  rename_state: pending_admin_rename
 
 canonical_operational_state:
   issues: true
@@ -7,6 +11,28 @@ canonical_operational_state:
   repository_control_issues: true
   github_project_is_display_only: true
   repository_files_duplicate_issue_state: false
+  chat_history_is_canonical: false
+
+agent_bootstrap:
+  entry_file: AGENTS.md
+  normal_managed_repository_read_order:
+    - devflow_agent_entry
+    - target_repository_control_issue
+    - target_repository_local_entry_points
+    - active_repository_local_issue_or_pull_request
+    - task_relevant_specs_code_tests
+    - cross_repository_spec_when_needed
+  control_issue_title_pattern: "[REPO] <repository>"
+  require_exactly_one_open_control_issue: true
+  no_control_issue_action: onboard_before_normal_implementation
+  duplicate_control_issue_action: reconcile_before_state_mutation
+  base_adopted_local_entry:
+    - AGENTS.md
+    - project/project.json
+    - project/docs/INDEX.md
+    - project/docs/CURRENT_STATE.md
+    - task_relevant_material
+  force_base_layout_on_non_base_repository: false
 
 workflow:
   work_states:
@@ -68,6 +94,31 @@ compatibility:
     VERIFIED: AWAITING_REVIEW
     SPEC_CHANGED: NEEDS_REAUDIT
 
+issue_authority:
+  repository_control:
+    owner: devflow
+    purpose: cross_repository_index_and_current_state_summary
+    detailed_implementation_record: false
+  cross_repository_work_order:
+    owner: devflow
+    use_when:
+      - coordinated_multi_repository_operation
+      - control_plane_or_workflow_change
+      - project_or_sync_structure_change
+      - one_shared_acceptance_decision
+  repository_local_issue_or_work_order:
+    owner: target_repository
+    use_when:
+      - repository_specific_implementation
+      - repository_specific_investigation
+      - repository_specific_finding
+      - repository_specific_specification_change
+    identical_template_required: false
+  pull_request:
+    owner: target_repository
+    purpose: diff_review_and_verification_evidence
+    normal_review_boundary: true
+
 repository_control:
   one_open_issue_per_managed_repository: true
   excluded_repositories:
@@ -75,6 +126,8 @@ repository_control:
     - pc-files2
   required_fields:
     - repository
+    - work_status
+    - type
     - repository_state
     - priority
     - risk
@@ -82,8 +135,51 @@ repository_control:
     - active_work
     - next_action
     - detailed_current_state
+    - canonical_entry_points
+  update_when:
+    - accepted_audit_sha_changes
+    - work_status_changes
+    - repository_state_changes
+    - cross_repository_priority_or_risk_changes
+    - active_work_reference_changes
+    - next_action_changes
+    - canonical_entry_points_change
+    - p0_or_p1_finding_changes_readiness
+    - managed_lifecycle_state_changes
+  do_not_update_for:
+    - every_commit
+    - repeated_test_with_same_outcome
+    - minor_implementation_comment
+    - local_detail_without_cross_repository_state_change
+
+repository_local_issue:
+  durable_tracking_expected_when:
+    - work_spans_sessions_or_multiple_commits
+    - acceptance_criteria_must_survive_handoff
+    - p0_or_p1_finding
+    - blocked_or_user_decision_required
+    - multiple_local_components_need_fixed_scope
+    - dependency_tracking_required
+    - lasting_decision_or_verification_history_required
+  trivial_single_pr_issue_optional: true
+  required_information_when_no_local_template:
+    - source_or_reason
+    - objective_or_problem
+    - scope
+    - acceptance_criteria
+    - verification
+    - audit_or_base_sha
+    - related_specs_or_decisions
+    - implementation_references
+    - blocker_or_next_action_when_unfinished
 
 required_work_order_fields:
+  - source
+  - type
+  - work_status
+  - priority
+  - risk
+  - repository
   - objective
   - scope
   - acceptance_criteria
@@ -91,6 +187,57 @@ required_work_order_fields:
   - verification
   - audit_base
   - related_specs_or_decisions
+
+operating_lifecycle:
+  normal_repository_work:
+    - read_control_and_local_canon
+    - audit_relevant_current_sha
+    - create_or_reuse_local_issue_when_durable_tracking_warranted
+    - dedicated_branch
+    - implementation
+    - verification_and_regression
+    - pull_request
+    - re_audit_changed_scope
+    - merge_under_safety_policy
+    - reconcile_repository_local_canon
+    - reconcile_devflow_control_if_summary_changed
+  full_audit_periodic: false
+  finding_escalation:
+    p0_p1: durable_issue_by_default
+    p2_p3: summarize_by_default
+
+merge_boundary:
+  default_branch_direct_write: false
+  low_or_medium_risk_merge_without_new_confirmation_requires:
+    - existing_user_authorization
+    - current_verification_evidence
+    - low_catastrophic_failure_potential
+    - no_unresolved_security_or_destructive_boundary
+    - safe_revert_pr_available
+  explicit_user_confirmation_required_for:
+    - release
+    - deploy
+    - publication
+    - destructive_delete
+    - shared_history_rewrite
+    - credential_or_session_change
+    - permission_change
+    - other_security_sensitive_action
+    - difficult_to_reverse_action
+  rollback: dedicated_branch_and_revert_pr
+  rewrite_shared_main_for_rollback: false
+
+handoff:
+  canonical_resume_sources:
+    - repository_control_issue
+    - referenced_repository_local_issue_or_work_order
+    - referenced_pull_request
+    - recorded_audit_sha_vs_current_head
+    - repository_local_specs_and_current_state
+    - first_acceptance_condition_without_current_evidence
+  previous_chat_required: false
+  devflow_summary_conflict_with_local_canon: reconcile_devflow_from_verified_local_canon
+  ambiguous_local_canon_conflict: resolve_before_implementation
 
 project_display:
   source_of_truth: false
@@ -118,6 +265,7 @@ project_display:
   enabled_project_workflows:
     - auto_add:
         repository: kinoko34077/devflow-test
+        rename_verification_target: kinoko34077/devflow
         filter: is:issue is:open
     - issue_closed:
         status: DONE
@@ -153,13 +301,31 @@ project_sync:
   direct_project_verification:
     routine_when_health_passes: false
     required_for:
-      - initial_live_rollout
       - structural_project_change
       - api_invisible_requirement
       - machine_ui_disagreement
       - ambiguous_project_discovery
       - owner_or_field_migration
+      - repository_identity_migration
       - explicit_user_request
+
+repository_rename:
+  target: kinoko34077/devflow
+  state: pending_admin_rename
+  phase_a_rename_ready:
+    - logical_name_devflow
+    - retain_explicit_current_identity_where_required
+    - classify_old_name_references
+    - remove_unnecessary_runtime_literal_dependency
+  phase_b_acceptance_after_admin_rename:
+    - verify_repository_identity
+    - verify_issues_pull_requests_actions_default_branch
+    - verify_branch_protection_and_required_configuration
+    - verify_project_auto_add_repository_identity
+    - full_project_reconcile
+    - full_project_verify
+    - require_sync_health_full_coverage_zero_drift_zero_errors
+    - update_current_identity_references_and_control_audit_sha
 
 review_boundary: pull_request
 implementation_actor: unrestricted

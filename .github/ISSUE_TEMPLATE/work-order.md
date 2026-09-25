@@ -1,18 +1,39 @@
 ---
-name: Work Order
-description: Audited implementation task with explicit acceptance criteria
+name: Cross-repository Work Order
+description: Coordinated devflow work with explicit acceptance and verification
 title: "Work Order: "
-labels: enhancement
 assignees: ''
 ---
 
 ## Source
 
-<!-- Link the audit Issue/comment or prior decision that created this work. -->
+<!-- User request, audit/finding, prior decision, or parent operation. -->
+
+## Type
+
+`SPEC`
+
+## Work Status
+
+`WORK_ORDER_READY`
+
+## Priority
+
+`P2`
+
+## Risk
+
+`LOW`
+
+## Repository
+
+<!-- Canonical section name. Project sync displays this through `Managed Repository`. Use one repository or a concise multi-repository scope. -->
+
+`MULTI`
 
 ## Objective
 
-<!-- State the outcome, not the implementation method. -->
+<!-- State the observable outcome, not only the implementation method. -->
 
 ## Scope
 
@@ -32,21 +53,34 @@ assignees: ''
 
 ## Audit base
 
-<!-- Commit SHA that was inspected before this Work Order was created. -->
+<!-- Record inspected SHA(s) or explicit no-SHA reason. -->
 
-`<commit-sha>`
+- `<repository>: <commit-sha>`
 
 ## Related specs / decisions
 
 - 
 
+## Repository-local child work
+
+<!-- Link owning-repository Issues/PRs. Detailed local implementation belongs there. -->
+
+- 
+
 ## Implementation
 
-- Branch: pending
-- Pull Request: pending
+- Branch / PR: pending
 - Implementer: unrestricted
+
+## Current blocker / Next Action
+
+`[IMPLEMENT]`
 
 ## Review result
 
 - Status: pending
-- Verified commit: pending
+- Verified commit(s): pending
+
+## Handoff notes
+
+<!-- Keep only information needed to resume from durable GitHub state. Do not paste chat history. -->
