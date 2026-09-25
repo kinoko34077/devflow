@@ -1,7 +1,7 @@
 # GitHub Project Synchronization
 
-Status: Implemented, live activation requires `PROJECTS_TOKEN`
-Tracking Work Order: `#39`
+Status: Operational; initial live acceptance completed 2026-09-25
+Tracking Work Order: `#39` (completed)
 Project: `KiNoTch. Development Control`
 Project URL: `https://github.com/users/kinoko34077/projects/1`
 
@@ -76,7 +76,7 @@ The Health Issue is kept closed so the Project Auto-add filter `is:issue is:open
 
 ## 5. Normal verification path
 
-After live activation, a normal ChatGPT session that cannot directly read the private Project should check, in order:
+A normal ChatGPT session that cannot directly read the private Project should check, in order:
 
 1. `[SYSTEM] GitHub Project Sync Health`
 2. `[REPO] devflow-test` Control Issue
@@ -91,12 +91,13 @@ Direct Project inspection is an escalation path, not routine state storage.
 
 Use direct inspection when:
 
-- initial live rollout is being accepted;
 - Project fields/views/workflows were structurally changed;
 - Sync Health says `CODEX_REQUIRED`;
 - an API-verifiable result disagrees with an observed UI result;
 - Project owner/number/field names changed;
 - the user explicitly requests direct Project verification.
+
+The initial live rollout direct inspection was completed on 2026-09-25 and recorded in Work Order `#39`.
 
 The capable agent must:
 
@@ -106,24 +107,19 @@ The capable agent must:
 4. record exact observations/discrepancies in the active Work Order or verification Issue;
 5. never silently rewrite canonical requirements to match a UI limitation.
 
-## 7. User-admin activation step
+## 7. Authentication and activation state
 
-`GITHUB_TOKEN` is repository-scoped and is not used for Project access. The Project synchronizer expects a separate repository Actions secret named exactly:
+`GITHUB_TOKEN` is repository-scoped and is not used for Project access. The Project synchronizer uses a separate repository Actions secret named exactly:
 
 `PROJECTS_TOKEN`
 
-For the current user-owned Project implementation, use a Project-capable personal access token and save only the token value as that repository secret. GitHub's documented user-Project Actions approach uses a personal access token (classic) with `project` and `repo` scopes.
+Current state: the secret is configured and authenticated Project access is operational.
+
+For recreation or credential rotation, use a Project-capable personal access token and save only the token value as that repository secret. The user-owned Project setup uses a personal access token (classic) with `project` and `repo` scopes.
 
 Do not place the token in source code, Issue bodies, workflow YAML, comments, or logs.
 
-After the secret is configured:
-
-1. manually dispatch `Project sync` with `mode = reconcile` and no Issue number;
-2. wait for the run to complete;
-3. manually dispatch `Project sync` with `mode = verify`;
-4. confirm `[SYSTEM] GitHub Project Sync Health` reports `PASS` (or an explicitly accepted `DEGRADED` state);
-5. perform one direct Codex/Project-capable inspection for initial rollout acceptance;
-6. record the result in Work Order #39 and update `[REPO] devflow-test`.
+After credential recreation/rotation, run full `reconcile` then full `verify` and confirm Sync Health returns an accepted state before considering the credential change complete.
 
 ## 8. Failure handling
 
@@ -152,8 +148,17 @@ python -m py_compile scripts/project_sync.py
 
 Unit tests do not require Project credentials or live Project mutations.
 
-## 10. Verification limitation before activation
+## 10. Initial live acceptance
 
-Before `PROJECTS_TOKEN` is registered, implementation/tests/workflow syntax can be verified but the private Project cannot be live-read or mutated by this workflow. That state is intentionally represented as `NOT_CONFIGURED`, not as a failed canonical comparison.
+Initial live acceptance completed on 2026-09-25.
 
-After registration, the first full `reconcile` + `verify` pair and one direct Codex/Project-capable inspection are required before Work Order #39 is closed.
+Recorded evidence:
+
+- full `reconcile`: Actions run `36108965683` — Success;
+- full `verify`: Actions run `36109459896` — Success;
+- full verification coverage: 33 canonical Issues checked, 33 Project items matched, drift 0, errors 0;
+- initial direct Codex/Project-capable inspection: completed with no material mismatch recorded;
+- Work Order `#39`: completed and closed;
+- normal operation is represented by `[REPO] devflow-test` and `[SYSTEM] GitHub Project Sync Health`.
+
+Subsequent Issue changes use event-sync. Use targeted or full `reconcile` -> `verify` when structural changes, suspected drift, credential rotation, or explicit verification require it.
