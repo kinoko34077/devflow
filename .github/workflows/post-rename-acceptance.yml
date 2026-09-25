@@ -26,3 +26,39 @@ jobs:
         run: python scripts/project_sync.py reconcile
       - name: Full verify
         run: python scripts/project_sync.py verify
+      - name: Inspect Project workflow API coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          query = r'''
+          query {
+            projectType: __type(name:"ProjectV2") {
+              fields { name }
+            }
+            workflowType: __type(name:"ProjectV2Workflow") {
+              fields { name }
+            }
+          }
+          '''
+          req = urllib.request.Request(
+              'https://api.github.com/graphql',
+              data=json.dumps({'query': query}).encode(),
+              headers={
+                  'Authorization': f"Bearer {os.environ['PROJECTS_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'devflow-post-rename-acceptance',
+              },
+              method='POST',
+          )
+          with urllib.request.urlopen(req, timeout=30) as r:
+              data = json.load(r)
+          if data.get('errors'):
+              raise SystemExit('GraphQL introspection error: ' + '; '.join(e.get('message','') for e in data['errors']))
+          project_fields = [f['name'] for f in (data.get('data',{}).get('projectType') or {}).get('fields') or []]
+          workflow_fields = [f['name'] for f in (data.get('data',{}).get('workflowType') or {}).get('fields') or []]
+          print('PROJECTV2_WORKFLOW_RELATED_FIELDS=' + json.dumps([x for x in project_fields if 'workflow' in x.lower()]))
+          print('PROJECTV2WORKFLOW_FIELDS=' + json.dumps(workflow_fields))
+          PY
