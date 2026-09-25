@@ -134,7 +134,7 @@ project_display:
 
 project_sync:
   implementation: present
-  live_state: awaiting_credential_live_acceptance
+  live_state: operational
   work_order: 39
   workflow_file: .github/workflows/project-sync.yml
   implementation_file: scripts/project_sync.py
