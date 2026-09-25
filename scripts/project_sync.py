@@ -164,6 +164,11 @@ def is_health_issue(issue: dict[str, Any]) -> bool:
     return str(issue.get("title") or "").strip() == HEALTH_TITLE
 
 
+def select_target_issue(rest: Any, issue_number: int) -> list[dict[str, Any]]:
+    issue = rest.get_issue(issue_number)
+    return [] if is_health_issue(issue) else [issue]
+
+
 def _redact(text: str, secrets: Iterable[str]) -> str:
     out = text
     for secret in secrets:
@@ -749,8 +754,7 @@ def run_sync(
             if rest is None:
                 raise ConfigError("repository token is required for verify/reconcile issue reads")
             if issue_number is not None:
-                issue = rest.get_issue(issue_number)
-                issues = [] if is_health_issue(issue) else [issue]
+                issues = select_target_issue(rest, issue_number)
             else:
                 all_issues = rest.list_issues(state="all")
                 issues = select_canonical_issues(all_issues, snapshot.items_by_content_id)
@@ -761,7 +765,7 @@ def run_sync(
                 health_issue2 = rest.find_issue_by_title(HEALTH_TITLE)
                 health_item_status = ensure_health_not_project_item(health_issue2, snapshot2, gql, mode="reconcile")
                 snapshot3 = discover_project(gql, cfg.owner, cfg.project_number)
-                issues2 = [rest.get_issue(issue_number)] if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
+                issues2 = select_target_issue(rest, issue_number) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
                 summary = process_issues(issues2, snapshot3, gql, mode="verify")
                 health_item_status = ensure_health_not_project_item(rest.find_issue_by_title(HEALTH_TITLE), snapshot3, gql, mode="verify")
                 snapshot = snapshot3
