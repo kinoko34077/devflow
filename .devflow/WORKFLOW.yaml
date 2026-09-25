@@ -96,6 +96,9 @@ project_display:
   source_of_truth: false
   preferred_update_direction: canonical_state_to_project
   direct_manual_update_is_normal_operation: false
+  work_status_field: Status
+  work_status_field_kind: builtin_project_status
+  duplicate_custom_work_status_field: false
   required_views:
     - Repository Overview
     - Work Queue
