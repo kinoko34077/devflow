@@ -2,6 +2,7 @@
 
 Status: Operational; initial live acceptance completed 2026-09-25
 Tracking Work Order: `#39` (completed)
+Current migration Work Order: `#46`
 Project: `KiNoTch. Development Control`
 Project URL: `https://github.com/users/kinoko34077/projects/1`
 
@@ -55,6 +56,8 @@ Manual workflow modes:
 
 There is no periodic schedule in v1.
 
+The workflow uses `$GITHUB_REPOSITORY` at runtime for repository-scoped Issue operations; the workflow YAML itself does not depend on the literal repository name.
+
 ## 4. Sync Health Issue
 
 The workflow maintains one Issue with exact title:
@@ -79,13 +82,13 @@ The Health Issue is kept closed so the Project Auto-add filter `is:issue is:open
 A normal ChatGPT session that cannot directly read the private Project should check, in order:
 
 1. `[SYSTEM] GitHub Project Sync Health`
-2. `[REPO] devflow-test` Control Issue
+2. the devflow Repository Control Issue (currently `[REPO] devflow-test`; after accepted rename `[REPO] devflow`)
 3. active Work Order / relevant Repository Control Issue
 4. relevant Actions run/logs when Health is not `PASS`
 
 A `PASS` result means the implemented API-verifiable synchronization checks passed at the recorded run/time. It does not claim that UI-only properties outside API coverage were directly observed.
 
-## 6. Direct Project verification by Codex or another capable agent
+## 6. Direct Project verification
 
 Direct Project inspection is an escalation path, not routine state storage.
 
@@ -95,13 +98,14 @@ Use direct inspection when:
 - Sync Health says `CODEX_REQUIRED`;
 - an API-verifiable result disagrees with an observed UI result;
 - Project owner/number/field names changed;
+- repository identity migration may affect Project Auto-add/configuration;
 - the user explicitly requests direct Project verification.
 
 The initial live rollout direct inspection was completed on 2026-09-25 and recorded in Work Order `#39`.
 
 The capable agent must:
 
-1. read `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`, `.devflow/WORKFLOW.yaml`, this file, Sync Health, and the active Work Order;
+1. read `AGENTS.md`, `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`, `.devflow/WORKFLOW.yaml`, this file, Sync Health, and the active Work Order;
 2. directly inspect Project #1 with Project-capable tooling/UI;
 3. compare the live Project against canonical requirements;
 4. record exact observations/discrepancies in the active Work Order or verification Issue;
@@ -115,7 +119,7 @@ The capable agent must:
 
 Current state: the secret is configured and authenticated Project access is operational.
 
-For recreation or credential rotation, use a Project-capable personal access token and save only the token value as that repository secret. The user-owned Project setup uses a personal access token (classic) with `project` and `repo` scopes.
+For recreation or credential rotation, use a Project-capable personal access token and save only the token value as that repository secret.
 
 Do not place the token in source code, Issue bodies, workflow YAML, comments, or logs.
 
@@ -157,8 +161,32 @@ Recorded evidence:
 - full `reconcile`: Actions run `36108965683` — Success;
 - full `verify`: Actions run `36109459896` — Success;
 - full verification coverage: 33 canonical Issues checked, 33 Project items matched, drift 0, errors 0;
-- initial direct Codex/Project-capable inspection: completed with no material mismatch recorded;
-- Work Order `#39`: completed and closed;
-- normal operation is represented by `[REPO] devflow-test` and `[SYSTEM] GitHub Project Sync Health`.
+- initial direct Project-capable inspection: completed with no material mismatch recorded;
+- Work Order `#39`: completed and closed.
 
-Subsequent Issue changes use event-sync. Use targeted or full `reconcile` -> `verify` when structural changes, suspected drift, credential rotation, or explicit verification require it.
+Subsequent Issue changes use event-sync. Use targeted or full `reconcile` -> `verify` when structural changes, suspected drift, credential rotation, repository identity migration, or explicit verification require it.
+
+## 11. `devflow-test` -> `devflow` repository rename
+
+The operational target identity is `kinoko34077/devflow`. Work Order `#46` owns migration acceptance.
+
+### Before admin rename
+
+- Keep current exact repository identity `kinoko34077/devflow-test` where GitHub configuration or current links require it.
+- Use logical product/operational name `devflow` in agent/user-facing documentation.
+- Do not rewrite historical Issue/PR references that identify events under the old name.
+- `scripts/project_sync.py` still contains a local fallback default for `GITHUB_REPOSITORY`; Actions always supplies the live environment value. Update/remove that fallback as part of the post-rename current-identity cleanup rather than pretending the GitHub identity already changed.
+
+### After admin rename
+
+Require all of the following before declaring migration complete:
+
+1. repository metadata resolves as `kinoko34077/devflow`;
+2. Issues, PRs, Actions, default branch and branch protection remain usable;
+3. required repository secret/configuration remains effective without exposing secret values;
+4. Project Auto-add is directly verified to target the renamed repository identity;
+5. full `reconcile` runs with no Issue number and succeeds;
+6. full `verify` runs with no Issue number and succeeds;
+7. Sync Health records expected full coverage, drift `0`, errors `0`, and no unresolved direct-verification requirement;
+8. `[REPO] devflow-test` is migrated to `[REPO] devflow`, current repository fields/references are updated, and Audit SHA is refreshed;
+9. only then may Work Order #46 close as `DONE`.
