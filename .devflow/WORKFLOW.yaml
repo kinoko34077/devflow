@@ -1,26 +1,87 @@
-schema_version: 1
+schema_version: 2
 repository: kinoko34077/devflow-test
 
 canonical_operational_state:
   issues: true
   pull_requests: true
+  repository_control_issues: true
+  github_project_is_display_only: true
   repository_files_duplicate_issue_state: false
 
 workflow:
-  states:
-    - NEW
+  work_states:
     - NEEDS_AUDIT
     - AUDITED
     - WORK_ORDER_READY
     - READY_FOR_IMPLEMENTATION
     - IMPLEMENTING
     - AWAITING_REVIEW
-    - VERIFIED
-    - DONE
-  exception_states:
     - BLOCKED
-    - SPEC_CHANGED
     - NEEDS_REAUDIT
+    - PARKED
+    - DONE
+  repository_states:
+    - ACTIVE
+    - PARKED
+    - MAINTENANCE
+    - DEPRECATED
+    - CANCELLED
+  priorities:
+    - P0
+    - P1
+    - P2
+    - P3
+  risks:
+    - LOW
+    - MEDIUM
+    - HIGH
+    - CRITICAL
+  types:
+    - FEATURE
+    - BUG
+    - SPEC
+    - AUDIT
+    - REFACTOR
+    - MAINTENANCE
+    - RESEARCH
+    - INFRA
+    - DOCS
+  next_action_tags:
+    - AUDIT
+    - SPECIFY
+    - IMPLEMENT
+    - VERIFY
+    - REVIEW
+    - MERGE
+    - RELEASE
+    - USER_DECISION
+    - WAIT
+    - NONE
+
+compatibility:
+  legacy_work_states_read_only:
+    - NEW
+    - VERIFIED
+    - SPEC_CHANGED
+  legacy_mapping:
+    NEW: NEEDS_AUDIT
+    VERIFIED: AWAITING_REVIEW
+    SPEC_CHANGED: NEEDS_REAUDIT
+
+repository_control:
+  one_open_issue_per_managed_repository: true
+  excluded_repositories:
+    - pc-files
+    - pc-files2
+  required_fields:
+    - repository
+    - repository_state
+    - priority
+    - risk
+    - audit_sha
+    - active_work
+    - next_action
+    - detailed_current_state
 
 required_work_order_fields:
   - objective
@@ -30,6 +91,14 @@ required_work_order_fields:
   - verification
   - audit_base
   - related_specs_or_decisions
+
+project_display:
+  source_of_truth: false
+  preferred_update_direction: canonical_state_to_project
+  direct_manual_update_is_normal_operation: false
+  required_views:
+    - Repository Overview
+    - Work Queue
 
 review_boundary: pull_request
 implementation_actor: unrestricted
