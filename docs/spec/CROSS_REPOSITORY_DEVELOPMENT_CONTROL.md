@@ -3,166 +3,23 @@
 Status: Canonical specification
 Approved: 2026-09-25
 Owner repository: `kinoko34077/devflow-test` (planned operational name: `devflow`)
+Tracking issue: `devflow-test#35`
 
-## 1. Purpose
+## 1. Purpose and authority
 
-Provide a GitHub-native cross-repository development-control system that makes it possible to determine, without relying on chat history:
+This specification defines a low-overhead GitHub-native control plane for cross-repository development. It must make repository state, active work, priority, risk, audit SHA, and next action discoverable without relying on chat history.
 
-- what repositories and cross-repository initiatives exist;
-- which repositories are active, parked, maintenance-only, deprecated, or cancelled;
-- which work is currently active;
-- the current priority and risk;
-- the latest audited commit;
-- the next action and where detailed state lives.
+The canonical source of truth is devflow and the individual repositories:
 
-Management overhead must remain low. Existing GitHub state should drive display state automatically wherever practical.
+- devflow owns Repository Control Issues, cross-repository work Issues, workflow definitions, and this specification.
+- Each individual repository owns its implementation, repository-local Issues/PRs, and detailed current state.
+- The GitHub Project `KiNoTch. Development Control` is a display and overview layer only.
 
-## 2. Three-layer architecture
+Project changes must not be treated as a second operational source of truth. No Project-to-Issue reverse synchronization or custom-field synchronization Action is part of v0.1. Project custom-field values may remain empty until a later, separately approved work order.
 
-### 2.1 GitHub Project — display / overview layer
+## 2. Repository Control Issues
 
-GitHub Project is a derived dashboard. It is not the operational source of truth.
-
-Normal operation does not require ChatGPT or the user to edit Project custom fields directly. Built-in Project workflows and, where needed, GitHub Actions synchronize canonical state into the Project.
-
-The primary Project items are:
-
-- one Repository Control Issue per managed repository;
-- cross-repository operational Issues maintained in devflow.
-
-Individual repositories may expose links to their active Issues / PRs through their Repository Control Issue. Adding every repository-local Issue / PR to the Project is optional, not required for correctness.
-
-### 2.2 devflow — cross-repository Current State source of truth
-
-`devflow` is the cross-repository Current State Hub.
-
-It owns:
-
-- Repository Control Issues;
-- cross-repository operational Issues;
-- workflow definitions;
-- cross-repository development-control specifications;
-- references to repository-local current state and active work.
-
-It does not duplicate repository-specific technical specifications or detailed implementation state.
-
-### 2.3 Individual repositories — repository-specific source of truth
-
-Each repository owns its own:
-
-- README / AGENTS entry guidance;
-- specifications;
-- CURRENT_STATE or equivalent current technical state;
-- repository-local Issues and Pull Requests;
-- ADR / decisions;
-- tests and source code.
-
-Repository-local Issue / PR state remains canonical for individual work items.
-
-## 3. Managed repository scope
-
-Manage all development and documentation repositories owned by `kinoko34077`, except explicit backup repositories:
-
-- `pc-files`
-- `pc-files2`
-
-Current initial managed set:
-
-1. `.ai-guidelines`
-2. `2bit-cell-automaton`
-3. `Structured-Cell-Automaton`
-4. `Gomoku-5D`
-5. `IDS-Composit`
-6. `Mapience-prototype`
-7. `Micro-Chordbot`
-8. `SynTrail-LM`
-9. `colony-ai`
-10. `cora_engine`
-11. `dev_agent`
-12. `devflow-test`
-13. `jev-audit`
-14. `kinotch-api`
-15. `kinotch-default-canary`
-16. `kinotch-repository-base`
-17. `kinotch-runtime`
-18. `kotonomani`
-19. `line-style-viewer`
-20. `lyric_reader_page`
-21. `memory-game`
-22. `microtone-piano`
-23. `obsidian-related-notes-view`
-24. `refil-viewer`
-25. `srt2subtitle`
-26. `stackedit.io`
-27. `standby-display`
-28. `testapp`
-29. `txt-auto-replace`
-30. `weather-widget`
-
-New development / documentation repositories are managed by default unless explicitly excluded.
-
-## 4. Work Status
-
-Allowed work states:
-
-- `NEEDS_AUDIT`
-- `AUDITED`
-- `WORK_ORDER_READY`
-- `READY_FOR_IMPLEMENTATION`
-- `IMPLEMENTING`
-- `AWAITING_REVIEW`
-- `BLOCKED`
-- `NEEDS_REAUDIT`
-- `PARKED`
-- `DONE`
-
-Work Status describes a work item, not the repository lifecycle.
-
-In GitHub Project, Work Status is represented by the Project's built-in `Status` single-select field. Do not create a separate custom `Work Status` field. Configure the built-in `Status` options to the allowed work states above so GitHub Projects built-in status workflows can update the same field.
-
-## 5. Repository State
-
-Allowed repository states:
-
-- `ACTIVE`
-- `PARKED`
-- `MAINTENANCE`
-- `DEPRECATED`
-- `CANCELLED`
-
-`BLOCKED` is not a Repository State. A repository may be ACTIVE while its current work item is BLOCKED.
-
-## 6. Priority
-
-- `P0` — urgent
-- `P1` — high
-- `P2` — normal
-- `P3` — low
-
-## 7. Risk
-
-- `LOW`
-- `MEDIUM`
-- `HIGH`
-- `CRITICAL`
-
-## 8. Type
-
-- `FEATURE`
-- `BUG`
-- `SPEC`
-- `AUDIT`
-- `REFACTOR`
-- `MAINTENANCE`
-- `RESEARCH`
-- `INFRA`
-- `DOCS`
-
-## 9. Repository Control Issue
-
-Each managed repository has exactly one open Repository Control Issue in devflow unless the repository is permanently retired and its control record is intentionally closed.
-
-Required information:
+Use one open Repository Control Issue per managed repository. Its canonical content includes:
 
 - Repository
 - Repository State
@@ -171,215 +28,159 @@ Required information:
 - Audit SHA
 - Active Work
 - Next Action
-- Detailed Current State reference
+- Detailed Current State
 
-The Control Issue is an index and current-state summary. It must not copy detailed repository specifications or implementation history.
+The managed-repository scope excludes `pc-files` and `pc-files2`. They must not be added as Project items or represented as managed repositories in this v0.1 setup.
 
-## 10. Next Action
+## 3. Work and repository state vocabulary
 
-`Next Action` is free text ending with a searchable category tag.
+### 3.1 Work Status
 
-Example:
+The work-status concept is represented by the GitHub Project built-in single-select field `Status`. Do not create a custom `Work Status` field. The exact ten options are:
 
-`Trainer差分をSTANDARD監査 [AUDIT]`
+- NEEDS_AUDIT
+- AUDITED
+- WORK_ORDER_READY
+- READY_FOR_IMPLEMENTATION
+- IMPLEMENTING
+- AWAITING_REVIEW
+- BLOCKED
+- NEEDS_REAUDIT
+- PARKED
+- DONE
 
-Initial tags:
+### 3.2 Repository State
 
-- `[AUDIT]`
-- `[SPECIFY]`
-- `[IMPLEMENT]`
-- `[VERIFY]`
-- `[REVIEW]`
-- `[MERGE]`
-- `[RELEASE]`
-- `[USER_DECISION]`
-- `[WAIT]`
-- `[NONE]`
+Custom single-select options:
 
-## 11. Audit SHA and Last Audit
+- ACTIVE
+- PARKED
+- MAINTENANCE
+- DEPRECATED
+- CANCELLED
 
-Store the audited commit as `Audit SHA`.
+### 3.3 Priority and Risk
 
-Do not manually duplicate `Last Audit` when the date can be derived from commit metadata for the Audit SHA.
+Custom single-select options:
 
-## 12. Project fields
+- Priority: P0, P1, P2, P3
+- Risk: LOW, MEDIUM, HIGH, CRITICAL
 
-The display Project should expose at least:
+### 3.4 Work Type
 
-- `Status` — built-in GitHub Project field representing Work Status
-- Repository State
-- Priority
-- Type
-- Repository
+The devflow concept `Type` is displayed in the Project as the custom single-select field `Work Type`. Its exact options are:
+
+- FEATURE
+- BUG
+- SPEC
+- AUDIT
+- REFACTOR
+- MAINTENANCE
+- RESEARCH
+- INFRA
+- DOCS
+
+### 3.5 Project field mapping
+
+| devflow concept | Project field | Kind |
+| --- | --- | --- |
+| Work Status | Status | GitHub built-in single-select |
+| Type | Work Type | Custom single-select |
+| Repository | Managed Repository | Custom text |
+
+The GitHub built-in `Repository` field identifies the Issue's owning repository. It may remain visible, but it is not the managed-repository field and must not be used as a substitute for `Managed Repository`.
+
+Custom text fields required by v0.1 are:
+
+- Managed Repository
 - Next Action
-- Risk
 - Audit SHA
 
-Do not create a duplicate custom Work Status field. Project fields are derived display state whenever automation can provide them.
+Do not retain `Type` or `Repository` as the current names of custom Project fields for these concepts.
 
-## 13. Project views
+## 4. GitHub Project configuration
 
-### Repository Overview
+Create a user-owned, Private Project:
 
-Primary fields:
+- Title: `KiNoTch. Development Control`
+- URL: `https://github.com/users/kinoko34077/projects/1`
+- Project is display-only; devflow and repository files remain authoritative.
 
-- Repository
+### 4.1 Views
+
+Create and maintain these views:
+
+#### Repository Overview
+
+A table view for Repository Control Issues. It must show at least:
+
+- Managed Repository
 - Repository State
 - Priority
 - Risk
 - Audit SHA
 - Next Action
 
-### Work Queue
+The built-in Repository column may remain for Issue ownership.
 
-Primary fields:
+#### Work Queue
+
+A table or board view for active cross-repository work. It must show at least:
 
 - Status
 - Priority
-- Type
-- Repository
+- Work Type
+- Managed Repository
 - Risk
 - Next Action
 
-## 14. Project automation
+### 4.2 Initial items
 
-Prefer GitHub Projects built-in workflows for simple GitHub-native events such as:
+Add devflow Issues #5 through #35 as the initial Project items. Existing matching Issues are added manually because Auto-add is not a retroactive import mechanism. Do not add pc-files or pc-files2.
 
-- automatic item addition;
-- initial built-in Status on item addition;
-- Issue close -> built-in Status = DONE;
-- PR merge -> built-in Status = DONE where PR items are used;
-- archive of completed items.
+## 5. v0.1 Project workflows
 
-Use GitHub Actions only when built-in workflows cannot express required synchronization, such as custom Project fields derived from Repository Control Issue state.
+Only the following workflows are enabled:
 
-Synchronization direction is normally:
+1. Auto-add: repository `kinoko34077/devflow-test`, filter `is:issue is:open`.
+2. Item closed / Issue closed: set the built-in `Status` field to `DONE`.
 
-`canonical GitHub state -> GitHub Project`
+The following workflows remain disabled:
 
-Do not make Project-field edits the normal source of changes back into devflow or repository state.
+- Auto-close issue
+- Auto-add sub-issues
+- Pull request linked to issue
+- Item added
+- Pull request merged
+- Auto-archive
+- Code changes requested
+- Code review approved
+- Item reopened
 
-## 15. Cross-repository work
+Auto-archive is intentionally not enabled in v0.1. Project automation must not close, edit, or otherwise mutate canonical devflow Issues in the reverse direction.
 
-Work affecting multiple repositories belongs in devflow.
+## 6. Operating lifecycle
 
-Examples:
+The normal boundary is:
 
-- GitHub Project construction;
-- cross-repository branch-protection audits;
-- Repository Base adoption policy;
-- shared workflow changes;
-- development-control specification changes.
+1. Audit the repository and record the audit SHA in the Repository Control Issue.
+2. Prepare a work order with objective, scope, acceptance criteria, non-goals, verification, audit base, and related specifications.
+3. Implement on a dedicated branch in the affected repository.
+4. Verify the change, open a PR, and perform a re-audit before merge.
+5. Update canonical repository/devflow state and let the Project reflect only its display role.
 
-Work contained to one repository remains in that repository.
+A document or operating-definition change follows Issue -> dedicated branch -> verification -> PR -> re-audit -> merge. If a GitHub limitation prevents a required setting, record the requirement, actual limitation, and alternative in tracking Issue #35 and leave it open.
 
-## 16. Read order
+## 7. Validation and handoff
 
-### Cross-repository request
+After any Project setup change, directly re-check the live Project rather than relying on prior reports:
 
-1. GitHub Project, when the current execution environment can read it.
-2. devflow Repository Control / cross-repository Issues.
-3. Target repository.
-4. Repository CURRENT_STATE or equivalent.
-5. Active repository Issue / PR.
-6. Relevant specification, code and tests.
+- title and Private visibility;
+- exactly the ten built-in Status options and no custom Work Status;
+- all custom fields and exact select options;
+- both view names and required columns;
+- initial items #5-#35 and absence of pc-files/pc-files2;
+- enabled/disabled workflows, Auto-add repository/filter, and Issue-closed -> DONE;
+- absence of Project-to-Issue reverse synchronization and custom-field sync Actions.
 
-### Environment cannot read GitHub Project
-
-Start at devflow and continue. Project access must not become a single point of failure for development work.
-
-## 17. Update order
-
-Normal direct updates target:
-
-1. the affected individual repository;
-2. devflow, only when the cross-repository state changes.
-
-The Project is updated by automation rather than routine direct editing.
-
-Update devflow when there is a meaningful cross-repository state change, including:
-
-- Repository State change;
-- Priority or Risk change;
-- active main work change;
-- Next Action change;
-- BLOCKED / PARKED transition;
-- audit completion;
-- Audit SHA change.
-
-Do not update devflow for repository-local changes that do not alter the cross-repository summary.
-
-## 18. Audit levels
-
-### QUICK
-
-Narrow targeted check for a known issue or small diff.
-
-### STANDARD
-
-Normal development audit of relevant Current State, specs, code, tests, interfaces, Issues and PRs.
-
-### FULL
-
-Repository-wide audit only when explicitly justified. Never run periodic repository-wide FULL audits by default.
-
-## 19. Finding escalation
-
-- `P0` / `P1`: create an Issue automatically unless an existing Issue already tracks the finding.
-- `P2` / `P3`: report in audit results by default; create an Issue only when tracking, dependency or explicit request requires it.
-
-## 20. PR policy
-
-All repository changes normally follow:
-
-`Issue / Work Order -> dedicated branch -> implementation -> verification -> Pull Request -> re-audit -> merge`
-
-Direct default-branch changes are outside the normal workflow.
-
-## 21. Agent confirmation boundary
-
-When requirements are sufficiently defined, an agent may proceed automatically through:
-
-- inspection;
-- audit;
-- Issue creation;
-- Work Order creation;
-- branch creation;
-- implementation;
-- tests / verification;
-- PR creation;
-- PR re-audit.
-
-Require user confirmation before:
-
-- merge;
-- release;
-- deploy;
-- publication;
-- destructive deletion;
-- difficult-to-reverse operations;
-- security-sensitive permission or credential changes.
-
-## 22. Information-boundary rule
-
-Do not duplicate the same live state without need across:
-
-- GitHub Project;
-- devflow;
-- repository CURRENT_STATE;
-- Issues;
-- Pull Requests;
-- specifications.
-
-Each layer stores only the information required by its responsibility. The Project should display derived state wherever practical.
-
-## 23. Migration from devflow-test
-
-The proven `devflow-test` principles remain valid:
-
-- GitHub Issues / PRs are the canonical live operational state for work items;
-- chat history is not canonical;
-- implementation actor is unrestricted;
-- workflow definition is separate from individual task state.
-
-The repository is promoted operationally first. Renaming `devflow-test` to `devflow` or another permanent name is a separate GitHub administration step and does not block the initial construction.
+Record the Project URL, final fields, views, workflow states, canonical-document PR, merge commit, and verification result in devflow-test#35. Close #35 only after every requirement passes; otherwise document the GitHub constraint and keep it open.
