@@ -118,6 +118,8 @@ Allowed work states:
 
 Work Status describes a work item, not the repository lifecycle.
 
+In GitHub Project, Work Status is represented by the Project's built-in `Status` single-select field. Do not create a separate custom `Work Status` field. Configure the built-in `Status` options to the allowed work states above so GitHub Projects built-in status workflows can update the same field.
+
 ## 5. Repository State
 
 Allowed repository states:
@@ -204,7 +206,7 @@ Do not manually duplicate `Last Audit` when the date can be derived from commit 
 
 The display Project should expose at least:
 
-- Work Status
+- `Status` — built-in GitHub Project field representing Work Status
 - Repository State
 - Priority
 - Type
@@ -213,7 +215,7 @@ The display Project should expose at least:
 - Risk
 - Audit SHA
 
-Project fields are derived display state whenever automation can provide them.
+Do not create a duplicate custom Work Status field. Project fields are derived display state whenever automation can provide them.
 
 ## 13. Project views
 
@@ -232,7 +234,7 @@ Primary fields:
 
 Primary fields:
 
-- Work Status
+- Status
 - Priority
 - Type
 - Repository
@@ -244,9 +246,9 @@ Primary fields:
 Prefer GitHub Projects built-in workflows for simple GitHub-native events such as:
 
 - automatic item addition;
-- initial status on item addition;
-- Issue close -> DONE;
-- PR merge -> DONE where PR items are used;
+- initial built-in Status on item addition;
+- Issue close -> built-in Status = DONE;
+- PR merge -> built-in Status = DONE where PR items are used;
 - archive of completed items.
 
 Use GitHub Actions only when built-in workflows cannot express required synchronization, such as custom Project fields derived from Repository Control Issue state.
