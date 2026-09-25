@@ -1,0 +1,56 @@
+name: Project sync
+
+on:
+  issues:
+    types: [opened, edited, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only verify or repair drift from devflow
+        type: choice
+        required: true
+        default: verify
+        options:
+          - verify
+          - reconcile
+      issue_number:
+        description: Optional devflow issue number; blank means full scope
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: project-sync-${{ github.event.issue.number || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sync issue event
+        if: github.event_name == 'issues'
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/project_sync.py event-sync
+
+      - name: Manual verify or reconcile
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          args=("$MODE")
+          if [[ -n "$ISSUE_NUMBER" ]]; then
+            args+=(--issue-number "$ISSUE_NUMBER")
+          fi
+          python scripts/project_sync.py "${args[@]}"
