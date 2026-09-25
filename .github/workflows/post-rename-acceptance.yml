@@ -1,0 +1,28 @@
+name: Post-rename acceptance
+
+on:
+  push:
+    branches:
+      - ops/issue-46-full-acceptance
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    env:
+      PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PROJECT_OWNER: kinoko34077
+      PROJECT_NUMBER: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Full reconcile
+        run: python scripts/project_sync.py reconcile
+      - name: Full verify
+        run: python scripts/project_sync.py verify
