@@ -13,11 +13,13 @@ Create a user-owned GitHub Project with:
 
 The Project is not the operational source of truth. Normal changes are made in devflow and individual repositories, then reflected into the Project.
 
-## 2. Create fields
+## 2. Configure fields
 
-### Work Status
+### Status — built-in Project field
 
-Single select:
+Use the existing built-in `Status` single-select field to represent the Work Status concept. Do **not** create a second custom `Work Status` field.
+
+Configure the built-in Status options to:
 
 - NEEDS_AUDIT
 - AUDITED
@@ -29,6 +31,8 @@ Single select:
 - NEEDS_REAUDIT
 - PARKED
 - DONE
+
+This is required so GitHub Projects built-in workflows such as item-added, Issue-closed and PR-merged can update the same status field used by this control system.
 
 ### Repository State
 
@@ -101,7 +105,7 @@ Table or board view for active cross-repository work.
 
 Show at least:
 
-- Work Status
+- Status
 - Priority
 - Type
 - Repository
@@ -119,13 +123,13 @@ Do not require every Issue / PR from every managed repository to be copied into 
 
 ## 5. Built-in Project workflows
 
-GitHub Projects currently provides built-in workflows for common events. Prefer these before adding custom Actions.
+GitHub Projects currently provides built-in workflows that update the built-in `Status` field for common events. Prefer these before adding custom Actions.
 
 Configure as applicable:
 
-1. Item added to Project -> set an initial Work Status where useful.
-2. Issue closed -> set Work Status to DONE.
-3. Pull request merged -> set Work Status to DONE when PR items are used.
+1. Item added to Project -> set built-in Status to the desired initial state.
+2. Issue closed -> set built-in Status to DONE.
+3. Pull request merged -> set built-in Status to DONE when PR items are used.
 4. Auto-archive completed items only when old completed work becomes visual noise.
 5. Auto-add devflow items if it reduces manual Project maintenance.
 
@@ -144,7 +148,7 @@ If filtering is needed, introduce a stable machine-readable convention such as l
 
 ## 7. Custom-field synchronization
 
-Built-in workflows do not infer arbitrary fields such as Risk, Repository State, Audit SHA or free-text Next Action from repository semantics.
+Built-in workflows do not infer arbitrary custom fields such as Risk, Repository State, Audit SHA or free-text Next Action from repository semantics.
 
 If manual Project field maintenance becomes burdensome, add a GitHub Actions synchronization workflow that:
 
@@ -176,7 +180,9 @@ After setup, verify:
 
 - Project title is exactly `KiNoTch. Development Control`;
 - visibility is Private;
-- all required fields and options exist;
+- the built-in `Status` field has the 10 approved Work Status options;
+- no duplicate custom `Work Status` field exists;
+- all other required fields and options exist;
 - `Repository Overview` exists;
 - `Work Queue` exists;
 - `pc-files` and `pc-files2` are not represented by Repository Control Issues;
