@@ -99,9 +99,31 @@ project_display:
   work_status_field: Status
   work_status_field_kind: builtin_project_status
   duplicate_custom_work_status_field: false
+  field_mapping:
+    work_status: Status
+    type: Work Type
+    repository: Managed Repository
+  builtin_repository_is_issue_owner_only: true
+  custom_field_sync_actions: false
   required_views:
     - Repository Overview
     - Work Queue
+  enabled_project_workflows:
+    - auto_add:
+        repository: kinoko34077/devflow-test
+        filter: is:issue is:open
+    - issue_closed:
+        status: DONE
+  disabled_project_workflows:
+    - auto_close_issue
+    - auto_add_sub_issues
+    - pull_request_linked_to_issue
+    - item_added
+    - pull_request_merged
+    - auto_archive
+    - code_changes_requested
+    - code_review_approved
+    - item_reopened
 
 review_boundary: pull_request
 implementation_actor: unrestricted
