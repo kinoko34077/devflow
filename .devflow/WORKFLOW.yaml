@@ -179,7 +179,7 @@ required_work_order_fields:
   - work_status
   - priority
   - risk
-  - managed_repository
+  - repository
   - objective
   - scope
   - acceptance_criteria
