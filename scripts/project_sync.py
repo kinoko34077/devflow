@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable
 PROJECT_OWNER = "kinoko34077"
 PROJECT_NUMBER = 1
 PROJECT_TITLE = "KiNoTch. Development Control"
+DEFAULT_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 EXCLUDED_REPOSITORIES = {"pc-files", "pc-files2"}
 
@@ -214,7 +215,7 @@ class RuntimeConfig:
     @classmethod
     def from_env(cls, env: dict[str, str] | os._Environ[str] = os.environ) -> "RuntimeConfig":
         return cls(
-            repository=env.get("GITHUB_REPOSITORY", "kinoko34077/devflow-test"),
+            repository=env.get("GITHUB_REPOSITORY", DEFAULT_REPOSITORY),
             project_token=env.get("PROJECTS_TOKEN", ""),
             github_token=env.get("GITHUB_TOKEN", ""),
             owner=env.get("PROJECT_OWNER", PROJECT_OWNER),

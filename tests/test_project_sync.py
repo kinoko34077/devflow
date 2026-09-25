@@ -95,8 +95,13 @@ class HealthTests(unittest.TestCase):
         self.assertIn("[REDACTED]", report)
         self.assertIn("CODEX_REQUIRED", report)
 
+    def test_runtime_default_repository_is_current_identity(self):
+        cfg = project_sync.RuntimeConfig.from_env({})
+        self.assertEqual(cfg.repository, "kinoko34077/devflow")
+        self.assertEqual(cfg.repository, project_sync.DEFAULT_REPOSITORY)
+
     def test_missing_projects_token_is_not_configured(self):
-        env = {"GITHUB_TOKEN": "repo-token", "GITHUB_REPOSITORY": "kinoko34077/devflow-test"}
+        env = {"GITHUB_TOKEN": "repo-token", "GITHUB_REPOSITORY": "kinoko34077/devflow"}
         cfg = project_sync.RuntimeConfig.from_env(env)
         self.assertFalse(cfg.project_token)
         self.assertEqual(project_sync.result_for_missing_project_token(), "NOT_CONFIGURED")
@@ -134,7 +139,7 @@ class ClientAndSyncTests(unittest.TestCase):
         def transport(method, url, headers, payload):
             calls.append(url)
             return responses[len(calls)-1]
-        rest = project_sync.GitHubREST("repo-token", "kinoko34077/devflow-test", transport=transport)
+        rest = project_sync.GitHubREST("repo-token", "kinoko34077/devflow", transport=transport)
         issues = rest.list_issues(state="all", per_page=2)
         self.assertEqual([i["number"] for i in issues], [1, 3])
         self.assertEqual(len(calls), 2)
@@ -155,7 +160,7 @@ class ClientAndSyncTests(unittest.TestCase):
                     {"id": "F_SHA", "name": "Audit SHA", "kind": "text", "options": []},
                 ]
             def get_project_items(self, project_id):
-                return [{"id": "I1", "content_id": "ISSUE1", "number": 1, "repository": "kinoko34077/devflow-test", "fields": {"Priority": "P1"}}]
+                return [{"id": "I1", "content_id": "ISSUE1", "number": 1, "repository": "kinoko34077/devflow", "fields": {"Priority": "P1"}}]
         snap = project_sync.discover_project(FakeGraphQL(), "kinoko34077", 1)
         self.assertEqual(snap.id, "P")
         self.assertEqual(snap.fields["Priority"].options["P1"], "O_P1")
@@ -166,7 +171,7 @@ class ClientAndSyncTests(unittest.TestCase):
             "Priority": project_sync.ProjectField("F_PRIORITY", "Priority", "single", {"P1": "O_P1", "P2": "O_P2"}),
             "Risk": project_sync.ProjectField("F_RISK", "Risk", "single", {"LOW": "O_LOW"}),
         }
-        item = project_sync.ProjectItem("ITEM", "ISSUE", 9, "kinoko34077/devflow-test", {"Priority": "P2", "Risk": "LOW"})
+        item = project_sync.ProjectItem("ITEM", "ISSUE", 9, "kinoko34077/devflow", {"Priority": "P2", "Risk": "LOW"})
         snap = project_sync.ProjectSnapshot("P", project_sync.PROJECT_TITLE, False, fields, {"ISSUE": item})
         issue = {"node_id": "ISSUE", "number": 9, "title": "x", "state": "open", "body": "## Priority\n\nP1\n\n## Risk\n\nLOW"}
         class FakeGraphQL:
@@ -235,7 +240,7 @@ class RuntimeFlowTests(unittest.TestCase):
             def __init__(self): self.body = None
             def find_issue_by_title(self, title): return {"number": 50, "title": title, "state": "closed"}
             def update_issue(self, number, body=None, state=None): self.body = body; return {"number": number}
-        cfg = project_sync.RuntimeConfig("kinoko34077/devflow-test", "", "repo-token")
+        cfg = project_sync.RuntimeConfig("kinoko34077/devflow", "", "repo-token")
         rest = FakeREST()
         code = project_sync.run_sync("verify", cfg, rest=rest, gql=None, issue_number=None, event_issue=None, run_url="run")
         self.assertEqual(code, 2)
@@ -243,13 +248,13 @@ class RuntimeFlowTests(unittest.TestCase):
         self.assertIn("PROJECTS_TOKEN", rest.body)
 
     def test_health_event_is_skipped_before_project_access(self):
-        cfg = project_sync.RuntimeConfig("kinoko34077/devflow-test", "", "repo-token")
+        cfg = project_sync.RuntimeConfig("kinoko34077/devflow", "", "repo-token")
         code = project_sync.run_sync("event-sync", cfg, rest=None, gql=None, issue_number=None, event_issue={"title": project_sync.HEALTH_TITLE}, run_url="run")
         self.assertEqual(code, 0)
 
     def test_verify_all_reports_drift_without_mutation(self):
         issue = {"number": 9, "node_id": "ISSUE", "title": "x", "state": "open", "body": "## Priority\n\nP1"}
-        snap = project_sync.ProjectSnapshot("P", project_sync.PROJECT_TITLE, False, {"Priority": project_sync.ProjectField("F", "Priority", "single", {"P1": "O1"})}, {"ISSUE": project_sync.ProjectItem("I", "ISSUE", 9, "kinoko34077/devflow-test", {"Priority": "P2"})})
+        snap = project_sync.ProjectSnapshot("P", project_sync.PROJECT_TITLE, False, {"Priority": project_sync.ProjectField("F", "Priority", "single", {"P1": "O1"})}, {"ISSUE": project_sync.ProjectItem("I", "ISSUE", 9, "kinoko34077/devflow", {"Priority": "P2"})})
         class FakeGQL:
             def update_single_select(self, *a): raise AssertionError
             def update_text(self, *a): raise AssertionError
@@ -260,7 +265,7 @@ class RuntimeFlowTests(unittest.TestCase):
 
     def test_health_item_is_reported_and_reconcile_deletes_it(self):
         health = {"number": 50, "node_id": "HEALTH", "title": project_sync.HEALTH_TITLE, "state": "closed", "body": ""}
-        snap = project_sync.ProjectSnapshot("P", project_sync.PROJECT_TITLE, False, {}, {"HEALTH": project_sync.ProjectItem("HI", "HEALTH", 50, "kinoko34077/devflow-test", {})})
+        snap = project_sync.ProjectSnapshot("P", project_sync.PROJECT_TITLE, False, {}, {"HEALTH": project_sync.ProjectItem("HI", "HEALTH", 50, "kinoko34077/devflow", {})})
         class FakeGQL:
             def __init__(self): self.deleted = []
             def delete_item(self, p, i): self.deleted.append((p, i))
