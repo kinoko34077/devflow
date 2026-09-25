@@ -19,6 +19,23 @@ GitHub Projectは表示・俯瞰用の派生層であり、live operational stat
 
 個別Repositoryの詳細仕様や実装状態をここへ複製せず、横断的に必要な現在状態・次Action・参照先だけを保持する。
 
+## GitHub Project synchronization
+
+Project custom fields are projected from canonical devflow Issues by:
+
+- `.github/workflows/project-sync.yml`
+- `scripts/project_sync.py`
+
+Operational guide:
+
+- `docs/project/PROJECT_SYNC.md`
+
+The synchronizer supports Issue event sync plus manual `verify` / `reconcile`. It discovers Project/field/option/item IDs at runtime and never treats Project values as canonical state.
+
+A normal ChatGPT environment that cannot directly read the private Project should use the machine-maintained Issue `[SYSTEM] GitHub Project Sync Health` as the primary indirect verification record after live activation. Direct Project inspection by Codex or another Project-capable agent is reserved for initial rollout, structural changes, API-invisible checks, machine/UI disagreement, or explicit user request.
+
+Live Project access requires repository Actions secret `PROJECTS_TOKEN`; credential creation and secret registration remain user-admin actions.
+
 ## 正本の分担
 
 - `docs/spec/` — 現在有効な横断仕様
