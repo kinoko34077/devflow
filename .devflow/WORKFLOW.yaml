@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 repository: kinoko34077/devflow-test
 
 canonical_operational_state:
@@ -96,15 +96,22 @@ project_display:
   source_of_truth: false
   preferred_update_direction: canonical_state_to_project
   direct_manual_update_is_normal_operation: false
+  project_owner: kinoko34077
+  project_number: 1
+  project_title: KiNoTch. Development Control
   work_status_field: Status
   work_status_field_kind: builtin_project_status
   duplicate_custom_work_status_field: false
   field_mapping:
     work_status: Status
+    repository_state: Repository State
+    priority: Priority
+    risk: Risk
     type: Work Type
     repository: Managed Repository
+    next_action: Next Action
+    audit_sha: Audit SHA
   builtin_repository_is_issue_owner_only: true
-  custom_field_sync_actions: false
   required_views:
     - Repository Overview
     - Work Queue
@@ -124,6 +131,35 @@ project_display:
     - code_changes_requested
     - code_review_approved
     - item_reopened
+
+project_sync:
+  implementation: present
+  live_state: awaiting_credential_live_acceptance
+  work_order: 39
+  workflow_file: .github/workflows/project-sync.yml
+  implementation_file: scripts/project_sync.py
+  operations_doc: docs/project/PROJECT_SYNC.md
+  secret_name: PROJECTS_TOKEN
+  event_modes:
+    - event-sync
+  manual_modes:
+    - verify
+    - reconcile
+  schedule: none
+  health_issue_title: "[SYSTEM] GitHub Project Sync Health"
+  health_issue_sync_to_project: false
+  runtime_id_discovery: true
+  project_to_issue_reverse_sync: false
+  direct_project_verification:
+    routine_when_health_passes: false
+    required_for:
+      - initial_live_rollout
+      - structural_project_change
+      - api_invisible_requirement
+      - machine_ui_disagreement
+      - ambiguous_project_discovery
+      - owner_or_field_migration
+      - explicit_user_request
 
 review_boundary: pull_request
 implementation_actor: unrestricted
