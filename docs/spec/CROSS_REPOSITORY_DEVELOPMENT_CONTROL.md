@@ -3,15 +3,16 @@
 Status: Canonical specification
 Approved: 2026-09-25
 Operational name: `devflow`
-Current GitHub identity until admin rename: `kinoko34077/devflow-test`
-Target GitHub identity after rename: `kinoko34077/devflow`
-Project setup history: `devflow-test#35`
-Project synchronization work: `devflow-test#39`
-Agent-operation hardening / rename migration: `devflow-test#46`
+Current GitHub identity: `kinoko34077/devflow`
+Former GitHub identity: `kinoko34077/devflow-test` (historical only)
+Project setup history: `#35`
+Project synchronization work: `#39`
+Agent-operation hardening / rename migration: `#46` (completed)
+Standing Issue-first operations: `#49`
 
 ## 1. Purpose and authority
 
-This specification defines a low-overhead GitHub-native control plane for cross-repository development. Repository state, active work, priority, risk, audit SHA, next action and canonical entry points must be discoverable without relying on chat history.
+This specification defines a low-overhead GitHub-native control plane for cross-repository development. Repository state, active work, priority, risk, audit SHA, next action and repository-local entry points must be discoverable without relying on chat history.
 
 Canonical authority is split by responsibility:
 
@@ -39,8 +40,8 @@ Given only a managed repository name, a new worker must use this sequence:
 
 1. read devflow `AGENTS.md`;
 2. locate exactly one open devflow Issue titled `[REPO] <repository>`;
-3. read its Work Status, Repository State, Audit SHA, Active Work, Next Action, Detailed Current State and Control Notes;
-4. follow the repository-local canonical entry points recorded there;
+3. read its Work Status, Repository State, Audit SHA, Active Work, Next Action and repository-local entry references;
+4. follow the Canonical Entry Points section when present, or equivalent verified repository-local entry references recorded in Detailed Current State / Control Notes for legacy Controls;
 5. open referenced repository-local Issue/Work Order/PR before creating duplicates;
 6. read only the repository-local specs, Current State, code and tests needed for the current work;
 7. read this specification / `.devflow/WORKFLOW.yaml` when workflow semantics, cross-repository authority or operation boundaries are relevant.
@@ -65,8 +66,10 @@ Canonical content:
 - Active Work
 - Next Action
 - Detailed Current State
-- Canonical Entry Points / equivalent references
+- Canonical Entry Points, or an equivalent explicitly identified repository-local entry reference in a legacy Control pending normalization
 - Control Notes
+
+New Controls must use the current template and include an explicit `Canonical Entry Points` section. Legacy Controls remain usable when their equivalent entry references are unambiguous; normalize them when the Control is materially updated rather than rewriting unrelated repository state only for formatting.
 
 The Control Issue is an index/current-state summary and must not duplicate detailed repository specifications, full task logs or implementation history.
 
@@ -249,14 +252,12 @@ Show at least:
 
 ### 8.2 Built-in Project workflows
 
-Current pre-rename configuration:
+Current accepted configuration:
 
-1. Auto-add: repository `kinoko34077/devflow-test`, filter `is:issue is:open`.
+1. Auto-add: repository `kinoko34077/devflow`, filter `is:issue is:open`.
 2. Item closed / Issue closed -> built-in `Status = DONE`.
 
-After the repository is actually renamed, Auto-add must be verified to target the renamed `kinoko34077/devflow` repository identity. Do not assume this migration without observation.
-
-Disabled unless a later specification explicitly changes this:
+The following remain disabled unless a later specification explicitly changes them:
 
 - Auto-close issue
 - Auto-add sub-issues
@@ -269,6 +270,8 @@ Disabled unless a later specification explicitly changes this:
 - Item reopened
 
 Built-in automation must not create a Project-to-Issue reverse authority path.
+
+Direct verification of this configuration was completed during rename acceptance Work Order #46. API-invisible Project workflow properties must be rechecked directly when structurally changed or when a repository identity migration affects them.
 
 ## 9. Automated Project synchronization
 
@@ -419,31 +422,19 @@ For Base-adopted repositories, after reading the devflow Control Issue, agents e
 
 For non-Base repositories, Control Issues record their actual existing entry points. Absence of `.kinotch/`, `AGENTS.md` or Base layout is not a defect by itself.
 
-## 15. Repository rename migration
+## 15. Repository rename history
 
-Operational target name is `kinoko34077/devflow`. The rename is accepted only after the actual GitHub admin mutation is observed.
+The GitHub repository was renamed from `kinoko34077/devflow-test` to `kinoko34077/devflow` on 2026-09-25. Work Order #46 completed and accepted the migration.
 
-### Phase A — rename-ready
+Accepted evidence is recorded in #46, `[REPO] devflow` #16 and `docs/project/PROJECT_SYNC.md`, including:
 
-Before rename:
+- repository identity resolves as `kinoko34077/devflow`;
+- Issues/PRs/Actions/default branch remained usable and `main` remained protected;
+- Project Auto-add was directly verified for `kinoko34077/devflow` with `is:issue is:open`;
+- full Project reconcile and verify succeeded;
+- Sync Health recorded zero accepted drift/errors and no unresolved direct-verification requirement.
 
-- use logical name `devflow` in user/agent-facing descriptions while retaining explicit current GitHub identity where exact URLs/configuration require it;
-- classify old `devflow-test` references as historical, current-identity, or runtime/config dependency;
-- do not rewrite historical Issue/PR references merely for cosmetics;
-- ensure runtime operation does not unnecessarily assume the old literal repository name.
-
-### Phase B — admin rename and acceptance
-
-After rename:
-
-1. confirm repository identity is `kinoko34077/devflow` and legacy URL behavior is understood;
-2. verify Issues/PRs/Actions/default branch/branch protection and required repository configuration remain usable;
-3. verify Project Auto-add targets the renamed repository identity;
-4. run full Project `reconcile` with no Issue number;
-5. run full Project `verify` with no Issue number;
-6. require accepted Sync Health with expected full coverage, drift 0, errors 0 and no unresolved direct-verification requirement;
-7. update current-identity references and Repository Control Audit SHA;
-8. close rename Work Order only after this evidence exists.
+Historical Issue/PR/commit references may retain `devflow-test` when they identify past events. The former name must not be used as a current runtime/default identity.
 
 ## 16. Detailed operations manuals
 
@@ -451,5 +442,6 @@ After rename:
 - Agent lifecycle/manual: `docs/operations/AGENT_OPERATING_MANUAL.md`
 - Repository-local Issue/Work Order manual: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
 - Project synchronization: `docs/project/PROJECT_SYNC.md`
+- Standing Issue-first reporting: Issue #49
 
 These manuals explain this specification; they must not establish conflicting authority.
