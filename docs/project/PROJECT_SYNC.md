@@ -151,3 +151,9 @@ python -m py_compile scripts/project_sync.py
 ```
 
 Unit tests do not require Project credentials or live Project mutations.
+
+## 10. Verification limitation before activation
+
+Before `PROJECTS_TOKEN` is registered, implementation/tests/workflow syntax can be verified but the private Project cannot be live-read or mutated by this workflow. That state is intentionally represented as `NOT_CONFIGURED`, not as a failed canonical comparison.
+
+After registration, the first full `reconcile` + `verify` pair and one direct Codex/Project-capable inspection are required before Work Order #39 is closed.
