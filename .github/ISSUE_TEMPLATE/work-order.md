@@ -25,9 +25,9 @@ assignees: ''
 
 `LOW`
 
-## Managed Repository
+## Repository
 
-<!-- Use one repository name or a concise multi-repository scope. -->
+<!-- Canonical section name. Project sync displays this through `Managed Repository`. Use one repository or a concise multi-repository scope. -->
 
 `MULTI`
 
