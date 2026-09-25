@@ -2,7 +2,7 @@
 
 Status: Operational; initial live acceptance completed 2026-09-25
 Tracking Work Order: `#39` (completed)
-Current migration Work Order: `#46`
+Repository rename Work Order: `#46` (completed)
 Project: `KiNoTch. Development Control`
 Project URL: `https://github.com/users/kinoko34077/projects/1`
 
@@ -168,18 +168,18 @@ Subsequent Issue changes use event-sync. Use targeted or full `reconcile` -> `ve
 
 ## 11. Repository rename acceptance
 
-The GitHub repository was renamed from `kinoko34077/devflow-test` to `kinoko34077/devflow` on 2026-09-25. Work Order `#46` owns final migration acceptance.
+The GitHub repository was renamed from `kinoko34077/devflow-test` to `kinoko34077/devflow` on 2026-09-25. Work Order `#46` completed the migration acceptance and is closed.
 
 Historical Issue/PR/commit references may retain the old repository name where they identify historical events. Current operational identity is `kinoko34077/devflow`.
 
-The rename itself has been directly observed. Before Work Order #46 may close, require all of the following:
+Accepted evidence:
 
 1. repository metadata resolves as `kinoko34077/devflow`;
-2. Issues, PRs, Actions, default branch and branch protection remain usable;
-3. required repository secret/configuration remains effective without exposing secret values;
-4. Project Auto-add is directly verified to target `kinoko34077/devflow`;
-5. full `reconcile` runs with no Issue number and succeeds;
-6. full `verify` runs with no Issue number and succeeds;
-7. Sync Health records expected full coverage, drift `0`, errors `0`, and no unresolved direct-verification requirement;
-8. Repository Control is migrated to `[REPO] devflow`, current repository fields/references are updated, and Audit SHA is refreshed;
-9. only then may Work Order #46 close as `DONE`.
+2. Issues, PRs, Actions, default branch and branch protection remained usable;
+3. required repository secret/configuration remained effective without exposing secret values;
+4. Project Auto-add was directly verified to target `kinoko34077/devflow` with filter `is:issue is:open`;
+5. full `reconcile` Run #63 (`36138740200`) succeeded on `main`;
+6. full `verify` Run #64 (`36138826213`) succeeded on `main`;
+7. Sync Health recorded full coverage with drift `0`, errors `0`, and `Direct Verification Requirement: NONE`;
+8. Repository Control was migrated to `[REPO] devflow` and returned to `AUDITED / ACTIVE` normal operation;
+9. Project remains display-only and no reverse Project -> Issue workflow is enabled.
