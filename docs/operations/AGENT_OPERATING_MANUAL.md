@@ -128,6 +128,118 @@ A PR may omit independent review only when it is genuinely trivial: LOW risk, sm
 
 Allowed submitted Review outcomes are `COMMENT`, `REQUEST_CHANGES`, and `APPROVE`. When native actor identity prevents an independent agent from using `APPROVE`, an independent `COMMENT` Review may carry the review result, but its body must state whether blocking findings remain. Native approval count must not be treated as proof of agent independence when multiple agent surfaces authenticate as the same GitHub actor.
 
+#### Reviewer input packet
+
+Before reviewing the diff, resolve only the material needed for the change:
+
+- owning Issue / Work Order and its acceptance criteria/non-goals;
+- PR base and current exact head SHA;
+- complete changed-file list and diff;
+- repository-local specifications / Current State relevant to the changed behavior;
+- implementer verification evidence and current Actions/checks for the exact head;
+- previous formal Reviews, unresolved review threads and durable findings, when present;
+- Priority/Risk and required review role from the owning task / Control.
+
+Chat history is not review evidence. Unchanged unrelated specifications, Issues and repository areas are not read merely because they exist.
+
+#### Proportional review depth
+
+Review and verification optimize for useful evidence per unit of effort, not exhaustive ceremony.
+
+Default depth model:
+
+```text
+small/local change
+  -> targeted tests + targeted review
+
+local failure/finding
+  -> expand around the affected state/data/control-flow/dependency boundary
+
+cross-cutting/high-impact change
+  -> broader changed-scope regression/integration review
+
+final acceptance / major milestone
+  -> whole relevant system/repository verification where justified
+```
+
+Avoid self-evident or low-information checks that are already guaranteed by a stronger current check and would not expose a distinct defect class. Do not add tests merely to increase test count or satisfy a checklist.
+
+The review dimensions below are dimensions to consider, not six mandatory exhaustive audits. Mark an irrelevant dimension `N/A`. A review is too shallow when it skips a plausible affected boundary; it is too broad when it repeatedly checks unrelated already-proven behavior without an impact reason.
+
+#### Review dimensions
+
+1. **Scope / requirement trace**
+   - changed behavior maps to the owning Issue/specification;
+   - acceptance criteria are not silently weakened;
+   - non-goals and unrelated behavior remain outside scope.
+2. **Correctness / state / failure paths**
+   - inspect affected normal, boundary, invalid/error, retry/recovery and lifecycle paths;
+   - when applicable, inspect stale-result, ordering, cleanup/cancellation and duplicate-action hazards.
+3. **Regression / compatibility**
+   - preserve affected existing behavior, persisted data, public API/CLI/UI contracts and migration assumptions where relevant.
+4. **Design / maintainability**
+   - responsibilities and source-of-truth boundaries remain coherent;
+   - avoid duplicated knowledge and unjustified speculative abstraction.
+5. **Verification quality**
+   - tests/checks demonstrate the changed contract;
+   - RED/GREEN evidence is credible when claimed;
+   - CI/check evidence belongs to the exact reviewed head.
+6. **Risk-specific checks**
+   - apply only when the diff touches the corresponding boundary: security/privacy/credentials/deploy/dependencies/workflows/UI accessibility-usability/etc.
+
+A narrower `security-review` or `spec-review` must state its scope. It does not silently replace a required baseline review unless another current Review covers the omitted baseline.
+
+#### Review findings
+
+Material findings should be recoverable in this form:
+
+```text
+Finding-ID: R<n>
+Severity: P0 | P1 | P2 | P3
+Blocking: YES | NO
+Location: <file/line or behavioral surface>
+Requirement: <Issue/spec/test contract, when applicable>
+Observed: <current diff behavior>
+Expected: <required behavior>
+Impact: <why it matters>
+Disposition: OPEN | FIXED | DEFERRED | NOT_A_FINDING
+Evidence: <diff/test/run/reference>
+```
+
+Diff-local findings belong in inline Review threads when practical. P0/P1 findings that outlive one Review cycle or change task readiness belong in the owning Issue. P2/P3 may remain in the Review when bounded to that PR; durable deferral needs a follow-up Issue when dependency/handoff/history matters. `DEFERRED` names the follow-up or accepted non-goal; `NOT_A_FINDING` records why the concern does not violate the current contract.
+
+Merge-blocking conditions include:
+
+- any unresolved P0/P1 finding;
+- acceptance/spec mismatch;
+- missing/failing required CI/check evidence;
+- review against a stale head;
+- unresolved `REQUEST_CHANGES` evidence;
+- unresolved blocking review thread;
+- unauthorized release/deploy/credential/permission/destructive scope expansion;
+- required independent review represented only by self-review.
+
+P2/P3 are not automatically non-blocking: mark `Blocking: YES` when the finding can invalidate acceptance, cause meaningful regression/data-state corruption, or make verification unreliable.
+
+#### Clean Review summary
+
+A clean formal Review records what was actually checked, for example:
+
+```markdown
+## Review Result
+- Blocking findings: none
+- Scope / requirements: PASS
+- Correctness / failure paths: PASS | N/A
+- Regression / compatibility: PASS | N/A
+- Design / maintainability: PASS | N/A
+- Verification evidence: PASS
+- Risk-specific checks: PASS | N/A
+- Reviewed Actions/checks: <run/check refs>
+- Reviewed-Commit: <full SHA>
+```
+
+`No blocking findings` alone is not a substitute for stating the reviewed dimensions.
+
 Every agent-produced formal Review uses Review Provenance v1:
 
 ```markdown
@@ -145,11 +257,34 @@ Every agent-produced formal Review uses Review Provenance v1:
 
 This block is attribution/provenance, not cryptographic signing. `self-review` and `independent-review` are distinct evidence and must never be represented as equivalent.
 
-Review freshness is commit-specific. `Reviewed-Commit` must equal the PR head used for merge-readiness. Any later push makes prior review evidence stale for merge-readiness until a reviewer explicitly examines the new diff and submits a fresh Review against the new head.
+#### Exact-SHA freshness and incremental re-review
 
-A `REQUEST_CHANGES` Review remains blocking evidence until the finding is addressed or explicitly dispositioned and a fresh Review is submitted. Resolving an inline thread alone does not create fresh review evidence.
+Review freshness is commit-specific. `Reviewed-Commit` must equal the PR head used for merge-readiness. Any later push makes prior review evidence stale for merge-readiness.
 
-Reviewer handoff/resume starts from the owning Issue, current PR head SHA, latest formal Review(s), unresolved review findings/threads, and current CI/check evidence. Long-term Current State remains in the owning Issue/repository canon, not in Review text.
+For a new head after review:
+
+1. compare the previous `Reviewed-Commit...new head`;
+2. review every changed hunk plus surrounding behavior invalidated by that delta;
+3. reuse earlier unchanged evidence instead of repeating it;
+4. perform broader changed-scope review when the delta materially changes scope, acceptance, architecture, persistence, security boundary or test strategy;
+5. submit a fresh formal Review against the exact new head.
+
+Thread resolution alone never refreshes Review provenance.
+
+A `REQUEST_CHANGES` Review remains blocking evidence until the finding is addressed or explicitly dispositioned and a fresh Review is submitted.
+
+#### Information ownership during review
+
+- repository specification/design docs own durable desired behavior/contracts;
+- repository Current State owns durable current repository facts/limitations useful beyond one task;
+- owning Issue/Work Order owns bounded task scope, acceptance, blockers, durable findings and next action;
+- PR/CI own the concrete diff and implementation/verification evidence;
+- formal Review owns exact-SHA review evidence and diff-local findings;
+- devflow Control remains a cross-repository summary/index.
+
+Reference the owning surface instead of copying the same canonical information into multiple places. `REPOSITORY_ISSUE_MANUAL.md` defines finding promotion/retirement in detail.
+
+Reviewer handoff/resume starts from the owning Issue, current PR head SHA, latest formal Review(s), unresolved review findings/threads, and current CI/check evidence. Long-term Current State remains in repository-owned documentation, not Review text.
 
 ## 5. Merge policy
 
@@ -159,6 +294,10 @@ Low/medium operational risk is not equivalent to automatic merge. All of the fol
 - verification evidence is current;
 - when independent review is required, a current-head formal Review from a different agent exists with no unresolved blocking finding;
 - no unresolved REQUEST_CHANGES Review remains;
+- current required Actions/checks are green for the PR head;
+- the accepted `Reviewed-Commit` equals the current PR head;
+- no unresolved blocking review thread or durable P0/P1 finding remains;
+- branch protection reports a merge-compatible state;
 - there is no unresolved Critical/High-risk security or destructive boundary;
 - catastrophic failure likelihood is low;
 - the change can be restored through a normal revert PR.
