@@ -45,7 +45,7 @@ The existing devflow MCP remains read-only. It must not become the high-churn wr
 Owns the runtime implementation of the protocol:
 
 - claim discovery projection;
-- claim/renew/release/expire/takeover mutations;
+- claim/acknowledge/renew/progress/wait/resume/release/fail/expire/takeover mutations;
 - ephemeral current claim state;
 - liveness/progress timestamps;
 - conflict-key enforcement;
@@ -161,9 +161,11 @@ evidence_ref: <PR/run/review/dependency reference or null>
 
 ## 6. Claim lifecycle
 
+Every mutating v1 operation carries a caller-supplied `idempotency_key`. Retrying the same logical mutation reuses that key; a different payload under the same key is rejected.
+
 ### 6.1 Claim
 
-`claim(task, role, worker, conflict_keys, expected_state)` is accepted only when:
+`claim(task, role, worker, conflict_keys, expected_state, idempotency_key)` is accepted only when:
 
 - the task remains eligible for that role;
 - no valid exclusive claim already owns the same task/role;
@@ -195,14 +197,16 @@ Progress is separate from heartbeat. A worker may remain alive without making fo
 
 When work intentionally blocks on CI/review/user/dependency/provider/external state, the worker records `WAITING` plus evidence.
 
+`WAITING` remains lease-bound. Wait evidence never extends `lease_until` and never exempts a runtime claim from expiry. If ownership is retained during a bounded unsafe-to-transfer wait, the worker must continue valid renewals; if renewal stops, the claim expires normally. Wait evidence affects observer classification, not runtime ownership authority.
+
 A waiting claim need not continuously hold an implementation-exclusive slot when doing so would prevent useful independent work. Role/conflict release policy is explicit per transition:
 
 - `WAITING:CI`: implementation claim may be released after push/PR when no local mutation remains in flight;
 - `WAITING:REVIEW`: implementer slot is normally released; reviewer role becomes independently claimable;
-- `WAITING:USER_DECISION`: active execution ownership is released unless preserving it is necessary for a bounded unsafe-to-transfer operation;
+- `WAITING:USER_DECISION`: active execution ownership is released unless preserving it is necessary for a bounded unsafe-to-transfer operation; retained ownership remains lease-bound and renewable;
 - dependency/provider/rate-limit waits normally release execution ownership.
 
-The durable task remains waiting even when the worker lease is released.
+The durable task remains waiting even when the worker lease is released. A live retained `WAITING` claim returns to active execution through `resume(claim_id, generation, idempotency_key)`, which requires the current unexpired generation, clears wait metadata, and transitions `WAITING -> RUNNING`.
 
 ### 6.6 Release/fail
 
@@ -212,9 +216,16 @@ Neither operation marks the durable Issue complete.
 
 ### 6.7 Expire/takeover
 
-When `lease_until` passes without valid renewal and no explicit durable wait evidence protects the task from loss classification, the claim becomes expired.
+Every current runtime claim, including `WAITING`, expires when `lease_until` passes without valid renewal. Durable wait evidence may affect whether an observer classifies the abandoned work as `LOST`, but it never extends the lease or preserves execution authority.
 
-A new worker may acquire a new generation. The previous worker is fenced and must not continue integration on the stale generation.
+v1 uses an explicit two-step recovery in the same serialized mutation lane:
+
+1. `expire(idempotency_key)` sweeps elapsed claims and commits the updated snapshot;
+2. `takeover(..., idempotency_key)` / `claim(...)` then allocates the next generation.
+
+`takeover` does not atomically perform the expiry sweep in v1. An expired-but-unswept claim may therefore reject a new claim until the explicit `expire` mutation commits. Atomic sweep-plus-takeover is deferred.
+
+A new worker may then acquire a new generation. The previous worker is fenced and must not continue integration on the stale generation.
 
 ## 7. Fencing rule
 
@@ -272,17 +283,22 @@ concurrency:
 
 `cancel-in-progress` is not enabled.
 
-Current GitHub Actions behavior permits at most one running member of a concurrency group; `queue: max` allows queued runs instead of replacing the existing pending run. Ordering is FIFO by when a run started waiting, not a strict guarantee of original dispatch order. The protocol requires serializability, not stronger global fairness.
+Current GitHub Actions behavior permits at most one running member of a concurrency group. With `queue: max`, up to 100 runs may remain pending in one concurrency group; when that queue is full, additional runs are canceled/rejected. Ordering follows when a run started waiting in the concurrency group (FIFO-oriented), but execution order is not a stronger dispatch-order guarantee. `queue: max` must not be combined with `cancel-in-progress: true`.
+
+A canceled/rejected queued run makes **no authority change**. Clients must not treat dispatch acceptance as mutation success; authority changes only after the serialized run successfully commits the system-Issue snapshot. The protocol requires serializability, not stronger global fairness.
 
 All v1 authority-changing operations use the global lane:
 
 - claim;
 - acknowledge/run;
 - renew;
+- progress;
 - wait transition;
+- resume;
 - release;
 - fail;
-- expire/takeover;
+- explicit expire sweep;
+- takeover/claim after expiry;
 - controller offer acceptance that creates a claim.
 
 Fine-grained conflict-key mutation lanes are deferred until real throughput requires them.
@@ -331,7 +347,9 @@ Initial v1 defaults:
 - stalled observer threshold: 15 minutes without progress while heartbeat remains current;
 - expiration: no valid renewal by `lease_until`.
 
-These are protocol defaults and may become repository/runtime configuration after pilot evidence. A worker in an explicit durable wait should release its active execution claim rather than consume heartbeat runs indefinitely whenever safe.
+These are protocol defaults and may become repository/runtime configuration after pilot evidence. A worker in an explicit durable wait should release its active execution claim rather than consume heartbeat runs indefinitely whenever safe. If a bounded unsafe-to-transfer `WAITING` claim is retained, it must renew before `lease_until`; wait evidence alone never protects it from expiry.
+
+Because the v1 global `queue: max` lane can hold at most 100 pending runs, renewal clients must treat a canceled/overflowed run as **no authority change** and must not assume `lease_until` moved. The first merged-main pilot smoke records dispatch-to-snapshot-commit latency so renewal cadence can be validated against real queue behavior.
 
 ## 11. Runtime API/command surface
 
@@ -347,8 +365,10 @@ acknowledge
 renew
 progress
 wait
+resume
 release
 fail
+expire
 takeover
 ```
 
@@ -417,7 +437,7 @@ repo-monitor may derive:
 - `AWAITING_REVIEW`: implementation released and review requirement is unsatisfied;
 - `WAITING_USER`: explicit user decision required;
 - `BLOCKED`: durable dependency prevents the next role;
-- `LOST`: previously running claim expired without protected wait evidence;
+- `LOST`: a previous runtime claim expired and durable/external evidence does not establish that the work was intentionally waiting; wait evidence affects this observer label but never prevents runtime lease expiry;
 - `ORPHANED`: branch/PR evidence exists with no valid/current ownership mapping.
 
 These are projections. repo-monitor must not claim direct knowledge of ChatGPT/Codex internal process state.
@@ -457,9 +477,9 @@ After this design is accepted:
 
 ## 17. Failure handling
 
-- failed Actions mutation run leaves the previous system-Issue snapshot authoritative;
-- callers treat a missing success result as no authority change;
-- retries carry an idempotency key so a repeated successful mutation does not allocate a second claim/generation;
+- failed or canceled Actions mutation run leaves the previous system-Issue snapshot authoritative;
+- callers treat a missing success result, queue overflow cancellation, or other canceled run as no authority change;
+- every mutating operation carries an `idempotency_key`; retries reuse the same key so a repeated successful mutation does not allocate a second claim/generation;
 - malformed state blocks mutation rather than being repaired heuristically;
 - stale generation rejects authority-bearing mutation;
 - GitHub/API outage means no new claim authority is issued; already-running workers must stop at lease expiry unless they can revalidate before then;
@@ -474,10 +494,14 @@ Minimum deterministic verification:
 - conflict-key collision rejects the second incompatible claim;
 - renew extends only the current generation;
 - stale generation cannot renew/push authority forward;
-- expiry permits a new generation takeover;
+- expiry permits a new generation takeover after the explicit expire sweep;
+- `WAITING` remains lease-bound and expired waiting ownership can be recovered;
+- live `WAITING` can `resume -> RUNNING`, while expired waiting cannot resume;
 - idempotent retry does not duplicate ownership;
-- CI wait is not classified as lost work;
+- canceled/overflowed serialized runs produce no authority change;
+- CI wait is not classified as lost work merely because no active claim remains;
 - reviewer role remains independent from implementer ownership;
+- malformed snapshots with incompatible conflict ownership or same-worker implementer/reviewer overlap fail closed;
 - controller offer must still pass normal claim rules;
 - malformed system state fails closed.
 
