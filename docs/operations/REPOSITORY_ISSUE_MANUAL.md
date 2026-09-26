@@ -137,20 +137,24 @@ The PR should identify:
 - known limitations or explicitly deferred findings;
 - rollback note when failure impact warrants it;
 - implementer provenance when the PR is agent-produced or mixed-agent work;
-- required review role/focus/head target when the repository template provides those fields.
+- whether formal Review is required, whether a different reviewer is explicitly required, the review focus, and the target head SHA when the repository template provides those fields.
 
 Use the repository PR template when present. Keep the PR compact: do not copy the full Issue body or move long-term Current State into the PR. Implementer provenance belongs in the PR body; reviewer provenance does not.
 
 ### At formal review
 
-For non-trivial PRs, submit a formal GitHub Pull Request Review according to the lifecycle, proportional review-depth rules and Review Provenance v1 defined in `AGENT_OPERATING_MANUAL.md`.
+For non-trivial PRs, submit a formal GitHub Pull Request Review according to the lifecycle, proportional review-depth rules and Review Provenance v2 defined in `AGENT_OPERATING_MANUAL.md`.
 
-- `self-review` and `independent-review` are different evidence and must be labeled accurately.
-- Review evidence is tied to the exact `Reviewed-Commit` SHA; a later push requires explicit re-review of the new head for merge-readiness.
-- `REQUEST_CHANGES` findings stay blocking until addressed or explicitly dispositioned and followed by a fresh Review.
-- Diff-local findings belong in inline review comments/threads when practical.
-- Task-level blocker, acceptance change, durable deferral or P0/P1 finding belongs in the owning Issue when it survives the immediate Review cycle.
-- When multiple agent surfaces share one GitHub actor, native approval count does not prove agent independence; preserve system/model/role attribution in Review Provenance and use CI/status/provenance policy where enforcement is required.
+- implementer-authored formal Review is valid by default unless an explicit different-reviewer escalation applies;
+- Review Provenance records direct reviewer and implementer signatures; do not persist `self-review`, `independent-review`, `Review-Role`, `Independence` or equivalent derived relation fields;
+- reviewer relation is derived from `(System, Model)` signature equality when gating requires it;
+- Review evidence is tied to the exact `Reviewed-Commit` SHA; a later push requires explicit re-review of the new head for merge-readiness;
+- `REQUEST_CHANGES` findings stay blocking until addressed or explicitly dispositioned and followed by a fresh Review;
+- Diff-local findings belong in inline review comments/threads when practical;
+- Task-level blocker, acceptance change, durable deferral or P0/P1 finding belongs in the owning Issue when it survives the immediate Review cycle;
+- when multiple agent surfaces share one GitHub actor, native approval count does not prove reviewer separation; use direct Review Provenance signatures and the applicable escalation policy instead.
+
+Priority/Risk/repository identity do not by themselves require a different reviewer. Escalation follows the explicit conditions in `AGENT_OPERATING_MANUAL.md` or a stricter owning Issue/repository policy.
 
 Review scope follows the changed behavior and credible impact boundary. Unchanged unrelated repository areas are not re-reviewed by default. A finding widens inspection around the affected state/data/control-flow/dependency boundary; whole-repository/spec review is reserved for broad architectural changes, cross-cutting migrations, materially uncertain impact, or explicit final/full verification.
 

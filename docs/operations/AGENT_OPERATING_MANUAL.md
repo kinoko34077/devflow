@@ -115,18 +115,37 @@ For normal changes:
 
 For every non-trivial PR, use a submitted GitHub Pull Request Review as the durable review artifact. The PR body owns implementation scope, verification and implementer provenance; reviewer identity/provenance belongs in the Review object.
 
-Independent Review is required when any of the following applies:
-- P0/P1 finding or task;
-- MEDIUM/HIGH risk change;
-- `devflow`, Repository Base, Runtime or another shared control-plane change;
-- shared API/contract change;
-- auth/security/privacy/credential/deploy/release boundary change;
-- cross-repository Work Order that changes more than one repository;
-- the owning Issue explicitly requires independent review.
+A formal Review authored by the implementer is a valid normal merge path. The default invariant is:
 
-A PR may omit independent review only when it is genuinely trivial: LOW risk, small and safely reversible, limited to docs/hygiene or deterministic generated metadata, changes no shared contract/security/deploy boundary, and the owning Issue does not require independent review. A formal self-review may still be used, but it must be labeled as self-review.
+```text
+Review is required for non-trivial PRs.
+Reviewer != Implementer is NOT required by default.
+```
 
-Allowed submitted Review outcomes are `COMMENT`, `REQUEST_CHANGES`, and `APPROVE`. When native actor identity prevents an independent agent from using `APPROVE`, an independent `COMMENT` Review may carry the review result, but its body must state whether blocking findings remain. Native approval count must not be treated as proof of agent independence when multiple agent surfaces authenticate as the same GitHub actor.
+A different-reviewer Review becomes an additional mandatory gate only when at least one of the following applies:
+
+1. the owning Issue / Work Order explicitly requires a different reviewer;
+2. security/auth/credential/permission/privacy boundaries change materially;
+3. destructive or difficult-to-reverse state/data migration is involved;
+4. persistent schema/data migration can cause non-trivial unrecoverable loss/corruption;
+5. a public/shared contract has a breaking or high-impact compatibility change;
+6. one semantic change propagates across multiple repositories/consumers and rollback is not purely local;
+7. devflow authority / merge safety / source-of-truth semantics themselves change materially;
+8. the first Review finds a P0/P1 issue whose resolution warrants independent confirmation;
+9. the user explicitly asks for another reviewer.
+
+Priority, Risk and repository identity are inputs to review depth and escalation analysis, not automatic second-reviewer triggers. P1, MEDIUM, `devflow`, Repository Base, Runtime or shared-control labels alone do not require reviewer separation when the actual change is local, reversible and does not cross one of the escalation boundaries above.
+
+The PR declares only the applicable gates:
+
+```text
+Formal review required: yes | no
+Different reviewer required: yes | no
+```
+
+Do not persist a derived `self-review` / `independent-review` classification. Whether the reviewer equals the implementer is derived from direct Review Provenance signatures.
+
+Allowed submitted Review outcomes are `COMMENT`, `REQUEST_CHANGES`, and `APPROVE`. When native actor identity prevents a reviewer from using `APPROVE`, a `COMMENT` Review may carry the review result, but its body must state whether blocking findings remain. Native approval count must not be treated as proof of agent identity separation when multiple agent surfaces authenticate as the same GitHub actor.
 
 #### Reviewer input packet
 
@@ -138,7 +157,7 @@ Before reviewing the diff, resolve only the material needed for the change:
 - repository-local specifications / Current State relevant to the changed behavior;
 - implementer verification evidence and current Actions/checks for the exact head;
 - previous formal Reviews, unresolved review threads and durable findings, when present;
-- Priority/Risk and required review role from the owning task / Control.
+- Priority/Risk and the applicable different-reviewer escalation requirement from the owning task / Control.
 
 Chat history is not review evidence. Unchanged unrelated specifications, Issues and repository areas are not read merely because they exist.
 
@@ -187,7 +206,7 @@ The review dimensions below are dimensions to consider, not six mandatory exhaus
 6. **Risk-specific checks**
    - apply only when the diff touches the corresponding boundary: security/privacy/credentials/deploy/dependencies/workflows/UI accessibility-usability/etc.
 
-A narrower `security-review` or `spec-review` must state its scope. It does not silently replace a required baseline review unless another current Review covers the omitted baseline.
+A narrower security-only or spec-only Review represents that specialization through `Review-Scope`. It does not silently replace a required baseline review unless another current Review covers the omitted baseline.
 
 #### Review findings
 
@@ -217,7 +236,7 @@ Merge-blocking conditions include:
 - unresolved `REQUEST_CHANGES` evidence;
 - unresolved blocking review thread;
 - unauthorized release/deploy/credential/permission/destructive scope expansion;
-- required independent review represented only by self-review.
+- an applicable different-reviewer escalation without a qualifying current-head Review from a differing reviewer signature.
 
 P2/P3 are not automatically non-blocking: mark `Blocking: YES` when the finding can invalidate acceptance, cause meaningful regression/data-state corruption, or make verification unreliable.
 
@@ -240,22 +259,31 @@ A clean formal Review records what was actually checked, for example:
 
 `No blocking findings` alone is not a substitute for stating the reviewed dimensions.
 
-Every agent-produced formal Review uses Review Provenance v1:
+Every agent-produced formal Review uses Review Provenance v2:
 
 ```markdown
 ### Review Provenance
 - Reviewer-System: ChatGPT | Codex | Claude Code | Human
 - Reviewer-Model: <model/version or unknown>
-- Review-Role: independent-review | self-review | security-review | spec-review
 - Implementer-System: ChatGPT | Codex | Claude Code | Human | mixed | unknown
+- Implementer-Model: <model/version or unknown>
 - Reviewed-Commit: <full SHA>
 - Review-Scope: <changed scope / owning Issue acceptance / file subset>
-- Independence: DIFFERENT_AGENT | DIFFERENT_MODEL | SAME_AGENT_SELF_REVIEW | HUMAN
 - Decision: APPROVE | REQUEST_CHANGES | COMMENT
-- Review-Provenance-Version: 1
+- Review-Provenance-Version: 2
 ```
 
-This block is attribution/provenance, not cryptographic signing. `self-review` and `independent-review` are distinct evidence and must never be represented as equivalent.
+This block is attribution/provenance, not cryptographic signing. Reviewer relation is derived rather than persisted:
+
+```text
+(Reviewer-System, Reviewer-Model) == (Implementer-System, Implementer-Model)
+=> implementer-authored Review
+
+signatures differ
+=> different-reviewer Review
+```
+
+Do not add `Review-Role`, `Independence`, `self-review`, `independent-review`, `SAME_AGENT_SELF_REVIEW`, `DIFFERENT_AGENT` or equivalent derived relation fields to the standard v2 schema. Add an instance/session discriminator only if real operation later demonstrates that `System + Model` is insufficient.
 
 #### Exact-SHA freshness and incremental re-review
 
@@ -292,7 +320,8 @@ Low/medium operational risk is not equivalent to automatic merge. All of the fol
 
 - the user has already granted broad authorization for this class of change;
 - verification evidence is current;
-- when independent review is required, a current-head formal Review from a different agent exists with no unresolved blocking finding;
+- when formal Review is required, a clean current-head formal Review exists with direct reviewer/implementer provenance;
+- when a different reviewer is explicitly required, at least one clean current-head formal Review has a reviewer signature different from the implementer signature;
 - no unresolved REQUEST_CHANGES Review remains;
 - current required Actions/checks are green for the PR head;
 - the accepted `Reviewed-Commit` equals the current PR head;
@@ -309,9 +338,9 @@ Auto-merge is a merge-execution convenience, not a review or verification gate. 
 In particular:
 
 - do not use auto-merge for release, deploy, publication, credential, permission, destructive, or other confirmation-gated finalization;
-- when independent review is required, the current-head independent formal Review must already exist and have no unresolved blocker before auto-merge is enabled;
+- the applicable current-head formal Review gate must already be satisfied before auto-merge is enabled; when different-reviewer escalation applies, the qualifying differing-signature Review must already exist with no unresolved blocker;
 - required CI/status checks must be configured for the current head; a GitHub-enforced required check may still be pending when auto-merge is enabled so GitHub can complete the merge only after it passes, but a known failing required check remains blocking; blocking review conversations/findings must already be resolved;
-- while AI reviewer surfaces share one GitHub actor and native required approval count remains `0`, never enable auto-merge early on the assumption that GitHub will wait for agent-level independent Review;
+- while AI reviewer surfaces share one GitHub actor and native required approval count remains `0`, do not treat GitHub native approval count as proof that the applicable provenance gate is satisfied;
 - after enablement, branch protection continues to govern technical merge eligibility; after merge, perform the normal Issue/Control reconciliation in Section 6.
 
 If these conditions do not hold, leave the PR unmerged and set the correct Next Action / `[USER_DECISION]` boundary.

@@ -7,46 +7,69 @@ HEAD = "a" * 40
 OTHER = "b" * 40
 
 
-def pr_body(role="independent-review", implementer="ChatGPT"):
+def pr_body(
+    formal_required="yes",
+    different_required="no",
+    implementer_system="ChatGPT",
+    implementer_model="GPT-5.6 Sol",
+):
     return f"""## Review target
-- Required review role: {role}
+- Formal review required: {formal_required}
+- Different reviewer required: {different_required}
 - Review focus: correctness
 - Reviewed-SHA target: {HEAD}
 
 ## Implementer Provenance
-- Implementer-System: {implementer}
+- Implementer-System: {implementer_system}
+- Implementer-Model: {implementer_model}
 """
 
 
 def review_body(
     *,
     reviewed_commit=HEAD,
-    reviewer="Claude Code",
-    role="independent-review",
-    independence="DIFFERENT_AGENT",
+    reviewer_system="ChatGPT",
+    reviewer_model="GPT-5.6 Sol",
+    implementer_system="ChatGPT",
+    implementer_model="GPT-5.6 Sol",
     blocking="none",
     decision="COMMENT",
+    version="2",
 ):
     return f"""## Review Result
 - Blocking findings: {blocking}
 - Reviewed-Commit: {reviewed_commit}
 
 ### Review Provenance
-- Reviewer-System: {reviewer}
-- Reviewer-Model: test-model
-- Review-Role: {role}
-- Implementer-System: ChatGPT
+- Reviewer-System: {reviewer_system}
+- Reviewer-Model: {reviewer_model}
+- Implementer-System: {implementer_system}
+- Implementer-Model: {implementer_model}
 - Reviewed-Commit: {reviewed_commit}
 - Review-Scope: test
-- Independence: {independence}
 - Decision: {decision}
-- Review-Provenance-Version: 1
+- Review-Provenance-Version: {version}
 """
 
 
-def pr(role="independent-review", implementer="ChatGPT", body=None):
+def pr(
+    formal_required="yes",
+    different_required="no",
+    implementer_system="ChatGPT",
+    implementer_model="GPT-5.6 Sol",
+    body=None,
+):
     return {
-        "body": pr_body(role, implementer) if body is None else body,
+        "body": (
+            pr_body(
+                formal_required,
+                different_required,
+                implementer_system,
+                implementer_model,
+            )
+            if body is None
+            else body
+        ),
         "head": {"sha": HEAD},
     }
 
@@ -64,8 +87,80 @@ def review(**kwargs):
 
 
 class ReviewReadinessTests(unittest.TestCase):
-    def test_independent_current_head_review_passes(self):
+    def test_default_same_signature_formal_review_passes(self):
         result = review_readiness.evaluate(pr(), [review()])
+        self.assertTrue(result.ready)
+        self.assertEqual(result.matched_review_id, 101)
+
+    def test_markdown_inline_code_reviewed_commit_passes(self):
+        candidate = review()
+        candidate["body"] = candidate["body"].replace(
+            f"Reviewed-Commit: {HEAD}", f"Reviewed-Commit: `{HEAD}`"
+        )
+        result = review_readiness.evaluate(pr(), [candidate])
+        self.assertTrue(result.ready)
+        self.assertEqual(result.matched_review_id, 101)
+
+    def test_default_different_signature_formal_review_passes(self):
+        candidate = review(
+            reviewer_system="Claude Code",
+            reviewer_model="Sonnet",
+        )
+        result = review_readiness.evaluate(pr(), [candidate])
+        self.assertTrue(result.ready)
+
+    def test_different_reviewer_gate_rejects_same_signature(self):
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [review()],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("different reviewer", result.reason.lower())
+
+    def test_different_reviewer_gate_normalizes_case_and_whitespace(self):
+        candidate = review(
+            reviewer_system=" chatgpt ",
+            reviewer_model="  gpt-5.6   sol ",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("different reviewer", result.reason.lower())
+
+    def test_same_system_unknown_model_does_not_satisfy_different_reviewer_gate(self):
+        candidate = review(
+            reviewer_system="ChatGPT",
+            reviewer_model="unknown",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("different reviewer", result.reason.lower())
+
+    def test_known_different_system_can_qualify_with_unknown_model(self):
+        candidate = review(
+            reviewer_system="Human",
+            reviewer_model="unknown",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertTrue(result.ready)
+
+    def test_different_reviewer_gate_accepts_different_signature(self):
+        candidate = review(
+            reviewer_system="Claude Code",
+            reviewer_model="Sonnet",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
         self.assertTrue(result.ready)
         self.assertEqual(result.matched_review_id, 101)
 
@@ -76,42 +171,37 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertFalse(result.ready)
         self.assertIn("current head", result.reason)
 
-    def test_independent_review_rejects_same_agent_or_wrong_independence(self):
-        cases = [
-            review(reviewer="ChatGPT"),
-            review(independence="SAME_AGENT_SELF_REVIEW"),
-        ]
-        for candidate in cases:
-            with self.subTest(candidate=candidate["body"]):
-                self.assertFalse(review_readiness.evaluate(pr(), [candidate]).ready)
-
     def test_declared_blocking_findings_fail(self):
         result = review_readiness.evaluate(pr(), [review(blocking="R1")])
         self.assertFalse(result.ready)
         self.assertIn("blocking", result.reason.lower())
 
-    def test_missing_or_malformed_required_role_fails_closed(self):
+    def test_missing_or_malformed_review_gate_fails_closed(self):
         bodies = [
-            "## Review target\n- Review focus: correctness",
-            "## Review target\n- Required review role: maybe",
+            "## Review target\n- Different reviewer required: no",
+            "## Review target\n- Formal review required: maybe\n- Different reviewer required: no",
+            "## Review target\n- Formal review required: yes",
+            "## Review target\n- Formal review required: yes\n- Different reviewer required: maybe",
         ]
         for body in bodies:
             with self.subTest(body=body):
                 result = review_readiness.evaluate(pr(body=body), [])
                 self.assertFalse(result.ready)
-                self.assertIn("Required review role", result.reason)
+                self.assertIn("review", result.reason.lower())
 
-    def test_valid_self_review_passes(self):
-        candidate = review(
-            reviewer="ChatGPT",
-            role="self-review",
-            independence="SAME_AGENT_SELF_REVIEW",
+    def test_inconsistent_no_formal_but_different_required_fails_closed(self):
+        result = review_readiness.evaluate(
+            pr(formal_required="no", different_required="yes"),
+            [],
         )
-        result = review_readiness.evaluate(pr(role="self-review"), [candidate])
-        self.assertTrue(result.ready)
+        self.assertFalse(result.ready)
+        self.assertIn("inconsistent", result.reason.lower())
 
-    def test_none_role_passes_without_review(self):
-        result = review_readiness.evaluate(pr(role="none"), [])
+    def test_no_formal_review_required_passes_without_review(self):
+        result = review_readiness.evaluate(
+            pr(formal_required="no", different_required="no"),
+            [],
+        )
         self.assertTrue(result.ready)
         self.assertIsNone(result.matched_review_id)
 
@@ -130,6 +220,12 @@ class ReviewReadinessTests(unittest.TestCase):
         result = review_readiness.evaluate(pr(), [malformed])
         self.assertFalse(result.ready)
         self.assertIn("formal review", result.reason.lower())
+
+    def test_legacy_v1_provenance_does_not_satisfy_v2_readiness(self):
+        candidate = review(version="1")
+        result = review_readiness.evaluate(pr(), [candidate])
+        self.assertFalse(result.ready)
+        self.assertIn("version", result.reason.lower())
 
     def test_later_blocking_review_supersedes_earlier_clean_review(self):
         clean = review(review_id=101)
@@ -150,12 +246,42 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertFalse(result.ready)
         self.assertIn("blocking", result.reason.lower())
 
+    def test_newer_malformed_request_changes_blocks_older_clean_review(self):
+        clean = review(review_id=101)
+        malformed_request_changes = {
+            "id": 102,
+            "state": "CHANGES_REQUESTED",
+            "commit_id": HEAD,
+            "body": "Requesting changes without managed provenance",
+        }
+        result = review_readiness.evaluate(
+            pr(),
+            [clean, malformed_request_changes],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("request", result.reason.lower())
+
     def test_fresh_clean_review_supersedes_earlier_blocker(self):
         blocking = review(review_id=101, blocking="R1")
         clean = review(review_id=102)
         result = review_readiness.evaluate(pr(), [blocking, clean])
         self.assertTrue(result.ready)
         self.assertEqual(result.matched_review_id, 102)
+
+    def test_different_reviewer_gate_requires_latest_different_signature_review_clean(self):
+        different_blocking = review(
+            review_id=101,
+            reviewer_system="Claude Code",
+            reviewer_model="Sonnet",
+            blocking="R1",
+        )
+        self_clean = review(review_id=102)
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [different_blocking, self_clean],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("blocking", result.reason.lower())
 
     def test_api_state_and_declared_decision_must_match(self):
         candidate = review(state="COMMENTED", decision="APPROVE")
