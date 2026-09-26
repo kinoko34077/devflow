@@ -62,22 +62,25 @@ def normalize_repository(repository: str) -> str:
 
 def _default_transport(url: str, headers: dict[str, str]) -> Any:
     request = urllib.request.Request(url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read().decode("utf-8")
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = response.read().decode("utf-8")
+        return json.loads(payload) if payload else None
+
+
+def _translate_read_error(exc: Exception) -> DevflowMCPError:
+    if isinstance(exc, urllib.error.HTTPError):
         if exc.code in {401, 403, 404}:
-            raise DevflowMCPError(
+            return DevflowMCPError(
                 f"GitHub read failed with HTTP {exc.code}. "
                 "If the repository is private or access-controlled, configure a read-capable "
                 "DEVFLOW_GITHUB_TOKEN or GITHUB_TOKEN."
-            ) from None
-        raise DevflowMCPError(f"GitHub read failed with HTTP {exc.code}.") from None
-    except urllib.error.URLError as exc:
-        raise DevflowMCPError(f"GitHub network read failed: {exc.reason}") from None
-    except json.JSONDecodeError:
-        raise DevflowMCPError("GitHub returned invalid JSON.") from None
+            )
+        return DevflowMCPError(f"GitHub read failed with HTTP {exc.code}.")
+    if isinstance(exc, urllib.error.URLError):
+        return DevflowMCPError(f"GitHub network read failed: {exc.reason}")
+    if isinstance(exc, json.JSONDecodeError):
+        return DevflowMCPError("GitHub returned invalid JSON.")
+    return DevflowMCPError(f"GitHub read failed: {type(exc).__name__}.")
 
 
 class GitHubReader:
@@ -111,6 +114,14 @@ class GitHubReader:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
+    def _read(self, url: str) -> Any:
+        try:
+            return self._transport(url, self._headers())
+        except DevflowMCPError:
+            raise
+        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise _translate_read_error(exc) from None
+
     def _repository_url(self, repository: str, suffix: str) -> str:
         normalized = normalize_repository(repository)
         owner, name = normalized.split("/", 1)
@@ -126,7 +137,7 @@ class GitHubReader:
         while True:
             query = urllib.parse.urlencode({"state": state, "per_page": per_page, "page": page})
             url = self._repository_url(repository, f"issues?{query}")
-            batch = self._transport(url, self._headers())
+            batch = self._read(url)
             if not isinstance(batch, list):
                 raise DevflowMCPError("GitHub issues response was not a list.")
             actual_issues = [item for item in batch if isinstance(item, dict) and "pull_request" not in item]
@@ -139,7 +150,7 @@ class GitHubReader:
         if issue_number < 1:
             raise DevflowMCPError("Issue number must be >= 1.")
         url = self._repository_url(repository, f"issues/{issue_number}")
-        issue = self._transport(url, self._headers())
+        issue = self._read(url)
         if not isinstance(issue, dict):
             raise DevflowMCPError("GitHub issue response was not an object.")
         return issue
