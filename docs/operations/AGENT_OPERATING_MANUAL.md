@@ -302,6 +302,18 @@ Low/medium operational risk is not equivalent to automatic merge. All of the fol
 - catastrophic failure likelihood is low;
 - the change can be restored through a normal revert PR.
 
+### 5.1 Auto-merge execution
+
+Auto-merge is a merge-execution convenience, not a review or verification gate. Enable it only for a LOW-risk, safely reversible PR after every devflow policy gate that GitHub may not enforce natively is already satisfied.
+
+In particular:
+
+- do not use auto-merge for release, deploy, publication, credential, permission, destructive, or other confirmation-gated finalization;
+- when independent review is required, the current-head independent formal Review must already exist and have no unresolved blocker before auto-merge is enabled;
+- required CI/status evidence must be current and green, and blocking review conversations/findings must already be resolved;
+- while AI reviewer surfaces share one GitHub actor and native required approval count remains `0`, never enable auto-merge early on the assumption that GitHub will wait for agent-level independent Review;
+- after enablement, branch protection continues to govern technical merge eligibility; after merge, perform the normal Issue/Control reconciliation in Section 6.
+
 If these conditions do not hold, leave the PR unmerged and set the correct Next Action / `[USER_DECISION]` boundary.
 
 ## 6. Post-merge reconciliation
