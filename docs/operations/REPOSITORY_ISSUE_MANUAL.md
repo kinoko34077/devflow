@@ -105,7 +105,22 @@ The PR should identify:
 - affected spec/current-state documents;
 - verification commands/results;
 - known limitations or explicitly deferred findings;
-- rollback note when failure impact warrants it.
+- rollback note when failure impact warrants it;
+- implementer provenance when the PR is agent-produced or mixed-agent work.
+
+Use the repository PR template when present. Keep the PR compact: do not copy the full Issue body or move long-term Current State into the PR. Implementer provenance belongs in the PR body; reviewer provenance does not.
+
+### At formal review
+
+For non-trivial PRs, submit a formal GitHub Pull Request Review according to the lifecycle and Review Provenance v1 defined in `AGENT_OPERATING_MANUAL.md`.
+
+- `self-review` and `independent-review` are different evidence and must be labeled accurately.
+- Review evidence is tied to the exact `Reviewed-Commit` SHA; a later push requires explicit re-review of the new head for merge-readiness.
+- `REQUEST_CHANGES` findings stay blocking until addressed or explicitly dispositioned and followed by a fresh Review.
+- Diff-local findings belong in inline review comments/threads; task-level blocker, acceptance change, deferral, or Current State belongs in the owning Issue.
+- When multiple agent surfaces share one GitHub actor, native approval count does not prove agent independence; preserve system/model/role attribution in Review Provenance and use CI/status/provenance policy where enforcement is required.
+
+At handoff, the owning Issue should let the next reviewer recover the current PR/head, latest formal Review, unresolved findings/threads, and current CI/check state without depending on chat history.
 
 ### At completion
 

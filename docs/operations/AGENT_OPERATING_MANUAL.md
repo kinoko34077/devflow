@@ -111,12 +111,54 @@ For normal changes:
 9. re-audit the changed scope and PR diff;
 10. merge only when the current policy permits it.
 
+### 4.1 Formal Pull Request Review lifecycle
+
+For every non-trivial PR, use a submitted GitHub Pull Request Review as the durable review artifact. The PR body owns implementation scope, verification and implementer provenance; reviewer identity/provenance belongs in the Review object.
+
+Independent Review is required when any of the following applies:
+- P0/P1 finding or task;
+- MEDIUM/HIGH risk change;
+- `devflow`, Repository Base, Runtime or another shared control-plane change;
+- shared API/contract change;
+- auth/security/privacy/credential/deploy/release boundary change;
+- cross-repository Work Order that changes more than one repository;
+- the owning Issue explicitly requires independent review.
+
+A PR may omit independent review only when it is genuinely trivial: LOW risk, small and safely reversible, limited to docs/hygiene or deterministic generated metadata, changes no shared contract/security/deploy boundary, and the owning Issue does not require independent review. A formal self-review may still be used, but it must be labeled as self-review.
+
+Allowed submitted Review outcomes are `COMMENT`, `REQUEST_CHANGES`, and `APPROVE`. When native actor identity prevents an independent agent from using `APPROVE`, an independent `COMMENT` Review may carry the review result, but its body must state whether blocking findings remain. Native approval count must not be treated as proof of agent independence when multiple agent surfaces authenticate as the same GitHub actor.
+
+Every agent-produced formal Review uses Review Provenance v1:
+
+```markdown
+### Review Provenance
+- Reviewer-System: ChatGPT | Codex | Claude Code | Human
+- Reviewer-Model: <model/version or unknown>
+- Review-Role: independent-review | self-review | security-review | spec-review
+- Implementer-System: ChatGPT | Codex | Claude Code | Human | mixed | unknown
+- Reviewed-Commit: <full SHA>
+- Review-Scope: <changed scope / owning Issue acceptance / file subset>
+- Independence: DIFFERENT_AGENT | DIFFERENT_MODEL | SAME_AGENT_SELF_REVIEW | HUMAN
+- Decision: APPROVE | REQUEST_CHANGES | COMMENT
+- Review-Provenance-Version: 1
+```
+
+This block is attribution/provenance, not cryptographic signing. `self-review` and `independent-review` are distinct evidence and must never be represented as equivalent.
+
+Review freshness is commit-specific. `Reviewed-Commit` must equal the PR head used for merge-readiness. Any later push makes prior review evidence stale for merge-readiness until a reviewer explicitly examines the new diff and submits a fresh Review against the new head.
+
+A `REQUEST_CHANGES` Review remains blocking evidence until the finding is addressed or explicitly dispositioned and a fresh Review is submitted. Resolving an inline thread alone does not create fresh review evidence.
+
+Reviewer handoff/resume starts from the owning Issue, current PR head SHA, latest formal Review(s), unresolved review findings/threads, and current CI/check evidence. Long-term Current State remains in the owning Issue/repository canon, not in Review text.
+
 ## 5. Merge policy
 
 Low/medium operational risk is not equivalent to automatic merge. All of the following must hold for merge without a new user confirmation:
 
 - the user has already granted broad authorization for this class of change;
 - verification evidence is current;
+- when independent review is required, a current-head formal Review from a different agent exists with no unresolved blocking finding;
+- no unresolved REQUEST_CHANGES Review remains;
 - there is no unresolved Critical/High-risk security or destructive boundary;
 - catastrophic failure likelihood is low;
 - the change can be restored through a normal revert PR.
@@ -156,6 +198,8 @@ Before leaving unfinished work, make sure the durable records reveal:
 - owning repository;
 - active local Issue/Work Order;
 - branch/PR if created;
+- current PR head SHA and latest formal Review provenance when review has started;
+- unresolved review findings/threads and current CI/check state;
 - verified/audited SHA or PR head;
 - completed acceptance conditions;
 - remaining acceptance conditions;
