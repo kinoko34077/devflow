@@ -92,6 +92,15 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertTrue(result.ready)
         self.assertEqual(result.matched_review_id, 101)
 
+    def test_markdown_inline_code_reviewed_commit_passes(self):
+        candidate = review()
+        candidate["body"] = candidate["body"].replace(
+            f"Reviewed-Commit: {HEAD}", f"Reviewed-Commit: `{HEAD}`"
+        )
+        result = review_readiness.evaluate(pr(), [candidate])
+        self.assertTrue(result.ready)
+        self.assertEqual(result.matched_review_id, 101)
+
     def test_default_different_signature_formal_review_passes(self):
         candidate = review(
             reviewer_system="Claude Code",
