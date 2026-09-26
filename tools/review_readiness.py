@@ -22,6 +22,7 @@ _STATE_TO_DECISION = {
 }
 _READY_REVIEW_STATES = {"COMMENTED", "APPROVED"}
 _FORBIDDEN_DERIVED_FIELDS = {"Review-Role", "Independence"}
+_UNKNOWN_IDENTITY = {"", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -86,8 +87,28 @@ def _blocking_findings(body: str) -> str | None:
     return value if unique else None
 
 
+def _normalize_identity_part(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
 def _signature(system: str, model: str) -> tuple[str, str]:
-    return system.strip(), model.strip()
+    return _normalize_identity_part(system), _normalize_identity_part(model)
+
+
+def _qualifies_as_different_reviewer(
+    reviewer_signature: tuple[str, str],
+    implementer_signature: tuple[str, str],
+) -> bool:
+    reviewer_system, reviewer_model = reviewer_signature
+    implementer_system, implementer_model = implementer_signature
+
+    if reviewer_system in _UNKNOWN_IDENTITY:
+        return False
+    if reviewer_system != implementer_system:
+        return True
+    if reviewer_model in _UNKNOWN_IDENTITY or implementer_model in _UNKNOWN_IDENTITY:
+        return False
+    return reviewer_model != implementer_model
 
 
 def _commit_value(value: str) -> str:
@@ -140,12 +161,14 @@ def _review_rejection(
     return None
 
 
-def _managed_reviews(reviews: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, str]]]:
-    managed: list[tuple[dict[str, Any], dict[str, str]]] = []
-    for candidate in reviews:
+def _managed_reviews(
+    reviews: list[dict[str, Any]],
+) -> list[tuple[int, dict[str, Any], dict[str, str]]]:
+    managed: list[tuple[int, dict[str, Any], dict[str, str]]] = []
+    for index, candidate in enumerate(reviews):
         fields = _provenance_fields(str(candidate.get("body") or ""))
         if fields is not None:
-            managed.append((candidate, fields))
+            managed.append((index, candidate, fields))
     return managed
 
 
@@ -190,7 +213,16 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
             return ReadinessResult(False, "No valid formal review provenance satisfies v2 schema")
         return ReadinessResult(False, "No formal review provenance found")
 
-    latest_review, _latest_fields = managed[-1]
+    latest_index, latest_review, _latest_fields = managed[-1]
+    if any(
+        str(candidate.get("state") or "").upper() == "CHANGES_REQUESTED"
+        for candidate in reviews[latest_index + 1 :]
+    ):
+        return ReadinessResult(
+            False,
+            "A newer REQUEST_CHANGES review remains unresolved",
+        )
+
     latest_rejection = _review_rejection(
         latest_review,
         implementer_signature=implementer_signature,
@@ -206,9 +238,12 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
             latest_review.get("id"),
         )
 
-    for candidate, fields in reversed(managed):
+    for _index, candidate, fields in reversed(managed):
         reviewer_signature = _signature(fields["Reviewer-System"], fields["Reviewer-Model"])
-        if reviewer_signature == implementer_signature:
+        if not _qualifies_as_different_reviewer(
+            reviewer_signature,
+            implementer_signature,
+        ):
             continue
         rejection = _review_rejection(
             candidate,
