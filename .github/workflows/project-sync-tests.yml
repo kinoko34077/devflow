@@ -1,17 +1,7 @@
-name: Project sync tests
+name: Required PR gate
 
 on:
   pull_request:
-    paths:
-      - 'scripts/project_sync.py'
-      - 'tools/**'
-      - 'tests/**'
-      - '.github/workflows/project-sync*.yml'
-      - '.devflow/WORKFLOW.yaml'
-      - 'docs/project/**'
-      - 'docs/operations/DEVFLOW_MCP.md'
-      - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
-      - 'requirements-mcp.txt'
   push:
     branches: [main]
     paths:
@@ -29,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
