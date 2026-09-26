@@ -16,8 +16,12 @@ from typing import Any
 
 
 _ALLOWED_ROLES = {"independent-review", "self-review", "none"}
-_ACCEPTED_REVIEW_STATES = {"COMMENTED", "APPROVED"}
-_ACCEPTED_DECISIONS = {"COMMENT", "APPROVE"}
+_STATE_TO_DECISION = {
+    "COMMENTED": "COMMENT",
+    "APPROVED": "APPROVE",
+    "CHANGES_REQUESTED": "REQUEST_CHANGES",
+}
+_READY_REVIEW_STATES = {"COMMENTED", "APPROVED"}
 
 
 @dataclass(frozen=True)
@@ -76,14 +80,6 @@ def _blocking_findings(body: str) -> str | None:
 def _review_rejection(
     review: dict[str, Any], *, required_role: str, implementer: str, head_sha: str
 ) -> str | None:
-    state = str(review.get("state") or "").upper()
-    if state not in _ACCEPTED_REVIEW_STATES:
-        return "Formal review is not in an accepted submitted state"
-
-    commit_id = review.get("commit_id")
-    if commit_id and str(commit_id) != head_sha:
-        return "Formal review API commit does not match current head"
-
     body = str(review.get("body") or "")
     fields = _provenance_fields(body)
     if fields is None:
@@ -93,14 +89,26 @@ def _review_rejection(
         return "Unsupported formal review provenance version"
     if fields["Reviewed-Commit"] != head_sha:
         return "Formal review does not target current head"
+
+    commit_id = review.get("commit_id")
+    if commit_id and str(commit_id) != head_sha:
+        return "Formal review API commit does not match current head"
+
     if fields["Implementer-System"] != implementer:
         return "Formal review implementer provenance does not match PR"
-    if fields["Decision"] not in _ACCEPTED_DECISIONS:
-        return "Formal review decision is not merge-ready evidence"
 
     blocking = _blocking_findings(body)
     if blocking is None or blocking.casefold() != "none":
         return "Formal review declares blocking findings or lacks a clear none result"
+
+    state = str(review.get("state") or "").upper()
+    expected_decision = _STATE_TO_DECISION.get(state)
+    if expected_decision is None:
+        return "Formal review is not in a recognized submitted state"
+    if fields["Decision"] != expected_decision:
+        return "Formal review API state and declared decision do not match"
+    if state not in _READY_REVIEW_STATES:
+        return "Formal review requests changes and remains blocking"
 
     reviewer = fields["Reviewer-System"]
     role = fields["Review-Role"]
@@ -138,8 +146,20 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
     if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
         return ReadinessResult(False, "Current head SHA is missing or invalid")
 
-    rejections: list[str] = []
+    saw_malformed = False
+    # GitHub returns Reviews in submission order. The newest managed Review for
+    # the required role supersedes older Reviews at the same role/head. This
+    # lets a fresh clean re-review clear an earlier blocker while preventing an
+    # older clean Review from masking a newer blocking/REQUEST_CHANGES Review.
     for candidate in reversed(reviews):
+        candidate_body = str(candidate.get("body") or "")
+        fields = _provenance_fields(candidate_body)
+        if fields is None:
+            saw_malformed = True
+            continue
+        if fields["Review-Role"] != required_role:
+            continue
+
         rejection = _review_rejection(
             candidate,
             required_role=required_role,
@@ -152,16 +172,10 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
                 f"Current-head {required_role} provenance is present",
                 candidate.get("id"),
             )
-        rejections.append(rejection)
+        return ReadinessResult(False, rejection)
 
-    if not rejections:
-        return ReadinessResult(False, f"No formal review satisfies required role {required_role}")
-    if len(rejections) == 1:
-        return ReadinessResult(False, rejections[0])
-    if any("blocking" in reason.casefold() for reason in rejections):
-        return ReadinessResult(False, "No acceptable formal review; blocking findings remain")
-    if any("current head" in reason.casefold() for reason in rejections):
-        return ReadinessResult(False, "No acceptable formal review targets the current head")
+    if saw_malformed:
+        return ReadinessResult(False, "No valid formal review provenance satisfies required role")
     return ReadinessResult(False, f"No formal review satisfies required role {required_role}")
 
 
