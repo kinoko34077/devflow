@@ -4,20 +4,26 @@ on:
   pull_request:
     paths:
       - 'scripts/project_sync.py'
+      - 'tools/**'
       - 'tests/**'
       - '.github/workflows/project-sync*.yml'
       - '.devflow/WORKFLOW.yaml'
       - 'docs/project/**'
+      - 'docs/operations/DEVFLOW_MCP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+      - 'requirements-mcp.txt'
   push:
     branches: [main]
     paths:
       - 'scripts/project_sync.py'
+      - 'tools/**'
       - 'tests/**'
       - '.github/workflows/project-sync*.yml'
       - '.devflow/WORKFLOW.yaml'
       - 'docs/project/**'
+      - 'docs/operations/DEVFLOW_MCP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+      - 'requirements-mcp.txt'
 
 permissions:
   contents: read
@@ -33,4 +39,4 @@ jobs:
       - name: Unit tests
         run: python -W error -m unittest discover -v
       - name: Compile check
-        run: python -m py_compile scripts/project_sync.py
+        run: python -m py_compile scripts/project_sync.py tools/devflow_mcp_core.py tools/devflow_mcp.py
