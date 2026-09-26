@@ -8,7 +8,7 @@ KiNoTch.の複数Repositoryを横断して、監査・Current State・Work Order
 
 現在のGitHub repository identityは`kinoko34077/devflow`。旧名`kinoko34077/devflow-test`は2026-09-25のrename以前の履歴参照としてのみ扱う。
 
-実装主体は固定しない。ChatGPT、Codex、その他のAgent/実装者が同じGitHub上の正本・Issue・PR・検証証拠から再開できることを要件とする。
+実装主体は固定しない。ChatGPT、Codex、Claude Code、その他のAgent/実装者が同じGitHub上の正本・Issue・PR・検証証拠から再開できることを要件とする。
 
 ## Cross-repository role
 
@@ -27,10 +27,13 @@ GitHub Project `KiNoTch. Development Control`は表示・俯瞰用の派生層�
 5. 現在タスクに必要なspec / Current State / code / tests
 6. 必要時のみ横断正本・運用マニュアル
 
+MCP対応クライアントでは、read-only `tools/devflow_mcp.py`の`bootstrap_repository`をこの読取順へのlive入口として利用できる。MCPは正本を複製せず、同じGitHub上のControl Issueを読むだけである。
+
 詳細:
 
 - `docs/operations/AGENT_OPERATING_MANUAL.md` — Agentの開始・実装・handoff・再開
 - `docs/operations/REPOSITORY_ISSUE_MANUAL.md` — repo-local Issue / Work Orderの役割と生命周期
+- `docs/operations/DEVFLOW_MCP.md` — Codex / Claude Code等からのread-only live bootstrap
 - `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` — 横断開発管理のCanonical specification
 - `.devflow/WORKFLOW.yaml` — machine-readable workflow contract
 
