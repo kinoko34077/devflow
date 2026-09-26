@@ -150,6 +150,13 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertFalse(result.ready)
         self.assertIn("blocking", result.reason.lower())
 
+    def test_fresh_clean_review_supersedes_earlier_blocker(self):
+        blocking = review(review_id=101, blocking="R1")
+        clean = review(review_id=102)
+        result = review_readiness.evaluate(pr(), [blocking, clean])
+        self.assertTrue(result.ready)
+        self.assertEqual(result.matched_review_id, 102)
+
     def test_api_state_and_declared_decision_must_match(self):
         candidate = review(state="COMMENTED", decision="APPROVE")
         result = review_readiness.evaluate(pr(), [candidate])
