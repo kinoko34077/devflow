@@ -117,6 +117,41 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertFalse(result.ready)
         self.assertIn("different reviewer", result.reason.lower())
 
+    def test_different_reviewer_gate_normalizes_case_and_whitespace(self):
+        candidate = review(
+            reviewer_system=" chatgpt ",
+            reviewer_model="  gpt-5.6   sol ",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("different reviewer", result.reason.lower())
+
+    def test_same_system_unknown_model_does_not_satisfy_different_reviewer_gate(self):
+        candidate = review(
+            reviewer_system="ChatGPT",
+            reviewer_model="unknown",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("different reviewer", result.reason.lower())
+
+    def test_known_different_system_can_qualify_with_unknown_model(self):
+        candidate = review(
+            reviewer_system="Human",
+            reviewer_model="unknown",
+        )
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [candidate],
+        )
+        self.assertTrue(result.ready)
+
     def test_different_reviewer_gate_accepts_different_signature(self):
         candidate = review(
             reviewer_system="Claude Code",
@@ -210,6 +245,21 @@ class ReviewReadinessTests(unittest.TestCase):
         result = review_readiness.evaluate(pr(), [clean, request_changes])
         self.assertFalse(result.ready)
         self.assertIn("blocking", result.reason.lower())
+
+    def test_newer_malformed_request_changes_blocks_older_clean_review(self):
+        clean = review(review_id=101)
+        malformed_request_changes = {
+            "id": 102,
+            "state": "CHANGES_REQUESTED",
+            "commit_id": HEAD,
+            "body": "Requesting changes without managed provenance",
+        }
+        result = review_readiness.evaluate(
+            pr(),
+            [clean, malformed_request_changes],
+        )
+        self.assertFalse(result.ready)
+        self.assertIn("request", result.reason.lower())
 
     def test_fresh_clean_review_supersedes_earlier_blocker(self):
         blocking = review(review_id=101, blocking="R1")
