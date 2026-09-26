@@ -14,7 +14,8 @@
 
 ## Review target
 
-- Required review role:
+- Required review role: independent-review | self-review | none
+- Review focus:
 - Reviewed-SHA target:
 
 ## Known limitations / deferred findings
