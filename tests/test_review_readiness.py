@@ -25,6 +25,7 @@ def review_body(
     role="independent-review",
     independence="DIFFERENT_AGENT",
     blocking="none",
+    decision="COMMENT",
 ):
     return f"""## Review Result
 - Blocking findings: {blocking}
@@ -38,7 +39,7 @@ def review_body(
 - Reviewed-Commit: {reviewed_commit}
 - Review-Scope: test
 - Independence: {independence}
-- Decision: COMMENT
+- Decision: {decision}
 - Review-Provenance-Version: 1
 """
 
@@ -52,9 +53,11 @@ def pr(role="independent-review", implementer="ChatGPT", body=None):
 
 def review(**kwargs):
     commit_id = kwargs.pop("commit_id", HEAD)
+    state = kwargs.pop("state", "COMMENTED")
+    review_id = kwargs.pop("review_id", 101)
     return {
-        "id": 101,
-        "state": "COMMENTED",
+        "id": review_id,
+        "state": state,
         "commit_id": commit_id,
         "body": review_body(**kwargs),
     }
@@ -127,6 +130,31 @@ class ReviewReadinessTests(unittest.TestCase):
         result = review_readiness.evaluate(pr(), [malformed])
         self.assertFalse(result.ready)
         self.assertIn("formal review", result.reason.lower())
+
+    def test_later_blocking_review_supersedes_earlier_clean_review(self):
+        clean = review(review_id=101)
+        blocking = review(review_id=102, blocking="R1")
+        result = review_readiness.evaluate(pr(), [clean, blocking])
+        self.assertFalse(result.ready)
+        self.assertIn("blocking", result.reason.lower())
+
+    def test_later_request_changes_supersedes_earlier_clean_review(self):
+        clean = review(review_id=101)
+        request_changes = review(
+            review_id=102,
+            state="CHANGES_REQUESTED",
+            decision="REQUEST_CHANGES",
+            blocking="R1",
+        )
+        result = review_readiness.evaluate(pr(), [clean, request_changes])
+        self.assertFalse(result.ready)
+        self.assertIn("blocking", result.reason.lower())
+
+    def test_api_state_and_declared_decision_must_match(self):
+        candidate = review(state="COMMENTED", decision="APPROVE")
+        result = review_readiness.evaluate(pr(), [candidate])
+        self.assertFalse(result.ready)
+        self.assertIn("decision", result.reason.lower())
 
 
 if __name__ == "__main__":
