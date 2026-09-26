@@ -16,6 +16,12 @@ Given `kinoko34077/<repo>`:
 
 If no Repository Control Issue exists, do not invent managed state. Treat onboarding as required and follow `docs/operations/AGENT_OPERATING_MANUAL.md`.
 
+### MCP-capable clients
+
+If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work.
+
+The MCP is a read-only access layer to the same live GitHub canon. It does not replace this file, the Control Issue, or repository-local technical truth. Setup and client trigger instructions are in `docs/operations/DEVFLOW_MCP.md`.
+
 ## 2. What owns what
 
 | Information | Canonical owner |
@@ -32,7 +38,7 @@ If no Repository Control Issue exists, do not invent managed state. Treat onboar
 
 ### Normal work on a managed repository
 
-1. This file: `devflow/AGENTS.md`.
+1. This file: `devflow/AGENTS.md` (or the equivalent MCP bootstrap result when already connected).
 2. The target `[REPO] <repo>` Control Issue.
 3. The target repository's own agent/readme/current-state entry point.
 4. Active repository-local Issue/Work Order and PR, if any.
@@ -119,6 +125,7 @@ If devflow summary and repository-local canon disagree, the owning repository go
 
 - Agent operations: `docs/operations/AGENT_OPERATING_MANUAL.md`
 - Repository-local Issue usage: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
+- MCP access/client setup: `docs/operations/DEVFLOW_MCP.md`
 - Canonical control-plane spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
 - Machine-readable workflow: `.devflow/WORKFLOW.yaml`
 - Project synchronization: `docs/project/PROJECT_SYNC.md`
