@@ -1,4 +1,4 @@
-﻿# Cross-Repository Agent Operating Manual
+# Cross-Repository Agent Operating Manual
 
 Status: Operational manual
 Canonical rules: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
@@ -11,7 +11,7 @@ This document explains how a GPT/agent performs ordinary work across managed rep
 
 Input: `kinoko34077/<repo>`.
 
-### Step 1 窶・Locate cross-repository state
+### Step 1 — Locate cross-repository state
 
 Search devflow Issues for the exact open title:
 
@@ -26,7 +26,7 @@ If none exists:
 
 If more than one open Control Issue exists, stop state mutation and reconcile the duplicate control records before continuing.
 
-### Step 2 窶・Read the Control Issue
+### Step 2 — Read the Control Issue
 
 Always inspect:
 - `Repository`
@@ -42,7 +42,7 @@ Always inspect:
 
 The Control Issue tells the agent where to enter the repository. It is not a substitute for local specifications.
 
-### Step 3 窶・Enter repository-local canon
+### Step 3 — Enter repository-local canon
 
 Follow the actual entry points listed in `Detailed Current State` / `Control Notes`.
 
@@ -58,7 +58,7 @@ Non-Base repository:
 - do not manufacture Base files or a standard directory structure;
 - if the Control Issue entry points are stale, update the Control Issue after verifying the correct replacements.
 
-### Step 4 窶・Resolve active work
+### Step 4 — Resolve active work
 
 If `Active Work` references a local Issue, Work Order or PR, open it before creating a duplicate.
 
@@ -335,7 +335,7 @@ Closing a local Issue does not automatically mean the repository is `DONE`; the 
 
 Typical task progression:
 
-`AUDITED 竊・WORK_ORDER_READY 竊・READY_FOR_IMPLEMENTATION 竊・IMPLEMENTING 竊・AWAITING_REVIEW 竊・AUDITED`
+`AUDITED → WORK_ORDER_READY → READY_FOR_IMPLEMENTATION → IMPLEMENTING → AWAITING_REVIEW → AUDITED`
 
 `DONE` is appropriate for a finite devflow Work Order/cross-repository operation. Long-lived Repository Control Issues normally remain open and return to `AUDITED`, `PARKED`, `BLOCKED`, or another current repository-level state.
 
@@ -357,7 +357,7 @@ Before leaving unfinished work, make sure the durable records reveal:
 - current blocker, if any;
 - exact Next Action.
 
-Do not rely on 窶彡ontinue from the previous chat窶・as the handoff mechanism.
+Do not rely on “continue from the previous chat” as the handoff mechanism.
 
 ## 9. Conflict handling
 
@@ -404,4 +404,3 @@ When an agent cannot perform a required operation:
 - do not replace an admin/security action with an unrelated workaround.
 
 Examples include repository rename, secret registration, security permission changes, Project UI-only structural checks, and history rewrite.
-
