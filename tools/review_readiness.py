@@ -90,6 +90,12 @@ def _signature(system: str, model: str) -> tuple[str, str]:
     return system.strip(), model.strip()
 
 
+def _commit_value(value: str) -> str:
+    value = value.strip()
+    inline = re.fullmatch(r"`([0-9a-fA-F]{40})`", value)
+    return inline.group(1) if inline else value
+
+
 def _review_rejection(
     review: dict[str, Any],
     *,
@@ -105,7 +111,7 @@ def _review_rejection(
         return "Unsupported formal review provenance version"
     if _FORBIDDEN_DERIVED_FIELDS.intersection(fields):
         return "Review Provenance v2 must not persist derived reviewer-relation fields"
-    if fields["Reviewed-Commit"] != head_sha:
+    if _commit_value(fields["Reviewed-Commit"]) != head_sha:
         return "Formal review does not target current head"
 
     commit_id = review.get("commit_id")
