@@ -14,7 +14,9 @@
 
 ## Review target
 
-- Required review role: independent-review | self-review | none
+- Formal review required: yes | no
+- Different reviewer required: no | yes
+- Escalation reason: none | <#111 escalation condition / owning policy>
 - Review focus:
 - Reviewed-SHA target:
 
