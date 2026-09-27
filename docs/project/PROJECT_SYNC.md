@@ -56,6 +56,8 @@ Manual workflow modes:
 
 There is no periodic schedule in v1.
 
+Trust boundary: devflow is public, so only Issues whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` are treated as canonical. Event sync for any other author exits without Project access, and verify/reconcile selection skips such Issues (missing association data is treated as untrusted).
+
 The workflow uses `$GITHUB_REPOSITORY` at runtime for repository-scoped Issue operations; the workflow YAML itself does not depend on the literal repository name.
 
 ## 4. Sync Health Issue

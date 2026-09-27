@@ -25,6 +25,29 @@ class ReviewProvenanceAmbiguityTests(unittest.TestCase):
         self.assertFalse(result.ready)
         self.assertIn("provenance", result.reason.casefold())
 
+    def test_newer_ambiguous_review_blocks_older_clean_review(self):
+        clean = review()
+        ambiguous = review()
+        ambiguous["id"] = 2
+        ambiguous["body"] = ambiguous["body"].replace(
+            "- Blocking findings: none", "- Blocking findings: R1 P1 open"
+        ) + "\n\n" + ambiguous["body"][ambiguous["body"].index("### Review Provenance"):]
+
+        result = review_readiness.evaluate(pr(), [clean, ambiguous])
+
+        self.assertFalse(result.ready)
+        self.assertIn("ambiguous", result.reason.casefold())
+
+    def test_older_ambiguous_review_superseded_by_newer_clean_review(self):
+        ambiguous = review()
+        ambiguous["body"] += "\n\n" + ambiguous["body"][ambiguous["body"].index("### Review Provenance"):]
+        clean = review()
+        clean["id"] = 3
+
+        result = review_readiness.evaluate(pr(), [ambiguous, clean])
+
+        self.assertTrue(result.ready, result.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

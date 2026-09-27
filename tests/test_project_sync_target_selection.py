@@ -28,6 +28,7 @@ class TargetSelectionTests(unittest.TestCase):
             "node_id": "ISSUE57",
             "title": "Bug: example",
             "state": "open",
+            "author_association": "OWNER",
             "body": "## Priority\n\nP2",
         }
 

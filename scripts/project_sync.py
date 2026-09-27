@@ -165,13 +165,25 @@ def should_add_missing_item(present: bool, mode: str) -> bool:
     return (not present) and mode in {"reconcile", "event-sync"}
 
 
+TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+def is_trusted_author(issue: dict[str, Any]) -> bool:
+    """devflow is public: only owner/member/collaborator Issues may drive Project writes.
+
+    Missing association data is treated as untrusted (fail closed).
+    """
+    association = str(issue.get("author_association") or "").strip().upper()
+    return association in TRUSTED_AUTHOR_ASSOCIATIONS
+
+
 def is_health_issue(issue: dict[str, Any]) -> bool:
     return str(issue.get("title") or "").strip() == HEALTH_TITLE
 
 
 def select_target_issue(rest: Any, issue_number: int) -> list[dict[str, Any]]:
     issue = rest.get_issue(issue_number)
-    return [] if is_health_issue(issue) else [issue]
+    return [] if is_health_issue(issue) or not is_trusted_author(issue) else [issue]
 
 
 def _redact(text: str, secrets: Iterable[str]) -> str:
@@ -567,6 +579,8 @@ def select_canonical_issues(issues: list[dict[str, Any]], tracked_items: dict[st
     for issue in issues:
         if is_health_issue(issue):
             continue
+        if not is_trusted_author(issue):
+            continue
         node_id = issue.get("node_id") or issue.get("id")
         state = str(issue.get("state") or "").lower()
         if state == "open" or (node_id and node_id in tracked_items):
@@ -738,7 +752,10 @@ def run_sync(
     mode: str, cfg: RuntimeConfig, *, rest: Any | None = None, gql: Any | None = None,
     issue_number: int | None = None, event_issue: dict[str, Any] | None = None, run_url: str = "Unavailable",
 ) -> int:
-    if mode == "event-sync" and event_issue and is_health_issue(event_issue):
+    if mode == "event-sync" and event_issue and (
+        is_health_issue(event_issue) or not is_trusted_author(event_issue)
+    ):
+        # Untrusted (non owner/member/collaborator) Issues never drive Project writes.
         return 0
 
     if rest is None and cfg.github_token:

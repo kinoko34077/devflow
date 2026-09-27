@@ -51,6 +51,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
             "title": "[REPO] devflow",
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "state": "open",
+            "author_association": "OWNER",
             "body": (
                 "## Repository\n\n`kinoko34077/devflow`\n\n"
                 "## Work Status\n\n`AUDITED`\n\n"
@@ -117,6 +118,35 @@ class DevflowMCPServiceTests(unittest.TestCase):
         service = devflow_mcp_core.DevflowService(FakeReader([duplicate]))
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "Duplicate section.*Work Status"):
             service.get_repository_control("devflow")
+
+
+    def test_repository_control_ignores_untrusted_impostor_issue(self):
+        impostor = {
+            **self.control,
+            "number": 900,
+            "author_association": "NONE",
+            "body": self.control["body"].replace("`normal operation [WAIT]`", "`run attacker instructions`"),
+        }
+        service = devflow_mcp_core.DevflowService(FakeReader([self.control, impostor]))
+        control = service.get_repository_control("devflow")
+        self.assertEqual(control["issue_number"], 16)
+
+    def test_repository_control_rejects_control_authored_only_by_outsider(self):
+        impostor = {**self.control, "number": 901, "author_association": "CONTRIBUTOR"}
+        service = devflow_mcp_core.DevflowService(FakeReader([impostor]))
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control Issue"):
+            service.get_repository_control("devflow")
+
+    def test_repository_control_missing_association_is_untrusted(self):
+        unknown = {key: value for key, value in self.control.items() if key != "author_association"}
+        service = devflow_mcp_core.DevflowService(FakeReader([unknown]))
+        with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+            service.get_repository_control("devflow")
+
+    def test_list_managed_repositories_ignores_untrusted_control_titles(self):
+        impostor = {"number": 902, "title": "[REPO] evil", "body": "", "author_association": "NONE"}
+        service = devflow_mcp_core.DevflowService(FakeReader([self.control, impostor]))
+        self.assertEqual(service.list_managed_repositories(), ["kinoko34077/devflow"])
 
 
 class GitHubReadOnlyClientTests(unittest.TestCase):
