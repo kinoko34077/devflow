@@ -68,7 +68,7 @@ def _strip_scalar(value: str) -> str:
     return value
 
 
-def parse_sections(body: str) -> dict[str, str]:
+def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> dict[str, str]:
     body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = body.split("\n")
     sections: dict[str, list[str]] = {}
@@ -77,6 +77,8 @@ def parse_sections(body: str) -> dict[str, str]:
         m = re.match(r"^## ([^#].*?)\s*$", line)
         if m:
             current = m.group(1).strip()
+            if reject_duplicates and current in reject_duplicates and current in sections:
+                raise ConfigError(f"duplicate canonical section in Project sync input: {current}")
             sections[current] = []
             continue
         if current is not None:
@@ -85,7 +87,10 @@ def parse_sections(body: str) -> dict[str, str]:
 
 
 def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
-    sections = parse_sections(str(issue.get("body") or ""))
+    sections = parse_sections(
+        str(issue.get("body") or ""),
+        reject_duplicates=set(FIELD_MAP),
+    )
     desired: dict[str, str] = {}
     for section, field in FIELD_MAP.items():
         value = sections.get(section, "").strip()
