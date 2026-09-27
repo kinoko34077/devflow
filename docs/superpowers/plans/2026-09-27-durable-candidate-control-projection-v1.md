@@ -20,6 +20,8 @@
 - `IMPLEMENTING` is not fresh ordinary discovery; recovery/resume/takeover remains out of scope.
 - Repository State other than `ACTIVE` emits no ordinary candidates.
 - Missing/duplicate/malformed/stale/unsupported/contradictory source state fails closed.
+- Control, owning task Issue, and optional Work Order Issue require `author_association` in `OWNER|MEMBER|COLLABORATOR`; missing/other associations fail closed and untrusted Control lookalikes are ignored for canonical selection.
+- The deprecated owning-Issue `DEVFLOW_EXECUTION_CANDIDATE_V1` source is never consumed as fallback or corroborating authority.
 - `requires_user_confirmation=true` is never autonomously claimable; sensitive-action permission is not granted by a validated candidate.
 - Conflict keys are explicit only; omitted `conflict_keys` normalizes to `()` and is never inferred.
 - No GitHub Project reverse authority, no prose-derived candidate construction, no ranking, scheduling, automatic claims, controller negotiation, runtime Issue #3 mutation, or bulk migration.
@@ -31,7 +33,8 @@
 - A syntactically valid candidate block with a stale body digest must emit no validated candidate, even if all projected readiness fields look claimable.
 - Multi-track Controls must validate each distinct `(task, role)` independently; duplicate `(task, role)` invalidates the block rather than choosing one.
 - A candidate with `USER_DECISION` plus `requires_user_confirmation=false`, or any unsupported role/state/action combination, must fail closed.
-- Parser failure must never fall back to `Active Work`, `Next Action` prose, labels, PR/branch existence, or other heuristic sources.
+- Parser failure must never fall back to `Active Work`, `Next Action` prose, labels, PR/branch existence, the deprecated owning-Issue marker, or other heuristic sources.
+- Outsider/untrusted authored Control, owning task, or Work Order Issues must never produce candidate authority even when their titles/bodies otherwise match exactly.
 
 ---
 
@@ -105,8 +108,8 @@ git commit -m "feat: parse durable candidate control projection"
 
 **Interfaces:**
 - Consumes: `CandidateBlock`, `CandidateRecord`, `canonical_issue_body_sha256()` from Task 1.
-- Produces: `IssueSnapshot(repository: str, number: int, state: str, body: str | None, html_url: str, is_pull_request: bool)`.
-- Produces: `ControlContext(source_ref: str, repository: str, repository_state: str)`.
+- Produces: `IssueSnapshot(repository: str, number: int, state: str, body: str | None, html_url: str, is_pull_request: bool, author_association: str, title: str, work_status: str | None)`.
+- Produces: `ControlContext(source_ref: str, repository: str, repository_state: str, next_action: str, author_association: str)`.
 - Produces: `ValidatedCandidate(task: str, role: str, entry_ref: str, conflict_keys: tuple[str, ...], scope_ready: bool, blocked: bool, requires_user_confirmation: bool)`.
 - Produces: `ValidationDiagnostic(code: str, task: str | None, message: str)`.
 - Produces: `validate_candidate_block(block: CandidateBlock, control: ControlContext, issues: dict[str, IssueSnapshot]) -> tuple[tuple[ValidatedCandidate, ...], tuple[ValidationDiagnostic, ...]]`.
@@ -116,8 +119,10 @@ git commit -m "feat: parse durable candidate control projection"
 Cover:
 - `source_ref` mismatch;
 - outer repository mismatch;
+- untrusted/missing Control `author_association` -> zero candidates, while untrusted lookalikes are excluded from canonical selection by the upstream discovery boundary;
 - repository state not `ACTIVE` -> zero ordinary candidates;
 - task repository mismatch;
+- owning Issue with missing/untrusted `author_association`;
 - missing/closed owning Issue;
 - PR object used as owning source;
 - digest mismatch;
@@ -152,6 +157,7 @@ Also cover:
 - `requires_user_confirmation=true` -> not claimable;
 - `USER_DECISION` + confirmation false -> contradiction/fail closed;
 - invalid entry repository -> fail closed;
+- optional Work Order with missing/untrusted `author_association` -> fail closed;
 - Protocol-v1-invalid conflict-key class -> fail closed;
 - omitted conflict keys remain `()` and are not inferred.
 
@@ -161,7 +167,7 @@ Use exact tables/constants in this module; do not parse free-form Control/Issue 
 
 - [ ] **Step 6: Add Review Focus regression asserting no heuristic fallback**
 
-Construct a malformed/absent candidate block whose surrounding body contains tempting `Active Work`, `[IMPLEMENT]`, PR URLs, and labels-like text. Assert the parser/validator returns no candidate and never interprets those strings as source records.
+Construct a malformed/absent candidate block whose surrounding body contains tempting `Active Work`, `[IMPLEMENT]`, PR URLs, labels-like text, and a deprecated `DEVFLOW_EXECUTION_CANDIDATE_V1` owning-Issue marker. Assert the parser/validator returns no candidate and never interprets those strings as source records.
 
 - [ ] **Step 7: Run focused tests and confirm GREEN**
 
@@ -262,7 +268,7 @@ Confirm merged-main required verification PASS and re-run/confirm `python -m uni
 
 - [ ] **Step 7: Reconcile durable authority**
 
-Update/close #125 as appropriate, reconcile #16/#105 from verified main, and change #107 Next Action from upstream-spec wait to a single explicit `execution-coordinator#28` re-audit/adaptation handoff. Do not create the runtime implementation PR in this task.
+Update/close #125 as appropriate, reconcile #16/#105 from verified main, and change #107 Next Action from upstream-spec wait to a single explicit `execution-coordinator#28` re-audit/adaptation handoff. Explicitly record that the owning-Issue marker path from #126 is deprecated and that open execution-coordinator PR #32 must not merge unchanged; close/supersede it when the downstream re-audit establishes its replacement path. Do not create the runtime implementation PR in this task.
 
 - [ ] **Step 8: Create the next separate plan**
 

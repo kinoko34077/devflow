@@ -40,6 +40,20 @@ A worker/session consuming candidate sources MUST NOT add, remove, refresh, or r
 
 This is a procedural authority boundary, not a cryptographic identity claim. The same agent technology may author and later consume a record in separate operations, but a single selection operation cannot manufacture its own eligibility.
 
+### 2.2 Trusted-author boundary
+
+Every GitHub Issue used as execution authority or provenance under this contract MUST satisfy the same trusted-author rule as devflow Control discovery:
+
+- `author_association` MUST be one of `OWNER`, `MEMBER`, or `COLLABORATOR`;
+- missing, empty, or any other association is untrusted and fails closed;
+- untrusted `[REPO]` lookalikes do not count toward canonical-Control cardinality and cannot become fallback Controls;
+- the exact owning task Issue named by `task` MUST be trusted before its body digest can authorize a candidate;
+- an Issue named by `work_order_ref` MUST also be trusted before it can provide Work Order provenance.
+
+The trust test is applied to the GitHub object itself, not inferred from title, labels, repository visibility, links, or nearby prose. A future accepted trust policy may extend the trusted association set, but v1 consumers must not silently broaden it.
+
+This closes the public-repository impersonation path tracked by devflow #127. Candidate discovery must not accept a machine block, task body, or Work Order provenance from an outsider-authored Issue merely because its title or body matches the expected shape.
+
 ## 3. Selected representation and alternatives
 
 ### 3.1 Selected: Repository Control hash-bound projection
@@ -309,17 +323,17 @@ Compatible records with `scope_ready=false`, `blocked=true`, or `requires_user_c
 
 For one managed repository:
 
-1. locate exactly one open `[REPO] <repository>` Control using existing devflow bootstrap rules;
-2. validate `Repository`, `Repository State=ACTIVE`, and the current Control human-gate vetoes in section 9;
+1. locate exactly one open **trusted-author** `[REPO] <repository>` Control using section 2.2 and existing devflow bootstrap rules; ignore untrusted lookalikes when counting canonical matches;
+2. validate the trusted Control's `Repository`, `Repository State=ACTIVE`, and current human-gate vetoes in section 9;
 3. locate the candidate block by exact markers;
 4. if absent, return zero candidates without source error;
 5. validate exact single block, JSON syntax, schema version, unknown-field prohibition, `source_ref`, and `repository`;
 6. validate unique `(task, role)` and section 7 cross-record consistency;
 7. for each distinct task, fetch the exact owning Issue;
-8. verify same repository, open Issue, not PR, and non-empty durable body;
+8. verify trusted author association, same repository, open Issue, not PR, and non-empty durable body;
 9. compute canonical body digest and compare every record for that task;
 10. validate role/status/action combinations;
-11. validate optional `work_order_ref` structurally when present;
+11. validate optional `work_order_ref` structurally and require its Issue to satisfy the trusted-author rule when present;
 12. validate `entry_ref`, booleans, conflict keys, and sensitive/Human gates;
 13. map valid records to `ClaimCandidate`;
 14. pass normalized candidates to existing runtime `list_claimable()` filtering.
@@ -330,7 +344,9 @@ The discovery adapter is GET/read-only. It does not mutate Controls or owning Is
 
 | Condition | Result |
 |---|---|
-| candidate block absent | valid Control; zero candidates |
+| no trusted canonical `[REPO]` Control | zero candidates / source unavailable |
+| outsider-authored `[REPO]` lookalike | ignored; never candidate authority |
+| candidate block absent | valid trusted Control; zero candidates |
 | valid block with empty candidates | zero candidates |
 | duplicate/partial/reversed marker | source invalid; emit none from Control |
 | malformed JSON / unsupported schema / unknown field | source invalid; emit none |
@@ -342,9 +358,11 @@ The discovery adapter is GET/read-only. It does not mutate Controls or owning Is
 | duplicate `(task, role)` | source invalid; emit none |
 | same task has inconsistent digest or lifecycle status | all records for that task invalid |
 | task repository mismatch | record invalid |
+| owning Issue author is not trusted | record invalid |
 | owning Issue missing/closed/PR/empty body | record invalid |
 | body digest mismatch | stale record; do not emit |
 | unsupported role/status/action | record invalid |
+| optional Work Order author is not trusted | record invalid |
 | invalid optional Work Order provenance | record invalid |
 | `scope_ready=false` | diagnostic candidate allowed; never claimable |
 | `blocked=true` | diagnostic candidate allowed; never claimable |
@@ -412,6 +430,8 @@ Refresh is required when:
 - relevant safety authority changes;
 - the candidate entry point changes.
 
+The expected workflow is fail-closed: the owning-body edit immediately makes the existing record stale; ordinary discovery returns no candidate for that stale record; a separate trusted publication/refresh operation reviews the new body and safety state, recomputes the digest, and updates the Control; only a later discovery cycle may consume the refreshed record. There is no automatic re-projection.
+
 The publisher recomputes the digest and revalidates the record. If uncertain, remove/disable the record rather than preserve a permissive stale projection.
 
 ### 17.3 Disable
@@ -426,11 +446,21 @@ Closed/DONE work is never ordinary candidate work. Historical candidate entries 
 
 `IMPLEMENTING` recovery, lease loss, generation takeover, and interrupted session admission are outside this contract.
 
-## 18. Migration policy
+## 18. Migration and supersession policy
 
 No bulk rewrite is required.
 
 Existing Controls without the block remain valid and publish no machine-discoverable candidate. Existing local Issues require no common template change.
+
+The previously merged owning-Issue marker source from PR #126 (`DEVFLOW_EXECUTION_CANDIDATE_V1`) is **deprecated and non-authoritative once this Control-projection contract is accepted**:
+
+- v1 Control-projection consumers MUST NOT read it as a candidate source, fallback, or corroborating authority;
+- existing marker text may remain as inert historical content until normal repository maintenance removes it;
+- no task may be made discoverable by keeping both the old Issue marker and the new Control record active;
+- the provisional execution-coordinator Issue #28 / PR #32 marker-conformance path MUST NOT be merged in its current form; after this contract is accepted, #28 must be re-audited and adapted to the Control projection or normally reverted/superseded;
+- the already-merged GET-only free-form discovery from PR #29 remains provisional/non-canonical until that same post-contract re-audit completes.
+
+This is a forward migration only. Do not rewrite shared history to remove #126 or #29.
 
 Initial adoption should be bounded:
 
@@ -486,6 +516,7 @@ Keep separate:
 
 - candidate publication is explicit opt-in;
 - discovery/selection cannot self-publish eligibility;
+- Control, owning task, and Work Order provenance Issues must pass the trusted-author boundary in section 2.2;
 - stale task bodies invalidate records;
 - explicit current Control user/Human gates veto ordinary candidates;
 - candidate-specific sensitive gates exclude autonomy;
@@ -501,7 +532,8 @@ A v1 consumer:
 - requires `schema_version=1`;
 - rejects unknown authority-bearing fields;
 - does not reinterpret future versions;
-- never falls back to prose inference when parsing/validation fails.
+- never falls back to prose inference when parsing/validation fails;
+- never falls back to the deprecated owning-Issue `DEVFLOW_EXECUTION_CANDIDATE_V1` source.
 
 Changes to field meaning, authority, role/lifecycle compatibility, provenance, body-digest semantics, safety gates, or fail-closed behavior require an accepted contract revision.
 
