@@ -7,196 +7,169 @@ Runtime consumer: `kinoko34077/execution-coordinator`
 
 ## 1. Purpose
 
-Execution Coordination Protocol v1 separates durable workflow truth from ephemeral runtime claim authority. `execution-coordinator` can already validate runtime state and filter normalized `ClaimCandidate` values, but no deterministic durable source for creating those values had been accepted.
+Execution Coordination Protocol v1 already separates durable GitHub task truth from ephemeral runtime claim authority. `execution-coordinator` can filter normalized `ClaimCandidate` values, but devflow does not yet provide a machine-safe source that identifies which exact owning Issue/Work Order may be normalized into a candidate and for which role.
 
-This contract defines one opt-in, machine-readable source embedded in the owning repository Issue. It does not create a second assignment database, does not make GitHub Project authoritative, and does not authorize execution merely because an Issue exists or has a particular Work Status.
+This contract defines one opt-in, machine-readable **hash-bound projection in the managed repository's devflow Repository Control Issue**. The projection points to exact owning repository Issues/Work Orders and binds each record to the exact owning Issue body revision by SHA-256. It does not replace the owning Issue, does not make the Control a second detailed task store, and does not authorize scheduling or claim mutation by itself.
 
-It answers only:
+The contract answers only:
 
-> Has this exact owning durable Issue explicitly published one valid execution-candidate record, and what exact `ClaimCandidate` fields may a read-only consumer derive from it?
+> Has the repository's canonical devflow Control explicitly projected one exact owning task/role as a current execution candidate, and does that projection still match the exact durable task body it was reviewed against?
 
 Ranking, capability matching, scheduling, automatic claim submission, controller negotiation, and recovery of interrupted `IMPLEMENTING` work remain separate contracts.
 
 ## 2. Authority model
 
-Authority remains:
+The existing authority split remains unchanged:
 
-1. the owning repository Issue / Work Order is detailed durable task authority;
-2. devflow is cross-repository policy and Repository Control authority;
-3. the candidate marker is an opt-in machine-readable projection **inside the owning Issue**;
-4. `ClaimCandidate` is derived runtime input only;
-5. execution-coordinator Issue #3 is ephemeral execution state only;
-6. GitHub Project is derived display only.
+1. the owning repository Issue / Work Order remains detailed durable task authority;
+2. devflow remains cross-repository policy and Repository Control authority;
+3. the Control's candidate block is a **derived, hash-bound execution-discovery projection**, not a second task truth;
+4. `ClaimCandidate` remains derived runtime input only;
+5. execution-coordinator Issue #3 remains ephemeral execution state only;
+6. GitHub Project remains derived display only.
 
-The marker does not override the rest of the Issue. Deterministic contradictions with supported durable guard fields fail closed.
+The projection cannot make stale owning state claimable. If the owning Issue body changes after projection, the body digest no longer matches and the record fails closed until the Control is deliberately refreshed.
 
-Free-form `Active Work` prose, Issue age, branch/PR existence, Project fields, chat history, and stale summaries are never sufficient candidate authority.
+Free-form `Active Work` prose, Issue age, branch existence, pull-request existence, Project fields, chat history, and stale summaries are never sufficient candidate authority.
 
-### 2.1 No self-publication during selection
+## 3. Selected representation and rejected alternatives
 
-The agent/session consuming candidate sources MUST treat the source Issue as read-only during discovery and claim selection. It MUST NOT add, remove, or relax its own marker as part of the same selection attempt in order to make itself eligible.
+### Selected: Repository Control hash-bound projection
 
-Publishing or changing a marker is a separate durable workflow action governed by the owning Issue, devflow policy, existing safety boundaries, and normal Issue-first reporting. Marker authoring must occur before a later consumer evaluates the source. This is a procedural authority boundary rather than a cryptographic identity claim.
+A Repository Control is already the unique cross-repository index for one managed repository. A consumer can locate exactly one open `[REPO] <repository>` Control, inspect one explicit machine block, then fetch only the owning entries named by that block.
 
-## 3. Canonical representation
+This keeps machine discovery centralized in the existing devflow bootstrap path while leaving detailed task authority in each owning repository.
 
-The canonical source is exactly one versioned JSON object embedded in the **owning repository Issue body**:
+### Rejected for v1: marker inside every owning Issue
+
+Embedding a machine marker directly in every repository-local Issue would preserve local ownership but would require heterogeneous managed repositories to adopt a new task-body format merely to participate in discovery. It would also force the discovery layer to enumerate repository-local Issues before it knows which ones are candidates.
+
+### Rejected for v1: dedicated candidate registry/database
+
+A separate registry would simplify enumeration but risks becoming a second durable assignment truth. The Repository Control already provides the single cross-repository index needed by v1.
+
+## 4. Selected representation
+
+A Control MAY contain exactly one versioned JSON block between these exact markers:
 
 ```text
-<!-- DEVFLOW_EXECUTION_CANDIDATE_V1_BEGIN -->
+<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->
 {
   "schema_version": 1,
-  "task_ref": "owner/repository#123",
-  "entry_ref": "https://github.com/owner/repository/issues/123",
-  "role": "implementer",
-  "scope_ready": true,
-  "blocked": false,
-  "requires_user_confirmation": false,
-  "conflict_keys": [
-    "component:owner/repository:parser"
-  ],
-  "provenance": {
-    "control_ref": "kinoko34077/devflow#17",
-    "work_order_ref": "kinoko34077/devflow#105"
-  }
+  "source_ref": "kinoko34077/devflow#17",
+  "repository": "kinoko34077/jev-audit",
+  "candidates": [
+    {
+      "task": "kinoko34077/jev-audit#17",
+      "task_body_sha256": "sha256:<64 lowercase hex characters>",
+      "task_work_status": "READY_FOR_IMPLEMENTATION",
+      "next_action_tag": "IMPLEMENT",
+      "role": "implementer",
+      "entry_ref": "https://github.com/kinoko34077/jev-audit/issues/17",
+      "scope_ready": true,
+      "blocked": false,
+      "requires_user_confirmation": false,
+      "conflict_keys": []
+    }
+  ]
 }
-<!-- DEVFLOW_EXECUTION_CANDIDATE_V1_END -->
+<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->
 ```
 
-Rules:
+The block is intentionally opt-in:
 
-- no marker: valid Issue, but not machine-discoverable;
-- exactly one valid pair: may be normalized after guard validation;
-- duplicate, partial, reversed, malformed, unsupported, or contradictory marker: fail closed;
-- consumers must not construct a substitute candidate from nearby prose when validation fails.
+- no block: the Control and all owning Issues remain valid, but this repository publishes no ordinary execution candidates;
+- one valid block: its records may be validated and normalized;
+- duplicate, partial, reversed, malformed, unsupported, stale, or contradictory blocks fail closed;
+- consumers must not manufacture substitute candidates from `Active Work`, `Next Action`, PR lists, branches, labels, Project fields, or other nearby prose.
 
-This representation keeps the machine projection in the same durable Issue instead of introducing a separate assignment store.
+## 5. Canonical body digest
 
-## 4. Schema
+`task_body_sha256` binds the projection to the exact durable task body that was inspected when the projection was authored.
 
-### 4.1 Required top-level fields
+The digest algorithm is deterministic:
+
+1. fetch the owning Issue through the GitHub API;
+2. take the Issue `body` string; `null` is treated as the empty string;
+3. normalize CRLF (`\r\n`) and lone CR (`\r`) to LF (`\n`);
+4. do not trim leading/trailing whitespace and do not otherwise normalize Unicode;
+5. encode the resulting string as UTF-8;
+6. compute SHA-256;
+7. serialize as `sha256:` followed by 64 lowercase hexadecimal characters.
+
+Issue comments are not part of the digest. Adding verification/progress comments therefore does not invalidate the candidate. Editing the durable Issue body does invalidate it.
+
+The digest is a staleness/freshness binding, not a cryptographic trust or signature mechanism.
+
+## 6. Block schema
+
+### 6.1 Required outer fields
 
 `schema_version`
 : Integer. MUST equal `1`.
 
-`task_ref`
-: Exact `owner/repository#issue_number`. MUST identify the Issue containing the marker.
+`source_ref`
+: Exact `kinoko34077/devflow#N` reference to the Control Issue containing the block. It MUST identify that exact containing Control.
 
-`entry_ref`
-: Explicit canonical `https://github.com/...` URL used to bootstrap the role-specific work. It MUST identify the same repository as `task_ref`. A consumer must never search for or choose an entry on the source's behalf.
+`repository`
+: Exact `owner/repository` identity managed by the containing Control. It MUST match the Control's canonical `Repository` field.
+
+`candidates`
+: Array of zero or more candidate records. An empty array explicitly publishes no ordinary candidate.
+
+Unknown outer fields are rejected in v1.
+
+### 6.2 Required candidate fields
+
+`task`
+: Exact `owner/repository#issue_number` reference. It MUST identify an Issue/Work Order in the same managed repository as the outer `repository`.
+
+`task_body_sha256`
+: Digest defined in section 5. A mismatch means the projection is stale and the record is not emitted.
+
+`task_work_status`
+: The exact durable work state that the devflow projection author reviewed for this candidate.
+
+`next_action_tag`
+: The exact action tag that the devflow projection author reviewed for this candidate, without brackets or prose.
 
 `role`
 : One of `implementer`, `reviewer`, `verifier`, `integrator`.
 
+`entry_ref`
+: Absolute canonical GitHub URL used for bootstrap/resume. It MUST identify the same owning repository. For a fresh implementer this normally identifies the owning Issue; review/verifier/integrator work may point to the exact authoritative PR when durably authorized.
+
 `scope_ready`
-: Boolean. Explicit candidate-specific readiness; consumers must not derive `true` merely from prose completeness.
+: Boolean indicating whether scope and acceptance are sufficiently fixed for the requested role.
 
 `blocked`
-: Boolean. Explicit candidate-specific blocker state.
+: Boolean indicating whether durable task state currently prohibits autonomous continuation for this candidate record.
 
 `requires_user_confirmation`
-: Boolean. MUST be `true` whenever current work still crosses a release, deploy, publication, credential/session, permission, destructive, security-sensitive, difficult-to-reverse, or explicit user-decision boundary requiring user approval.
+: Boolean indicating whether a Human/User gate currently prohibits autonomous continuation.
 
-`provenance`
-: Object identifying governing devflow authority.
+Unknown candidate fields are rejected in v1 except the optional field defined below.
 
-### 4.2 Optional top-level field
+### 6.3 Optional candidate field
 
 `conflict_keys`
-: Unique non-empty strings. Omission means `[]`. Keys must be explicit; never infer them from paths, branch names, labels, or file proximity.
+: Array of unique Protocol v1 conflict keys. Omission is equivalent to `[]`. Keys must already be durably justified; consumers must never derive them from paths, file proximity, branch names, repository identity, PR diffs, or labels.
 
-### 4.3 Provenance
+### 6.4 Projection interpretation rule
 
-`control_ref`
-: Required exact `kinoko34077/devflow#N`. It MUST resolve to the current open `[REPO] <repository>` Control whose structured `Repository` field matches the owning repository.
+`task_work_status`, `next_action_tag`, `scope_ready`, `blocked`, `requires_user_confirmation`, and `conflict_keys` are **reviewed projection values bound to `task_body_sha256`**. The discovery consumer MUST NOT scrape or heuristically parse the owning Issue body to reconstruct these values.
 
-`work_order_ref`
-: Optional exact `kinoko34077/devflow#N`. If present, it MUST resolve to an open devflow Issue with `[WORK ORDER]` identity. The marker itself establishes the candidate-to-Work-Order provenance link; consumers must not require reverse free-form prose scraping from the Work Order.
+The owning Issue body remains detailed durable authority. The hash binding ensures that any later body edit invalidates the reviewed projection until devflow deliberately refreshes it.
 
-Unknown v1 fields are rejected. Authority semantics are not forward-compatible by silent ignore.
+This rule is what allows heterogeneous repository-local Issue formats to remain valid without imposing a new shared task template.
 
-## 5. Ordinary role/state guard
+## 7. ClaimCandidate mapping
 
-Work Status is a **guard**, never source authority. The marker is always required.
+After block, Control, task, digest, and lifecycle validation succeeds, mapping is direct:
 
-| Role | Work Status allowed for ordinary new-candidate discovery |
+| Projection field | `ClaimCandidate` |
 |---|---|
-| `implementer` | `READY_FOR_IMPLEMENTATION` |
-| `reviewer` | `AWAITING_REVIEW` |
-| `verifier` | `AWAITING_REVIEW` |
-| `integrator` | `AWAITING_REVIEW` |
-
-All other Work Status values do not emit an ordinary candidate.
-
-In particular:
-
-- `IMPLEMENTING` without a live runtime claim is not fresh work;
-- `BLOCKED` is not ordinary claimable work;
-- `AUDITED`, `WORK_ORDER_READY`, `NEEDS_AUDIT`, `NEEDS_REAUDIT`, `PARKED`, and `DONE` are not ordinary candidates;
-- interrupted-work recovery/resume/takeover is a separate future contract.
-
-## 6. Deterministic validation
-
-### 6.1 GitHub object
-
-- containing object MUST be an open Issue;
-- a PR returned by the Issues API is rejected;
-- fetched repository/Issue number MUST equal `task_ref`;
-- exactly one complete marker pair is allowed.
-
-### 6.2 Lifecycle and normalized output
-
-There are two layers: **source normalization** and later **claimability filtering**.
-
-If the marker is structurally valid and the role/state table is compatible, the consumer emits one normalized `ClaimCandidate` preserving these booleans exactly:
-
-- `scope_ready=false` -> emit candidate with `scope_ready=false`; later `list_claimable` excludes it;
-- `blocked=true` -> emit candidate with `blocked=true`; later `list_claimable` excludes it;
-- `requires_user_confirmation=true` -> emit candidate with that value; later `list_claimable` excludes it.
-
-The consumer MUST NOT make those values more permissive.
-
-If Work Status is incompatible with the role/state table, no ordinary candidate is emitted. This includes `BLOCKED` and `IMPLEMENTING`. Implementations may report a guard diagnostic, but must not convert the source into a fresh candidate.
-
-A current `BLOCKED` Work Status combined with marker `blocked=false` is additionally contradictory and is reported as invalid source evidence rather than silently corrected.
-
-### 6.3 Human gates
-
-`requires_user_confirmation=true` is always non-autonomous.
-
-Existing deterministic human-gate evidence is an additional veto:
-
-- canonical `[USER_DECISION]` Next Action;
-- literal `[HUMAN_GATE]` currently used in managed-repository handoffs as a compatibility safety token;
-- future machine-recognized human-gate tokens accepted by devflow policy.
-
-If such evidence exists while the marker says `requires_user_confirmation=false`, the source is contradictory and fails closed. A consumer MUST NOT silently flip the flag and continue.
-
-`[HUMAN_GATE]` is a v1 compatibility veto, not a new canonical Next Action permission tag; `.devflow/WORKFLOW.yaml` remains authoritative for canonical tag vocabulary.
-
-Safety semantics that cannot be mechanically inferred remain marker-authoring/review obligations. A marker must never set the confirmation flag false to bypass an unresolved sensitive boundary.
-
-### 6.4 Entry
-
-- canonical HTTPS GitHub URL only;
-- same owning repository as `task_ref`;
-- explicit in marker;
-- no substitute branch/PR discovery when absent or invalid.
-
-### 6.5 Provenance
-
-- `control_ref` must resolve to the current open matching Repository Control;
-- optional `work_order_ref` must resolve to an open `[WORK ORDER]` devflow Issue;
-- missing, invalid, or contradictory provenance fails closed;
-- Control `Active Work` prose is not parsed as a source API.
-
-## 7. Exact mapping to ClaimCandidate
-
-When the marker is valid and the role/state guard permits normalization:
-
-| Source | `ClaimCandidate` |
-|---|---|
-| `task_ref` | `task` |
+| `task` | `task` |
 | `role` | `role` |
 | `entry_ref` | `entry_ref` |
 | `conflict_keys` or omitted | `conflict_keys` / `()` |
@@ -204,150 +177,288 @@ When the marker is valid and the role/state guard permits normalization:
 | `blocked` | `blocked` |
 | `requires_user_confirmation` | `requires_user_confirmation` |
 
-`list_claimable` subsequently combines these durable flags with runtime `CoordinatorState` and excludes unready, blocked, user-gated, already-owned, conflict-key-incompatible, or same-worker review-conflicting candidates.
+`task_work_status`, `next_action_tag`, `task_body_sha256`, `source_ref`, and `repository` are discovery/provenance guards and are not added to the current `ClaimCandidate` value.
 
-## 8. Fail-closed matrix
+A later `list_claimable()` call combines the validated durable candidates with current runtime `CoordinatorState`. Runtime claim/conflict filtering remains execution-coordinator authority.
+
+## 8. Ordinary role/readiness transitions
+
+The candidate record is explicit authority to *consider* one task/role; projected lifecycle fields still guard whether it may be emitted as ordinary new work.
+
+Supported v1 combinations are:
+
+| Role | Required `task_work_status` | Allowed `next_action_tag` |
+|---|---|---|
+| `implementer` | `READY_FOR_IMPLEMENTATION` | `SPECIFY`, `IMPLEMENT` |
+| `verifier` | `AWAITING_REVIEW` | `VERIFY` |
+| `reviewer` | `AWAITING_REVIEW` | `REVIEW` |
+| `integrator` | `AWAITING_REVIEW` | `MERGE` |
+
+Any other combination is non-claimable ordinary work and fails closed.
+
+In particular:
+
+- `IMPLEMENTING` is never automatically rediscovered as fresh work merely because no live runtime claim exists;
+- `BLOCKED`, `AUDITED`, `WORK_ORDER_READY`, `NEEDS_AUDIT`, `NEEDS_REAUDIT`, `PARKED`, and `DONE` are not ordinary new candidates;
+- recovery/resume/takeover is a separate future contract and must reason about prior execution authority explicitly.
+
+## 9. Human and sensitive-action boundary
+
+`requires_user_confirmation=true` always excludes autonomous ordinary claimability.
+
+Candidate authoring MUST set it to `true` whenever continuation still depends on:
+
+- explicit user decision or Human Gate;
+- release or deploy approval;
+- publication with external effect;
+- credential/session/permission changes;
+- destructive deletion or shared-history rewrite;
+- security-sensitive action;
+- another difficult-to-reverse action requiring explicit confirmation under devflow safety policy.
+
+The candidate projection does not weaken downstream safety gates. A runtime claim obtained from a candidate never grants permission to perform those protected operations.
+
+`next_action_tag=USER_DECISION` is always contradictory with `requires_user_confirmation=false` and fails closed. A repository-specific Human Gate that is represented outside the canonical tag vocabulary must be projected with `requires_user_confirmation=true`; the discovery consumer must not guess it from prose.
+
+## 10. Control-level and multi-track semantics
+
+Repository-level Control state is not flattened into candidate state.
+
+A single Control may summarize multiple local tracks with different readiness, such as a blocked security track and an independently executable UI track. Therefore:
+
+- overall Control `Work Status` and free-form `Active Work` are not used to manufacture or veto individual records solely by repository-level status;
+- each candidate is bound to one exact owning task body and carries its own role/readiness/blocker/user-gate projection;
+- multiple candidate records are allowed when they point to distinct task/role pairs;
+- the same `(task, role)` pair MUST NOT appear more than once;
+- contradictory duplicate records invalidate the entire block rather than choosing one arbitrarily.
+
+Repository State still applies at the Control level: a managed repository not in `ACTIVE` state emits no ordinary candidates in v1.
+
+## 11. Conflict-key validation
+
+Conflict keys use Protocol v1 classes only:
+
+```text
+repo:<owner/repo>
+component:<owner/repo>:<component>
+path-group:<owner/repo>:<logical-group>
+contract:<stable-contract-name>
+schema:<stable-schema-name>
+workflow:<stable-workflow-name>
+```
+
+Rules:
+
+- keys must be explicit strings in the projection and already durably justified by the owning task/control context;
+- duplicates are invalid;
+- whole-repository keys are exceptional and must not be injected by default;
+- no consumer may infer keys from changed paths, file proximity, branch names, repository identity, PR diffs, or labels;
+- omission means the empty tuple.
+
+## 12. Deterministic validation algorithm
+
+For each managed repository, a read-only consumer performs:
+
+1. locate exactly one open `[REPO] <repository>` Control under existing devflow bootstrap rules;
+2. verify Control `Repository State=ACTIVE`;
+3. locate the candidate block by exact markers;
+4. if absent, emit no candidates and no source error;
+5. validate exact single block, JSON syntax, schema version, unknown-field prohibition, `source_ref`, and `repository`;
+6. reject duplicate `(task, role)` records;
+7. for each record, fetch the exact owning Issue named by `task`;
+8. verify the object is an Issue, not a PR, is open, and belongs to the same managed repository;
+9. compute the canonical body digest and compare it to `task_body_sha256`;
+10. validate role/work-status/next-action combination from the hash-bound reviewed projection;
+11. validate `entry_ref`, booleans, optional conflict keys, and Human/User gate consistency;
+12. map the record to `ClaimCandidate`;
+13. pass only validated candidates to the existing runtime `list_claimable()` projection.
+
+The discovery adapter is GET/read-only. It does not edit Control or owning Issue bodies, create claims, rank candidates, or choose a winner.
+
+## 13. Fail-closed matrix
 
 | Condition | Result |
 |---|---|
-| marker absent | valid Issue; not discoverable |
-| valid marker + compatible role/state | normalize candidate exactly |
-| duplicate/partial/reversed marker | invalid source |
-| malformed JSON | invalid source |
-| unsupported schema version | invalid source |
-| unknown v1 field | invalid source |
-| task mismatch | invalid source |
-| closed Issue | no candidate / source diagnostic |
-| source object is PR | invalid source |
-| unsupported role | invalid source |
-| Work Status incompatible with role | no ordinary candidate |
-| `IMPLEMENTING` without runtime claim | no ordinary candidate; recovery only |
-| `BLOCKED` + marker `blocked=false` | contradiction; invalid source |
-| compatible status + marker `scope_ready=false` | normalize false; `list_claimable` excludes |
-| compatible status + marker `blocked=true` | normalize true; `list_claimable` excludes |
-| compatible status + marker confirmation true | normalize true; `list_claimable` excludes |
-| machine human gate + marker confirmation false | contradiction; invalid source |
-| invalid/missing entry | invalid source |
-| invalid Control provenance | invalid source |
-| invalid optional Work Order provenance | invalid source |
-| conflict keys absent | normalize empty tuple; never infer |
-| historical Issue without current marker | not discoverable |
+| candidate block absent | valid Control; zero discoverable candidates |
+| valid block with empty `candidates` | zero candidates |
+| duplicate/partial/reversed marker | source invalid; emit none from Control |
+| malformed JSON | source invalid; emit none |
+| unsupported schema version | source invalid; emit none |
+| unknown field | source invalid; emit none |
+| `source_ref` != containing Control | source invalid; emit none |
+| `repository` != Control repository | source invalid; emit none |
+| repository state != `ACTIVE` | no ordinary candidates |
+| duplicate `(task, role)` | source invalid; emit none |
+| task repository mismatch | record invalid |
+| owning Issue missing/closed | record invalid |
+| source object is PR | record invalid |
+| body digest mismatch | stale record; do not emit |
+| unsupported role/state/action combination | record invalid |
+| `scope_ready=false` | may remain diagnostic input; never claimable |
+| `blocked=true` | may remain diagnostic input; never claimable |
+| `requires_user_confirmation=true` | may remain diagnostic input; never claimable |
+| `USER_DECISION` + confirmation false | contradiction; record invalid |
+| `IMPLEMENTING` with no runtime claim | not ordinary candidate; recovery path only |
+| invalid/missing `entry_ref` | record invalid |
+| invalid/duplicate conflict key | record invalid |
+| conflict keys omitted | empty tuple; never infer |
+| stale historical references outside the explicit block | ignored |
 
-Diagnostic names are implementation details; authority results above are normative.
+Consumers MAY expose diagnostics such as `not_discoverable`, `invalid_source`, `stale_projection`, `guard_blocked`, and `user_gate`, but diagnostics must never change the authority result.
 
-## 9. Live-state conformance fixtures
+## 14. Representative live-state fixtures
 
-### 9.1 Fresh bounded implementation
+The following current shapes are conformance fixtures, not hard-coded repository exceptions.
 
-A `READY_FOR_IMPLEMENTATION` Issue such as the current `jev-audit#17` shape is eligible in principle only after that exact owning Issue receives a valid marker naming itself, role `implementer`, current entry, readiness flags, and Control provenance. Work Status + `[IMPLEMENT]` alone is insufficient.
+### 14.1 Fresh bounded implementation
 
-### 9.2 Human-gated work
+`jev-audit#17`-style work may be projected as an implementer candidate only when its Control explicitly publishes a record for that exact Issue/body digest with `READY_FOR_IMPLEMENTATION`, `IMPLEMENT`, `scope_ready=true`, and no blocker/Human Gate.
 
-SCA and kotonomani Human-Gate-bound work is not autonomously claimable. If a marker exists for observability it must carry `requires_user_confirmation=true`; false is contradictory.
+Status or Next Action alone remains insufficient.
 
-### 9.3 Credential/release user decision
+### 14.2 SCA Human Gate
 
-A `BLOCKED` kinotch-api-style task with `[USER_DECISION]` does not emit an ordinary candidate. Prior rollout authorization or history cannot override the current gate.
+Structured-Cell-Automaton work awaiting interactive browser/perceived-latency judgement is not an autonomous ordinary candidate. A projection, if retained for diagnostics, must set `requires_user_confirmation=true` and therefore cannot be emitted to ordinary claimable work.
 
-### 9.4 Multi-track Control
+### 14.3 kotonomani Human Gate
 
-Micro-Chordbot demonstrates why `Active Work` prose cannot be flattened into a candidate. Each discoverable track requires one exact owning durable Issue with its own marker.
+Content/source classification and production Voice selection remain Human Gates. Technical render completion does not make that acceptance work autonomously claimable.
 
-### 9.5 Interrupted IMPLEMENTING work
+### 14.4 kinotch-api user decision
 
-A dev_agent-style `IMPLEMENTING` Issue with no live claim is not rediscovered as fresh work. Recovery needs a separate contract.
+A `BLOCKED` credential/release-related task with `USER_DECISION` is not an ordinary candidate. Prior rollout authorization cannot be inferred as current authorization.
 
-### 9.6 AUDITED/WAIT and history
+### 14.5 Micro-Chordbot multi-track Control
 
-AUDITED/WAIT Controls and preserved historical handoffs without current owning markers are not candidates.
+A blocked security/history track does not automatically erase the possibility of a separately projected UI track. Conversely, the UI track does not make the blocked security task claimable. Each projected candidate names one exact owning Issue and body digest; `Active Work` prose is not flattened.
 
-## 10. Marker lifecycle
+### 14.6 dev_agent interrupted/externally waiting work
 
-### 10.1 Publish
+`IMPLEMENTING` with no current runtime claim is not fresh ordinary work. Provider/runtime waits and interrupted execution require later recovery/resume semantics, not ordinary rediscovery.
 
-A marker is published only when the owning Issue intentionally becomes machine-discoverable. Publication is a separate durable workflow update, not part of the consuming worker's selection operation.
+### 14.7 execution-coordinator prerequisite wait
 
-### 10.2 Update/disable
+`AUDITED / WAIT` with no repository-local implementation authority publishes no ordinary candidate until an owning task is explicitly created and projected.
 
-Role, entry, readiness, blocker, user-gate, conflict metadata, or provenance changes require marker reconciliation before later autonomous consumers rely on them. Removing the marker disables discovery without invalidating the Issue.
+### 14.8 historical preserved deltas
 
-### 10.3 Completion
+Closed/no-adoption recovery handoffs and stale preservation branches are not candidates unless a new current owning Issue intentionally reopens work and is explicitly projected.
 
-A marker may remain historically after `DONE`; the Work Status guard prevents ordinary emission. Automation must never resurrect completed work solely from marker text.
+## 15. Authoring lifecycle
 
-### 10.4 Recovery
+### 15.1 Create
 
-`IMPLEMENTING` recovery, lease loss, generation takeover, and interrupted session admission remain outside this contract.
+A candidate record is added to a Control only after an agent/human has inspected the owning task's current durable body and intentionally decided that machine discovery for the named role is appropriate. The body digest and projected guards are recorded at the same time.
 
-## 11. Migration
+### 15.2 Refresh
+
+When the owning Issue body changes, the existing record becomes stale automatically. It remains non-discoverable until a deliberate Control refresh recomputes the digest and revalidates readiness/gate/conflict metadata.
+
+This prevents a machine candidate from silently surviving a material scope, acceptance, blocker, or safety-boundary edit.
+
+### 15.3 Disable
+
+Removing the record, clearing the candidate array, or allowing the body digest to become stale disables ordinary discovery without invalidating the owning Issue.
+
+### 15.4 Completion
+
+Closed/DONE tasks are never ordinary candidates. Historical candidate entries should normally be removed during the next material Control update, but stale historical text outside the machine block has no authority.
+
+### 15.5 Recovery
+
+`IMPLEMENTING` recovery is intentionally outside this contract. A future recovery contract must use execution generation/lease/expected-state evidence rather than treating a missing live claim as permission to create a fresh one.
+
+## 16. Migration policy
 
 No bulk rewrite is required.
 
-Existing managed Issues without markers remain valid operational records and are simply non-discoverable. Initial opt-in migration should cover only a small set of current, non-sensitive representative work after consumer validation exists.
+Existing managed Controls without the block remain valid and simply publish no machine-discoverable candidate. Existing repository-local Issues require no template change to remain valid.
 
-Do not add markers merely for coverage to Human-Gate, security/credential, release/deploy, destructive, stale historical, or recovery-only work.
+Initial adoption should be bounded:
 
-## 12. Required follow-up slices
+1. implement and verify the devflow block validator/template guidance;
+2. implement the execution-coordinator read-only adapter against deterministic fixtures;
+3. pilot one or a few current non-sensitive candidates, such as a fresh bounded implementation task;
+4. expand only when operational evidence justifies it.
 
-Acceptance of this spec does not authorize scheduling or claims.
+Do not add candidate records to Human-Gate, security/credential, release/deploy, destructive, stale historical, or recovery-only work merely to increase coverage.
 
-### 12.1 devflow validator/template
+## 17. Required later implementation slices
 
-A later bounded devflow slice may add:
+Acceptance of this specification does not itself authorize runtime discovery, automatic scheduling, or claim submission.
 
-- JSON-schema/equivalent marker validator;
-- template/helper guidance;
-- deterministic duplicate/malformed/contradiction tests;
-- optional read-only projection helpers;
-- never Project -> Issue reverse authority.
+### 17.1 devflow validator/template slice
 
-### 12.2 execution-coordinator #28 conformance
+A separate bounded devflow change should add:
 
-The provisional #28 parser must be re-audited. The conforming adapter should:
+- optional `Execution Candidates` block guidance to the Repository Control template;
+- a deterministic parser/validator for exact markers and schema v1;
+- canonical owning-Issue body digest helper;
+- tests for malformed/duplicate/stale/contradictory blocks and the live-state fixture classes;
+- optional read-only MCP exposure of validated projection data;
+- no reverse Project authority and no Project-generated candidate edits.
 
-- treat only this marker as candidate source authority;
-- use ordinary Issue fields solely for guards explicitly allowed above;
-- add section 9 fixtures as RED/GREEN tests;
-- preserve exact-reference GET-only behavior and per-source diagnostics;
-- avoid ranking, mutation, and automatic claims.
+### 17.2 execution-coordinator discovery/normalization slice
 
-If the provisional adapter cannot be safely conformed, use a normal revert PR; never rewrite shared main.
+After the devflow contract is accepted, create exactly one bounded repository-local execution-coordinator Issue that:
 
-### 12.3 composed read-only path
+- reads only the explicit Control block as candidate-source authority;
+- fetches the exact tasks named by the block;
+- verifies canonical body digests and guards;
+- maps records to current `ClaimCandidate` values;
+- preserves per-source diagnostics;
+- passes the result through existing `list_claimable()` runtime filtering;
+- remains read-only and does not rank, claim, schedule, or mutate durable Issues.
 
-Only after conformance may a later slice compose:
+Any provisional parser that derives candidates from headings/free-form Issue prose must be re-audited and either adapted or superseded; it cannot become canonical merely because it landed first.
 
-```text
-explicit source refs
--> marker validation
--> ClaimCandidate normalization
--> get_state()
--> list_claimable()
--> claimable projection
-```
+### 17.3 later slices
 
-It still neither ranks a winner nor submits a claim.
+The following remain separate:
 
-### 12.4 ranking/capability/scheduling
+- priority/dependency-frontier ranking;
+- capability/environment matching;
+- automatic claim submission;
+- controller offers and agent negotiation;
+- repo-monitor projection;
+- richer expected-state/failure-evidence contracts;
+- recovery/takeover discovery.
 
-Priority/dependency ranking, capabilities, controller offers, automatic claims, and work stealing remain independent later slices.
+## 18. Security and safety boundary
 
-## 13. Safety boundary
+This contract is permission-minimizing:
 
-- marker opt-in never bypasses a user gate;
-- recognized human gates veto autonomy;
-- existing explicit confirmation requirements remain unchanged;
-- runtime claims never authorize release/deploy/publication/credential/session/permission/destructive/security-sensitive/difficult-to-reverse actions;
-- incomplete/conflicting evidence fails closed;
-- credentials and personal sensitive identifiers must not appear in markers.
+- candidate publication is explicit opt-in;
+- stale owning-task bodies invalidate projections automatically;
+- user/Human/sensitive gates exclude autonomy;
+- runtime claims do not grant release/deploy/publication/credential/session/permission/destructive/security-sensitive authority;
+- unknown or contradictory state fails closed;
+- no credentials, raw secrets, session tokens, or unnecessary personal identifiers belong in candidate records.
 
-## 14. Versioning
+## 19. Versioning
+
+Marker name and `schema_version` jointly define the contract version.
 
 A v1 consumer:
 
-- accepts exactly one `DEVFLOW_EXECUTION_CANDIDATE_V1` pair;
-- requires `schema_version: 1`;
+- accepts exactly one `DEVFLOW_EXECUTION_CANDIDATES_V1` block;
+- requires `schema_version=1`;
 - rejects unknown authority-bearing fields;
-- does not reinterpret future marker versions.
+- does not reinterpret future marker versions;
+- does not fall back to prose inference when v1 parsing fails.
 
-Any change that broadens discoverability, changes role/state compatibility, adds authority fields, or changes safety-gate behavior requires an accepted devflow protocol/spec revision before runtime adoption.
+Any change that alters field meaning, authority, lifecycle guards, digest semantics, or fail-closed behavior requires an accepted contract revision.
+
+## 20. Acceptance and verification direction
+
+Issue #125 is satisfied only after this design is reviewed and accepted through the normal devflow PR boundary.
+
+The specification change itself is docs-only. Acceptance requires:
+
+1. exact-current-head devflow verification;
+2. formal independent Review v2 on the exact candidate head;
+3. review-readiness and unresolved-thread checks;
+4. confirmation that no runtime adapter, scheduling, claim mutation, or bulk migration is bundled into the specification PR;
+5. normal merge only after the specification review gate is satisfied.
+
+After merge, #125 may close as the accepted durable-source authority and the later execution-coordinator discovery/normalization Issue may be created from this contract.
