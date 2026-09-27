@@ -64,6 +64,8 @@ If `Active Work` references a local Issue, Work Order or PR, open it before crea
 
 If a durable task exists but no local record exists, decide whether a repository-local Issue is warranted using `REPOSITORY_ISSUE_MANUAL.md`.
 
+Before non-trivial mutation, also inspect active or latest relevant Execution Session Record(s) on the owning Issue / Work Order. These records are short-lived worker execution checkpoints, not a replacement for durable task truth.
+
 ## 2. Decide where the task belongs
 
 Use devflow Work Order when any of the following is true:
@@ -96,20 +98,102 @@ Before changing code or durable specs:
 
 Do not schedule periodic FULL audits.
 
+### 3.1 Manual Execution Session before non-trivial mutation
+
+For non-trivial agent work likely to span multiple tool calls, commits, sessions, PR/review/CI waits, or parallel workers, establish or resume one worker-owned Execution Session Record on the owning Issue / Work Order before broad mutation.
+
+This convention deliberately mirrors execution-coordinator lifecycle concepts but is only a **soft coordination layer** unless an actual execution-coordinator claim exists. It does not provide atomic exclusion, leases, generation fencing, or automatic scheduling.
+
+#### Start / acknowledge sequence
+
+Before mutation:
+
+1. read the owning task, current branch/PR/head and active/recent Session Records;
+2. compare the intended semantic scope with other apparently active sessions;
+3. if overlap exists, choose an explicit disposition before continuing: continue one, split scopes, integrate, wait, or take over a stale/abandoned predecessor;
+4. create or resume the worker-owned record with `Execution-Session-ID`, worker/model, role, scope, excludes, verified base SHA, branch/PR if known, latest checkpoint, next action and blocker;
+5. write a bounded checklist plan;
+6. set `Status: CLAIMED` once scope/overlap are fixed;
+7. set `Status: RUNNING` when meaningful work begins.
+
+The Session Record belongs on the owning Issue / Work Order because it is task-scoped execution state. Do not copy every checkpoint into the devflow Repository Control.
+
+#### Checkpoint rule
+
+Before moving from one materially distinct bounded milestone to the next, externalize the completed state by updating the same Session Record.
+
+At minimum update:
+- completed checklist boxes;
+- `Status` if lifecycle changed;
+- `Last-Checkpoint`;
+- `Next-Action`;
+- branch/PR/head when newly relevant;
+- blocker/handoff information.
+
+Examples of useful milestones:
+- live state / overlap check complete;
+- scope + base SHA fixed;
+- failure reproduced / RED established;
+- implementation complete;
+- targeted GREEN complete;
+- regression / real-entry verification complete;
+- PR opened at known head;
+- exact-head Review complete;
+- merge/disposition complete;
+- owning Issue / Current State / devflow Control reconciled.
+
+Do not turn the Session Record into a shell transcript, tool-call log, CI log, or duplicate PR body. Commits/PR/Actions own those details.
+
+#### Wait / handoff / release / failure
+
+Use:
+- `WAITING` when intentionally paused on a named CI, user decision, review, dependency, environment or other blocker; record exactly how work should resume;
+- `HANDOFF` when the current worker intentionally stops and another worker may continue; record the recovery boundary and evidence;
+- `RELEASED` when this session has no remaining execution responsibility; this does not mean the owning Issue is globally complete;
+- `FAILED` when the session cannot safely continue; record the failure boundary/evidence rather than leaving it apparently active.
+
+A timeout/crash cannot update its own record. A later worker therefore treats an apparently active stale record as potentially abandoned, verifies live branch/PR/head/task state first, then creates an explicit successor/takeover session instead of silently editing the predecessor record.
+
+#### Parallel collision disposition
+
+If two active sessions overlap semantically, stop broad mutation until one disposition is explicit on the owning Issue:
+
+- `CONTINUE_ONE`: one continues; the other releases/handoffs;
+- `SPLIT`: redefine scopes so they no longer overlap;
+- `INTEGRATE`: preserve both outputs and create a distinct integrator session for non-trivial integration;
+- `WAIT`: one session waits on the other's dependency;
+- `TAKEOVER`: predecessor is stale/abandoned and a successor session explicitly assumes scope.
+
+This convention makes overlap visible and recoverable; execution-coordinator remains the future/runtime authority for atomic claim/lease/fencing behavior.
+
+#### Provenance boundary
+
+Each Session Record carries direct operational provenance:
+
+```text
+Worker-System: <system>
+Worker-Model: <model/version or unknown>
+Execution-Session-ID: <stable id>
+```
+
+This is attribution, not cryptographic identity. It is separate from Formal Review Provenance v2 and must not be treated as proof of reviewer independence, GitHub actor separation, or security identity.
+
 ## 4. Implementation path
 
 For normal changes:
 
 1. make or reuse a durable local Issue when required;
-2. create a dedicated branch from the verified base;
-3. update Work Status/Active Work if the cross-repository summary materially changes;
-4. implement in small independently verifiable changes;
-5. run target tests and appropriate regression tests;
-6. verify external/user entry path when API/CLI/UI/file behavior changed;
-7. update local specs/current-state documents only for information they own;
-8. open a PR with scope, linked Issue, verification evidence and rollback notes when relevant;
-9. re-audit the changed scope and PR diff;
-10. merge only when the current policy permits it.
+2. establish/resume the worker Execution Session and bounded checklist for non-trivial work;
+3. create a dedicated branch from the verified base;
+4. update Work Status/Active Work if the cross-repository summary materially changes;
+5. implement in small independently verifiable changes, checkpointing the Session Record between materially distinct milestones;
+6. run target tests and appropriate regression tests;
+7. verify external/user entry path when API/CLI/UI/file behavior changed;
+8. update local specs/current-state documents only for information they own;
+9. open a PR with scope, linked Issue, verification evidence and rollback notes when relevant;
+10. re-audit the changed scope and PR diff;
+11. merge only when the current policy permits it;
+12. reconcile owning Issue/current state/devflow summary as applicable, then release or hand off the Session Record.
 
 ### 4.1 Formal Pull Request Review lifecycle
 
@@ -306,13 +390,14 @@ A `REQUEST_CHANGES` Review remains blocking evidence until the finding is addres
 - repository specification/design docs own durable desired behavior/contracts;
 - repository Current State owns durable current repository facts/limitations useful beyond one task;
 - owning Issue/Work Order owns bounded task scope, acceptance, blockers, durable findings and next action;
+- worker-owned Execution Session Record owns short-lived execution checkpoint/handoff state for that task;
 - PR/CI own the concrete diff and implementation/verification evidence;
 - formal Review owns exact-SHA review evidence and diff-local findings;
 - devflow Control remains a cross-repository summary/index.
 
-Reference the owning surface instead of copying the same canonical information into multiple places. `REPOSITORY_ISSUE_MANUAL.md` defines finding promotion/retirement in detail.
+Reference the owning surface instead of copying the same canonical information into multiple places. `REPOSITORY_ISSUE_MANUAL.md` defines finding promotion/retirement and Session Record placement in detail.
 
-Reviewer handoff/resume starts from the owning Issue, current PR head SHA, latest formal Review(s), unresolved review findings/threads, and current CI/check evidence. Long-term Current State remains in repository-owned documentation, not Review text.
+Reviewer handoff/resume starts from the owning Issue, relevant Session Record, current PR head SHA, latest formal Review(s), unresolved review findings/threads, and current CI/check evidence. Long-term Current State remains in repository-owned documentation, not Review text.
 
 ## 5. Merge policy
 
@@ -355,8 +440,9 @@ After merge:
 4. update the devflow Control Issue only when its summary changed;
 5. set `Audit SHA` to an accepted current SHA only when the relevant state has actually been rechecked;
 6. ensure `Active Work` and `Next Action` point to current reality;
-7. allow Project event-sync to update the display layer;
-8. inspect Sync Health when Project synchronization is part of acceptance.
+7. set the active Execution Session Record to `RELEASED`, `HANDOFF` or `FAILED` with the final checkpoint/next state rather than leaving it apparently running;
+8. allow Project event-sync to update the display layer;
+9. inspect Sync Health when Project synchronization is part of acceptance.
 
 Closing a local Issue does not automatically mean the repository is `DONE`; the Control Issue describes repository-level operational state.
 
@@ -370,6 +456,8 @@ Typical task progression:
 
 Use `NEEDS_REAUDIT` when previous verification no longer supports current state. Use `BLOCKED` only when a concrete dependency prevents the next meaningful action.
 
+Execution Session status is separate from Work Status. A task may remain `IMPLEMENTING` while one session is `WAITING`, `HANDOFF` or `RELEASED`, and several compatible sessions may exist when their scopes/roles do not conflict.
+
 ## 8. Handoff between agents
 
 A handoff must be recoverable from GitHub alone.
@@ -377,6 +465,7 @@ A handoff must be recoverable from GitHub alone.
 Before leaving unfinished work, make sure the durable records reveal:
 - owning repository;
 - active local Issue/Work Order;
+- active/latest relevant Execution Session Record(s), including provenance, scope, last checkpoint and next action;
 - branch/PR if created;
 - current PR head SHA and latest formal Review provenance when review has started;
 - unresolved review findings/threads and current CI/check state;
@@ -388,6 +477,20 @@ Before leaving unfinished work, make sure the durable records reveal:
 
 Do not rely on “continue from the previous chat” as the handoff mechanism.
 
+Resume after timeout/interruption in this order:
+
+```text
+devflow Control
+-> owning Issue / Work Order
+-> active/latest relevant Execution Session Record(s)
+-> linked branch/PR/current head
+-> live checks/reviews
+-> latest completed checkpoint
+-> first unchecked / unverified milestone
+```
+
+If an apparently active predecessor is stale, compare live evidence first and create a successor/takeover session. Do not silently assume the predecessor's identity or edit its record as if no interruption occurred.
+
 ## 9. Conflict handling
 
 ### devflow summary vs repository-local canon
@@ -397,6 +500,12 @@ Repository-local canon wins on detailed technical facts. Correct the devflow sum
 ### local specification vs implementation
 
 Do not silently choose the implementation. Determine which is the current canonical requirement; track the discrepancy if it affects work.
+
+### overlapping Execution Session Records
+
+Do not independently continue semantically overlapping mutation by default. Compare scope, branch/PR/head and latest checkpoints, then record one explicit disposition on the owning Issue: continue one, split scopes, integrate, wait, or take over a stale/abandoned predecessor.
+
+Manual Session Records are advisory/soft coordination. If actual execution-coordinator runtime claims exist, runtime claim/lease/fencing authority governs execution ownership while durable task truth remains in the owning Issue/Work Order.
 
 ### stale Audit SHA
 
@@ -429,6 +538,7 @@ Do not convert the repository to Base merely because it is managed.
 When an agent cannot perform a required operation:
 - continue every independent read/write/verification step it can perform;
 - record the exact remaining operation and required authority in the active durable Issue;
+- update the Session Record to `WAITING`, `HANDOFF` or `FAILED` when the limitation stops or transfers the session;
 - do not claim the blocked operation happened;
 - do not replace an admin/security action with an unrelated workaround.
 
