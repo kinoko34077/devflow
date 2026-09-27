@@ -31,7 +31,7 @@ def _strip_scalar(value: str) -> str:
     return value
 
 
-def parse_sections(body: str) -> dict[str, str]:
+def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
     body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
     sections: dict[str, list[str]] = {}
     current: str | None = None
@@ -39,6 +39,8 @@ def parse_sections(body: str) -> dict[str, str]:
         match = re.match(r"^## ([^#].*?)\s*$", line)
         if match:
             current = match.group(1).strip()
+            if reject_duplicates and current in sections:
+                raise DevflowMCPError(f"Duplicate section in canonical Issue body: {current!r}.")
             sections[current] = []
             continue
         if current is not None:
@@ -119,7 +121,7 @@ class GitHubReader:
             return self._transport(url, self._headers())
         except DevflowMCPError:
             raise
-        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        except Exception as exc:
             raise _translate_read_error(exc) from None
 
     def _repository_url(self, repository: str, suffix: str) -> str:
@@ -204,7 +206,7 @@ class DevflowService:
         if len(matches) != 1:
             raise DevflowMCPError(f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.")
         issue = matches[0]
-        sections = parse_sections(str(issue.get("body") or ""))
+        sections = parse_sections(str(issue.get("body") or ""), reject_duplicates=True)
         recorded_repository = sections.get("Repository", "").strip()
         if recorded_repository and normalize_repository(recorded_repository) != normalized:
             raise DevflowMCPError(
