@@ -1,4 +1,4 @@
-﻿# Execution Coordination Protocol v1 — Design
+# Execution Coordination Protocol v1 — Design
 
 Status: Accepted Protocol v1 — devflow #106 / parent #105
 Date: 2026-09-27
