@@ -186,16 +186,16 @@ A candidate must first pass all hard filters:
 
 Remaining candidates are ranked by this initial order:
 
-1. durable priority: `P0 > P1 > P2 > P3`;
+1. durable priority from the trusted Repository Control `Priority` field: `P0 > P1 > P2 > P3`; it is not read from owning-Issue prose;
 2. explicit controller priority/urgency hint when present;
 3. dependency-frontier order / unblock value represented by explicit durable dependency data;
 4. role/action readiness class;
-5. `ready_at` / candidate publication time, oldest first when available;
+5. explicit candidate-projection `ready_at` in canonical UTC form, oldest first when present; it MUST NOT be derived from Issue `created_at`, `updated_at`, comments, labels, or edit timing;
 6. canonical `task_ref` lexical order as the final deterministic tie-breaker.
 
 No hidden LLM preference or free-form semantic scoring participates in v1 ranking.
 
-If some ranking field is unavailable under the accepted schema, it MUST have one explicit neutral/default ordering rule rather than being guessed from prose.
+If some ranking field is unavailable under the accepted schema, it MUST have one explicit neutral/default ordering rule rather than being guessed from prose. In particular, an absent `ready_at` receives the defined neutral/default value; Issue timestamps and prose never substitute for it.
 
 The rank fields through `ready_at` define deterministic rank classes. The canonical `task_ref` comparison remains the stable audit order, but a worker MUST avoid making every idle worker submit the same first claim from one class. Within the highest-ranked eligible class, selection uses a worker-scoped deterministic rotation:
 
