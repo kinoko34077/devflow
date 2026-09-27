@@ -43,8 +43,9 @@ Given only a managed repository name, a new worker must use this sequence:
 3. read its Work Status, Repository State, Audit SHA, Active Work, Next Action and repository-local entry references;
 4. follow the Canonical Entry Points section when present, or equivalent verified repository-local entry references recorded in Detailed Current State / Control Notes for legacy Controls;
 5. open referenced repository-local Issue/Work Order/PR before creating duplicates;
-6. read only the repository-local specs, Current State, code and tests needed for the current work;
-7. read this specification / `.devflow/WORKFLOW.yaml` when workflow semantics, cross-repository authority or operation boundaries are relevant.
+6. inspect active or latest relevant Execution Session Record(s) before non-trivial mutation or resumed work;
+7. read only the repository-local specs, Current State, code and tests needed for the current work;
+8. read this specification / `.devflow/WORKFLOW.yaml` when workflow semantics, cross-repository authority or operation boundaries are relevant.
 
 Chat history, Memory and GitHub Project fields are never substitutes for this read path when current GitHub canonical state is available.
 
@@ -84,7 +85,7 @@ Update the Control Issue when at least one of these changes:
 - a P0/P1 finding materially changes readiness;
 - managed/parked/deprecated/cancelled/excluded state.
 
-Do not update it merely for every commit, test run, comment or implementation detail.
+Do not update it merely for every Execution Session checkpoint, commit, test run, comment or implementation detail. Execution Session detail belongs on the owning Issue / Work Order unless that task itself is devflow-owned.
 
 Managed scope excludes:
 
@@ -120,6 +121,95 @@ Minimum durable local task information is defined in `docs/operations/REPOSITORY
 
 Normal repository change review boundary is the Pull Request. PR owns the actual diff and should expose linked task context, verification evidence, material limitations and rollback information when relevant.
 
+### 4.4 Manual Execution Session — short-lived worker execution state
+
+For non-trivial agent work that is likely to span multiple tool calls, commits, sessions, PR/review/CI waits, or parallel workers, the worker maintains one **Execution Session Record** on the owning Issue / Work Order.
+
+Purpose:
+
+- make the current worker, role and semantic scope visible before broad mutation;
+- make the intended bounded plan visible before execution;
+- externalize progress at recovery-relevant checkpoints rather than only at the end of a chat turn;
+- make timeout/crash/interruption recovery possible from GitHub evidence;
+- expose overlapping work early enough to continue one, split scopes, integrate, wait, or take over intentionally.
+
+Authority boundary:
+
+- the owning Issue / Work Order remains durable task truth, acceptance and blocker authority;
+- the Execution Session Record owns only one worker/session's short-lived execution checkpoint/handoff state;
+- PR / CI own concrete diff and verification evidence;
+- Formal Review owns exact-SHA review evidence and Review Provenance;
+- devflow Repository Control remains a cross-repository summary/index;
+- execution-coordinator runtime claim/lease/generation state, when actually used, owns atomic execution authority;
+- GitHub Project and chat never become Execution Session authority.
+
+A manual Session Record is a **soft lock** only. It MUST NOT be described as an atomic claim, lease, generation fence, scheduler assignment or cryptographic identity. It does not replace execution-coordinator runtime semantics.
+
+Minimum direct provenance:
+
+```text
+Execution-Session-ID: <stable unique id>
+Worker-System: <system>
+Worker-Model: <model/version or unknown>
+Role: implementer | reviewer | verifier | integrator | investigator
+```
+
+Minimum recoverable state:
+
+```text
+Status: CLAIMED | RUNNING | WAITING | HANDOFF | RELEASED | FAILED
+Scope: <exact semantic/work boundary>
+Excludes: <adjacent work explicitly not touched>
+Base-SHA: <verified base/head used to start>
+Branch/PR: <when available>
+Parent-Session: <optional predecessor>
+Last-Checkpoint: <latest completed bounded milestone>
+Next-Action: <first unfinished bounded milestone>
+Blocker: <none or explicit dependency>
+```
+
+The same worker-owned record carries a bounded checklist plan. The checklist records meaningful execution milestones, not every command/tool call.
+
+Lifecycle meaning:
+
+- `CLAIMED`: scope and collision check are fixed; meaningful mutation has not begun;
+- `RUNNING`: active execution is underway;
+- `WAITING`: execution is intentionally paused on a named dependency while the session remains a relevant continuation record;
+- `HANDOFF`: the current worker intentionally stops and leaves a recoverable boundary for a successor;
+- `RELEASED`: the session has no remaining execution responsibility; the owning task may still remain open;
+- `FAILED`: the session cannot continue safely and records the failure boundary/evidence.
+
+Worker ownership rules:
+
+- one worker/session updates its own Session Record;
+- another worker does not silently rewrite a predecessor record as if no handoff occurred;
+- a different worker/session creates a new record;
+- takeover creates a new `Execution-Session-ID` and names the predecessor through `Parent-Session`;
+- non-trivial integration of parallel outputs uses a distinct integrator session;
+- released/failed/handoff records remain historical evidence and are not recycled.
+
+Checkpoint rule:
+
+Before starting the next materially distinct bounded milestone, the active worker updates the Session Record so that the latest completed checkpoint and first unfinished action are externally recoverable. Do not wait until the end of a long chat or implementation batch to publish all progress.
+
+Collision rule:
+
+When apparently active Session Records overlap semantically, broad mutation pauses until the owning Issue records one explicit disposition:
+
+- `CONTINUE_ONE` — one session continues and the other releases/handoffs;
+- `SPLIT` — scopes are redefined to be non-overlapping;
+- `INTEGRATE` — both outputs are preserved and a distinct integrator session handles integration;
+- `WAIT` — one session waits for another dependency;
+- `TAKEOVER` — a stale/abandoned predecessor is replaced by an explicit successor session.
+
+Timeout/crash handling:
+
+A disappeared worker cannot update its own record. A later worker therefore treats an apparently active but stale session as potentially abandoned, verifies live owning Issue/branch/PR/head/check state, and creates an explicit successor/takeover session instead of silently assuming ownership.
+
+Operational provenance in a Session Record is attribution only. It is separate from Formal Review Provenance v2 and cannot prove reviewer independence, GitHub actor separation, or security identity.
+
+Detailed procedure and storage rules are defined in `docs/operations/AGENT_OPERATING_MANUAL.md` and `docs/operations/REPOSITORY_ISSUE_MANUAL.md`.
+
 ## 5. State vocabulary
 
 ### 5.1 Work Status
@@ -140,6 +230,8 @@ Allowed states:
 In GitHub Project this concept is represented by the built-in `Status` field. Do not create a duplicate custom `Work Status` field.
 
 Long-lived Repository Control Issues normally remain open and return to a repository-level state such as `AUDITED`, `BLOCKED` or `PARKED`; `DONE` is primarily the terminal state of finite Work Orders/operations.
+
+Execution Session `Status` is a different state dimension from Work Status. A task/repository may remain `IMPLEMENTING` while one worker session is `WAITING`, `HANDOFF` or `RELEASED`.
 
 ### 5.2 Repository State
 
@@ -216,6 +308,8 @@ A closed canonical Issue projects `Status = DONE`.
 GitHub built-in `Repository` identifies the repository containing the Issue. Because Repository Control Issues live in devflow, it is not a substitute for `Managed Repository`.
 
 Missing canonical sections are not guessed. Unsupported/unknown select values are errors rather than approximate matches.
+
+Execution Session state is task-comment execution metadata and is not projected into GitHub Project fields in this manual convention.
 
 ## 8. GitHub Project configuration
 
@@ -382,14 +476,17 @@ Normal repository work:
 read devflow Control + local canon
 -> audit relevant current SHA
 -> repository-local Issue/Work Order when durable tracking is warranted
+-> inspect active/relevant Execution Session Records
+-> establish/resume worker-owned Execution Session + bounded checklist
 -> dedicated branch
--> implementation
+-> implementation with checkpoint updates between bounded milestones
 -> tests/regression/real-entry verification as applicable
 -> PR
 -> re-audit changed scope
 -> merge under current safety policy
 -> local canon/current-state reconciliation
 -> devflow Control reconciliation when summary changed
+-> release/handoff/fail the worker Session Record with a recoverable final checkpoint
 ```
 
 A devflow cross-repository Work Order may parent multiple repository-local child Issues/PRs.
@@ -405,10 +502,15 @@ If a merged change proves faulty, use a dedicated rollback branch + revert PR. D
 A new worker resumes from durable GitHub evidence, not previous chat narrative:
 
 1. Repository Control Issue;
-2. referenced local Issue/Work Order/PR;
-3. recorded Audit SHA versus current default branch/PR head;
-4. local canonical specs/Current State referenced by those records;
-5. the first acceptance condition lacking current verification evidence.
+2. referenced local Issue/Work Order;
+3. active or latest relevant Execution Session Record(s);
+4. linked branch/PR and current head;
+5. recorded Audit SHA versus current default branch/PR head;
+6. local canonical specs/Current State referenced by those records;
+7. latest completed checkpoint and first unchecked / unverified milestone;
+8. the first acceptance condition lacking current verification evidence.
+
+If an apparently active Session Record is stale because a worker disappeared or a request timed out, verify live owning-repository evidence first and create an explicit successor/takeover session. Do not silently assume the predecessor's execution identity.
 
 If devflow summary disagrees with repository-local technical canon, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 
@@ -418,7 +520,7 @@ If two repository-local canonical sources conflict, do not guess. Resolve the lo
 
 Being devflow-managed does not imply Repository Base adoption.
 
-For Base-adopted repositories, after reading the devflow Control Issue, agents enter the repository through its local `AGENTS.md` and Base-defined local read order. Base may point to devflow rules but must not duplicate state vocabulary, Project configuration or detailed cross-repository lifecycle as a second canon.
+For Base-adopted repositories, after reading the devflow Control Issue, agents enter the repository through its local `AGENTS.md` and Base-defined local read order. Base may point to devflow rules but must not duplicate state vocabulary, Project configuration, Manual Execution Session semantics or detailed cross-repository lifecycle as a second canon.
 
 For non-Base repositories, Control Issues record their actual existing entry points. Absence of `.kinotch/`, `AGENTS.md` or Base layout is not a defect by itself.
 
@@ -440,8 +542,9 @@ Historical Issue/PR/commit references may retain `devflow-test` when they identi
 
 - Root start contract: `AGENTS.md`
 - Agent lifecycle/manual: `docs/operations/AGENT_OPERATING_MANUAL.md`
-- Repository-local Issue/Work Order manual: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
+- Repository-local Issue/Work Order + Execution Session storage manual: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
 - Project synchronization: `docs/project/PROJECT_SYNC.md`
 - Standing Issue-first reporting: Issue #49
+- Manual Execution Session specification work / acceptance history: Issue #142
 
 These manuals explain this specification; they must not establish conflicting authority.
