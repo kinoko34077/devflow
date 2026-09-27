@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/blob/main/.devflow/execution-candidate.schema.json",
+  "title": "KiNoTch. Execution Coordination ordinary candidate marker v1",
+  "description": "Machine-readable payload embedded in exactly one explicit devflow execution-candidate marker in an owning repository Issue or Work Order. Contextual GitHub/devflow validation is defined by docs/spec/EXECUTION_COORDINATION_DURABLE_CANDIDATES.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "mode",
+    "task",
+    "role",
+    "entry_ref",
+    "control_ref",
+    "parent_ref",
+    "scope_ready",
+    "blocked",
+    "requires_user_confirmation",
+    "conflict_keys"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "mode": {
+      "const": "ordinary"
+    },
+    "task": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "implementer",
+        "reviewer",
+        "verifier",
+        "integrator"
+      ]
+    },
+    "entry_ref": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(issues|pull)/[1-9][0-9]*$"
+    },
+    "control_ref": {
+      "type": "string",
+      "pattern": "^kinoko34077/devflow#[1-9][0-9]*$"
+    },
+    "parent_ref": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^kinoko34077/devflow#[1-9][0-9]*$"
+        }
+      ]
+    },
+    "scope_ready": {
+      "type": "boolean"
+    },
+    "blocked": {
+      "type": "boolean"
+    },
+    "requires_user_confirmation": {
+      "type": "boolean"
+    },
+    "conflict_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
