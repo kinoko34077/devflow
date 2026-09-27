@@ -34,6 +34,12 @@ GitHub Project, branch existence, PR existence, labels, chat history and free-fo
 
 A candidate projection is not a second durable task truth. It is an admission projection over the owning durable task.
 
+### Trust prerequisite
+
+Control discovery and every consumer of the projection MUST enforce the trusted-author rule from devflow #127: accept only the unique `[REPO] <repository>` Control whose GitHub `author_association` is `OWNER`, `MEMBER`, or `COLLABORATOR`. Outsider-authored lookalikes MUST be ignored and reported, while duplicate trusted Controls MUST fail closed. The exact owning Issue/Work Order snapshot used for `task_body_sha256` MUST pass the same trusted-author check, as required by execution-coordinator#34; missing or unknown association fails closed.
+
+`REQUIRED_FOR_AUTONOMOUS` MUST NOT be enabled until this trust rule is implemented and verified in every canonical Control/discovery path. `PILOT` may exercise only the bounded trusted path; it does not waive the trust prerequisite.
+
 ## 3. Canonical candidate source — Repository Control projection
 
 The canonical machine-discoverable source is an opt-in versioned candidate block in the unique devflow `[REPO] <repository>` Repository Control.
@@ -191,6 +197,14 @@ No hidden LLM preference or free-form semantic scoring participates in v1 rankin
 
 If some ranking field is unavailable under the accepted schema, it MUST have one explicit neutral/default ordering rule rather than being guessed from prose.
 
+The rank fields through `ready_at` define deterministic rank classes. The canonical `task_ref` comparison remains the stable audit order, but a worker MUST avoid making every idle worker submit the same first claim from one class. Within the highest-ranked eligible class, selection uses a worker-scoped deterministic rotation:
+
+1. identify the stable worker identity and the current discovery-cycle identifier;
+2. order candidates by `(SHA-256(worker_id || "\\0" || task_ref || "\\0" || discovery_cycle_id), task_ref)`;
+3. submit at most one claim attempt in that discovery cycle.
+
+This is a selection-spread rule, not a second assignment authority: hard eligibility and rank-class ordering remain unchanged, and the serialized runtime claim remains the sole ownership decision. If a stable worker identity is unavailable, use canonical `task_ref` order and still enforce the attempt cap. A rejected claim ends the current cycle; the worker refreshes and starts a new cycle rather than racing through the whole frontier in one attempt burst. The v1 default cap is one claim attempt per discovery cycle; any future increase requires an explicit policy revision and queue-capacity evidence.
+
 Weighted scoring, auctions and learned scheduling remain later alternatives requiring a separate accepted policy revision.
 
 ## 11. Capability and environment matching
@@ -219,9 +233,9 @@ bootstrap live devflow canon
 -> read coordinator state
 -> list_claimable
 -> exact capability/environment filter
--> deterministic ranking
--> submit serialized claim
--> if rejected: refresh and select next candidate
+-> deterministic rank classes + worker-scoped tie rotation
+-> submit at most one serialized claim in this discovery cycle
+-> if rejected: end the cycle and refresh on the next cycle
 -> if accepted: establish isolated execution context
 -> acknowledge CLAIMED -> RUNNING
 -> execute with renew/progress/wait/resume/release/fail
@@ -304,7 +318,7 @@ The following are intentionally fixed for v1:
 - **2B** Candidate projection is the task-specific machine admission authority; owning Issue remains detailed task truth.
 - **3C** Publisher and consumer are logically separated across execution attempts.
 - **4B** Coordinator is required for autonomous/parallel agent execution after promotion, not globally for all human/manual work.
-- **6B** Initial scheduler is deterministic lexicographic ranking.
+- **6B** Initial scheduler is deterministic lexicographic ranking, with worker-scoped deterministic spread within equal-rank classes and a bounded claim-attempt cap.
 - Adoption mode is machine-readable and starts at `PILOT`.
 - Capability/environment matching uses exact tag subset checks.
 - Controller offers are priority hints only; claim authority remains unique.
