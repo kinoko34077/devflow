@@ -20,6 +20,10 @@ The server exposes only read operations:
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
+## Control Issue trust boundary
+
+devflow is a public repository, so anyone can open an Issue with a canonical-looking title. Repository Control discovery (`get_repository_control`, `bootstrap_repository`, `list_managed_repositories`) only accepts `[REPO] <repo>` Issues whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. Issues from any other author, or with missing association data, are ignored (fail closed) and never count toward the "exactly one Control Issue" rule.
+
 ## Runtime
 
 Requirements:

@@ -52,8 +52,11 @@ def _yes_no_field(body: str, name: str) -> tuple[bool | None, bool]:
     return None, False
 
 
+_PROVENANCE_HEADING = re.compile(r"(?mi)^###\s+Review Provenance\s*$")
+
+
 def _provenance_fields(body: str) -> dict[str, str] | None:
-    matches = list(re.finditer(r"(?mi)^###\s+Review Provenance\s*$", body or ""))
+    matches = list(_PROVENANCE_HEADING.finditer(body or ""))
     if len(matches) != 1:
         return None
     match = matches[0]
@@ -222,6 +225,17 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
         return ReadinessResult(
             False,
             "A newer REQUEST_CHANGES review remains unresolved",
+        )
+
+    if any(
+        _PROVENANCE_HEADING.search(str(candidate.get("body") or ""))
+        for candidate in reviews[latest_index + 1 :]
+    ):
+        # A newer Review that attempted formal provenance but is ambiguous or
+        # malformed must block rather than be ignored in favor of an older one.
+        return ReadinessResult(
+            False,
+            "A newer formal review has ambiguous or malformed provenance",
         )
 
     latest_rejection = _review_rejection(

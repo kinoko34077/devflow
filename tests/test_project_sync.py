@@ -206,13 +206,24 @@ class ClientAndSyncTests(unittest.TestCase):
 
     def test_select_canonical_issues_includes_open_plus_project_tracked_closed(self):
         issues = [
-            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": ""},
-            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": ""},
-            {"number": 3, "node_id": "C", "title": "not tracked", "state": "closed", "body": ""},
-            {"number": 4, "node_id": "D", "title": project_sync.HEALTH_TITLE, "state": "open", "body": ""},
+            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": "", "author_association": "OWNER"},
+            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": "", "author_association": "MEMBER"},
+            {"number": 3, "node_id": "C", "title": "not tracked", "state": "closed", "body": "", "author_association": "OWNER"},
+            {"number": 4, "node_id": "D", "title": project_sync.HEALTH_TITLE, "state": "open", "body": "", "author_association": "OWNER"},
+            {"number": 5, "node_id": "E", "title": "[REPO] spoof", "state": "open", "body": "", "author_association": "NONE"},
+            {"number": 6, "node_id": "F", "title": "[REPO] unknown", "state": "open", "body": ""},
         ]
         selected = project_sync.select_canonical_issues(issues, {"B": object()})
         self.assertEqual([i["number"] for i in selected], [1, 2])
+
+    def test_event_sync_ignores_untrusted_issue_without_project_access(self):
+        class NoAccess:
+            def __getattr__(self, name):
+                raise AssertionError(f"untrusted event must not touch Project/REST: {name}")
+
+        cfg = project_sync.RuntimeConfig(repository="kinoko34077/devflow", project_token="token", github_token="token")
+        issue = {"number": 7, "node_id": "G", "title": "[REPO] spoof", "state": "open", "body": "", "author_association": "NONE"}
+        self.assertEqual(project_sync.run_sync("event-sync", cfg, rest=NoAccess(), gql=NoAccess(), event_issue=issue), 0)
 
     def test_upsert_health_issue_creates_and_closes_system_issue(self):
         class FakeREST:

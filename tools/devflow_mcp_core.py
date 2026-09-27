@@ -169,6 +169,19 @@ def _issue_url(issue: dict[str, Any]) -> str:
     return str(issue.get("html_url") or issue.get("url") or "")
 
 
+TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+def is_trusted_control_author(issue: dict[str, Any]) -> bool:
+    """Only repository owners/members/collaborators may author canonical control Issues.
+
+    devflow is public, so anyone can open an issue with a canonical-looking title.
+    Missing association data is treated as untrusted (fail closed).
+    """
+    association = str(issue.get("author_association") or "").strip().upper()
+    return association in TRUSTED_AUTHOR_ASSOCIATIONS
+
+
 class DevflowService:
     def __init__(self, reader: GitHubReader | Any, *, devflow_repository: str = DEVFLOW_REPOSITORY) -> None:
         self.reader = reader
@@ -180,6 +193,8 @@ class DevflowService:
         for issue in issues:
             title = str(issue.get("title") or "").strip()
             if not title.startswith("[REPO] "):
+                continue
+            if not is_trusted_control_author(issue):
                 continue
             sections = parse_sections(str(issue.get("body") or ""))
             repository = sections.get("Repository", "").strip()
@@ -197,7 +212,8 @@ class DevflowService:
         short_name = normalized.split("/", 1)[1]
         title = f"[REPO] {short_name}"
         issues = self.reader.list_issues(self.devflow_repository, state="open")
-        matches = [issue for issue in issues if str(issue.get("title") or "").strip() == title]
+        titled = [issue for issue in issues if str(issue.get("title") or "").strip() == title]
+        matches = [issue for issue in titled if is_trusted_control_author(issue)]
         if not matches:
             raise DevflowMCPError(
                 f"No open Repository Control Issue titled {title!r}. "
