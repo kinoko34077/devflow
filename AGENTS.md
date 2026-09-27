@@ -92,6 +92,8 @@ Do not write directly to the default branch for normal changes.
 
 Detailed session lifecycle, collision handling and record format are defined in `docs/operations/AGENT_OPERATING_MANUAL.md` and `docs/operations/REPOSITORY_ISSUE_MANUAL.md`.
 
+Repository Current State is updated when **accepted repository-level current state** changes, not for every implementation checkpoint. Task progress, temporary blockers, commit chronology, branch/reviewer state and individual verification runs belong in the owning Issue / PR / Actions. When accepted Current State advances, replace or retire stale projections and reference the establishing evidence compactly rather than accumulating a running history. Durable requirement or design changes still update their owning repository specification/design documents.
+
 ## 6. When devflow must be updated
 
 Update the target Repository Control Issue when any of these changes:
