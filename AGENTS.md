@@ -133,7 +133,7 @@ A new worker resumes from GitHub evidence, not from the previous chat narrative:
 5. recorded Audit SHA versus current branch/PR head;
 6. latest completed checkpoint and first unchecked / unverified milestone.
 
-If an apparently active session is stale because the worker disappeared or a request timed out, verify live repository/PR state first and create an explicit takeover session rather than silently assuming ownership.
+If an apparently active session may be stale because the worker disappeared or a request timed out, use the Manual Execution Session stale rule: `CLAIMED` / `RUNNING` require 1 hour with no trusted record update and no linked activity; `WAITING` remains active while its named blocker exists. A takeover posts a successor Session Record, re-reads the Issue, and only then mutates. Detailed collision rules are in the operating manuals.
 
 If devflow summary and repository-local canon disagree, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 

@@ -146,6 +146,8 @@ Ownership rules:
 - non-trivial integration of parallel branches uses a distinct integrator session;
 - historical released/failed/handoff records remain evidence and are not recycled.
 
+Worker ownership is procedural, not GitHub-enforced identity isolation. Multiple agent surfaces may authenticate as the same GitHub actor; the provenance fields identify the claimed worker/session but do not cryptographically prevent another agent from editing that comment.
+
 Lifecycle meaning:
 
 - `CLAIMED`: scope and overlap check completed; meaningful mutation has not begun;
@@ -158,6 +160,18 @@ Lifecycle meaning:
 This manual convention is a **soft lock**. It improves collision detection, handoff and recovery but does not provide atomic exclusion, leases or generation fencing. Those semantics belong to execution-coordinator when an actual runtime claim is used. Never describe a manual Session Record as a runtime claim/lease unless that coordinator state actually exists.
 
 Operational provenance (`Worker-System`, `Worker-Model`, `Execution-Session-ID`) is attribution only. It is separate from Formal Review Provenance v2 and does not prove reviewer independence or security identity.
+
+Stale/takeover rule:
+
+- explicit `HANDOFF`, `FAILED`, and `RELEASED` need no stale inference;
+- `CLAIMED` / `RUNNING` require at least **1 hour** with neither a trusted Session Record update nor linked branch/PR/check activity after the recorded checkpoint before they may be treated as stale;
+- `WAITING` remains active while its named blocker still exists; after that blocker resolves, the same 1-hour inactivity rule applies;
+- a takeover worker posts the successor record first, re-reads the owning Issue before mutation, and defers when another trusted overlapping successor already exists; when scopes are otherwise identical, the earliest trusted successor is the default continuation until an explicit collision disposition changes it.
+
+Visible transition rule:
+
+- `HANDOFF` and `FAILED` update the Session Record and append one short trusted top-level Issue comment with Session ID, transition, final checkpoint / next action and blocker;
+- `RELEASED` may remain an in-place update when the task is complete/obvious, but append the short transition comment when the task remains open and another worker is expected to continue.
 
 ## 5. Issue lifecycle
 
@@ -320,8 +334,9 @@ When opening an existing local Issue:
 7. compare live GitHub state with the Session Record's `Last-Checkpoint` / `Next-Action`;
 8. verify which acceptance conditions have current evidence;
 9. continue from the first unchecked / unverified milestone;
-10. if the predecessor session appears stale/abandoned, create an explicit takeover session rather than silently editing the predecessor record;
-11. reconcile stale Issue/Control/session text before declaring completion.
+10. if the predecessor session appears stale/abandoned, apply the 1-hour inactivity rule, post an explicit successor/takeover Session Record, then re-read the owning Issue before mutation;
+11. if another trusted overlapping successor is already present, stop until the collision is explicitly dispositioned;
+12. reconcile stale Issue/Control/session text before declaring completion.
 
 When multiple active Session Records overlap semantically, stop broad mutation until the owning Issue records one explicit disposition: continue one, split scopes, integrate through a distinct integrator session, wait on a dependency, or take over a stale/abandoned predecessor.
 
