@@ -28,20 +28,25 @@ The existing authority split remains unchanged:
 5. execution-coordinator Issue #3 remains ephemeral execution state only;
 6. GitHub Project remains derived display only.
 
-The projection cannot make stale or contradictory owning state claimable. If the owning Issue body changes after projection, the body digest no longer matches and the record fails closed until the Control is deliberately refreshed.
+The projection cannot make stale owning state claimable. If the owning Issue body changes after projection, the body digest no longer matches and the record fails closed until the Control is deliberately refreshed.
 
 Free-form `Active Work` prose, Issue age, branch existence, pull-request existence, Project fields, chat history, and stale summaries are never sufficient candidate authority.
 
-## 3. Why the source lives in the Repository Control
+## 3. Selected representation and rejected alternatives
 
-A Repository Control is already the unique cross-repository index for one managed repository. It is therefore the least invasive deterministic discovery root: a consumer can locate exactly one open `[REPO] <repository>` Control, inspect one explicit machine block, then fetch only the owning entries named in that block.
+### Selected: Repository Control hash-bound projection
 
-This avoids two failure modes:
+A Repository Control is already the unique cross-repository index for one managed repository. A consumer can locate exactly one open `[REPO] <repository>` Control, inspect one explicit machine block, then fetch only the owning entries named by that block.
 
-- requiring every managed repository to adopt a new machine marker/template in its local Issue format merely to participate in discovery;
-- creating a separate candidate registry/database whose contents could drift into a second durable assignment truth.
+This keeps machine discovery centralized in the existing devflow bootstrap path while leaving detailed task authority in each owning repository.
 
-The Control block may duplicate only the minimum execution-discovery fields required by Protocol v1. Detailed scope, acceptance criteria, implementation history, and technical state remain in the owning repository.
+### Rejected for v1: marker inside every owning Issue
+
+Embedding a machine marker directly in every repository-local Issue would preserve local ownership but would require heterogeneous managed repositories to adopt a new task-body format merely to participate in discovery. It would also force the discovery layer to enumerate repository-local Issues before it knows which ones are candidates.
+
+### Rejected for v1: dedicated candidate registry/database
+
+A separate registry would simplify enumeration but risks becoming a second durable assignment truth. The Repository Control already provides the single cross-repository index needed by v1.
 
 ## 4. Selected representation
 
@@ -123,10 +128,10 @@ Unknown outer fields are rejected in v1.
 : Digest defined in section 5. A mismatch means the projection is stale and the record is not emitted.
 
 `task_work_status`
-: The exact durable work state reviewed for this candidate. It is a projection guard bound to `task_body_sha256`; it does not replace the owning Issue body.
+: The exact durable work state that the devflow projection author reviewed for this candidate.
 
 `next_action_tag`
-: Canonical action tag only, without brackets or prose, for example `IMPLEMENT`, `REVIEW`, `VERIFY`, `MERGE`, `SPECIFY`, `USER_DECISION`, or `WAIT`. It is a guard, not permission to infer a candidate.
+: The exact action tag that the devflow projection author reviewed for this candidate, without brackets or prose.
 
 `role`
 : One of `implementer`, `reviewer`, `verifier`, `integrator`.
@@ -143,10 +148,20 @@ Unknown outer fields are rejected in v1.
 `requires_user_confirmation`
 : Boolean indicating whether a Human/User gate currently prohibits autonomous continuation.
 
-`conflict_keys`
-: Array of unique conflict keys. It MAY be empty. Keys must already be durably specified; absence must never be replaced by path/file/repository inference.
+Unknown candidate fields are rejected in v1 except the optional field defined below.
 
-Unknown candidate fields are rejected in v1.
+### 6.3 Optional candidate field
+
+`conflict_keys`
+: Array of unique Protocol v1 conflict keys. Omission is equivalent to `[]`. Keys must already be durably justified; consumers must never derive them from paths, file proximity, branch names, repository identity, PR diffs, or labels.
+
+### 6.4 Projection interpretation rule
+
+`task_work_status`, `next_action_tag`, `scope_ready`, `blocked`, `requires_user_confirmation`, and `conflict_keys` are **reviewed projection values bound to `task_body_sha256`**. The discovery consumer MUST NOT scrape or heuristically parse the owning Issue body to reconstruct these values.
+
+The owning Issue body remains detailed durable authority. The hash binding ensures that any later body edit invalidates the reviewed projection until devflow deliberately refreshes it.
+
+This rule is what allows heterogeneous repository-local Issue formats to remain valid without imposing a new shared task template.
 
 ## 7. ClaimCandidate mapping
 
@@ -157,7 +172,7 @@ After block, Control, task, digest, and lifecycle validation succeeds, mapping i
 | `task` | `task` |
 | `role` | `role` |
 | `entry_ref` | `entry_ref` |
-| `conflict_keys` | `conflict_keys` |
+| `conflict_keys` or omitted | `conflict_keys` / `()` |
 | `scope_ready` | `scope_ready` |
 | `blocked` | `blocked` |
 | `requires_user_confirmation` | `requires_user_confirmation` |
@@ -168,7 +183,7 @@ A later `list_claimable()` call combines the validated durable candidates with c
 
 ## 8. Ordinary role/readiness transitions
 
-The candidate record is explicit authority to *consider* one task/role; lifecycle fields still guard whether it may be emitted as ordinary new work.
+The candidate record is explicit authority to *consider* one task/role; projected lifecycle fields still guard whether it may be emitted as ordinary new work.
 
 Supported v1 combinations are:
 
@@ -238,7 +253,7 @@ Rules:
 - duplicates are invalid;
 - whole-repository keys are exceptional and must not be injected by default;
 - no consumer may infer keys from changed paths, file proximity, branch names, repository identity, PR diffs, or labels;
-- absence means the empty tuple.
+- omission means the empty tuple.
 
 ## 12. Deterministic validation algorithm
 
@@ -253,8 +268,8 @@ For each managed repository, a read-only consumer performs:
 7. for each record, fetch the exact owning Issue named by `task`;
 8. verify the object is an Issue, not a PR, is open, and belongs to the same managed repository;
 9. compute the canonical body digest and compare it to `task_body_sha256`;
-10. validate role/work-status/next-action combination;
-11. validate `entry_ref`, booleans, conflict keys, and Human/User gate consistency;
+10. validate role/work-status/next-action combination from the hash-bound reviewed projection;
+11. validate `entry_ref`, booleans, optional conflict keys, and Human/User gate consistency;
 12. map the record to `ClaimCandidate`;
 13. pass only validated candidates to the existing runtime `list_claimable()` projection.
 
@@ -279,14 +294,14 @@ The discovery adapter is GET/read-only. It does not edit Control or owning Issue
 | source object is PR | record invalid |
 | body digest mismatch | stale record; do not emit |
 | unsupported role/state/action combination | record invalid |
-| `scope_ready=false` | normalize only for diagnostics or exclude; never claimable |
-| `blocked=true` | normalize only for diagnostics or exclude; never claimable |
-| `requires_user_confirmation=true` | normalize only for diagnostics or exclude; never claimable |
+| `scope_ready=false` | may remain diagnostic input; never claimable |
+| `blocked=true` | may remain diagnostic input; never claimable |
+| `requires_user_confirmation=true` | may remain diagnostic input; never claimable |
 | `USER_DECISION` + confirmation false | contradiction; record invalid |
 | `IMPLEMENTING` with no runtime claim | not ordinary candidate; recovery path only |
 | invalid/missing `entry_ref` | record invalid |
 | invalid/duplicate conflict key | record invalid |
-| conflict keys absent | invalid in v1; author must write explicit `[]` |
+| conflict keys omitted | empty tuple; never infer |
 | stale historical references outside the explicit block | ignored |
 
 Consumers MAY expose diagnostics such as `not_discoverable`, `invalid_source`, `stale_projection`, `guard_blocked`, and `user_gate`, but diagnostics must never change the authority result.
