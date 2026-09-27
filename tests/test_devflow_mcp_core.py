@@ -109,6 +109,15 @@ class DevflowMCPServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
             service.get_repository_control("missing-repo")
 
+    def test_repository_control_rejects_duplicate_canonical_section(self):
+        duplicate = {
+            **self.control,
+            "body": self.control["body"] + "\n## Work Status\n\n`BLOCKED`\n",
+        }
+        service = devflow_mcp_core.DevflowService(FakeReader([duplicate]))
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "Duplicate section.*Work Status"):
+            service.get_repository_control("devflow")
+
 
 class GitHubReadOnlyClientTests(unittest.TestCase):
     def test_reader_uses_get_only_transport_and_bearer_token(self):
@@ -131,6 +140,14 @@ class GitHubReadOnlyClientTests(unittest.TestCase):
         reader = devflow_mcp_core.GitHubReader(token="", transport=transport)
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "GITHUB_TOKEN"):
             reader.get_issue("kinoko34077/private-repo", 1)
+
+    def test_timeout_error_is_translated_to_devflow_error(self):
+        def transport(url, headers):
+            raise TimeoutError("timed out")
+
+        reader = devflow_mcp_core.GitHubReader(token="", transport=transport)
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "GitHub read failed: TimeoutError"):
+            reader.get_issue("kinoko34077/devflow", 1)
 
 
 if __name__ == "__main__":
