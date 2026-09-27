@@ -91,6 +91,29 @@ Use this decision test:
 
 `CURRENT_STATE` is not a second Issue tracker. Accepted repository-level capability, current integration boundary, supported environment and durable active limitation belong there. Fine-grained task progress such as `3/5 items implemented`, `reviewer waiting`, a temporary branch name, or a one-off test failure belongs in Issue/PR/Actions.
 
+### Chronological implementation history
+
+Git, repository-local Issues/Work Orders, Pull Requests, formal Reviews and Actions already preserve implementation and verification chronology. Do not reconstruct a second running commit/test/PR history inside `CURRENT_STATE`, repository specifications or design documents.
+
+- `CURRENT_STATE` keeps the **currently accepted repository-level projection** plus compact references to the Issue/PR/evidence that established it.
+- When accepted state advances, replace or retire stale projections instead of appending them as historical checkpoints.
+- Specification/design documents describe currently applicable durable behavior, contracts and architecture; historical implementation checkpoints do not remain there merely because they were once true.
+- Link or compactly summarize evidence across surfaces; do not maintain full canonical copies in more than one place.
+- Use an ADR or CHANGELOG only when durable rationale or release/user-facing history has an independent long-term responsibility.
+
+### Task-result promotion and retirement
+
+When a bounded task completes, route its result according to what the result now owns:
+
+- task-only result or implementation history -> remains in the Issue/Work Order history;
+- accepted repository-level current state -> update/replace repository Current State;
+- accepted durable requirement/design -> update the owning specification/design document;
+- durable architecture/design rationale -> ADR when the rationale remains useful after the task closes;
+- release/user-facing history -> CHANGELOG when the repository uses one;
+- concrete diff/test/review evidence -> remains in Git/PR/Review/Actions.
+
+A closed Issue must not be the only owner of a still-active permanent requirement. Conversely, retire obsolete task-progress text from active Current State/specification rather than preserving it as a second history log.
+
 ## 4. Minimum local Work Order content
 
 Use the repository's own template when present. Otherwise include, at minimum:
