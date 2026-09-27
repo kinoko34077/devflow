@@ -301,7 +301,14 @@ class GitHubGraphQL:
             "Content-Type": "application/json",
             "User-Agent": "devflow-project-sync",
         }
-        response = self._transport(self.endpoint, headers, {"query": query, "variables": variables or {}})
+        try:
+            response = self._transport(self.endpoint, headers, {"query": query, "variables": variables or {}})
+        except APIError:
+            raise
+        except Exception as exc:
+            raise APIError(f"GitHub GraphQL transport failed: {type(exc).__name__}") from None
+        if not isinstance(response, dict):
+            raise APIError("GitHub GraphQL response was not an object")
         if response.get("errors"):
             messages = "; ".join(str(e.get("message", "GraphQL error")) for e in response["errors"])
             raise APIError(f"GitHub GraphQL error: {messages}")
@@ -478,7 +485,12 @@ class GitHubREST:
             "Content-Type": "application/json",
             "User-Agent": "devflow-project-sync",
         }
-        return self._transport(method, url, headers, payload)
+        try:
+            return self._transport(method, url, headers, payload)
+        except APIError:
+            raise
+        except Exception as exc:
+            raise APIError(f"GitHub REST transport failed: {type(exc).__name__}") from None
 
     def list_issues(self, state: str = "all", per_page: int = 100) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
