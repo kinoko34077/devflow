@@ -72,7 +72,9 @@ assignees: ''
 - Branch / PR: pending
 - Implementer: unrestricted
 
-## Current blocker / Next Action
+## Next Action
+
+<!-- State the current blocker first if one exists, then the explicit next action and one canonical Next Action tag. -->
 
 `[IMPLEMENT]`
 
