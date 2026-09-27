@@ -9,11 +9,11 @@ Runtime consumer: `kinoko34077/execution-coordinator`
 
 Execution Coordination Protocol v1 separates durable GitHub task truth from ephemeral runtime claim authority. `execution-coordinator` can filter normalized `ClaimCandidate` values, but devflow needs one deterministic source that identifies which exact owning Issue/Work Order may be considered for one execution role without scraping free-form prose or creating a second assignment database.
 
-This contract defines an opt-in, machine-readable **hash-bound projection in the managed repository's devflow Repository Control Issue**. Each projection record points to one exact owning repository Issue and is bound to the exact durable Issue body revision that was reviewed when the record was published.
+This contract defines an opt-in, machine-readable **hash-bound projection in the managed repository's devflow Repository Control Issue**. Each task envelope points to one exact owning repository Issue and contains one or more role entries; the envelope is bound to the exact durable Issue body revision that was reviewed when it was published.
 
 The contract answers only:
 
-> Has the repository's canonical devflow Control deliberately published one exact task/role as a current ordinary execution candidate, and is that projection still bound to the durable task revision and safety guards that were reviewed?
+> Has the repository's canonical devflow Control deliberately published one exact task envelope with one or more current ordinary execution roles, and is that projection still bound to the durable task revision and safety guards that were reviewed?
 
 It does not rank candidates, match capabilities, schedule workers, create claims, recover interrupted `IMPLEMENTING` work, or authorize release/deploy/publication/security-sensitive operations.
 
@@ -85,14 +85,18 @@ A Control MAY contain exactly one JSON block between these exact markers:
       "task": "kinoko34077/jev-audit#17",
       "task_body_sha256": "sha256:<64 lowercase hex characters>",
       "task_work_status": "READY_FOR_IMPLEMENTATION",
-      "next_action_tag": "IMPLEMENT",
-      "role": "implementer",
       "entry_ref": "https://github.com/kinoko34077/jev-audit/issues/17",
       "scope_ready": true,
       "blocked": false,
       "requires_user_confirmation": false,
       "conflict_keys": [],
-      "work_order_ref": "kinoko34077/devflow#105"
+      "work_order_ref": "kinoko34077/devflow#105",
+      "roles": [
+        {
+          "role": "implementer",
+          "next_action_tag": "IMPLEMENT"
+        }
+      ]
     }
   ]
 }
@@ -150,7 +154,7 @@ The digest is a freshness binding, not a signature or trust proof.
 
 Unknown outer fields are rejected in v1.
 
-### 6.2 Required candidate fields
+### 6.2 Required task-envelope fields
 
 `task`
 : Exact `owner/repository#issue_number`. It MUST identify an owning Issue in the same managed repository as the outer `repository`.
@@ -159,29 +163,26 @@ Unknown outer fields are rejected in v1.
 : Canonical digest from section 5. Mismatch means stale projection and no emission.
 
 `task_work_status`
-: Reviewed **task-specific projection** of the current durable lifecycle phase for this candidate. It uses the devflow Work Status vocabulary but does not require the repository-local Issue to expose a standardized Work Status heading.
-
-`next_action_tag`
-: Reviewed **task-specific projection** of the current action required for this candidate, without brackets/prose. It uses the accepted action vocabulary defined in section 8.
-
-`role`
-: One of `implementer`, `reviewer`, `verifier`, `integrator`.
+: One reviewed task-level projection of the current durable lifecycle phase. It uses the devflow Work Status vocabulary but does not require the repository-local Issue to expose a standardized Work Status heading.
 
 `entry_ref`
-: Explicit canonical `https://github.com/...` URL used to bootstrap the role. It MUST identify the same owning repository. Consumers do not search for a substitute entry.
+: Explicit canonical `https://github.com/...` URL for the owning task. It MUST identify the same owning repository. Consumers do not search for a substitute entry.
 
 `scope_ready`
-: Boolean indicating whether role-specific scope and acceptance are sufficiently fixed for ordinary consideration.
+: One task-level boolean indicating whether the task's scope and acceptance are sufficiently fixed for ordinary consideration.
 
 `blocked`
-: Boolean indicating whether task-specific durable state currently prohibits autonomous continuation for this role.
+: One task-level boolean indicating whether durable task state currently prohibits autonomous continuation.
 
 `requires_user_confirmation`
-: Boolean indicating whether a Human/User/sensitive-action gate currently prohibits autonomous continuation for this role.
+: One task-level boolean indicating whether a Human/User/sensitive-action gate currently prohibits autonomous continuation.
 
-Unknown candidate fields are rejected except the optional fields below.
+`roles`
+: Non-empty array of role entries. Each role entry MUST contain exactly one `role` from `implementer`, `reviewer`, `verifier`, or `integrator`, and one role-specific `next_action_tag`. Role entries are the only place for role-specific action values.
 
-### 6.3 Optional candidate fields
+Unknown task-envelope or role fields are rejected except the optional task-envelope fields below.
+
+### 6.3 Optional task-envelope fields
 
 `conflict_keys`
 : Array of unique Protocol v1 conflict keys. Omission equals `[]`. Consumers never infer keys from paths, repository identity, branch names, PR diffs, labels, or file proximity.
@@ -197,17 +198,18 @@ The owning Issue remains detailed task authority. `source_ref` provides Reposito
 
 Publication/refresh must inspect the exact owning body and current relevant devflow/safety context. Hash equality proves only that the body has not changed since projection; it does not prove that the projection was semantically correct. Normal Issue-first authoring, review, and the fail-closed checks in this specification remain required.
 
-## 7. Cross-record consistency
+## 7. Task-envelope and role consistency
 
-The block is validated as a set, not only record-by-record.
+The block is validated as a set of task envelopes, not only as independent records.
 
-- `(task, role)` MUST be unique.
-- All records sharing the same `task` MUST carry the same current `task_body_sha256`.
-- All records sharing the same `task` MUST carry the same `task_work_status`.
-- If either shared value differs, every record for that task is invalid and none is emitted.
-- `next_action_tag`, `scope_ready`, `blocked`, `requires_user_confirmation`, `conflict_keys`, and `work_order_ref` MAY differ by role only when the difference is intentionally role-specific and satisfies this contract. If one durable task is governed by one cross-repository Work Order, role records SHOULD use the same `work_order_ref`.
+- `task` MUST be unique per envelope. Duplicate task envelopes invalidate the block rather than choosing one.
+- Each envelope MUST contain at least one role entry, and `role` MUST be unique within that envelope.
+- Task-level `task_body_sha256`, `task_work_status`, `entry_ref`, `scope_ready`, `blocked`, `requires_user_confirmation`, `conflict_keys`, and `work_order_ref` are single-valued on the envelope; they MUST NOT vary by role.
+- Role-specific `next_action_tag` remains inside the role entry and is validated against the shared task-level status.
+- If future role-specific fields are added, they MUST remain inside role entries and MUST NOT override task-level freshness, lifecycle, scope, blocker, confirmation, provenance, or safety values.
+- A task with implementer/reviewer/integrator role entries is one envelope with one lifecycle state, not multiple contradictory task records.
 
-This prevents one durable task from simultaneously being projected as fresh implementation work and review/integration work under contradictory lifecycle phases.
+This prevents one durable task from simultaneously being projected as fresh implementation work and review/integration work under contradictory task-level phases or gates.
 
 ## 8. Ordinary role/readiness transitions
 
@@ -270,12 +272,13 @@ Repository-specific Human Gates that are not canonical action tags must be repre
 
 ## 11. Multi-track semantics
 
-A single Control may summarize multiple local tracks. The candidate block therefore MAY carry multiple records for different exact tasks/roles.
+A single Control may summarize multiple local tracks. The candidate block therefore MAY carry multiple task envelopes for distinct exact tasks.
 
-- A blocked security/history task and an independently executable UI task are distinct records.
-- `Active Work` prose is not flattened into records.
+- A blocked security/history task and an independently executable UI task are distinct envelopes.
+- Multiple role entries for one task remain inside that task's one envelope.
+- `Active Work` prose is not flattened into envelopes.
 - overall Control Work Status is not treated as a task identifier.
-- same-task records still obey section 7 cross-record lifecycle consistency.
+- duplicate task envelopes, duplicate roles, or role-level overrides of task-level gates fail closed.
 - repository-level USER_DECISION/HUMAN_GATE remains a conservative global veto under section 9.
 
 This permits multi-track discovery when the Control is not globally human-gated while failing closed when the cross-repository summary itself says user judgement is the next repository-level boundary.
@@ -303,21 +306,21 @@ Rules:
 
 ## 13. ClaimCandidate mapping
 
-After source, Control, task, digest, set-consistency, lifecycle, provenance, entry, and safety validation succeeds:
+After source, Control, task, digest, set-consistency, lifecycle, provenance, entry, and safety validation succeeds, each valid role entry in a task envelope produces one normalized `ClaimCandidate`:
 
 | Projection field | `ClaimCandidate` |
 |---|---|
-| `task` | `task` |
-| `role` | `role` |
-| `entry_ref` | `entry_ref` |
-| `conflict_keys` or omitted | `conflict_keys` / `()` |
-| `scope_ready` | `scope_ready` |
-| `blocked` | `blocked` |
-| `requires_user_confirmation` | `requires_user_confirmation` |
+| envelope `task` | `task` |
+| role entry `role` | `role` |
+| envelope `entry_ref` | `entry_ref` |
+| envelope `conflict_keys` or omitted | `conflict_keys` / `()` |
+| envelope `scope_ready` | `scope_ready` |
+| envelope `blocked` | `blocked` |
+| envelope `requires_user_confirmation` | `requires_user_confirmation` |
 
-`task_work_status`, `next_action_tag`, `task_body_sha256`, `source_ref`, `repository`, and `work_order_ref` are discovery/provenance guards rather than new `ClaimCandidate` fields.
+`task_work_status`, role entry `next_action_tag`, `task_body_sha256`, `source_ref`, `repository`, and `work_order_ref` are discovery/provenance guards rather than new `ClaimCandidate` fields.
 
-Compatible records with `scope_ready=false`, `blocked=true`, or `requires_user_confirmation=true` MAY be normalized for diagnostics, but existing `list_claimable()` must exclude them. Invalid/stale/contradictory records are not normalized into authoritative candidates.
+Compatible role entries with `scope_ready=false`, `blocked=true`, or `requires_user_confirmation=true` MAY be normalized for diagnostics, but existing `list_claimable()` must exclude them. Invalid/stale/contradictory envelopes are not normalized into authoritative candidates.
 
 ## 14. Deterministic validation algorithm
 
@@ -328,7 +331,7 @@ For one managed repository:
 3. locate the candidate block by exact markers;
 4. if absent, return zero candidates without source error;
 5. validate exact single block, JSON syntax, schema version, unknown-field prohibition, `source_ref`, and `repository`;
-6. validate unique `(task, role)` and section 7 cross-record consistency;
+6. validate unique task envelopes, non-empty role arrays, unique roles within each envelope, and section 7 task-level consistency;
 7. for each distinct task, fetch the exact owning Issue;
 8. verify trusted author association, same repository, open Issue, not PR, and non-empty durable body;
 9. compute canonical body digest and compare every record for that task;
@@ -355,7 +358,7 @@ The discovery adapter is GET/read-only. It does not mutate Controls or owning Is
 | Repository State != `ACTIVE` | zero ordinary candidates |
 | Control Next Action contains `[USER_DECISION]` | zero ordinary candidates |
 | Control Next Action contains `[HUMAN_GATE]` | zero ordinary candidates |
-| duplicate `(task, role)` | source invalid; emit none |
+| duplicate task envelope or role | source invalid; emit none |
 | same task has inconsistent digest or lifecycle status | all records for that task invalid |
 | task repository mismatch | record invalid |
 | owning Issue author is not trusted | record invalid |
