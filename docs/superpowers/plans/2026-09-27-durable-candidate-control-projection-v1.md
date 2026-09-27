@@ -25,13 +25,13 @@
 - `requires_user_confirmation=true` is never autonomously claimable; sensitive-action permission is not granted by a validated candidate.
 - Conflict keys are explicit only; omitted `conflict_keys` normalizes to `()` and is never inferred.
 - No GitHub Project reverse authority, no prose-derived candidate construction, no ranking, scheduling, automatic claims, controller negotiation, runtime Issue #3 mutation, or bulk migration.
-- This plan starts only after the replacement specification PR (#132 or its accepted successor) is merged and #125 identifies that merged spec as canonical authority.
+- This plan starts only after the parent policy PR #134 is merged and #125 identifies the accepted task-envelope contract as canonical authority.
 
 ## Review Focus
 
 - CRLF/lone-CR body normalization must produce the same digest as canonical LF text while preserving all other whitespace and Unicode bytes.
 - A syntactically valid candidate block with a stale body digest must emit no validated candidate, even if all projected readiness fields look claimable.
-- Multi-track Controls must validate each distinct `(task, role)` independently; duplicate `(task, role)` invalidates the block rather than choosing one.
+- Multi-track Controls must validate one task envelope with one or more roles; duplicate task envelopes or duplicate roles within an envelope invalidate the block rather than choosing one, and task-level gates cannot vary by role.
 - A candidate with `USER_DECISION` plus `requires_user_confirmation=false`, or any unsupported role/state/action combination, must fail closed.
 - Parser failure must never fall back to `Active Work`, `Next Action` prose, labels, PR/branch existence, the deprecated owning-Issue marker, or other heuristic sources.
 - Outsider/untrusted authored Control, owning task, or Work Order Issues must never produce candidate authority even when their titles/bodies otherwise match exactly.
@@ -47,7 +47,7 @@
 **Interfaces:**
 - Produces: `canonical_issue_body_sha256(body: str | None) -> str`
 - Produces: `parse_candidate_block(control_body: str) -> CandidateBlock | None`
-- Produces dataclasses: `CandidateBlock`, `CandidateRecord`
+- Produces dataclasses: `CandidateBlock`, `CandidateEnvelope`, `CandidateRole`
 - No GitHub network access in this task.
 
 - [ ] **Step 1: Write RED tests for canonical body digest**
@@ -82,9 +82,13 @@ Add tests for:
 
 - [ ] **Step 5: Implement parser/dataclasses minimally**
 
-`CandidateBlock` fields: `schema_version: int`, `source_ref: str`, `repository: str`, `candidates: tuple[CandidateRecord, ...]`.
+`CandidateBlock` fields: `schema_version: int`, `source_ref: str`, `repository: str`, `candidates: tuple[CandidateEnvelope, ...]`.
 
-`CandidateRecord` fields: `task: str`, `task_body_sha256: str`, `task_work_status: str`, `next_action_tag: str`, `role: str`, `entry_ref: str`, `scope_ready: bool`, `blocked: bool`, `requires_user_confirmation: bool`, `conflict_keys: tuple[str, ...]`.
+`CandidateEnvelope` fields: `task: str`, `task_body_sha256: str`, `task_work_status: str`, `entry_ref: str`, `scope_ready: bool`, `blocked: bool`, `requires_user_confirmation: bool`, `conflict_keys: tuple[str, ...]`, `work_order_ref: str | None`, `roles: tuple[CandidateRole, ...]`.
+
+`CandidateRole` fields: `role: str`, `next_action_tag: str`.
+
+`CandidateEnvelope` stores the task-level fields once, and each `CandidateRole` stores only `role` and `next_action_tag`; role-specific output later reuses the envelope `entry_ref` and safety fields.
 
 Reject unknown authority-bearing fields rather than ignoring them.
 
@@ -107,7 +111,7 @@ git commit -m "feat: parse durable candidate control projection"
 - Modify: `tests/test_durable_candidate_projection.py`
 
 **Interfaces:**
-- Consumes: `CandidateBlock`, `CandidateRecord`, `canonical_issue_body_sha256()` from Task 1.
+- Consumes: `CandidateBlock`, `CandidateEnvelope`, `CandidateRole`, and `canonical_issue_body_sha256()` from Task 1.
 - Produces: `IssueSnapshot(repository: str, number: int, state: str, body: str | None, html_url: str, is_pull_request: bool, author_association: str, title: str, work_status: str | None)`.
 - Produces: `ControlContext(source_ref: str, repository: str, repository_state: str, next_action: str, author_association: str)`.
 - Produces: `ValidatedCandidate(task: str, role: str, entry_ref: str, conflict_keys: tuple[str, ...], scope_ready: bool, blocked: bool, requires_user_confirmation: bool)`.
@@ -126,7 +130,8 @@ Cover:
 - missing/closed owning Issue;
 - PR object used as owning source;
 - digest mismatch;
-- duplicate `(task, role)` invalidates the block.
+- duplicate task envelopes or duplicate roles within one envelope invalidate the block;
+- task-level scope/blocker/confirmation fields cannot diverge by role because they exist only on the envelope.
 
 Expected authority result for each invalid/contradictory case: no validated candidate for the affected source; block-wide structural contradictions such as duplicate `(task, role)` emit no candidates from the block.
 
@@ -207,7 +212,7 @@ Expected: FAIL before template update.
 
 - [ ] **Step 3: Add bounded template guidance**
 
-Add a short optional `Execution Candidates` guidance section after `Canonical Entry Points` or immediately before `Control Notes`. Do not require migration of existing Controls and do not duplicate the full schema in the template.
+Add a short optional `Execution Candidates` guidance section after `Canonical Entry Points` or immediately before `Control Notes`. Do not require migration of existing Controls and do not duplicate the full schema in the template. The guidance must describe one task envelope with a non-empty `roles` array, not one flat record per role.
 
 - [ ] **Step 4: Run focused template + projection tests**
 
