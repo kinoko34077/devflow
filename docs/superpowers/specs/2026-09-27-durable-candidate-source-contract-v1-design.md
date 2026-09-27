@@ -77,7 +77,8 @@ A Control MAY contain exactly one JSON block between these exact markers:
       "scope_ready": true,
       "blocked": false,
       "requires_user_confirmation": false,
-      "conflict_keys": []
+      "conflict_keys": [],
+      "work_order_ref": "kinoko34077/devflow#105"
     }
   ]
 }
@@ -164,18 +165,21 @@ Unknown outer fields are rejected in v1.
 `requires_user_confirmation`
 : Boolean indicating whether a Human/User/sensitive-action gate currently prohibits autonomous continuation for this role.
 
-Unknown candidate fields are rejected except the optional field below.
+Unknown candidate fields are rejected except the optional fields below.
 
-### 6.3 Optional candidate field
+### 6.3 Optional candidate fields
 
 `conflict_keys`
 : Array of unique Protocol v1 conflict keys. Omission equals `[]`. Consumers never infer keys from paths, repository identity, branch names, PR diffs, labels, or file proximity.
+
+`work_order_ref`
+: Exact `kinoko34077/devflow#N` reference to the governing cross-repository Work Order when one exists. Omission means no governing Work Order is asserted for this candidate. If present, the referenced devflow Issue MUST be open, MUST identify a `[WORK ORDER]` under current devflow conventions, and MUST NOT be rediscovered by reverse prose/link scraping. A closed/DONE Work Order cannot authorize fresh ordinary work.
 
 ### 6.4 Projection interpretation
 
 The candidate fields are reviewed projection values bound to `task_body_sha256`. They are not produced by heuristic local-body parsing.
 
-The owning Issue remains detailed task authority. The Control projection supplies only the bounded machine-readable execution-discovery view needed by this protocol.
+The owning Issue remains detailed task authority. `source_ref` provides Repository Control provenance, `work_order_ref` provides optional governing cross-repository provenance, and `task` names the detailed owning entry. The Control projection supplies only the bounded machine-readable execution-discovery view needed by this protocol.
 
 Publication/refresh must inspect the exact owning body and current relevant devflow/safety context. Hash equality proves only that the body has not changed since projection; it does not prove that the projection was semantically correct. Normal Issue-first authoring, review, and the fail-closed checks in this specification remain required.
 
@@ -187,7 +191,7 @@ The block is validated as a set, not only record-by-record.
 - All records sharing the same `task` MUST carry the same current `task_body_sha256`.
 - All records sharing the same `task` MUST carry the same `task_work_status`.
 - If either shared value differs, every record for that task is invalid and none is emitted.
-- `next_action_tag`, `scope_ready`, `blocked`, `requires_user_confirmation`, and `conflict_keys` MAY differ by role only when the difference is intentionally role-specific and satisfies the role/action rules below.
+- `next_action_tag`, `scope_ready`, `blocked`, `requires_user_confirmation`, `conflict_keys`, and `work_order_ref` MAY differ by role only when the difference is intentionally role-specific and satisfies this contract. If one durable task is governed by one cross-repository Work Order, role records SHOULD use the same `work_order_ref`.
 
 This prevents one durable task from simultaneously being projected as fresh implementation work and review/integration work under contradictory lifecycle phases.
 
@@ -285,7 +289,7 @@ Rules:
 
 ## 13. ClaimCandidate mapping
 
-After source, Control, task, digest, set-consistency, lifecycle, entry, and safety validation succeeds:
+After source, Control, task, digest, set-consistency, lifecycle, provenance, entry, and safety validation succeeds:
 
 | Projection field | `ClaimCandidate` |
 |---|---|
@@ -297,7 +301,7 @@ After source, Control, task, digest, set-consistency, lifecycle, entry, and safe
 | `blocked` | `blocked` |
 | `requires_user_confirmation` | `requires_user_confirmation` |
 
-`task_work_status`, `next_action_tag`, `task_body_sha256`, `source_ref`, and `repository` are discovery/provenance guards rather than new `ClaimCandidate` fields.
+`task_work_status`, `next_action_tag`, `task_body_sha256`, `source_ref`, `repository`, and `work_order_ref` are discovery/provenance guards rather than new `ClaimCandidate` fields.
 
 Compatible records with `scope_ready=false`, `blocked=true`, or `requires_user_confirmation=true` MAY be normalized for diagnostics, but existing `list_claimable()` must exclude them. Invalid/stale/contradictory records are not normalized into authoritative candidates.
 
@@ -315,9 +319,10 @@ For one managed repository:
 8. verify same repository, open Issue, not PR, and non-empty durable body;
 9. compute canonical body digest and compare every record for that task;
 10. validate role/status/action combinations;
-11. validate `entry_ref`, booleans, conflict keys, and sensitive/Human gates;
-12. map valid records to `ClaimCandidate`;
-13. pass normalized candidates to existing runtime `list_claimable()` filtering.
+11. validate optional `work_order_ref` structurally when present;
+12. validate `entry_ref`, booleans, conflict keys, and sensitive/Human gates;
+13. map valid records to `ClaimCandidate`;
+14. pass normalized candidates to existing runtime `list_claimable()` filtering.
 
 The discovery adapter is GET/read-only. It does not mutate Controls or owning Issues, publish candidate records, rank work, choose a winner, or submit claims.
 
@@ -340,6 +345,7 @@ The discovery adapter is GET/read-only. It does not mutate Controls or owning Is
 | owning Issue missing/closed/PR/empty body | record invalid |
 | body digest mismatch | stale record; do not emit |
 | unsupported role/status/action | record invalid |
+| invalid optional Work Order provenance | record invalid |
 | `scope_ready=false` | diagnostic candidate allowed; never claimable |
 | `blocked=true` | diagnostic candidate allowed; never claimable |
 | `requires_user_confirmation=true` | diagnostic candidate allowed; never claimable |
@@ -356,7 +362,7 @@ Diagnostic names such as `not_discoverable`, `invalid_source`, `stale_projection
 
 ### 16.1 Fresh bounded implementation
 
-`jev-audit#17` itself does not need a standardized Work Status field. Its devflow Control may deliberately publish an implementer record for that exact Issue/body digest with projected `READY_FOR_IMPLEMENTATION`, `IMPLEMENT`, `scope_ready=true`, and no blocker/Human Gate.
+`jev-audit#17` itself does not need a standardized Work Status field. Its devflow Control may deliberately publish an implementer record for that exact Issue/body digest with projected `READY_FOR_IMPLEMENTATION`, `IMPLEMENT`, `scope_ready=true`, and no blocker/Human Gate. If that task is governed by a cross-repository Work Order, the record also carries the explicit `work_order_ref`; otherwise it is omitted.
 
 Status or Next Action prose alone remains insufficient; the explicit hash-bound record is required.
 
@@ -392,7 +398,7 @@ Closed/no-adoption recovery handoffs and stale branches are not candidates unles
 
 ### 17.1 Publish
 
-Publication is a deliberate devflow Control mutation after an agent/human inspects the current owning task body, relevant safety state, and intended role.
+Publication is a deliberate devflow Control mutation after an agent/human inspects the current owning task body, governing Work Order when present, relevant safety state, and intended role.
 
 Publication is not part of discovery/selection. A later read-only selection cycle consumes the committed record.
 
@@ -402,6 +408,7 @@ Refresh is required when:
 
 - owning Issue body changes;
 - projected role/status/action/readiness/blocker/user-gate/conflict metadata changes;
+- governing Work Order relationship/state changes;
 - relevant safety authority changes;
 - the candidate entry point changes.
 
@@ -444,7 +451,7 @@ A separate bounded change should add:
 - optional candidate-block guidance to Repository Control template;
 - deterministic block parser/validator;
 - canonical owning-body digest helper;
-- validation of cross-record consistency and Control global gates;
+- validation of cross-record consistency, Work Order provenance, and Control global gates;
 - tests for malformed/duplicate/stale/contradictory blocks and live fixtures;
 - optional read-only MCP exposure of validated projection data;
 - no Project-to-Issue reverse authority.
@@ -455,7 +462,7 @@ Only after this contract and the devflow validator boundary are accepted, confor
 
 - reads only explicit Control candidate blocks as candidate-source authority;
 - fetches exact tasks named by the block;
-- verifies body digests, set consistency, lifecycle, entry and safety guards;
+- verifies body digests, set consistency, Work Order provenance, lifecycle, entry and safety guards;
 - maps records to current `ClaimCandidate` values;
 - preserves per-source diagnostics;
 - passes normalized candidates through existing `list_claimable()`;
@@ -496,7 +503,7 @@ A v1 consumer:
 - does not reinterpret future versions;
 - never falls back to prose inference when parsing/validation fails.
 
-Changes to field meaning, authority, role/lifecycle compatibility, body-digest semantics, safety gates, or fail-closed behavior require an accepted contract revision.
+Changes to field meaning, authority, role/lifecycle compatibility, provenance, body-digest semantics, safety gates, or fail-closed behavior require an accepted contract revision.
 
 ## 22. Acceptance and verification direction
 
