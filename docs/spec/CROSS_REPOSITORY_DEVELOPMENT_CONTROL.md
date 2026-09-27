@@ -188,9 +188,16 @@ Worker ownership rules:
 - non-trivial integration of parallel outputs uses a distinct integrator session;
 - released/failed/handoff records remain historical evidence and are not recycled.
 
+These ownership rules are procedural provenance, not GitHub-enforced worker isolation. Multiple agent surfaces may authenticate as the same GitHub actor, so worker/model/session fields do not prove cryptographic identity and cannot technically prevent another agent from editing the same comment.
+
 Checkpoint rule:
 
 Before starting the next materially distinct bounded milestone, the active worker updates the Session Record so that the latest completed checkpoint and first unfinished action are externally recoverable. Do not wait until the end of a long chat or implementation batch to publish all progress.
+
+Transition visibility rule:
+
+- moving to `HANDOFF` or `FAILED` updates the worker-owned Session Record **and** appends one short trusted top-level Issue comment naming the Session ID, transition, final checkpoint / next action and blocker;
+- moving to `RELEASED` may remain an in-place Session Record update when the owning task is complete or the outcome is otherwise self-evident; append the same short transition comment when the owning task remains open and another worker is expected to continue.
 
 Collision rule:
 
@@ -204,7 +211,13 @@ When apparently active Session Records overlap semantically, broad mutation paus
 
 Timeout/crash handling:
 
-A disappeared worker cannot update its own record. A later worker therefore treats an apparently active but stale session as potentially abandoned, verifies live owning Issue/branch/PR/head/check state, and creates an explicit successor/takeover session instead of silently assuming ownership.
+A disappeared worker cannot update its own record. Manual stale inference is therefore conservative:
+
+- `HANDOFF`, `FAILED`, and `RELEASED` are explicit lifecycle states and do not require stale inference;
+- `CLAIMED` or `RUNNING` may be treated as stale only after **1 hour** with no trusted Session Record update **and** no linked branch/PR/check activity after the recorded checkpoint;
+- `WAITING` is not stale merely because time passed while its named blocker still exists; after that named blocker is resolved, the same 1-hour inactivity rule applies.
+
+A takeover worker first verifies live owning Issue/branch/PR/head/check state, then posts its successor Session Record, and then re-reads the owning Issue before mutation. If another trusted successor already exists for overlapping scope, the later successor does not mutate until `CONTINUE_ONE`, `SPLIT`, `INTEGRATE`, or `WAIT` is explicitly chosen. When overlapping successors otherwise have identical scope, the earliest trusted successor is the default continuation until an explicit disposition changes it.
 
 Operational provenance in a Session Record is attribution only. It is separate from Formal Review Provenance v2 and cannot prove reviewer independence, GitHub actor separation, or security identity.
 
@@ -512,7 +525,7 @@ A new worker resumes from durable GitHub evidence, not previous chat narrative:
 7. latest completed checkpoint and first unchecked / unverified milestone;
 8. the first acceptance condition lacking current verification evidence.
 
-If an apparently active Session Record is stale because a worker disappeared or a request timed out, verify live owning-repository evidence first and create an explicit successor/takeover session. Do not silently assume the predecessor's execution identity.
+If an apparently active Session Record may be stale because a worker disappeared or a request timed out, apply the Manual Execution Session stale rule in section 4.4 before takeover. A successor must be posted before mutation and the owning Issue must then be re-read so competing successors are detected before work continues.
 
 If devflow summary disagrees with repository-local technical canon, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 

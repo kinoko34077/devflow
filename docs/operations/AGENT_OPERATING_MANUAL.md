@@ -154,7 +154,11 @@ Use:
 - `RELEASED` when this session has no remaining execution responsibility; this does not mean the owning Issue is globally complete;
 - `FAILED` when the session cannot safely continue; record the failure boundary/evidence rather than leaving it apparently active.
 
-A timeout/crash cannot update its own record. A later worker therefore treats an apparently active stale record as potentially abandoned, verifies live branch/PR/head/task state first, then creates an explicit successor/takeover session instead of silently editing the predecessor record.
+For transition visibility, `HANDOFF` and `FAILED` also append one short trusted top-level Issue comment with Session ID, transition, final checkpoint / next action and blocker after the worker-owned record is updated. `RELEASED` may remain an in-place update when the task is complete or obvious; append the short transition comment when the task remains open and another worker is expected to continue.
+
+A timeout/crash cannot update its own record. Treat `CLAIMED` / `RUNNING` as stale only after **1 hour** with neither a trusted Session Record update nor linked branch/PR/check activity after the recorded checkpoint. `WAITING` does not become stale while its named blocker still exists; once that blocker resolves, the same 1-hour inactivity rule applies. Explicit `HANDOFF`, `FAILED`, and `RELEASED` need no stale inference.
+
+For takeover: verify live task/branch/PR/check state, post the successor Session Record, then re-read the owning Issue before mutation. If another trusted overlapping successor already exists, the later successor waits for an explicit collision disposition; for otherwise identical scopes, the earliest trusted successor is the default continuation.
 
 #### Parallel collision disposition
 
@@ -178,7 +182,7 @@ Worker-Model: <model/version or unknown>
 Execution-Session-ID: <stable id>
 ```
 
-This is attribution, not cryptographic identity. It is separate from Formal Review Provenance v2 and must not be treated as proof of reviewer independence, GitHub actor separation, or security identity.
+This is attribution, not cryptographic identity. It is separate from Formal Review Provenance v2 and must not be treated as proof of reviewer independence, GitHub actor separation, or security identity. Multiple agent surfaces may authenticate as the same GitHub actor, so worker ownership is a procedural/provenance rule rather than a GitHub-enforced edit boundary.
 
 ## 4. Implementation path
 
@@ -491,7 +495,7 @@ devflow Control
 -> first unchecked / unverified milestone
 ```
 
-If an apparently active predecessor is stale, compare live evidence first and create a successor/takeover session. Do not silently assume the predecessor's identity or edit its record as if no interruption occurred.
+If an apparently active predecessor may be stale, apply the 1-hour inactivity rule above, compare live evidence, post a successor/takeover Session Record, and re-read the Issue before mutation. Do not silently assume the predecessor's identity or edit its record as if no interruption occurred.
 
 ## 9. Conflict handling
 
