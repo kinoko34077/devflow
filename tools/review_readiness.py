@@ -53,9 +53,10 @@ def _yes_no_field(body: str, name: str) -> tuple[bool | None, bool]:
 
 
 def _provenance_fields(body: str) -> dict[str, str] | None:
-    match = re.search(r"(?mi)^###\s+Review Provenance\s*$", body or "")
-    if not match:
+    matches = list(re.finditer(r"(?mi)^###\s+Review Provenance\s*$", body or ""))
+    if len(matches) != 1:
         return None
+    match = matches[0]
     tail = (body or "")[match.end() :]
     next_heading = re.search(r"(?m)^#{1,6}\s+", tail)
     section = tail[: next_heading.start()] if next_heading else tail
