@@ -31,6 +31,7 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 | Cross-repository coordinated work | devflow Work Order |
 | Repository-specific requirements/specs/current technical detail | owning repository |
 | Repository-specific implementation task/finding | owning repository Issue / Work Order |
+| Short-lived manual execution-session checkpoint | worker-owned record on the owning Issue / Work Order |
 | Code diff and verification evidence | owning repository PR / Actions / tests |
 | Display/overview | GitHub Project; never canonical |
 
@@ -42,9 +43,10 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 2. The target `[REPO] <repo>` Control Issue.
 3. The target repository's own agent/readme/current-state entry point.
 4. Active repository-local Issue/Work Order and PR, if any.
-5. Task-relevant specs/code/tests.
-6. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
-7. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
+5. Active or latest relevant Execution Session Record(s) on that owning Issue / Work Order when non-trivial work is active or being resumed.
+6. Task-relevant specs/code/tests.
+7. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
+8. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
 
 ### Work on devflow itself or cross-repository rules
 
@@ -52,8 +54,9 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 2. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
 3. `.devflow/WORKFLOW.yaml`.
 4. Relevant devflow Work Order / Repository Control Issues.
-5. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
-6. Implementation/tests only for the touched control-plane component.
+5. Active or latest relevant Execution Session Record(s) when the work is non-trivial or resumed.
+6. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
+7. Implementation/tests only for the touched control-plane component.
 
 ## 4. Repository-local entry
 
@@ -63,22 +66,29 @@ If it does not use Repository Base, use the existing repository structure record
 
 ## 5. Normal lifecycle
 
+Before non-trivial mutation, inspect active Execution Session Records for overlapping semantic scope and establish or resume a worker-owned session record on the owning Issue / Work Order. Record the bounded plan, provenance, latest checkpoint and next action, then update that same record after each materially distinct milestone. This is a soft coordination convention unless an actual execution-coordinator runtime claim exists; it does not provide atomic exclusion or replace durable task truth.
+
 ```text
 Control Issue / local canon read
 → audit current relevant SHA
 → create or reuse repository-local Issue when durable task tracking is warranted
+→ inspect overlapping Execution Session Records
+→ establish/resume one worker-owned Execution Session + bounded checklist
 → dedicated branch
-→ implementation
+→ implementation with checkpoint updates between bounded milestones
 → tests + regression + real-entry verification as applicable
 → Pull Request
 → re-audit changed scope
 → merge if authorized, low-risk, and safely revertible
 → update repository-local canon/current state where owned information changed
 → update devflow Control Issue only when cross-repository summary changed
+→ release/handoff the Execution Session with recoverable next state
 → Project display follows synchronization
 ```
 
 Do not write directly to the default branch for normal changes.
+
+Detailed session lifecycle, collision handling and record format are defined in `docs/operations/AGENT_OPERATING_MANUAL.md` and `docs/operations/REPOSITORY_ISSUE_MANUAL.md`.
 
 ## 6. When devflow must be updated
 
@@ -93,7 +103,7 @@ Update the target Repository Control Issue when any of these changes:
 - P0/P1 finding that changes readiness;
 - managed/parked/deprecated/cancelled/excluded state.
 
-Do not copy every commit, test log, implementation note, or detailed specification into devflow.
+Do not copy every Execution Session checkpoint, commit, test log, implementation note, or detailed specification into devflow. Session detail belongs on the owning Issue / Work Order unless the task itself is devflow-owned.
 
 ## 7. Safety boundary
 
@@ -112,12 +122,16 @@ If a merged change is wrong, use a dedicated rollback branch + revert PR. Do not
 
 ## 8. Resume / handoff
 
-A new worker resumes from GitHub evidence, not from the previous worker's prose:
+A new worker resumes from GitHub evidence, not from the previous chat narrative:
 
 1. Control Issue;
-2. referenced local Issue/PR;
-3. recorded Audit SHA versus current branch/PR head;
-4. first acceptance condition without current verification evidence.
+2. referenced local Issue/Work Order;
+3. active or latest relevant Execution Session Record(s);
+4. linked branch/PR and current head;
+5. recorded Audit SHA versus current branch/PR head;
+6. latest completed checkpoint and first unchecked / unverified milestone.
+
+If an apparently active session is stale because the worker disappeared or a request timed out, verify live repository/PR state first and create an explicit takeover session rather than silently assuming ownership.
 
 If devflow summary and repository-local canon disagree, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 
