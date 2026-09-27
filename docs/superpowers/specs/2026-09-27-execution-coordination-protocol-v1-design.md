@@ -1,6 +1,6 @@
 # Execution Coordination Protocol v1 — Design
 
-Status: Proposed design for devflow #106 / parent #105
+Status: Accepted Protocol v1 — devflow #106 / parent #105
 Date: 2026-09-27
 Audit base: `2e9f5735d80d82820e2ebf500ca4a07d86573bf3`
 Target runtime repository: `kinoko34077/execution-coordinator`
