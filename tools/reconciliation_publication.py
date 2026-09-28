@@ -9,7 +9,10 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = "development-reconciliation-work.v1"
 SOURCE_CONTRACT_VERSION = "development-reconciliation.v1"
+PROJECTION_MARKER_BEGIN = "<!-- DEVFLOW_RECONCILIATION_WORK_V1_BEGIN -->"
+PROJECTION_MARKER_END = "<!-- DEVFLOW_RECONCILIATION_WORK_V1_END -->"
 
+_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TASK_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
 _ENTRY_REF = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$"
@@ -26,6 +29,24 @@ def _require_nonempty_string(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _require_repository(value: object, field: str = "repository") -> str:
+    repository = _require_nonempty_string(value, field)
+    if _REPOSITORY.fullmatch(repository) is None:
+        raise ValueError(f"{field} must be owner/repository")
+    return repository
+
+
+def _require_observed_at(value: object) -> str:
+    observed_at = _require_nonempty_string(value, "observed_at")
+    try:
+        parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("observed_at must be an RFC-3339 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("observed_at must include an RFC-3339 timezone offset")
+    return observed_at
 
 
 def _require_task_identity(evidence: dict[str, Any]) -> tuple[str, str, str]:
@@ -59,14 +80,7 @@ def _require_source_contract(evidence: dict[str, Any]) -> str:
         raise ValueError("unsupported reconciliation contract version")
     if evidence.get("evidence_complete") is not True:
         raise ValueError("publication requires complete reconciler evidence")
-    observed_at = _require_nonempty_string(evidence.get("observed_at"), "observed_at")
-    try:
-        parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("observed_at must be an RFC-3339 timestamp") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("observed_at must include an RFC-3339 timezone offset")
-    return observed_at
+    return _require_observed_at(evidence.get("observed_at"))
 
 
 def _reason_codes(value: object) -> list[str]:
@@ -204,11 +218,7 @@ def reconcile_publications(
     role: str,
     desired: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Return active publications plus superseded logical IDs for one task/role.
-
-    This is a pure projection operation. Persistence remains the responsibility
-    of the canonical publication surface selected by devflow policy.
-    """
+    """Return active publications plus superseded logical IDs for one task/role."""
 
     _require_nonempty_string(task_ref, "task_ref")
     if _TASK_REF.fullmatch(task_ref) is None:
@@ -246,3 +256,177 @@ def reconcile_publications(
         active.append(desired)
 
     return {"active": active, "superseded_ids": superseded}
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"projection contains duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _validate_projection_publication(
+    publication: object,
+    repository: str,
+) -> dict[str, Any]:
+    if not isinstance(publication, dict):
+        raise ValueError("projection publication must be an object")
+    if publication.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("projection publication has unsupported schema_version")
+
+    publication_id = _require_nonempty_string(
+        publication.get("publication_id"), "publication_id"
+    )
+    if _DIGEST.fullmatch(publication_id) is None:
+        raise ValueError("publication_id must be sha256:<64 lowercase hex>")
+
+    task_ref = _require_nonempty_string(publication.get("task_ref"), "task_ref")
+    task_match = _TASK_REF.fullmatch(task_ref)
+    if task_match is None or task_match.group(1) != repository:
+        raise ValueError("publication task_ref must belong to the projected repository")
+
+    task_digest = _require_nonempty_string(
+        publication.get("task_body_sha256"), "task_body_sha256"
+    )
+    if _DIGEST.fullmatch(task_digest) is None:
+        raise ValueError("task_body_sha256 must be sha256:<64 lowercase hex>")
+
+    entry_ref = _require_nonempty_string(publication.get("entry_ref"), "entry_ref")
+    entry_match = _ENTRY_REF.fullmatch(entry_ref)
+    if entry_match is None:
+        raise ValueError("entry_ref must be a canonical GitHub Issue URL")
+    if f"{entry_match.group(1)}/{entry_match.group(2)}#{entry_match.group(3)}" != task_ref:
+        raise ValueError("entry_ref must identify the exact publication task")
+
+    role = publication.get("role")
+    disposition = publication.get("disposition")
+    expected_disposition = {
+        "reviewer": "NEEDS_REVIEWER",
+        "recovery": "NEEDS_RECOVERY",
+    }.get(str(role))
+    if expected_disposition is None or disposition != expected_disposition:
+        raise ValueError("projection publication role/disposition is unsupported")
+    if publication.get("requires_user_confirmation") is not False:
+        raise ValueError("publishable work must not require user confirmation")
+
+    _reason_codes(publication.get("reason_codes"))
+    _require_nonempty_string(publication.get("scope"), "scope")
+    _require_observed_at(publication.get("observed_at"))
+    if not isinstance(publication.get("context"), dict):
+        raise ValueError("publication context must be an object")
+
+    freshness = publication.get("freshness")
+    if not isinstance(freshness, dict):
+        raise ValueError("publication freshness must be an object")
+    if freshness.get("source_contract_version") != SOURCE_CONTRACT_VERSION:
+        raise ValueError("publication freshness source contract is unsupported")
+    if freshness.get("task_body_sha256") != task_digest:
+        raise ValueError("publication freshness digest must match task_body_sha256")
+
+    return publication
+
+
+def _projection_bounds(body: str) -> tuple[int, int] | None:
+    begin_count = body.count(PROJECTION_MARKER_BEGIN)
+    end_count = body.count(PROJECTION_MARKER_END)
+    if begin_count == 0 and end_count == 0:
+        return None
+    if begin_count != 1 or end_count != 1:
+        raise ValueError("publication projection must contain exactly one marker pair")
+    begin = body.find(PROJECTION_MARKER_BEGIN)
+    end = body.find(PROJECTION_MARKER_END)
+    if end < begin + len(PROJECTION_MARKER_BEGIN):
+        raise ValueError("publication projection markers are malformed")
+    return begin, end
+
+
+def render_publication_projection(
+    repository: str,
+    publications: Iterable[dict[str, Any]],
+) -> str:
+    repository = _require_repository(repository)
+    validated = [
+        _validate_projection_publication(item, repository) for item in publications
+    ]
+    publication_ids = [item["publication_id"] for item in validated]
+    if len(publication_ids) != len(set(publication_ids)):
+        raise ValueError("projection publication IDs must be unique")
+    validated.sort(key=lambda item: str(item["publication_id"]))
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "repository": repository,
+        "publications": validated,
+    }
+    encoded = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
+    return f"{PROJECTION_MARKER_BEGIN}\n{encoded}\n{PROJECTION_MARKER_END}"
+
+
+def parse_publication_projection(
+    body: str,
+    repository: str,
+) -> list[dict[str, Any]]:
+    repository = _require_repository(repository)
+    bounds = _projection_bounds(body)
+    if bounds is None:
+        return []
+    begin, end = bounds
+    raw = body[begin + len(PROJECTION_MARKER_BEGIN) : end].strip()
+    if not raw:
+        raise ValueError("publication projection JSON is empty")
+    try:
+        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+    except json.JSONDecodeError as exc:
+        raise ValueError("publication projection JSON is malformed") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("publication projection must be an object")
+    if set(payload) != {"schema_version", "repository", "publications"}:
+        raise ValueError("publication projection has unknown or missing fields")
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("publication projection has unsupported schema_version")
+    if payload.get("repository") != repository:
+        raise ValueError("publication projection repository identity mismatch")
+    publications = payload.get("publications")
+    if not isinstance(publications, list):
+        raise ValueError("publication projection publications must be an array")
+    validated = [
+        _validate_projection_publication(item, repository) for item in publications
+    ]
+    publication_ids = [item["publication_id"] for item in validated]
+    if len(publication_ids) != len(set(publication_ids)):
+        raise ValueError("projection publication IDs must be unique")
+    return validated
+
+
+def replace_publication_projection(
+    body: str,
+    repository: str,
+    publications: Iterable[dict[str, Any]],
+) -> str:
+    repository = _require_repository(repository)
+    desired = list(publications)
+    bounds = _projection_bounds(body)
+
+    if not desired:
+        if bounds is None:
+            return body.rstrip()
+        begin, end = bounds
+        prefix = body[:begin].rstrip()
+        suffix = body[end + len(PROJECTION_MARKER_END) :].strip("\n")
+        return (prefix + ("\n\n" + suffix if suffix else "")).rstrip()
+
+    block = render_publication_projection(repository, desired)
+    if bounds is None:
+        return body.rstrip() + "\n\n" + block
+
+    # Parse the current block before replacement so malformed/stale framing does
+    # not get silently overwritten as if it were trusted state.
+    parse_publication_projection(body, repository)
+    begin, end = bounds
+    prefix = body[:begin].rstrip()
+    suffix = body[end + len(PROJECTION_MARKER_END) :].strip("\n")
+    result = prefix + "\n\n" + block
+    if suffix:
+        result += "\n\n" + suffix
+    return result.rstrip()
