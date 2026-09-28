@@ -248,6 +248,55 @@ class GitHubIssueIdentityTests(unittest.TestCase):
         ):
             reader.get_issue("kinoko34077/owner-repo", 7)
 
+
+    def test_reader_rejects_issue_url_number_mismatch(self):
+        issue = {
+            "number": 7,
+            "title": "contradictory issue",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/repos/kinoko34077/owner-repo/issues/8",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
+    def test_reader_rejects_non_github_identity_url_host(self):
+        issue = {
+            "number": 7,
+            "title": "spoofed issue",
+            "repository_url": "https://evil.example/repos/kinoko34077/owner-repo",
+            "url": "https://evil.example/repos/kinoko34077/owner-repo/issues/7",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
+    def test_reader_rejects_conflicting_repository_identity_fields(self):
+        issue = {
+            "number": 7,
+            "title": "conflicting issue",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/repos/other-owner/other-repo/issues/7",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
     def test_service_rejects_mismatched_observed_issue_identity(self):
         issue = {
             "number": 7,
