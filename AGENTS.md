@@ -139,6 +139,16 @@ If an apparently active session may be stale because the worker disappeared or a
 
 If devflow summary and repository-local canon disagree, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 
+## 8.1 Broad-instruction pickup (already-open chat workers)
+
+When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a broad instruction for a managed repository, such as 「このリポ側に合わせてなんか作業して」, do **not** ask the user to pick an Issue. Run one discovery cycle through the common path in `docs/operations/CHAT_WORKER_INTEGRATION.md`. That path uses the contract `docs/spec/CHAT_WORKER_BOOTSTRAP.md` and the profiles `docs/spec/CHAT_WORKER_PROFILES.md`, and it returns exactly one disposition:
+
+- `CLAIM_AND_WORK` / `REVIEW_WORK` / `RECOVERY_WORK`: begin only after the execution-coordinator claim and acknowledge succeed; then follow the normal lifecycle above.
+- `NEEDS_HUMAN`: ask only about that gate.
+- `WAIT_EXTERNAL`, `NO_ELIGIBLE_WORK` or `NEEDS_EVIDENCE`: report the typed result; never invent a task from prose, Issue age, branches, Project fields or chat history.
+
+Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository pickup is deferred (#198).
+
 ## 9. Detailed manuals
 
 - Agent operations: `docs/operations/AGENT_OPERATING_MANUAL.md`
@@ -147,3 +157,4 @@ If devflow summary and repository-local canon disagree, the owning repository go
 - Canonical control-plane spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
 - Machine-readable workflow: `.devflow/WORKFLOW.yaml`
 - Project synchronization: `docs/project/PROJECT_SYNC.md`
+- Chat worker broad-instruction pickup: `docs/operations/CHAT_WORKER_INTEGRATION.md`
