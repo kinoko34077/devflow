@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'AGENTS.md'
       - 'scripts/project_sync.py'
       - 'scripts/repository_bootstrap.py'
       - 'tools/**'
@@ -17,6 +18,7 @@ on:
       - 'docs/operations/DEVFLOW_MCP.md'
       - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+      - 'docs/spec/REPOSITORY_BOOTSTRAP.md'
       - 'requirements-mcp.txt'
 
 permissions:
