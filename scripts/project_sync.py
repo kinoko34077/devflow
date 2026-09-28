@@ -31,6 +31,10 @@ FIELD_MAP = {
     "Next Action": "Next Action",
     "Audit SHA": "Audit SHA",
 }
+# WAIT is a valid devflow Control state; map it only at the Project display boundary.
+# The source Control remains WAIT, while the existing Project Status option is PARKED.
+PROJECT_STATUS_ALIASES = {"WAIT": "PARKED"}
+
 SELECT_OPTIONS = {
     "Status": {
         "NEEDS_AUDIT", "AUDITED", "WORK_ORDER_READY", "READY_FOR_IMPLEMENTATION",
@@ -94,6 +98,8 @@ def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
     desired: dict[str, str] = {}
     for section, field in FIELD_MAP.items():
         value = sections.get(section, "").strip()
+        if section == "Work Status":
+            value = PROJECT_STATUS_ALIASES.get(value, value)
         if value:
             desired[field] = value
     if str(issue.get("state", "")).lower() == "closed":
