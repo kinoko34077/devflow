@@ -1,6 +1,6 @@
 # Chat Worker Integration (already-open chats)
 
-Status: operational procedure for devflow#199 (#190 Phase E)
+Status: operational procedure for devflow#199 (#190 Phase E), updated by #203 with the #201 pilot evidence
 Contracts: [`CHAT_WORKER_BOOTSTRAP.md`](../spec/CHAT_WORKER_BOOTSTRAP.md), [`CHAT_WORKER_PROFILES.md`](../spec/CHAT_WORKER_PROFILES.md)
 Runtime: `kinoko34077/execution-coordinator` → `python -m execution_coordinator.bootstrap_pickup`
 
@@ -39,15 +39,27 @@ Rules that bind every provider:
 - The session file `.chat-worker-session.json` holds only chat identity (`worker_session_id`, cycle). It is never task truth and must never contain secrets.
 - Tokens come from the environment (`GH_TOKEN` / `GITHUB_TOKEN`). They are never pasted into chat text, profile fields or Issues. Creating or broadening credentials is Human-gated.
 
-## 2. Provider status
+## 2. Prerequisites (from the #201 pilot)
 
-| Provider | Access path | Surfaces | Status |
-| --- | --- | --- | --- |
-| **Claude / Claude Code** (cloud session with a shell) | the repository checkout and a shell run the command directly; GitHub through the session token | `github:read`, `github:write`, `coordinator:claim`; `python`, `git`, `node`, `tests`; `linux` | **Verified.** A live end-to-end run for #197 went from the broad instruction to `CLAIM_AND_WORK` → claim → acknowledge → work → release on the real lane. The read-only CLI run for #199 matches. |
-| **Codex** (already-open Codex session with a repository sandbox) | the command runs in the Codex sandbox from a checkout of execution-coordinator plus devflow | expected to match Claude **only if** the Codex environment grants network access to `api.github.com` and supplies a token with Issues-write and Actions-dispatch on execution-coordinator | **Not yet verified.** It must be verified from inside a Codex session (Phase F). Without network or token, its probes report no surfaces and it gets `PROVIDER_SURFACE_MISSING`; that is a provider-local limitation, not a reason to weaken authority. |
-| **ordinary ChatGPT** (chat with a GitHub connector) | the connector reads Issues/files; there is no shell | at most `github:read` and possibly `github:write` via the connector; **no `coordinator:claim`**, because it cannot dispatch the `mutate-state.yml` lane | **Limitation recorded.** Work dispositions become `NEEDS_EVIDENCE` / `PROVIDER_SURFACE_MISSING`. ChatGPT may still perform the read-only bootstrap: it reads the Control and reports the non-work disposition. It must not implement unclaimed candidates. Removing this limitation would need a supported claim transport for ChatGPT, which is a separate future Issue. |
+The ChatGPT pilot leg needed each of these fixed by hand. Check them before the first cycle:
 
-## 3. Minimal user invocations
+1. **Python ≥ 3.11.** execution-coordinator uses `enum.StrEnum`, so older interpreters fail at import.
+2. **Checkouts on the `execution-coordinator` import path**, for example `PYTHONPATH=<execution-coordinator>/src`, plus a **current devflow checkout** (`git -C <devflow> pull --ff-only`). A stale devflow checkout lacks the contract tools.
+3. **A GitHub token in the environment** (`GH_TOKEN` or `GITHUB_TOKEN`) with Issues-write and Actions-dispatch on execution-coordinator. A missing or invalid token shows up as HTTP 401, or as no `coordinator:claim` surface.
+4. **UTF-8 output**, especially on Windows: set `PYTHONUTF8=1` and use a UTF-8 console. Otherwise Japanese text in posted comments degrades to `??`.
+
+The follow-up Work Order #202 moves this cycle into GitHub Actions so that chats no longer need these local prerequisites.
+
+## 3. Provider status
+
+| Provider | Surfaces | Status |
+| --- | --- | --- |
+| **Claude / Claude Code** (cloud session with a shell) | `github:read`, `github:write`, `coordinator:claim`; `python`, `git`, `node`, `tests`; `linux` | **Verified.** #197 ran end to end live, and #201 ran two concurrent sessions that made disjoint selections with no duplicate claim. |
+| **ordinary ChatGPT with local execution access** | the same surfaces once the prerequisites hold | **Verified in #201.** It went from the broad instruction to `CLAIM_AND_WORK` on canary#7, then claim, acknowledge, comment and release, with the same canonical interpretation as Claude. |
+| **ordinary ChatGPT without local execution** (connector only) | at most `github:read` / `github:write`; no `coordinator:claim` | **Limitation.** Work dispositions become `PROVIDER_SURFACE_MISSING`, so it can only run the read-only bootstrap. No uncoordinated fallback is allowed. #202 would remove this limitation. |
+| **Codex** | expected to match Claude when its sandbox has network access and a token | **Deferred / unverified.** The pilot leg was postponed by the user because of a Codex usage limit; the procedure above applies unchanged. |
+
+## 4. Minimal user invocations
 
 ```text
 Codex / Claude:  このリポ側に合わせてなんか作業して    (with the target repository open in the session)
