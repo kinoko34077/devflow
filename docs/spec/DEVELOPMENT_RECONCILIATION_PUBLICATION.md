@@ -1,6 +1,6 @@
 # Development Reconciliation Work Publication Contract
 
-Status: proposed for acceptance under devflow#159  
+Status: Canonical specification owned by devflow#159  
 Authority: devflow cross-repository workflow specification  
 Parent decision contract: `DEVELOPMENT_RECONCILIATION.md` / `development-reconciliation.v1`  
 Schema: `development-reconciliation-work.v1`
@@ -24,13 +24,14 @@ The authority chain is:
 owning Issue / Work Order durable truth
 -> validated development-reconciliation.v1 result
 -> development-reconciliation-work.v1 publication
+-> unique devflow Repository Control projection
 -> later accepted consumer such as execution-coordinator
 -> serialized runtime claim/lease/generation authority
 ```
 
 The publication MUST NOT be manufactured from Project fields, labels, branch existence, chat text, title heuristics, or free-form prose.
 
-The publication layer introduces no private queue database. Active demand is a deterministic projection of current accepted evidence. Re-evaluation may retain the same logical publication, supersede it, or remove it when demand no longer exists.
+The publication layer introduces no private queue database. Active demand is a deterministic projection of current accepted evidence into the unique trusted `[REPO] <repository>` Control. Re-evaluation may retain the same logical publication, supersede it, or remove it when demand no longer exists.
 
 ## 3. Common envelope
 
@@ -64,7 +65,7 @@ Required invariants:
 - `disposition` is copied from the accepted Reconciler vocabulary, never invented here;
 - `reason_codes` preserve the reconciler reason evidence;
 - `requires_user_confirmation` is `false` for a publishable reviewer/recovery record; an active Human Gate suppresses publication rather than producing autonomous work demand;
-- `observed_at` records observation time but does not participate in logical deduplication identity.
+- `observed_at` is a timezone-aware RFC-3339 timestamp and records observation time but does not participate in logical deduplication identity.
 
 Incomplete, malformed, stale, contradictory, unsupported or identity-mismatched required evidence fails closed and MUST NOT be converted into a publication.
 
@@ -147,12 +148,48 @@ For one `(task_ref, role)` pair, reconciliation against current evidence produce
 
 Supersession is derived from current authority. It is not evidence that a worker completed the published work.
 
-## 8. Consumer boundary
+## 8. Canonical Repository Control projection
+
+The machine-readable GitHub publication surface is a dedicated block in the unique trusted devflow Repository Control for the owning repository.
+
+Markers:
+
+```text
+<!-- DEVFLOW_RECONCILIATION_WORK_V1_BEGIN -->
+<canonical JSON>
+<!-- DEVFLOW_RECONCILIATION_WORK_V1_END -->
+```
+
+Payload:
+
+```json
+{
+  "schema_version": "development-reconciliation-work.v1",
+  "repository": "owner/repository",
+  "publications": []
+}
+```
+
+Rules:
+
+- zero marker pairs means no active reconciliation work publication;
+- exactly one marker pair is allowed;
+- duplicate, reversed, malformed, unknown-field or repository-mismatched projection evidence fails closed;
+- publication IDs inside one projection are unique;
+- every publication `task_ref` belongs to the projected repository;
+- replacement is deterministic and idempotent;
+- when no active publications remain, the dedicated block is removed rather than retained as stale queue state;
+- this block is separate from the accepted `DEVFLOW_EXECUTION_CANDIDATES_V1` admission projection. A reconciliation publication does not become an execution candidate until the separately gated downstream adoption path explicitly consumes it.
+
+The Control remains a cross-repository projection. The owning Issue/Work Order remains detailed durable task truth.
+
+## 9. Consumer boundary
 
 `execution-coordinator#49` may later adopt this schema only after its own Control/audit gates and explicit devflow release are satisfied.
 
 A consumer MUST:
 
+- read only the trusted unique Repository Control publication projection;
 - validate exact task/source/freshness identity;
 - preserve role-specific demand without inventing new reconciliation semantics;
 - preserve publication/consumption separation from devflow#125;
@@ -161,14 +198,16 @@ A consumer MUST:
 
 The schema intentionally contains no provider, selected worker, claim ID, lease, assignment, scheduler score, or provider-launch instruction.
 
-## 9. Implementation mapping
+## 10. Implementation mapping
 
 Reference implementation:
 
 - `tools/reconciliation_publication.py`
 - `tests/test_reconciliation_publication.py`
+- `tests/test_reconciliation_publication_validation.py`
+- `tests/test_reconciliation_publication_projection.py`
 
-The implementation is a pure derivation/reconciliation layer. Persistence to a canonical machine-readable GitHub surface and runtime role adoption are separate bounded responsibilities; this contract must be consumed rather than redefined by those layers.
+The implementation derives/deduplicates role demand and deterministically renders, parses, replaces or removes the canonical Repository Control projection. Actual execution-coordinator role adoption remains the separately gated responsibility of execution-coordinator#49.
 
 ## Related authority
 
