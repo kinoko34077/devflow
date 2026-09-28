@@ -61,9 +61,11 @@ def _require_source_contract(evidence: dict[str, Any]) -> str:
         raise ValueError("publication requires complete reconciler evidence")
     observed_at = _require_nonempty_string(evidence.get("observed_at"), "observed_at")
     try:
-        datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError("observed_at must be an RFC-3339 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("observed_at must include an RFC-3339 timezone offset")
     return observed_at
 
 
@@ -143,7 +145,11 @@ def build_publication(evidence: dict[str, Any]) -> dict[str, Any] | None:
     disposition = str(evidence.get("disposition") or "")
     if disposition not in {"NEEDS_REVIEWER", "NEEDS_RECOVERY"}:
         return None
-    if evidence.get("human_gate") is True:
+
+    human_gate = evidence.get("human_gate")
+    if not isinstance(human_gate, bool):
+        raise ValueError("human_gate must be a boolean")
+    if human_gate:
         return None
 
     observed_at = _require_source_contract(evidence)
