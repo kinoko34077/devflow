@@ -205,6 +205,46 @@ class ObservedIssueIdentityTests(unittest.TestCase):
         self.assertEqual(result["repository"], "kinoko34077/SynTrail-LM")
         self.assertEqual(result["issue_number"], 7)
 
+    def test_non_github_repository_url_fails_closed(self):
+        issue = self._issue(
+            repository_url="https://evil.example/repos/kinoko34077/SynTrail-LM",
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_noncanonical_repository_url_path_fails_closed(self):
+        issue = self._issue(
+            repository_url="https://api.github.com/prefix/repos/kinoko34077/SynTrail-LM",
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_conflicting_html_url_identity_fails_closed(self):
+        issue = self._issue(
+            html_url="https://github.com/other/repo/issues/7",
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_non_default_repository_url_port_fails_closed(self):
+        issue = self._issue(
+            repository_url="https://api.github.com:8443/repos/kinoko34077/SynTrail-LM",
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_conflicting_api_issue_number_fails_closed(self):
+        issue = self._issue(
+            url="https://api.github.com/repos/kinoko34077/SynTrail-LM/issues/8",
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_malformed_repository_object_fails_closed(self):
+        issue = self._issue(repository={})
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
     def test_repository_match_is_case_insensitive(self):
         reader = self._reader(self._issue(repository_url="https://api.github.com/repos/kinoko34077/syntrail-lm"))
         self.assertEqual(reader.get_issue("kinoko34077/SynTrail-LM", 7)["number"], 7)

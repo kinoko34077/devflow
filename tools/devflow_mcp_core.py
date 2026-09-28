@@ -183,33 +183,121 @@ def _issue_url(issue: dict[str, Any]) -> str:
     return str(issue.get("html_url") or issue.get("url") or "")
 
 
-def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue_number: int) -> None:
-    """Fail closed unless the observed GitHub object is the requested Issue.
+TRUSTED_GITHUB_API_HOSTS = frozenset({"api.github.com"})
+TRUSTED_GITHUB_WEB_HOSTS = frozenset({"github.com", "www.github.com"})
 
-    The response's own ``number`` and ``repository_url`` are authoritative; the
-    caller-supplied identity is never used to fill in or relabel them.
-    """
+
+def _parse_issue_identity_url(value: Any, *, field: str) -> tuple[str, int | None] | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+        or parsed.path.endswith("/")
+        or "//" in parsed.path
+    ):
+        return None
+
+    host = (parsed.hostname or "").lower()
+    segments = [urllib.parse.unquote(part) for part in parsed.path.split("/")[1:]]
+    try:
+        if field == "repository_url":
+            if host not in TRUSTED_GITHUB_API_HOSTS or len(segments) != 3 or segments[0] != "repos":
+                return None
+            return normalize_repository(f"{segments[1]}/{segments[2]}"), None
+
+        if field == "url":
+            if (
+                host not in TRUSTED_GITHUB_API_HOSTS
+                or len(segments) != 5
+                or segments[0] != "repos"
+                or segments[3] != "issues"
+                or not segments[4].isdigit()
+            ):
+                return None
+            return normalize_repository(f"{segments[1]}/{segments[2]}"), int(segments[4])
+
+        if field == "html_url":
+            if (
+                host not in TRUSTED_GITHUB_WEB_HOSTS
+                or len(segments) != 4
+                or segments[2] != "issues"
+                or not segments[3].isdigit()
+            ):
+                return None
+            return normalize_repository(f"{segments[0]}/{segments[1]}"), int(segments[3])
+    except DevflowMCPError:
+        return None
+
+    return None
+
+
+def _identity_mismatch(requested: str, detail: str) -> DevflowMCPError:
+    return DevflowMCPError(
+        f"Observed Issue identity {detail} does not match requested {requested!r}; "
+        "the response may be malformed, transferred, or misrouted."
+    )
+
+
+def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue_number: int) -> None:
+    """Fail closed unless every present observed identity field matches the request."""
     requested = normalize_repository(repository)
     observed_number = issue.get("number")
     if isinstance(observed_number, bool) or not isinstance(observed_number, int) or observed_number != issue_number:
         raise DevflowMCPError(
             f"Observed Issue number {observed_number!r} does not match requested #{issue_number} in {requested}."
         )
-    repository_url = str(issue.get("repository_url") or "")
-    path = urllib.parse.urlsplit(repository_url).path
-    marker = "/repos/"
-    observed_repository = ""
-    if marker in path:
-        tail = path.split(marker, 1)[1].strip("/")
-        if tail.count("/") == 1:
-            observed_repository = urllib.parse.unquote(tail)
-    if not observed_repository or observed_repository.casefold() != requested.casefold():
-        raise DevflowMCPError(
-            f"Observed Issue repository {observed_repository or '<missing>'!r} does not match requested {requested!r}; "
-            "the Issue may have been transferred or the repository renamed."
-        )
     if "pull_request" in issue:
         raise DevflowMCPError(f"{requested}#{issue_number} is a pull request, not an Issue.")
+
+    repositories: set[str] = set()
+    issue_numbers: set[int] = set()
+    for field in ("repository_url", "url", "html_url"):
+        if field not in issue:
+            if field == "repository_url":
+                raise _identity_mismatch(requested, "repository <missing>")
+            continue
+        parsed = _parse_issue_identity_url(issue.get(field), field=field)
+        if parsed is None:
+            raise _identity_mismatch(requested, f"field {field!r} is invalid")
+        observed_repository, observed_issue_number = parsed
+        repositories.add(observed_repository.casefold())
+        if observed_issue_number is not None:
+            issue_numbers.add(observed_issue_number)
+
+    if repositories != {requested.casefold()}:
+        raise _identity_mismatch(requested, f"repositories {sorted(repositories)!r}")
+
+    if any(number != issue_number for number in issue_numbers):
+        raise _identity_mismatch(requested, f"Issue numbers {sorted(issue_numbers)!r}")
+
+    if "repository" in issue:
+        repository_object = issue.get("repository")
+        if not isinstance(repository_object, dict):
+            raise _identity_mismatch(requested, "repository object is invalid")
+        repository_values: set[str] = set()
+        for key in ("full_name", "nameWithOwner"):
+            if key not in repository_object:
+                continue
+            value = repository_object.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise _identity_mismatch(requested, f"repository.{key} is invalid")
+            try:
+                repository_values.add(normalize_repository(value).casefold())
+            except DevflowMCPError:
+                raise _identity_mismatch(requested, f"repository.{key} is invalid") from None
+        if not repository_values or repository_values != {requested.casefold()}:
+            raise _identity_mismatch(requested, f"repository object {sorted(repository_values)!r}")
 
 
 TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
