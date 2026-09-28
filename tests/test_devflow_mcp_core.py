@@ -66,6 +66,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
         }
         self.health = {
             "number": 41,
+            "author_association": "OWNER",
             "title": devflow_mcp_core.HEALTH_TITLE,
             "html_url": "https://github.com/kinoko34077/devflow/issues/41",
             "state": "closed",
@@ -178,6 +179,82 @@ class GitHubReadOnlyClientTests(unittest.TestCase):
         reader = devflow_mcp_core.GitHubReader(token="", transport=transport)
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "GitHub read failed: TimeoutError"):
             reader.get_issue("kinoko34077/devflow", 1)
+
+
+    def test_sync_health_ignores_untrusted_duplicate_and_reports_it(self):
+        outsider = {
+            **self.health,
+            "number": 99,
+            "author_association": "NONE",
+        }
+        reader = FakeReader([outsider, self.health])
+        result = devflow_mcp_core.DevflowService(reader).get_sync_health()
+        self.assertEqual(result["issue_number"], 41)
+        self.assertEqual(result["ignored_untrusted_candidates"], [99])
+
+    def test_sync_health_outsider_only_is_unavailable(self):
+        outsider = {
+            **self.health,
+            "author_association": "CONTRIBUTOR",
+        }
+        service = devflow_mcp_core.DevflowService(FakeReader([outsider]))
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "trusted Sync Health Issue",
+        ):
+            service.get_sync_health()
+
+
+class GitHubIssueIdentityTests(unittest.TestCase):
+    def test_reader_accepts_matching_observed_issue_identity(self):
+        issue = {
+            "number": 7,
+            "title": "owner issue",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/repos/kinoko34077/owner-repo/issues/7",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        self.assertEqual(
+            reader.get_issue("kinoko34077/owner-repo", 7)["number"],
+            7,
+        )
+
+    def test_reader_rejects_mismatched_observed_issue_identity(self):
+        issue = {
+            "number": 7,
+            "title": "redirected issue",
+            "repository_url": "https://api.github.com/repos/other-owner/other-repo",
+            "url": "https://api.github.com/repos/other-owner/other-repo/issues/7",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
+    def test_service_rejects_mismatched_observed_issue_identity(self):
+        issue = {
+            "number": 7,
+            "title": "redirected issue",
+            "repository_url": "https://api.github.com/repos/other-owner/other-repo",
+            "url": "https://api.github.com/repos/other-owner/other-repo/issues/7",
+        }
+
+        class Reader:
+            def get_issue(self, repository, issue_number):
+                return issue
+
+        service = devflow_mcp_core.DevflowService(Reader())
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            service.get_issue("kinoko34077/owner-repo", 7)
 
 
 if __name__ == "__main__":
