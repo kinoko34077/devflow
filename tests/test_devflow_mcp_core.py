@@ -69,6 +69,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
             "title": devflow_mcp_core.HEALTH_TITLE,
             "html_url": "https://github.com/kinoko34077/devflow/issues/41",
             "state": "closed",
+            "author_association": "OWNER",
             "body": "## Result\n\nPASS\n\n## Mode\n\nevent-sync\n",
         }
 
@@ -178,6 +179,142 @@ class GitHubReadOnlyClientTests(unittest.TestCase):
         reader = devflow_mcp_core.GitHubReader(token="", transport=transport)
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "GitHub read failed: TimeoutError"):
             reader.get_issue("kinoko34077/devflow", 1)
+
+
+class ObservedIssueIdentityTests(unittest.TestCase):
+    """devflow#154 P1: exact Issue reads must match the observed object identity."""
+
+    def _issue(self, **overrides):
+        issue = {
+            "number": 7,
+            "title": "Owner task",
+            "state": "open",
+            "body": "## Next Action\n\ncontinue\n",
+            "repository_url": "https://api.github.com/repos/kinoko34077/SynTrail-LM",
+            "html_url": "https://github.com/kinoko34077/SynTrail-LM/issues/7",
+        }
+        issue.update(overrides)
+        return issue
+
+    def _reader(self, issue):
+        return devflow_mcp_core.GitHubReader(token="", transport=lambda url, headers: issue)
+
+    def test_matching_identity_is_returned(self):
+        service = devflow_mcp_core.DevflowService(self._reader(self._issue()))
+        result = service.get_issue("SynTrail-LM", 7)
+        self.assertEqual(result["repository"], "kinoko34077/SynTrail-LM")
+        self.assertEqual(result["issue_number"], 7)
+
+    def test_repository_match_is_case_insensitive(self):
+        reader = self._reader(self._issue(repository_url="https://api.github.com/repos/kinoko34077/syntrail-lm"))
+        self.assertEqual(reader.get_issue("kinoko34077/SynTrail-LM", 7)["number"], 7)
+
+    def test_mismatched_repository_fails_closed(self):
+        reader = self._reader(self._issue(repository_url="https://api.github.com/repos/other/elsewhere"))
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "does not match requested"):
+            reader.get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_missing_repository_url_fails_closed(self):
+        issue = self._issue()
+        del issue["repository_url"]
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "<missing>"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_mismatched_number_fails_closed(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "number 8"):
+            self._reader(self._issue(number=8)).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_missing_number_is_not_filled_from_request(self):
+        issue = self._issue()
+        del issue["number"]
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "number None"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_pull_request_is_rejected(self):
+        issue = self._issue(pull_request={"url": "x"})
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "pull request"):
+            self._reader(issue).get_issue("kinoko34077/SynTrail-LM", 7)
+
+    def test_service_checks_identity_even_with_custom_reader(self):
+        class Reader:
+            def get_issue(self, repository, issue_number):
+                return {"number": 7, "repository_url": "https://api.github.com/repos/other/x", "body": ""}
+
+        with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+            devflow_mcp_core.DevflowService(Reader()).get_issue("SynTrail-LM", 7)
+
+    def test_default_transport_rejects_redirected_final_url(self):
+        from unittest import mock
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def geturl(self):
+                return "https://api.github.com/repositories/1/issues/9?token=leak"
+
+            def read(self):
+                raise AssertionError("body must not be consumed after a redirect")
+
+        with mock.patch("urllib.request.urlopen", return_value=Response()):
+            with self.assertRaises(devflow_mcp_core.DevflowMCPError) as ctx:
+                devflow_mcp_core._default_transport(
+                    "https://api.github.com/repos/kinoko34077/devflow/issues/7",
+                    {"Authorization": "Bearer secret"},
+                )
+        message = str(ctx.exception)
+        self.assertIn("redirected", message)
+        self.assertNotIn("leak", message)
+        self.assertNotIn("secret", message)
+
+
+class SyncHealthTrustTests(unittest.TestCase):
+    """devflow#154 P2: Sync Health selection applies the trusted-author policy."""
+
+    def _health(self, number, association, state="open", result="PASS"):
+        return {
+            "number": number,
+            "title": devflow_mcp_core.HEALTH_TITLE,
+            "state": state,
+            "author_association": association,
+            "body": f"## Result\n\n{result}\n",
+        }
+
+    def _service(self, issues):
+        return devflow_mcp_core.DevflowService(FakeReader(issues))
+
+    def test_outsider_only_health_is_unavailable(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, r"No trusted Sync Health.*\[5\]"):
+            self._service([self._health(5, "NONE")]).get_sync_health()
+
+    def test_missing_association_is_untrusted(self):
+        issue = self._health(5, "OWNER")
+        del issue["author_association"]
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No trusted Sync Health"):
+            self._service([issue]).get_sync_health()
+
+    def test_trusted_plus_outsider_selects_trusted_and_reports_ignored(self):
+        result = self._service([
+            self._health(41, "OWNER"),
+            self._health(900, "CONTRIBUTOR", result="FAIL"),
+        ]).get_sync_health()
+        self.assertEqual(result["issue_number"], 41)
+        self.assertEqual(result["result"], "PASS")
+        self.assertEqual(result["ignored_untrusted_candidates"], [900])
+
+    def test_open_trusted_preferred_over_closed_trusted_history(self):
+        result = self._service([
+            self._health(30, "OWNER", state="closed", result="FAIL"),
+            self._health(41, "OWNER"),
+        ]).get_sync_health()
+        self.assertEqual(result["issue_number"], 41)
+
+    def test_two_open_trusted_candidates_remain_ambiguous(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "found 2"):
+            self._service([self._health(41, "OWNER"), self._health(42, "MEMBER")]).get_sync_health()
 
 
 if __name__ == "__main__":

@@ -65,8 +65,21 @@ def normalize_repository(repository: str) -> str:
 def _default_transport(url: str, headers: dict[str, str]) -> Any:
     request = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(request, timeout=30) as response:
+        final_url = response.geturl()
+        if final_url != url:
+            # A redirect means the observed object may not be the requested
+            # one (transfer, rename, misrouting). Fail closed; never relabel.
+            raise DevflowMCPError(
+                "GitHub read was redirected; refusing to use a response whose "
+                f"identity differs from the request ({_redact_url(url)} -> {_redact_url(final_url)})."
+            )
         payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else None
+
+
+def _redact_url(value: str) -> str:
+    parts = urllib.parse.urlsplit(str(value))
+    return urllib.parse.urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
 
 
 def _translate_read_error(exc: Exception) -> DevflowMCPError:
@@ -155,6 +168,7 @@ class GitHubReader:
         issue = self._read(url)
         if not isinstance(issue, dict):
             raise DevflowMCPError("GitHub issue response was not an object.")
+        verify_observed_issue_identity(issue, repository, issue_number)
         return issue
 
 
@@ -167,6 +181,35 @@ def _exactly_one(items: Iterable[dict[str, Any]], predicate: Callable[[dict[str,
 
 def _issue_url(issue: dict[str, Any]) -> str:
     return str(issue.get("html_url") or issue.get("url") or "")
+
+
+def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue_number: int) -> None:
+    """Fail closed unless the observed GitHub object is the requested Issue.
+
+    The response's own ``number`` and ``repository_url`` are authoritative; the
+    caller-supplied identity is never used to fill in or relabel them.
+    """
+    requested = normalize_repository(repository)
+    observed_number = issue.get("number")
+    if isinstance(observed_number, bool) or not isinstance(observed_number, int) or observed_number != issue_number:
+        raise DevflowMCPError(
+            f"Observed Issue number {observed_number!r} does not match requested #{issue_number} in {requested}."
+        )
+    repository_url = str(issue.get("repository_url") or "")
+    path = urllib.parse.urlsplit(repository_url).path
+    marker = "/repos/"
+    observed_repository = ""
+    if marker in path:
+        tail = path.split(marker, 1)[1].strip("/")
+        if tail.count("/") == 1:
+            observed_repository = urllib.parse.unquote(tail)
+    if not observed_repository or observed_repository.casefold() != requested.casefold():
+        raise DevflowMCPError(
+            f"Observed Issue repository {observed_repository or '<missing>'!r} does not match requested {requested!r}; "
+            "the Issue may have been transferred or the repository renamed."
+        )
+    if "pull_request" in issue:
+        raise DevflowMCPError(f"{requested}#{issue_number} is a pull request, not an Issue.")
 
 
 TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
@@ -270,10 +313,11 @@ class DevflowService:
     def get_issue(self, repository: str, issue_number: int) -> dict[str, Any]:
         normalized = normalize_repository(repository)
         issue = self.reader.get_issue(normalized, issue_number)
+        verify_observed_issue_identity(issue, normalized, issue_number)
         body = str(issue.get("body") or "")
         return {
             "repository": normalized,
-            "issue_number": int(issue.get("number") or issue_number),
+            "issue_number": int(issue["number"]),
             "title": str(issue.get("title") or ""),
             "state": str(issue.get("state") or ""),
             "url": _issue_url(issue),
@@ -283,11 +327,18 @@ class DevflowService:
 
     def get_sync_health(self) -> dict[str, Any]:
         issues = self.reader.list_issues(self.devflow_repository, state="all")
-        issue = _exactly_one(
-            issues,
-            lambda item: str(item.get("title") or "").strip() == HEALTH_TITLE,
-            "Sync Health Issue",
-        )
+        titled = [item for item in issues if str(item.get("title") or "").strip() == HEALTH_TITLE]
+        trusted = [item for item in titled if is_trusted_control_author(item)]
+        ignored = sorted(int(item.get("number") or 0) for item in titled if not is_trusted_control_author(item))
+        if not trusted:
+            raise DevflowMCPError(
+                f"No trusted Sync Health Issue titled {HEALTH_TITLE!r}"
+                + (f"; ignored untrusted candidates {ignored}." if ignored else ".")
+            )
+        if len(trusted) > 1:
+            # Prefer the single open trusted Issue over closed history.
+            trusted = [item for item in trusted if str(item.get("state") or "") == "open"]
+        issue = _exactly_one(trusted, lambda item: True, "trusted Sync Health Issue")
         sections = parse_sections(str(issue.get("body") or ""))
         return {
             "issue_number": int(issue.get("number") or 0),
@@ -298,6 +349,7 @@ class DevflowService:
             "mode": sections.get("Mode", ""),
             "coverage": sections.get("Coverage", ""),
             "drift_errors": sections.get("Drift / Errors", ""),
+            "ignored_untrusted_candidates": ignored,
             "run": sections.get("Run", ""),
             "direct_verification_requirement": sections.get("Direct Verification Requirement", ""),
             "sections": sections,
