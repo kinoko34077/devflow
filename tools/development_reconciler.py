@@ -38,6 +38,12 @@ class PullRequestTransport(Protocol):
 
 
 class PostMergeTransport(Protocol):
+    def get_reconciliation_state(
+        self,
+        task_ref: str,
+        pr_number: int,
+    ) -> dict[str, Any]: ...
+
     def close_task(self, task_ref: str) -> bool: ...
 
     def update_current_state(self, task_ref: str) -> bool: ...
@@ -321,12 +327,69 @@ def execute_post_merge(
         decision.disposition != "AUTO_ADVANCE"
         or decision.transition != "POST_MERGE_RECONCILE"
         or decision.task_ref is None
+        or decision.pr_number is None
+        or decision.expected_head_sha is None
     ):
         return ExecutionResult(
             False,
             False,
             decision.disposition,
             "not a post-merge reconciliation transition",
+        )
+
+    observed = transport.get_reconciliation_state(
+        decision.task_ref,
+        decision.pr_number,
+    )
+    required = {
+        "task_ref",
+        "pr_number",
+        "pr_head_sha",
+        "pr_merged",
+        "acceptance_satisfied",
+        "human_gate",
+        "external_wait",
+        "owning_blocker",
+    }
+    if not required.issubset(observed):
+        return ExecutionResult(
+            False,
+            False,
+            "NEEDS_EVIDENCE",
+            "post-merge re-observation is incomplete",
+        )
+    if (
+        str(observed["task_ref"]) != decision.task_ref
+        or observed["pr_number"] != decision.pr_number
+        or str(observed["pr_head_sha"]) != decision.expected_head_sha
+        or observed["pr_merged"] is not True
+    ):
+        return ExecutionResult(
+            False,
+            False,
+            "NEEDS_EVIDENCE",
+            "post-merge identity/head evidence changed",
+        )
+    if observed["human_gate"]:
+        return ExecutionResult(
+            False,
+            False,
+            "NEEDS_HUMAN",
+            "a Human Gate appeared before reconciliation",
+        )
+    if observed["external_wait"]:
+        return ExecutionResult(
+            False,
+            False,
+            "WAIT_EXTERNAL",
+            "an external dependency appeared before reconciliation",
+        )
+    if observed["owning_blocker"] or observed["acceptance_satisfied"] is not True:
+        return ExecutionResult(
+            False,
+            False,
+            "NO_ACTION",
+            "owning task is not currently eligible for reconciliation",
         )
 
     operations = {
