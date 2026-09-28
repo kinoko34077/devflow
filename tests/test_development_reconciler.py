@@ -153,6 +153,20 @@ class ReconcilerTests(unittest.TestCase):
                 self.closed = False
                 self.current_state_updates = 0
                 self.control_updates = 0
+                self.observations = 0
+
+            def get_reconciliation_state(self, task_ref, pr_number):
+                self.observations += 1
+                return {
+                    "task_ref": task_ref,
+                    "pr_number": pr_number,
+                    "pr_head_sha": HEAD,
+                    "pr_merged": True,
+                    "acceptance_satisfied": True,
+                    "human_gate": False,
+                    "external_wait": False,
+                    "owning_blocker": False,
+                }
 
             def close_task(self, task_ref):
                 if self.closed:
@@ -185,11 +199,63 @@ class ReconcilerTests(unittest.TestCase):
         self.assertTrue(transport.closed)
         self.assertEqual(transport.current_state_updates, 1)
         self.assertEqual(transport.control_updates, 1)
+        self.assertEqual(transport.observations, 1)
 
         repeated = dr.execute_post_merge(decision, transport)
         self.assertTrue(repeated.already_applied)
         self.assertEqual(transport.current_state_updates, 1)
         self.assertEqual(transport.control_updates, 1)
+        self.assertEqual(transport.observations, 2)
+
+    def test_post_merge_executor_reobserves_and_refuses_stale_head(self):
+        class Transport:
+            def get_reconciliation_state(self, task_ref, pr_number):
+                return {
+                    "task_ref": task_ref,
+                    "pr_number": pr_number,
+                    "pr_head_sha": OTHER,
+                    "pr_merged": True,
+                    "acceptance_satisfied": True,
+                    "human_gate": False,
+                    "external_wait": False,
+                    "owning_blocker": False,
+                }
+
+            def close_task(self, task_ref):
+                raise AssertionError("must not mutate")
+
+            update_current_state = close_task
+            update_control = close_task
+
+        decision = dr.evaluate_pr(base(pr_state="MERGED", current_state_changed=True))
+        result = dr.execute_post_merge(decision, Transport())
+        self.assertFalse(result.applied)
+        self.assertEqual(result.disposition, "NEEDS_EVIDENCE")
+
+    def test_post_merge_executor_reobserves_new_human_gate(self):
+        class Transport:
+            def get_reconciliation_state(self, task_ref, pr_number):
+                return {
+                    "task_ref": task_ref,
+                    "pr_number": pr_number,
+                    "pr_head_sha": HEAD,
+                    "pr_merged": True,
+                    "acceptance_satisfied": True,
+                    "human_gate": True,
+                    "external_wait": False,
+                    "owning_blocker": False,
+                }
+
+            def close_task(self, task_ref):
+                raise AssertionError("must not mutate")
+
+            update_current_state = close_task
+            update_control = close_task
+
+        decision = dr.evaluate_pr(base(pr_state="MERGED", current_state_changed=True))
+        result = dr.execute_post_merge(decision, Transport())
+        self.assertFalse(result.applied)
+        self.assertEqual(result.disposition, "NEEDS_HUMAN")
 
 
 if __name__ == "__main__":
