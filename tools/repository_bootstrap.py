@@ -129,6 +129,14 @@ def _mapping(value: Any, field: str) -> Mapping[str, Any]:
     return value
 
 
+def _reject_unknown_keys(value: Mapping[str, Any], field: str, allowed: set[str]) -> None:
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise BootstrapError(
+            f"{field} contains unsupported field(s): {', '.join(unknown)}"
+        )
+
+
 def _string(value: Any, field: str, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
         raise BootstrapError(f"{field} must be a string")
@@ -188,11 +196,13 @@ def parse_request_body(body: str) -> dict[str, Any]:
 def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequest:
     if not isinstance(raw, Mapping):
         raise BootstrapError("bootstrap request must be an object")
+    _reject_unknown_keys(raw, "request", {"schema", "repository", "classification", "bootstrap", "initial_content", "issues", "devflow"})
     schema = _string(raw.get("schema"), "schema")
     if schema != SCHEMA_VERSION:
         raise BootstrapError(f"unsupported schema: {schema}")
 
     repository = _mapping(raw.get("repository"), "repository")
+    _reject_unknown_keys(repository, "repository", {"owner", "name", "description", "visibility"})
     owner = _string(repository.get("owner"), "repository.owner")
     if owner != ALLOWED_OWNER:
         raise BootstrapError(f"unsupported repository.owner: {owner}")
@@ -208,11 +218,13 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     visibility = _enum(repository.get("visibility", "private"), "repository.visibility", VISIBILITIES)
 
     classification = _mapping(raw.get("classification"), "classification")
+    _reject_unknown_keys(classification, "classification", {"kind", "priority", "risk"})
     kind = _string(classification.get("kind"), "classification.kind")
     priority = _enum(classification.get("priority"), "classification.priority", PRIORITIES)
     risk = _enum(classification.get("risk"), "classification.risk", RISKS)
 
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
+    _reject_unknown_keys(bootstrap, "bootstrap", {"template", "devflow_managed"})
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
         devflow_managed = _boolean(bootstrap.get("devflow_managed"), "bootstrap.devflow_managed")
@@ -222,6 +234,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         raise BootstrapError(f"repository {name!r} is excluded from devflow management")
 
     initial = _mapping(raw.get("initial_content", {}), "initial_content")
+    _reject_unknown_keys(initial, "initial_content", {"readme", "specification", "license"})
     readme = initial.get("readme", f"# {name}\n")
     if not isinstance(readme, str):
         raise BootstrapError("initial_content.readme must be a string")
@@ -236,6 +249,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     seen_keys: set[str] = set()
     for index, item in enumerate(raw_issues):
         issue = _mapping(item, f"issues[{index}]")
+        _reject_unknown_keys(issue, f"issues[{index}]", {"key", "title", "body", "role"})
         key = _string(issue.get("key"), f"issues[{index}].key")
         if ISSUE_KEY_RE.fullmatch(key) is None:
             raise BootstrapError(f"issues[{index}].key is invalid")
@@ -252,6 +266,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         )
 
     devflow = _mapping(raw.get("devflow", {}), "devflow")
+    _reject_unknown_keys(devflow, "devflow", {"create_control", "work_status", "repository_state", "next_action"})
     create_control = _boolean(devflow.get("create_control", devflow_managed), "devflow.create_control")
     if create_control and not devflow_managed:
         raise BootstrapError("devflow.create_control requires bootstrap.devflow_managed=true")
@@ -365,9 +380,8 @@ class BootstrapExecutor:
 
     @staticmethod
     def _find_exact_title(api: Any, full_name: str, title: str) -> list[dict[str, Any]]:
-        finder = getattr(api, "find_issues_by_exact_title", None)
-        if callable(finder):
-            return list(finder(full_name, title, state="open"))
+        # Control identity is safety-critical. Use the authoritative Issues listing
+        # rather than the eventually-consistent Search index.
         return [
             issue
             for issue in api.list_issues(full_name, state="open")
