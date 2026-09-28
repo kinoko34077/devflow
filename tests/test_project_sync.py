@@ -24,7 +24,7 @@ class ParseTests(unittest.TestCase):
     def test_wait_control_maps_to_existing_project_status_alias(self):
         issue = {
             "state": "open",
-            "body": "## Work Status\\n\\nWAIT\\n\\n## Repository\\n\\n`kinoko34077/demo`",
+            "body": "## Work Status\n\nWAIT\n\n## Repository\n\n`kinoko34077/demo`",
         }
         fields = project_sync.desired_project_fields(issue)
         self.assertEqual(fields["Status"], "PARKED")
