@@ -21,6 +21,15 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(fields["Work Type"], "INFRA")
         self.assertEqual(fields["Managed Repository"], "kinoko34077/demo")
 
+    def test_wait_control_maps_to_existing_project_status_alias(self):
+        issue = {
+            "state": "open",
+            "body": "## Work Status\\n\\nWAIT\\n\\n## Repository\\n\\n`kinoko34077/demo`",
+        }
+        fields = project_sync.desired_project_fields(issue)
+        self.assertEqual(fields["Status"], "PARKED")
+        self.assertEqual(project_sync.validate_select_values(fields), [])
+
     def test_missing_sections_are_not_guessed(self):
         issue = {"state": "open", "body": "## Repository\n\nkinoko34077/demo"}
         self.assertEqual(project_sync.desired_project_fields(issue), {"Managed Repository": "kinoko34077/demo"})
