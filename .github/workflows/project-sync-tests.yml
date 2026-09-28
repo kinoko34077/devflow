@@ -6,12 +6,16 @@ on:
     branches: [main]
     paths:
       - 'scripts/project_sync.py'
+      - 'scripts/repository_bootstrap.py'
       - 'tools/**'
       - 'tests/**'
       - '.github/workflows/project-sync*.yml'
+      - '.github/workflows/repository-bootstrap.yml'
       - '.devflow/WORKFLOW.yaml'
+      - 'schemas/repository-bootstrap.v1.schema.json'
       - 'docs/project/**'
       - 'docs/operations/DEVFLOW_MCP.md'
+      - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
       - 'requirements-mcp.txt'
 
@@ -29,4 +33,10 @@ jobs:
       - name: Unit tests
         run: python -W error -m unittest discover -v
       - name: Compile check
-        run: python -m py_compile scripts/project_sync.py tools/devflow_mcp_core.py tools/devflow_mcp.py
+        run: >-
+          python -m py_compile
+          scripts/project_sync.py
+          scripts/repository_bootstrap.py
+          tools/devflow_mcp_core.py
+          tools/devflow_mcp.py
+          tools/repository_bootstrap.py
