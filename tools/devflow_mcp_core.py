@@ -155,7 +155,64 @@ class GitHubReader:
         issue = self._read(url)
         if not isinstance(issue, dict):
             raise DevflowMCPError("GitHub issue response was not an object.")
+        validate_observed_issue_identity(issue, repository, issue_number)
         return issue
+
+
+def _repository_from_github_url(value: Any) -> str | None:
+    parsed = urllib.parse.urlparse(str(value))
+    segments = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if "repos" in segments:
+        index = segments.index("repos")
+        if len(segments) > index + 2:
+            return f"{segments[index + 1]}/{segments[index + 2]}"
+    if "issues" in segments:
+        index = segments.index("issues")
+        if index >= 2:
+            return f"{segments[index - 2]}/{segments[index - 1]}"
+    return None
+
+
+def _observed_issue_identity(issue: dict[str, Any]) -> tuple[int | None, set[str]]:
+    raw_number = issue.get("number")
+    observed_number: int | None = None
+    if isinstance(raw_number, int) and not isinstance(raw_number, bool):
+        observed_number = raw_number
+    elif isinstance(raw_number, str) and raw_number.isdigit():
+        observed_number = int(raw_number)
+
+    repositories: set[str] = set()
+    for key in ("repository_url", "url", "html_url"):
+        value = issue.get(key)
+        if value:
+            repository = _repository_from_github_url(value)
+            if repository:
+                repositories.add(normalize_repository(repository))
+
+    repository_object = issue.get("repository")
+    if isinstance(repository_object, dict):
+        repository = repository_object.get("full_name") or repository_object.get("nameWithOwner")
+        if repository:
+            repositories.add(normalize_repository(str(repository)))
+
+    return observed_number, repositories
+
+
+def validate_observed_issue_identity(
+    issue: dict[str, Any],
+    repository: str,
+    issue_number: int,
+) -> None:
+    normalized = normalize_repository(repository)
+    observed_number, observed_repositories = _observed_issue_identity(issue)
+    if observed_number != issue_number or observed_repositories != {normalized}:
+        observed = (
+            f"number={observed_number!r}, repositories={sorted(observed_repositories)!r}"
+        )
+        raise DevflowMCPError(
+            "GitHub Issue identity mismatch: "
+            f"requested {normalized}#{issue_number}; observed {observed}."
+        )
 
 
 def _exactly_one(items: Iterable[dict[str, Any]], predicate: Callable[[dict[str, Any]], bool], description: str) -> dict[str, Any]:
@@ -270,6 +327,9 @@ class DevflowService:
     def get_issue(self, repository: str, issue_number: int) -> dict[str, Any]:
         normalized = normalize_repository(repository)
         issue = self.reader.get_issue(normalized, issue_number)
+        if not isinstance(issue, dict):
+            raise DevflowMCPError("GitHub issue response was not an object.")
+        validate_observed_issue_identity(issue, normalized, issue_number)
         body = str(issue.get("body") or "")
         return {
             "repository": normalized,
@@ -283,11 +343,22 @@ class DevflowService:
 
     def get_sync_health(self) -> dict[str, Any]:
         issues = self.reader.list_issues(self.devflow_repository, state="all")
-        issue = _exactly_one(
-            issues,
-            lambda item: str(item.get("title") or "").strip() == HEALTH_TITLE,
-            "Sync Health Issue",
-        )
+        titled = [
+            item for item in issues
+            if str(item.get("title") or "").strip() == HEALTH_TITLE
+        ]
+        trusted = [item for item in titled if is_trusted_control_author(item)]
+        ignored_untrusted_candidates = [
+            item.get("number") or item.get("id") or item.get("html_url")
+            for item in titled
+            if not is_trusted_control_author(item)
+        ]
+        if len(trusted) != 1:
+            raise DevflowMCPError(
+                "Expected exactly one trusted Sync Health Issue; "
+                f"found {len(trusted)}."
+            )
+        issue = trusted[0]
         sections = parse_sections(str(issue.get("body") or ""))
         return {
             "issue_number": int(issue.get("number") or 0),
@@ -300,6 +371,7 @@ class DevflowService:
             "drift_errors": sections.get("Drift / Errors", ""),
             "run": sections.get("Run", ""),
             "direct_verification_requirement": sections.get("Direct Verification Requirement", ""),
+            "ignored_untrusted_candidates": ignored_untrusted_candidates,
             "sections": sections,
         }
 
