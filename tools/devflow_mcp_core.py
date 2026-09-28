@@ -164,9 +164,13 @@ TRUSTED_GITHUB_WEB_HOSTS = frozenset({"github.com", "www.github.com"})
 
 
 def _parse_issue_identity_url(value: Any) -> tuple[str, int | None] | None:
-    parsed = urllib.parse.urlparse(str(value))
+    try:
+        parsed = urllib.parse.urlparse(str(value))
+        port = parsed.port
+    except ValueError:
+        return None
     host = (parsed.hostname or "").lower()
-    if parsed.scheme.lower() != "https":
+    if parsed.scheme.lower() != "https" or port not in (None, 443):
         return None
     segments = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
 
