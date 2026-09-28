@@ -146,6 +146,20 @@ Examples of useful milestones:
 
 Do not turn the Session Record into a shell transcript, tool-call log, CI log, or duplicate PR body. Commits/PR/Actions own those details.
 
+#### Interruption-prone chat work and bounded progress Issues
+
+Apply the stronger recovery pattern when work is long-running or multi-turn, spans multiple sessions/commits, includes browser/E2E or external waits, or otherwise has a realistic timeout/interruption risk.
+
+- Keep one owning Issue when one Session Record and checklist make the next unfinished milestone unambiguous.
+- Split materially distinct recovery, verification, or fix units into bounded repository-local Issues when they can complete or hand off independently, or when replaying already-proven setup would add material cost or risk.
+- Each bounded Issue owns its Objective, Scope/Excludes, Acceptance boundary, and fixed resume state; its active worker owns one recoverable Execution Session Record.
+- Update the active Issue/Session before crossing into the next materially distinct unit. A successor starts from the final checkpoint and does not repeat accepted earlier units merely because the previous chat is unavailable.
+- Use concise timestamped Issue comments when in-place Session edits alone would erase recovery-relevant intermediate history; do not duplicate raw command logs or CI output.
+- Chat history, summaries and Memory are not resume authority. Appending a new message versus editing/resubmitting an earlier message does not change the GitHub durability requirement.
+- Do not manufacture sub-Issues for short or trivial work whose recovery boundary is already unambiguous.
+
+Standing policy `devflow#49` owns the detailed Issue-first rule. `gpt-supervisor#7` through `#11` are a concrete proven example; their chronology is not duplicated here.
+
 #### Wait / handoff / release / failure
 
 Use:

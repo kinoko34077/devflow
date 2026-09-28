@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/chat-worker-bootstrap-result.v1.schema.json",
+  "title": "Chat Worker Bootstrap result v1 (devflow#191)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "disposition",
+    "worker_session_id",
+    "execution_attempt_id",
+    "target_repository",
+    "task_ref",
+    "role",
+    "action",
+    "source_refs",
+    "reason_code",
+    "reason_detail",
+    "claim_required",
+    "claim_candidate_fingerprint",
+    "coordinator_worker_id",
+    "omissions",
+    "next_authoritative_step"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chat-worker-bootstrap-result.v1"
+    },
+    "disposition": {
+      "enum": [
+        "CLAIM_AND_WORK",
+        "REVIEW_WORK",
+        "RECOVERY_WORK",
+        "NEEDS_HUMAN",
+        "WAIT_EXTERNAL",
+        "NO_ELIGIBLE_WORK",
+        "NEEDS_EVIDENCE"
+      ]
+    },
+    "worker_session_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "execution_attempt_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target_repository": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "role": {
+      "anyOf": [
+        {
+          "enum": [
+            "implementer",
+            "recovery",
+            "reviewer"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "reason_code": {
+      "enum": [
+        "ELIGIBLE_FRESH_CANDIDATE",
+        "ELIGIBLE_REVIEW_DEMAND",
+        "ELIGIBLE_RECOVERY_DEMAND",
+        "HUMAN_GATE",
+        "EXTERNAL_BLOCKER",
+        "NO_CANDIDATES_PUBLISHED",
+        "ALL_CANDIDATES_OMITTED",
+        "REPOSITORY_NOT_ACTIVE",
+        "REQUEST_INVALID",
+        "SCHEMA_UNSUPPORTED",
+        "EVIDENCE_INVALID",
+        "EVIDENCE_STALE",
+        "PORTFOLIO_ENUMERATION_UNAVAILABLE",
+        "BOOTSTRAP_UNREAD",
+        "CONTROL_NOT_FOUND",
+        "CONTROL_DUPLICATE",
+        "CONTROL_UNTRUSTED",
+        "FRONTIER_UNAVAILABLE",
+        "COORDINATOR_STATE_UNAVAILABLE",
+        "PROVIDER_SURFACE_MISSING"
+      ]
+    },
+    "reason_detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "claim_required": {
+      "type": "boolean"
+    },
+    "claim_candidate_fingerprint": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "coordinator_worker_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_ref",
+          "role",
+          "reason"
+        ],
+        "properties": {
+          "task_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+          },
+          "role": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "STALE_DIGEST",
+              "DEPENDENCY_NOT_READY",
+              "LIVE_CLAIM_CONFLICT",
+              "CAPABILITY_MISMATCH",
+              "ENVIRONMENT_MISMATCH",
+              "REVIEWER_INDEPENDENCE_CONFLICT",
+              "PUBLISHED_BY_THIS_ATTEMPT",
+              "HUMAN_GATE",
+              "EXTERNAL_BLOCKER",
+              "ROLE_UNSUPPORTED"
+            ]
+          }
+        }
+      }
+    },
+    "next_authoritative_step": {
+      "enum": [
+        "ASK_HUMAN",
+        "CLAIM_THEN_ACKNOWLEDGE",
+        "RECHECK_EXTERNAL",
+        "REFRESH_LATER",
+        "RESOLVE_EVIDENCE"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "disposition": {
+            "enum": [
+              "CLAIM_AND_WORK",
+              "REVIEW_WORK",
+              "RECOVERY_WORK"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "claim_required": {
+            "const": true
+          },
+          "task_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+          },
+          "role": {
+            "enum": [
+              "implementer",
+              "recovery",
+              "reviewer"
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "claim_candidate_fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "coordinator_worker_id": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "claim_required": {
+            "const": false
+          },
+          "task_ref": {
+            "type": "null"
+          },
+          "role": {
+            "type": "null"
+          },
+          "action": {
+            "type": "null"
+          },
+          "claim_candidate_fingerprint": {
+            "type": "null"
+          },
+          "coordinator_worker_id": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}
