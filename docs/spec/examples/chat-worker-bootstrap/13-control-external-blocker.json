@@ -1,0 +1,93 @@
+{
+  "summary": "Named external blocker on the Control.",
+  "request": {
+    "schema_version": "chat-worker-bootstrap-request.v1",
+    "target_repository": "kinoko34077/execution-coordinator",
+    "work_intent": "このリポ側に合わせてなんか作業して",
+    "worker_system": "claude",
+    "worker_session_id": "claude-20260928-a",
+    "execution_attempt_id": "claude-20260928-a:c1",
+    "capabilities": [
+      "python",
+      "tests"
+    ],
+    "environment": [
+      "github-actions-lane",
+      "linux"
+    ],
+    "tool_surfaces": [
+      "coordinator:claim",
+      "github:read",
+      "github:write"
+    ],
+    "observed_at": "2026-09-28T15:00:00Z"
+  },
+  "evidence": {
+    "schema_version": "chat-worker-bootstrap-evidence.v1",
+    "observed_at": "2026-09-28T14:59:00Z",
+    "fresh_until": "2026-09-28T15:09:00Z",
+    "agents_md_read": true,
+    "controls": [
+      {
+        "ref": "kinoko34077/devflow#107",
+        "managed_repository": "kinoko34077/execution-coordinator",
+        "state": "open",
+        "trusted": true,
+        "repository_state": "ACTIVE",
+        "human_gate": false,
+        "external_blocker": true
+      }
+    ],
+    "coordinator_state_read": true,
+    "frontier": {
+      "complete": true,
+      "candidates": [
+        {
+          "task_ref": "kinoko34077/execution-coordinator#80",
+          "role": "implementer",
+          "action": "IMPLEMENT",
+          "fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "digest_fresh": true,
+          "dependency_ready": true,
+          "human_gate": false,
+          "external_blocker": false,
+          "reviewer_independence_conflict": false,
+          "published_by_this_attempt": false,
+          "claimability": "CLAIMABLE",
+          "rank_key": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "required_capabilities": [
+            "python"
+          ],
+          "required_environment": [
+            "linux"
+          ]
+        }
+      ]
+    }
+  },
+  "expected": {
+    "schema_version": "chat-worker-bootstrap-result.v1",
+    "disposition": "WAIT_EXTERNAL",
+    "worker_session_id": "claude-20260928-a",
+    "execution_attempt_id": "claude-20260928-a:c1",
+    "target_repository": "kinoko34077/execution-coordinator",
+    "task_ref": null,
+    "role": null,
+    "action": null,
+    "source_refs": [
+      "kinoko34077/devflow#107"
+    ],
+    "reason_code": "EXTERNAL_BLOCKER",
+    "reason_detail": null,
+    "claim_required": false,
+    "claim_candidate_fingerprint": null,
+    "coordinator_worker_id": null,
+    "omissions": [],
+    "next_authoritative_step": "RECHECK_EXTERNAL"
+  }
+}

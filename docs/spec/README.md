@@ -11,3 +11,4 @@
 - [CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md](./CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md) — cross-repository authority and operating model
 - [DEVELOPMENT_RECONCILIATION.md](./DEVELOPMENT_RECONCILIATION.md) — deterministic evidence-to-disposition contract for devflow#155/#156
 - [DEVELOPMENT_RECONCILIATION_PUBLICATION.md](./DEVELOPMENT_RECONCILIATION_PUBLICATION.md) — deterministic reviewer/recovery work-demand publication contract for devflow#159
+- [CHAT_WORKER_BOOTSTRAP.md](./CHAT_WORKER_BOOTSTRAP.md) — provider-neutral manual-started chat-worker bootstrap contract v1 for devflow#191 (schemas in `schemas/`, examples in `examples/chat-worker-bootstrap/`)

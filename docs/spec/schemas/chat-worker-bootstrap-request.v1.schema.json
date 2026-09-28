@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/chat-worker-bootstrap-request.v1.schema.json",
+  "title": "Chat Worker Bootstrap request v1 (devflow#191)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capabilities",
+    "environment",
+    "execution_attempt_id",
+    "observed_at",
+    "schema_version",
+    "target_repository",
+    "tool_surfaces",
+    "work_intent",
+    "worker_session_id",
+    "worker_system"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chat-worker-bootstrap-request.v1"
+    },
+    "target_repository": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "work_intent": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 500
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "worker_system": {
+      "enum": [
+        "codex",
+        "claude",
+        "chatgpt"
+      ]
+    },
+    "worker_session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "execution_attempt_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+      },
+      "uniqueItems": true
+    },
+    "environment": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+      },
+      "uniqueItems": true
+    },
+    "tool_surfaces": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+      },
+      "uniqueItems": true
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
+  }
+}

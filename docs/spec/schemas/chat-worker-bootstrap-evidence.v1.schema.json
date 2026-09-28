@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/chat-worker-bootstrap-evidence.v1.schema.json",
+  "title": "Chat Worker Bootstrap gathered evidence v1 (devflow#191)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "observed_at",
+    "fresh_until",
+    "agents_md_read",
+    "controls",
+    "coordinator_state_read",
+    "frontier"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chat-worker-bootstrap-evidence.v1"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "fresh_until": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "agents_md_read": {
+      "type": "boolean"
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "managed_repository",
+          "state",
+          "trusted",
+          "repository_state",
+          "human_gate",
+          "external_blocker"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "pattern": "^kinoko34077/devflow#[1-9][0-9]*$"
+          },
+          "managed_repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "trusted": {
+            "type": "boolean"
+          },
+          "repository_state": {
+            "type": "string"
+          },
+          "human_gate": {
+            "type": "boolean"
+          },
+          "external_blocker": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "coordinator_state_read": {
+      "type": "boolean"
+    },
+    "frontier": {
+      "type": "object",
+      "required": [
+        "complete",
+        "candidates"
+      ],
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "task_ref",
+              "role",
+              "action",
+              "fingerprint",
+              "digest_fresh",
+              "dependency_ready",
+              "human_gate",
+              "external_blocker",
+              "reviewer_independence_conflict",
+              "published_by_this_attempt",
+              "claimability",
+              "rank_key",
+              "required_capabilities",
+              "required_environment"
+            ],
+            "properties": {
+              "task_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+              },
+              "role": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "digest_fresh": {
+                "type": "boolean"
+              },
+              "dependency_ready": {
+                "type": "boolean"
+              },
+              "human_gate": {
+                "type": "boolean"
+              },
+              "external_blocker": {
+                "type": "boolean"
+              },
+              "reviewer_independence_conflict": {
+                "type": "boolean"
+              },
+              "published_by_this_attempt": {
+                "type": "boolean"
+              },
+              "claimability": {
+                "enum": [
+                  "CLAIMABLE",
+                  "BLOCKED_LIVE",
+                  "EXPIRED_UNSWEPT"
+                ]
+              },
+              "rank_key": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required_capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+                },
+                "uniqueItems": true
+              },
+              "required_environment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

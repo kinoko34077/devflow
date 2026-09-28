@@ -1,0 +1,266 @@
+# Chat Worker Bootstrap Contract v1
+
+Status: proposed for acceptance under devflow#191 (Phase A of devflow#190)
+Authority: devflow cross-repository workflow specification
+Scope: provider-neutral bootstrap for an already-open, manually-started Codex, Claude/Claude Code or ordinary ChatGPT chat
+
+This contract turns a broad instruction such as
+
+> 「このリポ側に合わせてなんか作業して」
+
+into exactly one deterministic, fail-closed **disposition** for one worker, plus at most one selected work candidate. It is a derived decision contract. It creates no queue, scheduler, task database or provider-specific priority authority. The owning Issue/Work Order remains durable task truth. The Repository Control remains the cross-repository summary and candidate source. `kinoko34077/execution-coordinator` remains the only runtime claim/lease/generation/fencing authority. Adoption mode stays `PILOT` (devflow#189).
+
+Machine-readable artifacts:
+
+- request schema: [`schemas/chat-worker-bootstrap-request.v1.schema.json`](./schemas/chat-worker-bootstrap-request.v1.schema.json)
+- evidence schema: [`schemas/chat-worker-bootstrap-evidence.v1.schema.json`](./schemas/chat-worker-bootstrap-evidence.v1.schema.json)
+- result schema: [`schemas/chat-worker-bootstrap-result.v1.schema.json`](./schemas/chat-worker-bootstrap-result.v1.schema.json)
+- executable reference classifier (pure, no I/O): `tools/chat_worker_bootstrap.py`
+- positive and negative examples: [`examples/chat-worker-bootstrap/`](./examples/chat-worker-bootstrap/), exercised by `tests/test_chat_worker_bootstrap.py`
+
+If the prose here and the reference classifier ever disagree, the prose is normative and the classifier has a defect.
+
+## 1. Processing model
+
+```text
+user broad instruction (+ current working context)
+  -> worker builds a v1 request (identity, declared tags, tool surfaces)
+  -> worker reads live evidence in the canonical order (section 4)
+  -> classify(request, evidence) -> exactly one v1 result
+  -> work disposition: serialized claim -> acknowledge -> Execution Session -> bounded work
+  -> any other disposition: report it and stop; no invented task
+```
+
+The classification is a pure function of `(request, evidence)`. The provider identity never enters selection, so the same inputs yield the same result on every provider.
+
+## 2. Request envelope (`chat-worker-bootstrap-request.v1`)
+
+All fields are required. Unknown fields are rejected.
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `schema_version` | const | `chat-worker-bootstrap-request.v1`; any other value gives `NEEDS_EVIDENCE` / `SCHEMA_UNSUPPORTED` |
+| `target_repository` | `owner/name` or `null` | from the user or the current working context; `null` means portfolio scope |
+| `work_intent` | string ≤ 500 or `null` | the user's broad instruction, recorded for audit only; **never selects, ranks or filters work** |
+| `worker_system` | `codex` \| `claude` \| `chatgpt` | provenance only; never implies a capability |
+| `worker_session_id` | identity | one per chat/session for its lifetime (section 6) |
+| `execution_attempt_id` | identity | one per discovery cycle (section 7) |
+| `capabilities` | exact tags | declared by the session; no inference |
+| `environment` | exact tags | declared by the session; no inference |
+| `tool_surfaces` | exact tags | tools the chat can actually use right now (section 8) |
+| `observed_at` | RFC3339 UTC (`…Z`) | when the request was built |
+
+Normalization:
+
+- tags must match `^[a-z0-9][a-z0-9_.:/-]{0,63}$`;
+- duplicate tags are rejected, and valid tags are sorted;
+- identities must match `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`;
+- `target_repository` is compared case-insensitively against Control identities, with no other transformation.
+
+Secret prohibition: credentials, tokens, cookies, secrets and session material must never appear in any request field. Secret-shaped values are rejected with `REQUEST_INVALID`. Examples of secret-shaped values are `ghp_`, `github_pat_`, `sk-`, and text containing `bearer`, `token`, `secret`, `password` or `cookie`. The session/attempt identities are procedural/audit identities, not cryptographic identity or authentication.
+
+## 3. Result envelope (`chat-worker-bootstrap-result.v1`)
+
+One envelope serves every disposition. `role`/`action` distinguish fresh, review and recovery work, so no per-disposition subtypes exist (decision 8).
+
+| Field | Rule |
+| --- | --- |
+| `disposition` | exactly one of the seven dispositions (section 5) |
+| `worker_session_id`, `execution_attempt_id`, `target_repository` | echoed from the normalized request; `null` only when the request itself was invalid |
+| `task_ref`, `role`, `action` | set **exactly** for the work dispositions; `null` otherwise |
+| `claim_required` | `true` exactly for the work dispositions |
+| `claim_candidate_fingerprint` | the selected candidate fingerprint, for binding the serialized claim; `null` otherwise |
+| `coordinator_worker_id` | `<worker_system>:<worker_session_id>` for the runtime claim; `null` otherwise |
+| `source_refs` | sorted, unique canonical references only (section 9) |
+| `reason_code` | a typed code from section 5.2 (authority) |
+| `reason_detail` | human-readable; **never authority** |
+| `omissions` | per-candidate `{task_ref, role, reason}` evidence, sorted |
+| `next_authoritative_step` | derived from the disposition (section 5.1) |
+
+## 4. Canonical read and selection order
+
+Repository-scoped entry reads, in order:
+
+1. live `devflow/AGENTS.md`, or the equivalent bootstrap result;
+2. the exact target `[REPO]` Repository Control;
+3. canonical repository-local entry points, and the active owning Issue/Work Order/PR where referenced;
+4. trusted active/relevant Execution Session Records (#142/#144);
+5. the accepted candidate/reconciliation frontier (#125, #159, execution-coordinator managed frontier);
+6. execution-coordinator runtime state and claimability;
+7. dependency, capability/environment and safety filtering;
+8. deterministic selection.
+
+The classifier then applies the **first matching rule**:
+
+| # | Condition | Result |
+| --- | --- | --- |
+| 1 | request malformed / unknown schema / secret-shaped | `NEEDS_EVIDENCE` (`REQUEST_INVALID` / `SCHEMA_UNSUPPORTED`) |
+| 2 | evidence malformed, or its `[observed_at, fresh_until]` window does not cover the request | `NEEDS_EVIDENCE` (`EVIDENCE_INVALID` / `EVIDENCE_STALE`) |
+| 3 | `target_repository` is `null` | `NEEDS_EVIDENCE` (`PORTFOLIO_ENUMERATION_UNAVAILABLE`) |
+| 4 | live AGENTS.md not read | `NEEDS_EVIDENCE` (`BOOTSTRAP_UNREAD`) |
+| 5 | no open Control / more than one open Control / untrusted Control for the target | `NEEDS_EVIDENCE` (`CONTROL_NOT_FOUND` / `CONTROL_DUPLICATE` / `CONTROL_UNTRUSTED`) |
+| 6 | Control `Repository State` is not `ACTIVE` | `NO_ELIGIBLE_WORK` (`REPOSITORY_NOT_ACTIVE`) |
+| 7 | Control-level Human gate / external blocker | `NEEDS_HUMAN` (`HUMAN_GATE`) / `WAIT_EXTERNAL` (`EXTERNAL_BLOCKER`) |
+| 8 | frontier incomplete / runtime state unread | `NEEDS_EVIDENCE` (`FRONTIER_UNAVAILABLE` / `COORDINATOR_STATE_UNAVAILABLE`) |
+| 9 | successful scan with zero published candidates | `NO_ELIGIBLE_WORK` (`NO_CANDIDATES_PUBLISHED`) |
+| 10 | per-candidate hard filters (section 5.3); if nothing survives: a Human-gate omission gives `NEEDS_HUMAN`; otherwise an external-blocker omission gives `WAIT_EXTERNAL`; otherwise `NO_ELIGIBLE_WORK` (`ALL_CANDIDATES_OMITTED`) | |
+| 11 | provider lacks a required tool surface (section 8) | `NEEDS_EVIDENCE` (`PROVIDER_SURFACE_MISSING`) |
+| 12 | deterministic selection (section 5.4) | `RECOVERY_WORK` / `REVIEW_WORK` / `CLAIM_AND_WORK` |
+
+A later rule never overrides an earlier integrity or safety rule.
+
+Portfolio scope (`target_repository = null`) is reserved. It must return `NEEDS_EVIDENCE` until a later accepted phase (#190 Phase D) supplies authoritative cross-repository enumeration.
+
+## 5. Dispositions and vocabulary
+
+### 5.1 Dispositions
+
+| Disposition | Meaning | `next_authoritative_step` |
+| --- | --- | --- |
+| `CLAIM_AND_WORK` | one fresh `implementer` candidate is fully eligible | `CLAIM_THEN_ACKNOWLEDGE` |
+| `REVIEW_WORK` | one explicit `reviewer` demand is eligible and satisfies reviewer independence | `CLAIM_THEN_ACKNOWLEDGE` |
+| `RECOVERY_WORK` | one explicit `recovery` demand over interrupted/stale work is eligible | `CLAIM_THEN_ACKNOWLEDGE` |
+| `NEEDS_HUMAN` | a Human/User gate is the next real blocker | `ASK_HUMAN` |
+| `WAIT_EXTERNAL` | a named external blocker is unresolved | `RECHECK_EXTERNAL` |
+| `NO_ELIGIBLE_WORK` | the authoritative scan succeeded and nothing is eligible for this worker | `REFRESH_LATER` |
+| `NEEDS_EVIDENCE` | required authority/freshness/trust/surface evidence is missing or ambiguous | `RESOLVE_EVIDENCE` |
+
+Fresh, review and recovery work stay distinct:
+
+- `IMPLEMENTING` with no live claim is **never** converted into fresh work. Only an explicit recovery demand (#158/#159) produces `RECOVERY_WORK`.
+- A work disposition is not ownership. No work starts before the serialized claim and `acknowledge` succeed. A claim rejection ends the cycle (section 7).
+
+### 5.2 `reason_code` vocabulary (closed for v1)
+
+Selection:
+- `ELIGIBLE_FRESH_CANDIDATE`
+- `ELIGIBLE_REVIEW_DEMAND`
+- `ELIGIBLE_RECOVERY_DEMAND`
+
+Non-work outcomes:
+- `HUMAN_GATE`
+- `EXTERNAL_BLOCKER`
+- `NO_CANDIDATES_PUBLISHED`
+- `ALL_CANDIDATES_OMITTED`
+- `REPOSITORY_NOT_ACTIVE`
+
+Evidence failures:
+- `REQUEST_INVALID`
+- `SCHEMA_UNSUPPORTED`
+- `EVIDENCE_INVALID`
+- `EVIDENCE_STALE`
+- `PORTFOLIO_ENUMERATION_UNAVAILABLE`
+- `BOOTSTRAP_UNREAD`
+- `CONTROL_NOT_FOUND`
+- `CONTROL_DUPLICATE`
+- `CONTROL_UNTRUSTED`
+- `FRONTIER_UNAVAILABLE`
+- `COORDINATOR_STATE_UNAVAILABLE`
+- `PROVIDER_SURFACE_MISSING`
+
+Adding a code is a contract change.
+
+### 5.3 Per-candidate hard filters
+
+Filters are applied in this order. The first failing filter becomes the candidate's single omission `reason`.
+
+1. `ROLE_UNSUPPORTED`: the role is not `implementer`, `reviewer` or `recovery`.
+2. `STALE_DIGEST`: the owning-body SHA-256 no longer matches (#125).
+3. `HUMAN_GATE`: a task-level Human/User gate.
+4. `EXTERNAL_BLOCKER`: a task-level external blocker.
+5. `DEPENDENCY_NOT_READY`.
+6. `LIVE_CLAIM_CONFLICT`: claimability is not `CLAIMABLE` (`BLOCKED_LIVE` / `EXPIRED_UNSWEPT`).
+7. `PUBLISHED_BY_THIS_ATTEMPT`: decision 3C; this attempt published or relaxed the candidate.
+8. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only.
+9. `CAPABILITY_MISMATCH`: `required_capabilities ⊄ capabilities`.
+10. `ENVIRONMENT_MISMATCH`: `required_environment ⊄ environment`.
+
+Capability/environment matching is an exact tag subset check. `worker_system`, the model name, `work_intent`, repository language and prior success never add tags.
+
+### 5.4 Deterministic selection
+
+Among the eligible candidates, exactly one is selected by the lexicographic key:
+
+```text
+(track, rank_key, task_ref, role)
+track: recovery = 0, reviewer = 1, implementer = 2
+```
+
+- Finishing in-flight work comes before starting new work.
+- `rank_key` is the accepted execution-coordinator Phase 2 rank key (priority, urgency, dependency order, readiness, `ready_at`, …), carried verbatim. Integers compare numerically.
+- No free-form semantic scoring, model preference, Issue age, branch-existence or chat-memory heuristic participates.
+- Candidates arrive through accepted projections. Candidate order in the input does not affect the result.
+
+## 6. Identity boundary (decision 4)
+
+| Identity | Scope | Used for |
+| --- | --- | --- |
+| `worker_session_id` | one chat/session, stable for its lifetime | equals the Manual Execution Session `Execution-Session-ID` in the worker-owned Session Record (#142/#144) |
+| `coordinator_worker_id` = `<worker_system>:<worker_session_id>` | runtime | the execution-coordinator `worker_id` for claim/acknowledge/release and reviewer-independence checks |
+| `execution_attempt_id` | one discovery cycle | the execution-coordinator `AutonomousAttempt.attempt_id` for 3C, and the audit trail |
+
+The Session Record stays a soft, worker-owned provenance record. The runtime claim is the only atomic ownership. Neither is a cryptographic identity. Two chats must never share a `worker_session_id`.
+
+## 7. Discovery cycle (decision 5)
+
+One cycle is one `classify` evaluation over one freshly gathered evidence set, identified by `execution_attempt_id`.
+
+- A cycle submits **at most one** claim.
+- A rejected claim, or any other disposition, ends the cycle. The next cycle re-reads live evidence under a **new** `execution_attempt_id`.
+- A recommended attempt id is `<worker_session_id>:c<N>` with `N` increasing within the chat. Uniqueness is required; the format is advisory.
+
+## 8. Provider-local tool surfaces (decision 6)
+
+`tool_surfaces` records which tools the chat can actually invoke right now. It is availability evidence, **not capability**, and it never participates in candidate matching. v1 defines these tags:
+
+| Tag | Meaning |
+| --- | --- |
+| `github:read` | read live Issues/PRs/files of the target and devflow |
+| `github:write` | create branch/commit/PR/comment in the target |
+| `coordinator:claim` | invoke the execution-coordinator serialized mutation lane (claim/acknowledge/release) |
+
+Work dispositions require all three. If one is missing, the result is `NEEDS_EVIDENCE` / `PROVIDER_SURFACE_MISSING`, and the missing tags appear in `reason_detail`. This is a provider-local limitation. The worker must not fall back to uncoordinated implementation, and the common authority model is not weakened for that provider.
+
+## 9. Source references (decision 7)
+
+`source_refs` carries canonical references only:
+
+- the Control ref `kinoko34077/devflow#N`;
+- the selected `owner/repo#N`;
+- when relevant, PR refs and exact SHAs.
+
+It never copies Issue bodies, acceptance text or checkpoints. The worker must re-read the referenced objects before mutation. The result is a pointer into durable truth, not a copy of it.
+
+## 10. Broad-instruction rule
+
+A missing Issue number in the user prompt is **not** a reason to ask the user. If `target_repository` is known from the prompt or the working context, and the classification returns a work disposition, the worker proceeds to the claim without asking the user to choose among machine-resolvable candidates.
+
+The worker asks the user only when the missing information is authoritative and cannot be derived safely:
+
+- the target repository cannot be determined uniquely (the request would carry `target_repository = null`);
+- the disposition is `NEEDS_HUMAN`;
+- proceeding would require a credential/session/permission change;
+- `PROVIDER_SURFACE_MISSING` holds and no safe read-only path satisfies the task.
+
+For any other non-work disposition, the worker reports the typed disposition and does not invent a task.
+
+## 11. Boundaries preserved
+
+- Already-open chats only. There is no provider launch and no provider-to-provider spawning.
+- One chat/session is one worker context.
+- Live GitHub/devflow is the source of truth; chat history is not durable task authority.
+- Release/deploy/publication, credential/session/permission, destructive, shared-history and difficult-to-reverse operations remain Human-gated. They surface as `NEEDS_HUMAN` and are never automated by this contract.
+- There is no second scheduler, queue, task database or provider-specific priority authority. Controller negotiation stays deferred (#188), and adoption stays `PILOT` (#189).
+
+## 12. Phase B handoff (per-session worker profiles)
+
+Phase B must define, for each of `codex`, `claude` and `chatgpt`, how a session produces the request's identity/profile fields reproducibly. A Phase B profile MUST supply:
+
+- `worker_system`;
+- a unique `worker_session_id`, with its rule for stability across the chat's lifetime;
+- an `execution_attempt_id` generation rule;
+- `capabilities[]` and `environment[]`, each with an explainable, reproducible derivation from what the session can verify about itself, and never from the provider/model name;
+- `tool_surfaces[]` derived from the tools actually available in that chat at bootstrap time;
+- a confirmation that no secret, token, cookie or session material enters any field.
+
+Phase B does not change this envelope. A needed change is a v2 contract.
