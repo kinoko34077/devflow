@@ -182,21 +182,32 @@ class GitHubReadOnlyClientTests(unittest.TestCase):
 
 
     def test_sync_health_ignores_untrusted_duplicate_and_reports_it(self):
+        health = {
+            "number": 41,
+            "title": devflow_mcp_core.HEALTH_TITLE,
+            "state": "closed",
+            "author_association": "OWNER",
+            "body": "## Result\\n\\nPASS\\n",
+        }
         outsider = {
-            **self.health,
+            **health,
             "number": 99,
             "author_association": "NONE",
         }
-        reader = FakeReader([outsider, self.health])
+        reader = FakeReader([outsider, health])
         result = devflow_mcp_core.DevflowService(reader).get_sync_health()
         self.assertEqual(result["issue_number"], 41)
         self.assertEqual(result["ignored_untrusted_candidates"], [99])
 
     def test_sync_health_outsider_only_is_unavailable(self):
-        outsider = {
-            **self.health,
+        health = {
+            "number": 41,
+            "title": devflow_mcp_core.HEALTH_TITLE,
+            "state": "closed",
             "author_association": "CONTRIBUTOR",
+            "body": "## Result\\n\\nPASS\\n",
         }
+        outsider = health
         service = devflow_mcp_core.DevflowService(FakeReader([outsider]))
         with self.assertRaisesRegex(
             devflow_mcp_core.DevflowMCPError,
