@@ -10,3 +10,4 @@
 
 - [CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md](./CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md) — cross-repository authority and operating model
 - [DEVELOPMENT_RECONCILIATION.md](./DEVELOPMENT_RECONCILIATION.md) — deterministic evidence-to-disposition contract for devflow#155/#156
+- [DEVELOPMENT_RECONCILIATION_PUBLICATION.md](./DEVELOPMENT_RECONCILIATION_PUBLICATION.md) — deterministic reviewer/recovery work-demand publication contract for devflow#159
