@@ -139,10 +139,40 @@ If an apparently active session may be stale because the worker disappeared or a
 
 If devflow summary and repository-local canon disagree, the owning repository governs detailed technical truth and devflow must be reconciled as the summary.
 
-## 9. Detailed manuals
+## 9. Creating a new repository
+
+When the user explicitly asks to create a new repository from the current conversation/source context, use Repository Bootstrap rather than manually reproducing repository creation, seed commit, initial Issue creation and devflow onboarding as separate ad-hoc operations.
+
+The agent translates the already-established context into one `repository-bootstrap.v1` request Issue titled exactly:
+
+```text
+[REPO CREATE] <repository-name>
+```
+
+Then the deterministic GitHub-side bootstrap path owns provisioning and produces the long-lived:
+
+```text
+[REPO] <repository-name>
+```
+
+Control when the repository is managed.
+
+Do not put an LLM inside the bootstrap executor. Do not ask the user to repeat fields already fixed by the current context. Use only the safe defaults defined by the canonical specification. Public visibility, licence intent, exclusions and other explicit user choices must be preserved rather than guessed or replaced.
+
+Credential/App/Actions-secret/permission setup for repository creation remains a Human confirmation boundary. If the approved bootstrap credential is absent, record/report that blocker instead of bypassing it.
+
+Read before creating a request:
+
+- Canonical specification: `docs/spec/REPOSITORY_BOOTSTRAP.md`
+- Agent/operator procedure: `docs/operations/REPOSITORY_BOOTSTRAP.md`
+- Machine-readable workflow contract: `.devflow/WORKFLOW.yaml`
+
+## 10. Detailed manuals
 
 - Agent operations: `docs/operations/AGENT_OPERATING_MANUAL.md`
 - Repository-local Issue usage: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
+- Repository creation/bootstrap: `docs/operations/REPOSITORY_BOOTSTRAP.md`
+- Repository Bootstrap canonical spec: `docs/spec/REPOSITORY_BOOTSTRAP.md`
 - MCP access/client setup: `docs/operations/DEVFLOW_MCP.md`
 - Canonical control-plane spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
 - Machine-readable workflow: `.devflow/WORKFLOW.yaml`
