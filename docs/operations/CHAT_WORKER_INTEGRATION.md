@@ -8,7 +8,36 @@ This document tells an **already-open, manually-started** Codex, Claude/Claude C
 
 There is no provider launch and no provider-to-provider spawning. Every provider uses the same contract, the same classifier and the same claim authority. Provider differences show up only as probe results and tool surfaces.
 
-## 1. Common path (every provider)
+## 0. Preferred path: Actions-side transport (devflow#205)
+
+A chat that can comment on GitHub needs **no local Python, checkout or token**. Post the command on the request Issue kinoko34077/execution-coordinator#83 (or on any execution-coordinator Issue):
+
+```text
+/pickup
+target: <owner/repo>
+worker_system: <codex|claude|chatgpt>
+capabilities: <tags you actually verified, e.g. python, tests>
+environment: <e.g. linux>
+intent: <the user's words>
+```
+
+Then do the following:
+
+1. The `chat-pickup.yml` workflow replies on the same Issue with the typed result. On `CLAIMED` it also returns `claim_id`, `generation`, the ready-made release command and `next_cycle`.
+2. Do the bounded work, then post the returned release command.
+3. For the next discovery cycle, pass `session: <worker_session_id>` and `cycle: <next_cycle>`.
+
+Notes on the transport:
+
+- Only OWNER, MEMBER or COLLABORATOR comments are processed; anything else is ignored silently.
+- Capabilities and environment are the worker's own declaration; Actions adds only the transport surfaces.
+- It uses the same contract, the same serialized claim lane and one claim per request.
+- A `---` line ends the command, so appended footers are ignored.
+- Reading a **private** target repository needs the `COORDINATOR_READ_TOKEN` Actions secret. Creating it is a credential change, so it is Human-gated. Public targets work without it.
+
+Section 1 below remains the local fallback.
+
+## 1. Common path (every provider, local fallback)
 
 ```text
 1. read live devflow/AGENTS.md, then the target [REPO] Control (live GitHub is the source of truth)
@@ -48,7 +77,7 @@ The ChatGPT pilot leg needed each of these fixed by hand. Check them before the 
 3. **A GitHub token in the environment** (`GH_TOKEN` or `GITHUB_TOKEN`) with Issues-write and Actions-dispatch on execution-coordinator. A missing or invalid token shows up as HTTP 401, or as no `coordinator:claim` surface.
 4. **UTF-8 output**, especially on Windows: set `PYTHONUTF8=1` and use a UTF-8 console. Otherwise Japanese text in posted comments degrades to `??`.
 
-The follow-up Work Order #202 moves this cycle into GitHub Actions so that chats no longer need these local prerequisites.
+These prerequisites apply only to the local fallback. The Actions-side transport (section 0, #205) removes them.
 
 ## 3. Provider status
 
