@@ -411,6 +411,7 @@ def replace_publication_projection(
     if not desired:
         if bounds is None:
             return body.rstrip()
+        parse_publication_projection(body, repository)
         begin, end = bounds
         prefix = body[:begin].rstrip()
         suffix = body[end + len(PROJECTION_MARKER_END) :].strip("\n")

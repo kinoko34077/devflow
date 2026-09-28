@@ -51,6 +51,21 @@ class ReconciliationPublicationProjectionTests(unittest.TestCase):
         self.assertEqual(cleared, CONTROL.rstrip())
         self.assertEqual(rp.parse_publication_projection(cleared, "owner/repository"), [])
 
+    def test_empty_desired_projection_rejects_malformed_existing_block(self):
+        malformed = (
+            CONTROL.rstrip()
+            + "\n\n"
+            + rp.PROJECTION_MARKER_BEGIN
+            + "\n{not-json}\n"
+            + rp.PROJECTION_MARKER_END
+        )
+        with self.assertRaises(ValueError):
+            rp.replace_publication_projection(
+                malformed,
+                "owner/repository",
+                [],
+            )
+
     def test_duplicate_or_malformed_projection_markers_fail_closed(self):
         item = publication()
         with_block = rp.replace_publication_projection(CONTROL, "owner/repository", [item])
