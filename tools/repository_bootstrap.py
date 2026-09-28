@@ -43,7 +43,7 @@ ISSUE_KEY_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
 
 class BootstrapError(ValueError):
-    """Raised when a repository-bootstrap request is invalid or ambiguous."""
+    """Invalid, ambiguous, or unsupported repository bootstrap input."""
 
 
 class GitHubApiError(RuntimeError):
@@ -96,7 +96,7 @@ class BootstrapRequest:
     devflow_managed: bool
     readme: str
     specification: str | None
-    license: str | None
+    license: None
     issues: tuple[InitialIssue, ...]
     create_control: bool
     work_status: str
@@ -157,17 +157,14 @@ def _enum(value: Any, field: str, allowed: frozenset[str]) -> str:
 
 
 def parse_request_body(body: str) -> dict[str, Any]:
-    """Extract exactly one repository-bootstrap.v1 JSON block from an Issue body."""
     if not isinstance(body, str):
         raise BootstrapError("Issue body must be a string")
     if body.count(START_MARKER) != 1 or body.count(END_MARKER) != 1:
         raise BootstrapError("Issue body must contain exactly one bootstrap payload block")
-
     start = body.index(START_MARKER) + len(START_MARKER)
     end = body.index(END_MARKER)
     if end <= start:
         raise BootstrapError("bootstrap payload markers are out of order")
-
     payload = body[start:end].strip()
     if payload.startswith("```json"):
         payload = payload[len("```json") :].lstrip("\r\n")
@@ -179,7 +176,6 @@ def parse_request_body(body: str) -> dict[str, Any]:
         if not payload.endswith("```"):
             raise BootstrapError("bootstrap JSON fence is not closed")
         payload = payload[:-3].rstrip()
-
     try:
         decoded = json.loads(payload)
     except json.JSONDecodeError as exc:
@@ -201,11 +197,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     if owner != ALLOWED_OWNER:
         raise BootstrapError(f"unsupported repository.owner: {owner}")
     name = _string(repository.get("name"), "repository.name")
-    if (
-        name in {".", ".."}
-        or name != name.strip()
-        or REPOSITORY_NAME_RE.fullmatch(name) is None
-    ):
+    if name in {".", ".."} or name != name.strip() or REPOSITORY_NAME_RE.fullmatch(name) is None:
         raise BootstrapError("repository.name is invalid")
     expected_title = f"[REPO CREATE] {name}"
     if issue_title != expected_title:
@@ -213,9 +205,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     description = repository.get("description", "")
     if not isinstance(description, str):
         raise BootstrapError("repository.description must be a string")
-    visibility = _enum(
-        repository.get("visibility", "private"), "repository.visibility", VISIBILITIES
-    )
+    visibility = _enum(repository.get("visibility", "private"), "repository.visibility", VISIBILITIES)
 
     classification = _mapping(raw.get("classification"), "classification")
     kind = _string(classification.get("kind"), "classification.kind")
@@ -224,11 +214,8 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
 
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
-    managed_explicit = "devflow_managed" in bootstrap
-    if managed_explicit:
-        devflow_managed = _boolean(
-            bootstrap.get("devflow_managed"), "bootstrap.devflow_managed"
-        )
+    if "devflow_managed" in bootstrap:
+        devflow_managed = _boolean(bootstrap.get("devflow_managed"), "bootstrap.devflow_managed")
     else:
         devflow_managed = name not in EXCLUDED_REPOSITORIES
     if name in EXCLUDED_REPOSITORIES and devflow_managed:
@@ -238,10 +225,9 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     readme = initial.get("readme", f"# {name}\n")
     if not isinstance(readme, str):
         raise BootstrapError("initial_content.readme must be a string")
-    specification = _optional_string(
-        initial.get("specification"), "initial_content.specification"
-    )
-    license_value = _optional_string(initial.get("license"), "initial_content.license")
+    specification = _optional_string(initial.get("specification"), "initial_content.specification")
+    if initial.get("license") is not None:
+        raise BootstrapError("initial_content.license is unsupported in repository-bootstrap.v1; use null/omit")
 
     raw_issues = raw.get("issues", [])
     if not isinstance(raw_issues, list):
@@ -256,28 +242,21 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         if key in seen_keys:
             raise BootstrapError(f"duplicate Issue key: {key}")
         seen_keys.add(key)
-        title = _string(issue.get("title"), f"issues[{index}].title")
-        body = _string(issue.get("body"), f"issues[{index}].body", allow_empty=True)
-        role = _optional_string(issue.get("role"), f"issues[{index}].role")
-        issues.append(InitialIssue(key=key, title=title, body=body, role=role))
+        issues.append(
+            InitialIssue(
+                key=key,
+                title=_string(issue.get("title"), f"issues[{index}].title"),
+                body=_string(issue.get("body"), f"issues[{index}].body", allow_empty=True),
+                role=_optional_string(issue.get("role"), f"issues[{index}].role"),
+            )
+        )
 
     devflow = _mapping(raw.get("devflow", {}), "devflow")
-    create_control_default = devflow_managed
-    create_control = _boolean(
-        devflow.get("create_control", create_control_default), "devflow.create_control"
-    )
+    create_control = _boolean(devflow.get("create_control", devflow_managed), "devflow.create_control")
     if create_control and not devflow_managed:
         raise BootstrapError("devflow.create_control requires bootstrap.devflow_managed=true")
-    work_status = _enum(
-        devflow.get("work_status", "WORK_ORDER_READY"),
-        "devflow.work_status",
-        WORK_STATES,
-    )
-    repository_state = _enum(
-        devflow.get("repository_state", "ACTIVE"),
-        "devflow.repository_state",
-        REPOSITORY_STATES,
-    )
+    work_status = _enum(devflow.get("work_status", "WORK_ORDER_READY"), "devflow.work_status", WORK_STATES)
+    repository_state = _enum(devflow.get("repository_state", "ACTIVE"), "devflow.repository_state", REPOSITORY_STATES)
     next_action = _string(
         devflow.get("next_action", "[SPECIFY] Define the first implementation slice."),
         "devflow.next_action",
@@ -285,12 +264,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
 
     return BootstrapRequest(
         schema=schema,
-        repository=RepositorySpec(
-            owner=owner,
-            name=name,
-            description=description,
-            visibility=visibility,
-        ),
+        repository=RepositorySpec(owner, name, description, visibility),
         kind=kind,
         priority=priority,
         risk=risk,
@@ -298,7 +272,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         devflow_managed=devflow_managed,
         readme=readme,
         specification=specification,
-        license=license_value,
+        license=None,
         issues=tuple(issues),
         create_control=create_control,
         work_status=work_status,
@@ -341,9 +315,7 @@ class BootstrapExecutor:
         self.devflow_api = devflow_api
 
     def _comment(self, context: BootstrapContext, body: str) -> None:
-        self.devflow_api.comment_issue(
-            context.devflow_repo, context.request_issue_number, body
-        )
+        self.devflow_api.comment_issue(context.devflow_repo, context.request_issue_number, body)
 
     def _raise_failure(
         self,
@@ -354,31 +326,20 @@ class BootstrapExecutor:
         safe_retry: str,
         resources: list[str],
     ) -> None:
-        failure_body = [
+        lines = [
             "Repository-Bootstrap-State: FAILED",
             f"Stage: {stage}",
             f"Safe-Retry: {safe_retry}",
             "Created/Observed Resources:",
+            *(f"- {item}" for item in resources),
+            f"Failure: {message}",
+            "Next-Action: Re-read this request and observed live resources before retrying.",
         ]
-        failure_body.extend(f"- {item}" for item in resources)
-        failure_body.extend(
-            [
-                f"Failure: {message}",
-                "Next-Action: Re-read this request and observed live resources before retrying.",
-            ]
-        )
         try:
-            self._comment(context, "\n".join(failure_body))
+            self._comment(context, "\n".join(lines))
         except Exception:
-            # Preserve the primary failure. A missing failure comment is itself visible
-            # through the failed workflow and must not replace the causal boundary.
             pass
-        raise BootstrapFailure(
-            stage,
-            message,
-            safe_retry=safe_retry,
-            resources=tuple(resources),
-        )
+        raise BootstrapFailure(stage, message, safe_retry=safe_retry, resources=tuple(resources))
 
     def _call(
         self,
@@ -402,7 +363,8 @@ class BootstrapExecutor:
                 resources=resources,
             )
 
-    def _find_exact_title(self, api: Any, full_name: str, title: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def _find_exact_title(api: Any, full_name: str, title: str) -> list[dict[str, Any]]:
         finder = getattr(api, "find_issues_by_exact_title", None)
         if callable(finder):
             return list(finder(full_name, title, state="open"))
@@ -412,9 +374,7 @@ class BootstrapExecutor:
             if issue.get("title") == title and "pull_request" not in issue
         ]
 
-    def execute(
-        self, request: BootstrapRequest, context: BootstrapContext
-    ) -> BootstrapResult:
+    def execute(self, request: BootstrapRequest, context: BootstrapContext) -> BootstrapResult:
         resources: list[str] = []
         if not is_trusted_association(context.author_association):
             self._raise_failure(
@@ -446,12 +406,7 @@ class BootstrapExecutor:
         )
 
         full_name = request.repository.full_name
-        repo = self._call(
-            context,
-            "REPOSITORY",
-            resources,
-            lambda: self.repository_api.get_repository(full_name),
-        )
+        repo = self._call(context, "REPOSITORY", resources, lambda: self.repository_api.get_repository(full_name))
         repository_was_created = repo is None
         if repo is None:
             repo = self._call(
@@ -465,10 +420,17 @@ class BootstrapExecutor:
                     request.repository.visibility,
                 ),
             )
-            repository_url = repo.get("html_url") or f"https://github.com/{full_name}"
-            resources.append(f"repository:{repository_url}")
+            observed_full_name = repo.get("full_name") if isinstance(repo, dict) else None
+            if not isinstance(observed_full_name, str) or observed_full_name.lower() != full_name.lower():
+                self._raise_failure(
+                    context,
+                    "REPOSITORY",
+                    "created repository identity does not match request",
+                    safe_retry="after-human-decision",
+                    resources=resources,
+                )
         else:
-            observed_full_name = repo.get("full_name")
+            observed_full_name = repo.get("full_name") if isinstance(repo, dict) else None
             if observed_full_name and observed_full_name.lower() != full_name.lower():
                 self._raise_failure(
                     context,
@@ -477,8 +439,8 @@ class BootstrapExecutor:
                     safe_retry="after-human-decision",
                     resources=resources,
                 )
-            repository_url = repo.get("html_url") or f"https://github.com/{full_name}"
-            resources.append(f"repository:{repository_url}")
+        repository_url = repo.get("html_url") or f"https://github.com/{full_name}"
+        resources.append(f"repository:{repository_url}")
 
         provenance_path = ".github/repository-bootstrap.json"
         expected_provenance = _provenance(context, full_name)
@@ -510,17 +472,15 @@ class BootstrapExecutor:
                 ),
                 safe_retry="after-human-decision",
             )
-            resources.append(f"file:{provenance_path}")
-        else:
-            if existing_provenance.get("content") != expected_provenance:
-                self._raise_failure(
-                    context,
-                    "REPOSITORY",
-                    "existing repository bootstrap provenance does not match request",
-                    safe_retry="after-human-decision",
-                    resources=resources,
-                )
-            resources.append(f"file:{provenance_path}")
+        elif existing_provenance.get("content") != expected_provenance:
+            self._raise_failure(
+                context,
+                "REPOSITORY",
+                "existing repository bootstrap provenance does not match request",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+        resources.append(f"file:{provenance_path}")
 
         seed_files: list[tuple[str, str]] = [("README.md", request.readme)]
         if request.specification is not None:
@@ -603,9 +563,7 @@ class BootstrapExecutor:
                 owner_issues.append(issue)
             issue_url = issue.get("html_url") or ""
             issue_urls.append(issue_url)
-            issue_refs.append(
-                f"- `{full_name}#{issue.get('number')}` — {requested_issue.title}"
-            )
+            issue_refs.append(f"- `{full_name}#{issue.get('number')}` — {requested_issue.title}")
             resources.append(f"issue:{issue_url}")
 
         control_url: str | None = None
@@ -615,9 +573,7 @@ class BootstrapExecutor:
                 context,
                 "CONTROL",
                 resources,
-                lambda: self._find_exact_title(
-                    self.devflow_api, context.devflow_repo, control_title
-                ),
+                lambda: self._find_exact_title(self.devflow_api, context.devflow_repo, control_title),
             )
             if len(controls) > 1:
                 self._raise_failure(
@@ -638,11 +594,7 @@ class BootstrapExecutor:
                         resources=resources,
                     )
             else:
-                active_work = (
-                    "\n".join(issue_refs)
-                    if issue_refs
-                    else "No repository-local bootstrap Issue was requested."
-                )
+                active_work = "\n".join(issue_refs) if issue_refs else "No repository-local bootstrap Issue was requested."
                 entry_points = ["- `README.md`"]
                 if request.specification is not None:
                     entry_points.append("- `docs/SPECIFICATION.md`")
@@ -660,9 +612,8 @@ class BootstrapExecutor:
                     "## Canonical Entry Points\n\n"
                     + "\n".join(entry_points)
                     + "\n\n## Detailed Current State\n\n"
-                    f"Repository was initialized through `{context.request_ref}` using "
-                    f"`{SCHEMA_VERSION}`. Accepted initial head is `{head_sha}`. "
-                    "No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
+                    f"Repository was initialized through `{context.request_ref}` using `{SCHEMA_VERSION}`. "
+                    f"Accepted initial head is `{head_sha}`. No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
                     "## Control Notes\n\n"
                     f"Cross-repository routing summary only. Bootstrap request: {context.request_url}. "
                     f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`."
@@ -671,26 +622,24 @@ class BootstrapExecutor:
                     context,
                     "CONTROL",
                     resources,
-                    lambda: self.devflow_api.create_issue(
-                        context.devflow_repo, control_title, control_body
-                    ),
+                    lambda: self.devflow_api.create_issue(context.devflow_repo, control_title, control_body),
                 )
             control_url = control.get("html_url") or ""
             resources.append(f"control:{control_url}")
 
-        done_body = [
+        done_lines = [
             "Repository-Bootstrap-State: DONE",
             f"Repository: {repository_url}",
             f"Initial-Accepted-SHA: `{head_sha}`",
+            *(f"Initial-Issue: {url}" for url in issue_urls),
         ]
-        done_body.extend(f"Initial-Issue: {url}" for url in issue_urls)
         if control_url:
-            done_body.append(f"Repository-Control: {control_url}")
+            done_lines.append(f"Repository-Control: {control_url}")
         self._call(
             context,
             "FINALIZE",
             resources,
-            lambda: self._comment(context, "\n".join(done_body)),
+            lambda: self._comment(context, "\n".join(done_lines)),
         )
         return BootstrapResult(
             repository_url=repository_url,
@@ -728,9 +677,7 @@ class GitHubApi:
         allow_404: bool = False,
     ) -> Any:
         url = f"{self._api_url}{path}"
-        data = None
-        if payload is not None:
-            data = json.dumps(payload).encode("utf-8")
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
         request = urllib.request.Request(
             url,
             data=data,
@@ -769,9 +716,7 @@ class GitHubApi:
         return f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}"
 
     def get_repository(self, full_name: str) -> dict[str, Any] | None:
-        return self._request(
-            "GET", f"/repos/{self._repo_path(full_name)}", allow_404=True
-        )
+        return self._request("GET", f"/repos/{self._repo_path(full_name)}", allow_404=True)
 
     def create_repository(
         self,
@@ -782,6 +727,10 @@ class GitHubApi:
     ) -> dict[str, Any]:
         if owner != ALLOWED_OWNER:
             raise BootstrapError(f"unsupported repository owner: {owner}")
+        identity = self._request("GET", "/user")
+        login = identity.get("login") if isinstance(identity, dict) else None
+        if not isinstance(login, str) or login.lower() != owner.lower():
+            raise BootstrapError("repository bootstrap credential owner does not match requested owner")
         result = self._request(
             "POST",
             "/user/repos",
@@ -795,6 +744,10 @@ class GitHubApi:
         )
         if not isinstance(result, dict):
             raise GitHubApiError("create repository returned malformed response")
+        expected = f"{owner}/{name}"
+        observed = result.get("full_name")
+        if not isinstance(observed, str) or observed.lower() != expected.lower():
+            raise GitHubApiError("create repository returned mismatched repository identity")
         return result
 
     def get_file(self, full_name: str, path: str) -> dict[str, Any] | None:
@@ -817,9 +770,7 @@ class GitHubApi:
             raise GitHubApiError(f"contents response for {path} is not UTF-8 text") from exc
         return {"content": content, "sha": result.get("sha")}
 
-    def create_file(
-        self, full_name: str, path: str, content: str, message: str
-    ) -> dict[str, Any]:
+    def create_file(self, full_name: str, path: str, content: str, message: str) -> dict[str, Any]:
         encoded_path = urllib.parse.quote(path, safe="/")
         result = self._request(
             "PUT",
@@ -874,7 +825,9 @@ class GitHubApi:
     def find_issues_by_exact_title(
         self, full_name: str, title: str, state: str = "open"
     ) -> list[dict[str, Any]]:
-        state_qualifier = "is:open" if state == "open" else "is:closed" if state == "closed" else ""
+        if state not in {"open", "closed", "all"}:
+            raise BootstrapError(f"unsupported Issue state: {state}")
+        state_qualifier = f"is:{state}" if state != "all" else ""
         query = f'repo:{full_name} is:issue {state_qualifier} in:title "{title}"'.strip()
         encoded_query = urllib.parse.urlencode({"q": query, "per_page": 100})
         result = self._request("GET", f"/search/issues?{encoded_query}")
