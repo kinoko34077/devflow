@@ -163,37 +163,59 @@ TRUSTED_GITHUB_API_HOSTS = frozenset({"api.github.com"})
 TRUSTED_GITHUB_WEB_HOSTS = frozenset({"github.com", "www.github.com"})
 
 
-def _parse_issue_identity_url(value: Any) -> tuple[str, int | None] | None:
+def _parse_issue_identity_url(value: Any, *, field: str) -> tuple[str, int | None] | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
     try:
-        parsed = urllib.parse.urlparse(str(value))
+        parsed = urllib.parse.urlparse(value)
         port = parsed.port
-    except ValueError:
+    except (TypeError, ValueError):
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+        or parsed.path.endswith("/")
+        or "//" in parsed.path
+    ):
         return None
     host = (parsed.hostname or "").lower()
-    if parsed.scheme.lower() != "https" or port not in (None, 443):
-        return None
-    segments = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
-
-    if host in TRUSTED_GITHUB_API_HOSTS and "repos" in segments:
-        index = segments.index("repos")
-        if len(segments) < index + 3:
-            return None
-        suffix = segments[index + 3 :]
-        issue_number: int | None = None
-        if suffix:
-            if len(suffix) != 2 or suffix[0] != "issues" or not suffix[1].isdigit():
+    segments = [urllib.parse.unquote(part) for part in parsed.path.split("/")[1:]]
+    try:
+        if field == "repository_url":
+            if host not in TRUSTED_GITHUB_API_HOSTS or len(segments) != 3 or segments[0] != "repos":
                 return None
-            issue_number = int(suffix[1])
-        return normalize_repository(f"{segments[index + 1]}/{segments[index + 2]}"), issue_number
+            return normalize_repository(f"{segments[1]}/{segments[2]}"), None
 
-    if host in TRUSTED_GITHUB_WEB_HOSTS:
-        if len(segments) != 4 or segments[2] != "issues" or not segments[3].isdigit():
-            return None
-        return normalize_repository(f"{segments[0]}/{segments[1]}"), int(segments[3])
+        if field == "url":
+            if (
+                host not in TRUSTED_GITHUB_API_HOSTS
+                or len(segments) != 5
+                or segments[0] != "repos"
+                or segments[3] != "issues"
+                or not segments[4].isdigit()
+            ):
+                return None
+            return normalize_repository(f"{segments[1]}/{segments[2]}"), int(segments[4])
+
+        if field == "html_url":
+            if (
+                host not in TRUSTED_GITHUB_WEB_HOSTS
+                or len(segments) != 4
+                or segments[2] != "issues"
+                or not segments[3].isdigit()
+            ):
+                return None
+            return normalize_repository(f"{segments[0]}/{segments[1]}"), int(segments[3])
+    except DevflowMCPError:
+        return None
 
     return None
-
-
 def _observed_issue_identity(
     issue: dict[str, Any],
 ) -> tuple[int | None, set[str], set[int], bool]:
@@ -209,12 +231,11 @@ def _observed_issue_identity(
     invalid_identity = False
 
     for key in ("repository_url", "url", "html_url"):
-        value = issue.get(key)
-        if not value:
+        if key not in issue:
             continue
         try:
-            parsed = _parse_issue_identity_url(value)
-        except DevflowMCPError:
+            parsed = _parse_issue_identity_url(issue.get(key), field=key)
+        except (TypeError, ValueError):
             parsed = None
         if parsed is None:
             invalid_identity = True
@@ -224,14 +245,26 @@ def _observed_issue_identity(
         if url_issue_number is not None:
             url_issue_numbers.add(url_issue_number)
 
-    repository_object = issue.get("repository")
-    if isinstance(repository_object, dict):
-        repository = repository_object.get("full_name") or repository_object.get("nameWithOwner")
-        if repository:
-            try:
-                repositories.add(normalize_repository(str(repository)))
-            except DevflowMCPError:
+    if "repository" in issue:
+        repository_object = issue.get("repository")
+        if not isinstance(repository_object, dict):
+            invalid_identity = True
+        else:
+            repository_values = []
+            for key in ("full_name", "nameWithOwner"):
+                if key not in repository_object:
+                    continue
+                value = repository_object.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    invalid_identity = True
+                    continue
+                try:
+                    repository_values.append(normalize_repository(value))
+                except DevflowMCPError:
+                    invalid_identity = True
+            if not repository_values:
                 invalid_identity = True
+            repositories.update(repository_values)
 
     return observed_number, repositories, url_issue_numbers, invalid_identity
 
