@@ -314,6 +314,55 @@ class GitHubIssueIdentityTests(unittest.TestCase):
         ):
             reader.get_issue("kinoko34077/owner-repo", 7)
 
+    def test_reader_rejects_repository_only_issue_url(self):
+        issue = {
+            "number": 7,
+            "title": "repository URL in issue URL field",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/repos/kinoko34077/owner-repo",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
+    def test_reader_rejects_noncanonical_api_identity_path(self):
+        issue = {
+            "number": 7,
+            "title": "noncanonical API path",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/prefix/repos/kinoko34077/owner-repo/issues/7",
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
+    def test_reader_rejects_malformed_present_repository_identity(self):
+        issue = {
+            "number": 7,
+            "title": "malformed repository object",
+            "repository_url": "https://api.github.com/repos/kinoko34077/owner-repo",
+            "url": "https://api.github.com/repos/kinoko34077/owner-repo/issues/7",
+            "repository": {},
+        }
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: issue,
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "identity mismatch",
+        ):
+            reader.get_issue("kinoko34077/owner-repo", 7)
+
     def test_service_rejects_mismatched_observed_issue_identity(self):
         issue = {
             "number": 7,
