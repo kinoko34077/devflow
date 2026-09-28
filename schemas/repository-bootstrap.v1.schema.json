@@ -42,7 +42,7 @@
       "properties": {
         "readme": {"type": "string"},
         "specification": {"type": ["string", "null"]},
-        "license": {"type": ["string", "null"]}
+        "license": {"type": "null"}
       }
     },
     "issues": {
