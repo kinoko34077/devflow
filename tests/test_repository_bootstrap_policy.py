@@ -11,6 +11,7 @@ class RepositoryBootstrapPolicyTests(unittest.TestCase):
         self.assertIn("repository-bootstrap.v1", text)
         self.assertIn("[REPO CREATE] <repository-name>", text)
         self.assertIn("docs/operations/REPOSITORY_BOOTSTRAP.md", text)
+        self.assertIn("docs/spec/REPOSITORY_BOOTSTRAP.md", text)
 
     def test_machine_workflow_declares_bootstrap_request_control_and_human_gate(self):
         text = (ROOT / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
@@ -21,7 +22,7 @@ class RepositoryBootstrapPolicyTests(unittest.TestCase):
         self.assertIn("human_confirmation", text)
 
     def test_canonical_spec_distinguishes_create_request_from_repository_control(self):
-        text = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(encoding="utf-8")
+        text = (ROOT / "docs" / "spec" / "REPOSITORY_BOOTSTRAP.md").read_text(encoding="utf-8")
         self.assertIn("Repository Bootstrap", text)
         self.assertIn("[REPO CREATE] <repository-name>", text)
         self.assertIn("[REPO] <repository-name>", text)
