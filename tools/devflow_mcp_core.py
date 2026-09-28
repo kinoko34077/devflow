@@ -159,21 +159,40 @@ class GitHubReader:
         return issue
 
 
-def _repository_from_github_url(value: Any) -> str | None:
+TRUSTED_GITHUB_API_HOSTS = frozenset({"api.github.com"})
+TRUSTED_GITHUB_WEB_HOSTS = frozenset({"github.com", "www.github.com"})
+
+
+def _parse_issue_identity_url(value: Any) -> tuple[str, int | None] | None:
     parsed = urllib.parse.urlparse(str(value))
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https":
+        return None
     segments = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
-    if "repos" in segments:
+
+    if host in TRUSTED_GITHUB_API_HOSTS and "repos" in segments:
         index = segments.index("repos")
-        if len(segments) > index + 2:
-            return f"{segments[index + 1]}/{segments[index + 2]}"
-    if "issues" in segments:
-        index = segments.index("issues")
-        if index >= 2:
-            return f"{segments[index - 2]}/{segments[index - 1]}"
+        if len(segments) < index + 3:
+            return None
+        suffix = segments[index + 3 :]
+        issue_number: int | None = None
+        if suffix:
+            if len(suffix) != 2 or suffix[0] != "issues" or not suffix[1].isdigit():
+                return None
+            issue_number = int(suffix[1])
+        return normalize_repository(f"{segments[index + 1]}/{segments[index + 2]}"), issue_number
+
+    if host in TRUSTED_GITHUB_WEB_HOSTS:
+        if len(segments) != 4 or segments[2] != "issues" or not segments[3].isdigit():
+            return None
+        return normalize_repository(f"{segments[0]}/{segments[1]}"), int(segments[3])
+
     return None
 
 
-def _observed_issue_identity(issue: dict[str, Any]) -> tuple[int | None, set[str]]:
+def _observed_issue_identity(
+    issue: dict[str, Any],
+) -> tuple[int | None, set[str], set[int], bool]:
     raw_number = issue.get("number")
     observed_number: int | None = None
     if isinstance(raw_number, int) and not isinstance(raw_number, bool):
@@ -182,20 +201,35 @@ def _observed_issue_identity(issue: dict[str, Any]) -> tuple[int | None, set[str
         observed_number = int(raw_number)
 
     repositories: set[str] = set()
+    url_issue_numbers: set[int] = set()
+    invalid_identity = False
+
     for key in ("repository_url", "url", "html_url"):
         value = issue.get(key)
-        if value:
-            repository = _repository_from_github_url(value)
-            if repository:
-                repositories.add(normalize_repository(repository))
+        if not value:
+            continue
+        try:
+            parsed = _parse_issue_identity_url(value)
+        except DevflowMCPError:
+            parsed = None
+        if parsed is None:
+            invalid_identity = True
+            continue
+        repository, url_issue_number = parsed
+        repositories.add(repository)
+        if url_issue_number is not None:
+            url_issue_numbers.add(url_issue_number)
 
     repository_object = issue.get("repository")
     if isinstance(repository_object, dict):
         repository = repository_object.get("full_name") or repository_object.get("nameWithOwner")
         if repository:
-            repositories.add(normalize_repository(str(repository)))
+            try:
+                repositories.add(normalize_repository(str(repository)))
+            except DevflowMCPError:
+                invalid_identity = True
 
-    return observed_number, repositories
+    return observed_number, repositories, url_issue_numbers, invalid_identity
 
 
 def validate_observed_issue_identity(
@@ -204,10 +238,22 @@ def validate_observed_issue_identity(
     issue_number: int,
 ) -> None:
     normalized = normalize_repository(repository)
-    observed_number, observed_repositories = _observed_issue_identity(issue)
-    if observed_number != issue_number or observed_repositories != {normalized}:
+    (
+        observed_number,
+        observed_repositories,
+        url_issue_numbers,
+        invalid_identity,
+    ) = _observed_issue_identity(issue)
+    if (
+        invalid_identity
+        or observed_number != issue_number
+        or observed_repositories != {normalized}
+        or any(number != issue_number for number in url_issue_numbers)
+    ):
         observed = (
-            f"number={observed_number!r}, repositories={sorted(observed_repositories)!r}"
+            f"number={observed_number!r}, "
+            f"repositories={sorted(observed_repositories)!r}, "
+            f"url_issue_numbers={sorted(url_issue_numbers)!r}"
         )
         raise DevflowMCPError(
             "GitHub Issue identity mismatch: "
