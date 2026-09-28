@@ -24,6 +24,12 @@ The underlying GitHub client implements GET-only REST access. It has no Issue up
 
 devflow is a public repository, so anyone can open an Issue with a canonical-looking title. Repository Control discovery (`get_repository_control`, `bootstrap_repository`, `list_managed_repositories`) only accepts `[REPO] <repo>` Issues whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. Issues from any other author, or with missing association data, are ignored (fail closed) and never count toward the "exactly one Control Issue" rule.
 
+The same policy applies to `get_sync_health`: only trusted-author `[SYSTEM] GitHub Project Sync Health` Issues are candidates. Untrusted candidates are ignored and listed in `ignored_untrusted_candidates`; if no trusted candidate exists the health surface is unavailable. When several trusted candidates exist, exactly one must be open.
+
+## Exact Issue identity
+
+`get_issue` validates the observed GitHub object, not the caller's request. The response `number` and `repository_url` must match the requested Issue (repository compared case-insensitively), pull requests are rejected, and any HTTP redirect (transfer, rename, misrouting) fails closed with a non-secret diagnostic. The caller-supplied identity is never used to fill in or relabel a response. A renamed repository must be requested by its current name.
+
 ## Runtime
 
 Requirements:
