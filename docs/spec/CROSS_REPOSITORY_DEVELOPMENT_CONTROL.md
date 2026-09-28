@@ -194,6 +194,8 @@ Checkpoint rule:
 
 Before starting the next materially distinct bounded milestone, the active worker updates the Session Record so that the latest completed checkpoint and first unfinished action are externally recoverable. Do not wait until the end of a long chat or implementation batch to publish all progress.
 
+For long-running, multi-turn, or interruption-prone chat-driven work, the recovery boundary MUST remain in GitHub evidence rather than provider conversation history. When one owning task contains materially distinct recovery, verification, or fix units that benefit from independent completion or handoff, the worker MAY split them into bounded repository-local progress Issues; this MUST NOT be used to fragment trivial work. Each successor MUST begin from live owning Issue / Session / branch / PR evidence and the first unfinished checkpoint, and MUST NOT repeat already accepted setup or verification solely because prior chat state is absent, stale, edited, or resubmitted. Appending a new chat message versus editing/resubmitting an earlier message does not alter the externalization requirement. Standing operational detail is maintained in `devflow#49`.
+
 Transition visibility rule:
 
 - moving to `HANDOFF` or `FAILED` updates the worker-owned Session Record **and** appends one short trusted top-level Issue comment naming the Session ID, transition, final checkpoint / next action and blocker;
