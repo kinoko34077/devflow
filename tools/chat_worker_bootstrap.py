@@ -501,6 +501,7 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     accepted_work_classes = request["accepted_work_classes"]
     eligible: list[dict[str, Any]] = []
     omissions: list[dict[str, str]] = []
+    cycle_relevant_omission_reasons: list[str] = []
     portfolio_refs: set[str] = set()
     for item in candidates:
         reason = None
@@ -575,10 +576,12 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
             omissions.append(
                 {"task_ref": item["task_ref"], "role": item["role"], "reason": reason}
             )
+            if accepted_work_classes is None or item["work_class"] in accepted_work_classes:
+                cycle_relevant_omission_reasons.append(reason)
 
     cycle_refs = sorted(portfolio_refs) if portfolio else refs
     if not eligible:
-        omitted = {item["reason"] for item in omissions}
+        omitted = set(cycle_relevant_omission_reasons)
         if "HUMAN_GATE" in omitted:
             return _result(
                 request,
