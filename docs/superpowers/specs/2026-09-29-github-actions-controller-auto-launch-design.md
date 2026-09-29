@@ -1,6 +1,6 @@
 # GitHub Actions Controller-first Dispatch + Provider Auto-launch Design
 
-Status: AWAITING_REVIEW
+Status: AWAITING_PLAN_REVIEW
 Date: 2026-09-29
 Authority: devflow#223 under parent devflow#105
 Runtime owner: kinoko34077/execution-coordinator
@@ -51,8 +51,6 @@ acknowledge -> RUNNING
 normal work / verification / PR / review / release
 ```
 
-The normal success path uses `acknowledge`. An ambiguous launch may temporarily enter `WAITING:PROVIDER`; if the provider is later proven live under current authority, that recovery path uses the existing `resume -> RUNNING` transition instead.
-
 ## 4. Controller trigger model
 
 Initial v1 uses:
@@ -84,9 +82,17 @@ Codex auto-launch is deferred.
 
 Ordinary ChatGPT product chats remain manual-start workers through the accepted #190/#202 path. v1 does not try to create ChatGPT UI conversations from GitHub Actions. A future OpenAI API Agent/Conversation runtime would be a distinct programmatic provider adapter, not an ordinary ChatGPT chat.
 
+### 5.1 Target-repository GitHub authority
+
+The central `execution-coordinator` workflow does not treat its ordinary repository `GITHUB_TOKEN` as target-repository authority.
+
+For v1, target-repository branch/push/draft-PR/Issue evidence uses a separately configured GitHub App installation token that is minted only for the selected target repository and only after an eligible offer exists. Creation/configuration of the GitHub App, private key, installation or permission scope is Human-gated. Runtime may consume an approved configuration but may not create or broaden it.
+
+The provider step does not receive this token. GitHub mutation after provider work is deterministic workflow logic rather than provider-held authority.
+
 ## 6. Claim / launch ordering
 
-The accepted v1 normal ordering is:
+The accepted v1 ordering is:
 
 ```text
 controller offer
@@ -96,11 +102,11 @@ controller offer
 -> serialized claim
 -> CLAIMED
 -> construct CLAIMED-bound auto-launch ExecutionRequest
--> invoke provider adapter
+-> invoke provider adapter bootstrap
 -> prove provider execution context established
 -> acknowledge claim
 -> RUNNING
--> begin work
+-> resume the same provider session for bounded work
 ```
 
 Rules:
@@ -108,16 +114,25 @@ Rules:
 - ACCEPT is not ownership.
 - Provider launch occurs only after claim success.
 - Repository work must not begin in CLAIMED.
-- RUNNING means the provider execution context exists and the current claim has been transitioned into active execution; normally by `acknowledge`, or by `resume` after an ambiguous-launch `WAITING:PROVIDER` reconciliation.
+- RUNNING means the provider execution context exists and the current claim has been acknowledged.
 - GitHub Actions launcher/orchestration is transport/control context, not a second runtime owner.
 - The claim remains bound to the intended provider execution attempt; returned provider/session identity is dispatch evidence, not parallel ownership.
-- A stale/fenced generation blocks acknowledge/resume/work even if a delayed launch response later arrives.
+- A stale/fenced generation blocks acknowledge/work even if a delayed launch response later arrives.
 
 Required execution-coordinator contract change:
 
 - add/version an auto-launch ExecutionRequest path valid from a current CLAIMED authority;
 - preserve the existing already-RUNNING request path where compatibility requires it;
 - preserve exact task/role/fingerprint/source/freshness/capability/environment binding from #68.
+
+### 6.1 Provider bootstrap/work separation
+
+The selected Claude transport performs two provider invocations around the runtime acknowledge boundary:
+
+1. create one bounded tool-less Claude session using a caller-selected session identifier; this invocation may establish provider/session context but may not inspect or modify repository files;
+2. after the current CLAIMED authority is revalidated and acknowledged to RUNNING, resume that exact session for the actual bounded repository-file work.
+
+This separation exists to preserve the semantic meaning of `CLAIMED` and `RUNNING`: actual repository work must not start merely because a provider invocation was requested.
 
 ## 7. Launch outcome semantics
 
@@ -149,9 +164,7 @@ The system cannot prove whether the provider started, for example after a timeou
 CLAIMED -> WAITING:PROVIDER
 ```
 
-The current runtime already permits a live claim to enter `WAITING`, and the canonical return path from `WAITING` to active execution is `resume`.
-
-Reconcile as follows:
+Then reconcile:
 
 - confirmed live + current authority -> `resume` -> RUNNING;
 - confirmed not started -> release;
@@ -202,17 +215,19 @@ Use the smallest existing durable owning surface that correctly owns the evidenc
 - return ACCEPT / DECLINE / DEFER;
 - on ACCEPT, refresh hard constraints and acquire exactly one serialized claim;
 - construct the CLAIMED-bound auto-launch request;
-- invoke exactly one provider adapter;
+- invoke exactly one provider adapter bootstrap;
 - reconcile launch outcome;
-- acknowledge only after provider execution context is established on the normal success path;
-- use `resume` rather than `acknowledge` when recovering a confirmed-live ambiguous launch from `WAITING:PROVIDER`.
+- acknowledge only after provider execution context is established;
+- resume the same established provider session for bounded work only after RUNNING.
 
 ### Claude provider adapter
 
 - concrete Claude/Claude Code launch transport only;
 - GitHub OIDC direction for authentication;
 - return typed launch status and provider/session evidence;
-- no candidate discovery/ranking/priority/claim authority.
+- no candidate discovery/ranking/priority/claim authority;
+- initial bootstrap has no repository tools;
+- actual work phase receives only the explicitly permitted repository-file tools; GitHub branch/push/PR operations remain deterministic wrapper behavior.
 
 ## 10. Ordinary ChatGPT and future OpenAI runtimes
 
@@ -242,7 +257,18 @@ Codex
 
 API-created sessions must not be represented as ordinary ChatGPT UI chats.
 
-## 11. Safety and compatibility invariants
+## 11. Initial implementation bounds
+
+The implementation plan fixes additional bounded-v1 limits that are narrower than the long-term architecture:
+
+- only `Role.IMPLEMENTER` enters the first auto-launch provider path; other roles remain existing/manual paths until separately extended;
+- one central controller job is capped below the existing 15-minute claim lease and does not add a new lease-renew daemon/loop in v1;
+- hard runner disappearance is recovered through existing lease expiry/fencing rather than relying on cleanup code that may never execute;
+- target GitHub write authority is isolated from the Claude provider step.
+
+These limits are implementation-scope decisions, not adoption-policy changes. They may be widened only through later evidence-backed bounded work.
+
+## 12. Safety and compatibility invariants
 
 - Sole runtime authority remains execution-coordinator claim/lease/generation/fencing.
 - Stale candidate/fingerprint/source/freshness fails closed.
@@ -255,9 +281,9 @@ API-created sessions must not be represented as ordinary ChatGPT UI chats.
 - No work stealing or LLM-semantic ranking.
 - Adoption remains PILOT.
 
-## 12. Implementation acceptance
+## 13. Implementation acceptance
 
-Implementation is not released by this design. After written-spec approval and implementation-plan approval, acceptance requires at least:
+Implementation is not released by this design. After implementation-plan approval and execution-method selection, acceptance requires at least:
 
 - controller consumes only accepted live candidate/portfolio evidence;
 - at most one offer per cycle;
@@ -278,7 +304,7 @@ Implementation is not released by this design. After written-spec approval and i
 - #188 is no longer merely deferred;
 - #105 PARK state is re-evaluated only after all remaining parent conditions are checked.
 
-## 13. Non-goals
+## 14. Non-goals
 
 - no PILOT -> REQUIRED_FOR_AUTONOMOUS promotion;
 - no ordinary ChatGPT product auto-launch;
@@ -291,7 +317,7 @@ Implementation is not released by this design. After written-spec approval and i
 - no provider-to-provider spawning outside the accepted Actions launcher path;
 - no credential/session/permission/release/deploy/publication/destructive/shared-history mutation without required Human authorization.
 
-## 14. Related authority
+## 15. Related authority
 
 - devflow#105
 - devflow#106
@@ -307,6 +333,8 @@ Implementation is not released by this design. After written-spec approval and i
 - execution-coordinator#85
 - execution-coordinator#3
 
-## 15. Next step
+## 16. Implementation plan
 
-This design is awaiting user review. After explicit approval, invoke the architectural implementation-planning stage. Do not release runtime implementation before that review/plan boundary is complete.
+`docs/superpowers/plans/2026-09-29-github-actions-controller-auto-launch.md`
+
+The plan is part of PR #224 and is awaiting user review and execution-method selection. Runtime implementation remains unreleased until that boundary is passed.
