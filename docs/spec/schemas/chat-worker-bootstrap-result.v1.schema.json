@@ -199,7 +199,8 @@
               "PUBLISHED_BY_THIS_ATTEMPT",
               "HUMAN_GATE",
               "EXTERNAL_BLOCKER",
-              "ROLE_UNSUPPORTED"
+              "ROLE_UNSUPPORTED",
+              "REPOSITORY_NOT_ACTIVE"
             ]
           }
         }
