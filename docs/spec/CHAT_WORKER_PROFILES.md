@@ -1,6 +1,6 @@
 # Chat Worker Profiles v1
 
-Status: proposed for acceptance under devflow#195 (Phase B of devflow#190)
+Status: accepted under devflow#195; operational profile contract for the accepted chat-worker bootstrap path
 Authority: devflow cross-repository workflow specification
 Depends on: [`CHAT_WORKER_BOOTSTRAP.md`](./CHAT_WORKER_BOOTSTRAP.md) section 12
 
