@@ -200,7 +200,8 @@
               "HUMAN_GATE",
               "EXTERNAL_BLOCKER",
               "ROLE_UNSUPPORTED",
-              "REPOSITORY_NOT_ACTIVE"
+              "REPOSITORY_NOT_ACTIVE",
+              "WORK_CLASS_MISMATCH"
             ]
           }
         }
