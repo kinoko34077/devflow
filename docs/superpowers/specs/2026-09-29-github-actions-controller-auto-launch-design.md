@@ -51,6 +51,8 @@ acknowledge -> RUNNING
 normal work / verification / PR / review / release
 ```
 
+The normal success path uses `acknowledge`. An ambiguous launch may temporarily enter `WAITING:PROVIDER`; if the provider is later proven live under current authority, that recovery path uses the existing `resume -> RUNNING` transition instead.
+
 ## 4. Controller trigger model
 
 Initial v1 uses:
@@ -84,7 +86,7 @@ Ordinary ChatGPT product chats remain manual-start workers through the accepted 
 
 ## 6. Claim / launch ordering
 
-The accepted v1 ordering is:
+The accepted v1 normal ordering is:
 
 ```text
 controller offer
@@ -106,10 +108,10 @@ Rules:
 - ACCEPT is not ownership.
 - Provider launch occurs only after claim success.
 - Repository work must not begin in CLAIMED.
-- RUNNING means the provider execution context exists and the current claim has been acknowledged.
+- RUNNING means the provider execution context exists and the current claim has been transitioned into active execution; normally by `acknowledge`, or by `resume` after an ambiguous-launch `WAITING:PROVIDER` reconciliation.
 - GitHub Actions launcher/orchestration is transport/control context, not a second runtime owner.
 - The claim remains bound to the intended provider execution attempt; returned provider/session identity is dispatch evidence, not parallel ownership.
-- A stale/fenced generation blocks acknowledge/work even if a delayed launch response later arrives.
+- A stale/fenced generation blocks acknowledge/resume/work even if a delayed launch response later arrives.
 
 Required execution-coordinator contract change:
 
@@ -147,9 +149,11 @@ The system cannot prove whether the provider started, for example after a timeou
 CLAIMED -> WAITING:PROVIDER
 ```
 
-Then reconcile:
+The current runtime already permits a live claim to enter `WAITING`, and the canonical return path from `WAITING` to active execution is `resume`.
 
-- confirmed live + current authority -> acknowledge -> RUNNING;
+Reconcile as follows:
+
+- confirmed live + current authority -> `resume` -> RUNNING;
 - confirmed not started -> release;
 - confirmed terminal failure -> fail;
 - still unknown -> retain only under existing bounded lease/renew semantics, then expire/recover normally.
@@ -200,7 +204,8 @@ Use the smallest existing durable owning surface that correctly owns the evidenc
 - construct the CLAIMED-bound auto-launch request;
 - invoke exactly one provider adapter;
 - reconcile launch outcome;
-- acknowledge only after provider execution context is established.
+- acknowledge only after provider execution context is established on the normal success path;
+- use `resume` rather than `acknowledge` when recovering a confirmed-live ambiguous launch from `WAITING:PROVIDER`.
 
 ### Claude provider adapter
 
