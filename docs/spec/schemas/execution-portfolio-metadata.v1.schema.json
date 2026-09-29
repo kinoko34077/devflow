@@ -55,6 +55,16 @@
               "integrator"
             ]
           },
+          "work_class": {
+            "enum": [
+              "audit",
+              "triage",
+              "sync-check",
+              "quickfix",
+              "implementation",
+              "formal-review"
+            ]
+          },
           "task_body_sha256": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$"

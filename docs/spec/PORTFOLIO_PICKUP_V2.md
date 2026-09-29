@@ -1,7 +1,7 @@
 # Portfolio-scope Broad Pickup v2
 
 Status: proposed for acceptance under devflow#208
-Authority chain: devflow#190 Phase D -> #198 -> #208
+Authority chain: devflow#190 Phase D -> #198 -> #208; additive work-class constraint: devflow#215 Stage 1
 Runtime consumer: `kinoko34077/execution-coordinator`
 
 ## 1. Purpose
@@ -29,13 +29,17 @@ The JSON shape is canonicalized by `schemas/execution-portfolio-metadata.v1.sche
 
 Each entry binds exactly one already-valid v1 candidate role using both `task_body_sha256` and `candidate_fingerprint`. The body digest prevents a newly revised owning task from silently inheriting old scheduling metadata; the fingerprint prevents a changed admission/conflict projection from inheriting it. Both must match current validated evidence.
 
-The entry carries only scheduling/worker-match data: optional controller urgency, explicit dependency readiness/order, readiness class, optional `ready_at`, exact required capability/environment tags, and `observed_at`/`fresh_until`. The exact live trusted Control `Priority` field supplies `control_priority`; it is deliberately not duplicated. Owning-Issue scope/acceptance remains in the owning repository.
+The entry carries only scheduling/worker-match data: optional controller urgency, explicit dependency readiness/order, readiness class, optional `ready_at`, exact required capability/environment tags, optional `work_class`, and `observed_at`/`fresh_until`. The exact live trusted Control `Priority` field supplies `control_priority`; it is deliberately not duplicated. Owning-Issue scope/acceptance remains in the owning repository.
 
-`dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags.
+`work_class`, when present, uses the closed Stage-1 vocabulary from `CHAT_WORKER_BOOTSTRAP.md`: `audit`, `triage`, `sync-check`, `quickfix`, `implementation`, `formal-review`. It describes task content and is independent of the participation `role`. It is optional for backward compatibility; consumers apply only the conservative legacy fallback defined in the bootstrap contract when it is absent.
+
+`dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags or a work class.
 
 ## 3. Complete frontier rule
 
 Portfolio enumeration begins from the exact live managed `[REPO]` Controls and retains source/discovery failures. For ordinary fresh candidates, the frontier is complete only when each participating candidate has one unique fresh matching companion entry. Missing, stale, duplicate, body/fingerprint-mismatched or ambiguous ranking/requirements evidence makes portfolio evidence incomplete; consumers return `NEEDS_EVIDENCE / FRONTIER_UNAVAILABLE` rather than using the repository-scoped fallback.
+
+The optional absence of `work_class` does not make legacy metadata incomplete. It deliberately invokes the conservative role-to-class compatibility mapping from `CHAT_WORKER_BOOTSTRAP.md`. New lightweight classes (`audit`, `triage`, `sync-check`, `quickfix`) require explicit class evidence and are never inferred from an old implementer entry.
 
 Recovery demand remains a separate track. It is not converted into fresh work and does not gain ordinary ranking authority merely because a runtime claim is absent.
 
@@ -43,9 +47,11 @@ Recovery demand remains a separate track. It is not converted into fresh work an
 
 Hard filters remain: trusted/fresh admission, live Control state and safety gates, dependency readiness, runtime claim/conflict compatibility, 3C publisher/consumer separation, reviewer independence, and exact capability/environment subset matching.
 
+When a bootstrap request explicitly supplies `accepted_work_classes`, work-class mismatch is an additional hard omission applied after the existing safety/capability gates and before role-track ranking. This means a maintenance-mode worker can reject unrelated `formal-review` demand without changing the global `recovery -> reviewer -> implementer` track policy for unconstrained workers.
+
 Ordinary rank class is lexicographic over: Control priority; explicit urgency; dependency order; readiness class; explicit `ready_at`. Canonical task identity is an audit tie-breaker, not part of the rank class.
 
-After selecting the highest-precedence work track and best rank class, portfolio selection uses **worker-scoped** deterministic spread:
+After filtering, portfolio selection fixes the highest-precedence surviving work track and best rank class, then uses **worker-scoped** deterministic spread:
 
 ```text
 SHA-256(coordinator_worker_id || "\0" || task_ref || "\0" || execution_attempt_id)
@@ -53,7 +59,7 @@ SHA-256(coordinator_worker_id || "\0" || task_ref || "\0" || execution_attempt_i
 
 The smallest `(hash, task_ref, role)` wins. Candidate input order never matters. One discovery cycle submits at most one claim attempt. A rejected claim ends the cycle; the worker refreshes rather than falling through to candidate 2.
 
-Repository-scoped requests retain the accepted v1 `(track, rank_key, task_ref, role)` behavior.
+Repository-scoped requests retain the accepted v1 `(track, rank_key, task_ref, role)` behavior after the same optional work-class filter.
 
 ## 5. Control gates in portfolio scope
 
@@ -65,6 +71,8 @@ Release/deploy/publication, credential/session/permission mutation, destructive/
 
 Publication and consumption remain separate operations (3C). A worker/session that adds or relaxes candidate/portfolio metadata does not consume that change in the same execution attempt.
 
+Stage 1 adds no effort scoring, fairness controller, persistent queue or small-batch loop. It only permits a worker cycle to constrain the already-authoritative frontier by a bounded work-class set before existing ranking/claim logic runs.
+
 ## 7. Acceptance
 
-Acceptance requires exact-head tests/CI/review; runtime implementation consuming this contract only after the devflow contract is accepted; a bounded Stage-3 pilot across at least two real managed repositories; no fallthrough after claim rejection; and final execution-coordinator runtime claims `{}`.
+The original #208 acceptance requires exact-head tests/CI/review, a bounded Stage-3 pilot across at least two real managed repositories, no fallthrough after claim rejection, and final execution-coordinator runtime claims `{}`. The additive #215 Stage-1 change separately requires exact-head compatibility tests proving unconstrained legacy behavior and explicit work-class filtering before runtime propagation is accepted.

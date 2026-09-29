@@ -24,7 +24,7 @@ If the prose here and the reference classifier ever disagree, the prose is norma
 
 ```text
 user broad instruction (+ current working context)
-  -> worker builds a v1 request (identity, declared tags, tool surfaces)
+  -> worker builds a v1 request (identity, declared tags, tool surfaces, optional structured work-class constraint)
   -> worker reads live evidence in the canonical order (section 4)
   -> classify(request, evidence) -> exactly one v1 result
   -> work disposition: serialized claim -> acknowledge -> Execution Session -> bounded work
@@ -35,13 +35,14 @@ The classification is a pure function of `(request, evidence)`. The provider ide
 
 ## 2. Request envelope (`chat-worker-bootstrap-request.v1`)
 
-All fields are required. Unknown fields are rejected.
+The original v1 fields remain required. devflow#215 Stage 1 adds one optional additive field, `accepted_work_classes`. Unknown fields are rejected.
 
 | Field | Type | Rule |
 | --- | --- | --- |
 | `schema_version` | const | `chat-worker-bootstrap-request.v1`; any other value gives `NEEDS_EVIDENCE` / `SCHEMA_UNSUPPORTED` |
 | `target_repository` | `owner/name` or `null` | from the user or the current working context; `null` means portfolio scope |
 | `work_intent` | string ≤ 500 or `null` | the user's broad instruction, recorded for audit only; **never selects, ranks or filters work** |
+| `accepted_work_classes` | optional non-empty closed array | explicit structured constraint over Stage-1 work classes; absent means unconstrained legacy selection |
 | `worker_system` | `codex` \| `claude` \| `chatgpt` | provenance only; never implies a capability |
 | `worker_session_id` | identity | one per chat/session for its lifetime (section 6) |
 | `execution_attempt_id` | identity | one per discovery cycle (section 7) |
@@ -50,10 +51,22 @@ All fields are required. Unknown fields are rejected.
 | `tool_surfaces` | exact tags | tools the chat can actually use right now (section 8) |
 | `observed_at` | RFC3339 UTC (`…Z`) | when the request was built |
 
+Stage-1 work classes are a deliberately small closed vocabulary:
+
+- `audit`
+- `triage`
+- `sync-check`
+- `quickfix`
+- `implementation`
+- `formal-review`
+
+`accepted_work_classes` is a worker-cycle preference/constraint, not a capability grant and not a new scheduler. It may be populated only from an explicit operating-mode/request interpretation made before classification. Free-form `work_intent` remains audit text and does not itself cause selection. An absent `accepted_work_classes` field preserves the pre-#215 behavior exactly.
+
 Normalization:
 
 - tags must match `^[a-z0-9][a-z0-9_.:/-]{0,63}$`;
 - duplicate tags are rejected, and valid tags are sorted;
+- `accepted_work_classes`, when present, must be non-empty, unique and contain only the closed values above;
 - identities must match `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`;
 - `target_repository` is compared case-insensitively against Control identities, with no other transformation.
 
@@ -87,7 +100,7 @@ Repository-scoped entry reads, in order:
 4. trusted active/relevant Execution Session Records (#142/#144);
 5. the accepted candidate/reconciliation frontier (#125, #159, execution-coordinator managed frontier);
 6. execution-coordinator runtime state and claimability;
-7. dependency, capability/environment and safety filtering;
+7. dependency, capability/environment, safety and optional work-class filtering;
 8. deterministic selection.
 
 The classifier then applies the **first matching rule**:
@@ -175,23 +188,33 @@ Filters are applied in this order. The first failing filter becomes the candidat
 9. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only.
 10. `CAPABILITY_MISMATCH`: `required_capabilities ⊄ capabilities`.
 11. `ENVIRONMENT_MISMATCH`: `required_environment ⊄ environment`.
+12. `WORK_CLASS_MISMATCH`: the request contains `accepted_work_classes` and the candidate's effective class is outside that set.
 
 Capability/environment matching is an exact tag subset check. `worker_system`, the model name, `work_intent`, repository language and prior success never add tags.
 
+A candidate may carry an explicit optional `work_class`. For compatibility with candidates published before #215 Stage 1, a missing class has only these conservative defaults:
+
+- `reviewer` -> `formal-review`;
+- `implementer` -> `implementation`;
+- `recovery` -> `implementation`.
+
+No legacy candidate is inferred to be `audit`, `triage`, `sync-check` or `quickfix`. Those classes require explicit publication evidence. This avoids reclassifying an old broad implementation task as a lightweight job merely because a maintenance worker requested one.
+
 ### 5.4 Deterministic selection
 
-Among the eligible candidates, exactly one is selected by the lexicographic key:
+Among candidates surviving hard filtering, exactly one is selected by the existing lexicographic policy:
 
 ```text
 (track, rank_key, task_ref, role)
 track: recovery = 0, reviewer = 1, implementer = 2
 ```
 
-- Finishing in-flight work comes before starting new work.
+- Finishing in-flight work comes before starting new work **within the worker's accepted class set** when one was explicitly supplied.
 - `rank_key` is the accepted execution-coordinator Phase 2 rank key (priority, urgency, dependency order, readiness, `ready_at`, …), carried verbatim. Integers compare numerically.
 - No free-form semantic scoring, model preference, Issue age, branch-existence or chat-memory heuristic participates.
 - Candidates arrive through accepted projections. Candidate order in the input does not affect the result.
 - Portfolio scope first fixes the best track and rank class, then applies the worker-scoped SHA-256 spread defined in `PORTFOLIO_PICKUP_V2.md`; repository-scoped v1 keeps the existing lexical tie-break.
+- If `accepted_work_classes` is absent, the exact pre-#215 role/track behavior is preserved.
 
 ## 6. Identity boundary (decision 4)
 
@@ -237,6 +260,8 @@ It never copies Issue bodies, acceptance text or checkpoints. The worker must re
 
 A missing Issue number in the user prompt is **not** a reason to ask the user. If `target_repository` is known from the prompt or the working context, and the classification returns a work disposition, the worker proceeds to the claim without asking the user to choose among machine-resolvable candidates.
 
+A worker may normalize an explicit operating-mode instruction such as 「監査だけ」「軽い保守だけ」「レビューだけ」 into `accepted_work_classes` according to the accepted integration procedure. It must not infer a hidden preference from provider identity, repository language, model reputation or prior chats. `work_intent` itself remains non-authoritative input to the classifier.
+
 The worker asks the user only when the missing information is authoritative and cannot be derived safely:
 
 - portfolio evidence itself is unavailable or ambiguous after `target_repository = null` is resolved through the accepted #208 contract;
@@ -253,6 +278,7 @@ For any other non-work disposition, the worker reports the typed disposition and
 - Live GitHub/devflow is the source of truth; chat history is not durable task authority.
 - Release/deploy/publication, credential/session/permission, destructive, shared-history and difficult-to-reverse operations remain Human-gated. They surface as `NEEDS_HUMAN` and are never automated by this contract.
 - There is no second scheduler, queue, task database or provider-specific priority authority. Controller negotiation stays deferred (#188), and adoption stays `PILOT` (#189).
+- Stage 1 does not add effort scoring, batching, daemon workers, audit-supply automation or task manufacture. Those remain separately staged under #215.
 
 ## 12. Phase B handoff (per-session worker profiles)
 
@@ -265,4 +291,4 @@ Phase B must define, for each of `codex`, `claude` and `chatgpt`, how a session 
 - `tool_surfaces[]` derived from the tools actually available in that chat at bootstrap time;
 - a confirmation that no secret, token, cookie or session material enters any field.
 
-Phase B does not change this envelope. A needed change is a v2 contract.
+Phase B does not require `accepted_work_classes`; omission means unconstrained legacy behavior. The optional field is a Stage-1 execution preference under #215, not a permanent worker capability or persona.
