@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/schemas/repository-bootstrap.v1.schema.json",
+  "title": "repository-bootstrap.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "classification"],
+  "properties": {
+    "schema": {"const": "repository-bootstrap.v1"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": {"const": "kinoko34077"},
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,100}$"},
+        "description": {"type": "string", "default": ""},
+        "visibility": {"enum": ["private", "public"], "default": "private"}
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "priority", "risk"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "priority": {"enum": ["P0", "P1", "P2", "P3"]},
+        "risk": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]}
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "template": {"const": "minimal", "default": "minimal"},
+        "devflow_managed": {"type": "boolean", "default": true}
+      }
+    },
+    "initial_content": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readme": {"type": "string"},
+        "specification": {"type": ["string", "null"]},
+        "license": {"type": "null"}
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "title", "body"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$"},
+          "title": {"type": "string", "minLength": 1},
+          "body": {"type": "string"},
+          "role": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "devflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create_control": {"type": "boolean"},
+        "work_status": {
+          "enum": ["NEEDS_AUDIT", "AUDITED", "WORK_ORDER_READY", "READY_FOR_IMPLEMENTATION", "IMPLEMENTING", "AWAITING_REVIEW", "BLOCKED", "NEEDS_REAUDIT", "PARKED", "DONE"],
+          "default": "WORK_ORDER_READY"
+        },
+        "repository_state": {
+          "enum": ["ACTIVE", "PARKED", "MAINTENANCE", "DEPRECATED", "CANCELLED"],
+          "default": "ACTIVE"
+        },
+        "next_action": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

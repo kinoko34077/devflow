@@ -1,0 +1,55 @@
+name: Repository bootstrap
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-bootstrap-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      candidate: ${{ steps.validate.outputs.candidate }}
+      valid: ${{ steps.validate.outputs.valid }}
+      authorized: ${{ steps.validate.outputs.authorized }}
+      repository_name: ${{ steps.validate.outputs.repository_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Validate request without repository-creation credential
+        id: validate
+        env:
+          DEVFLOW_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/repository_bootstrap.py validate-event
+          --event "$GITHUB_EVENT_PATH"
+          --github-output "$GITHUB_OUTPUT"
+
+  provision:
+    needs: validate
+    if: ${{ needs.validate.outputs.valid == 'true' && needs.validate.outputs.authorized == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Provision repository from validated request
+        env:
+          DEVFLOW_TOKEN: ${{ github.token }}
+          REPOSITORY_BOOTSTRAP_TOKEN: ${{ secrets.REPOSITORY_BOOTSTRAP_TOKEN }}
+        run: python scripts/repository_bootstrap.py execute-event --event "$GITHUB_EVENT_PATH"

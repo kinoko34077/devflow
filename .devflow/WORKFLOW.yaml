@@ -308,6 +308,41 @@ project_sync:
       - repository_identity_migration
       - explicit_user_request
 
+repository_bootstrap:
+  contract_schema: repository-bootstrap.v1
+  canonical_spec: docs/spec/REPOSITORY_BOOTSTRAP.md
+  operations_doc: docs/operations/REPOSITORY_BOOTSTRAP.md
+  workflow_file: .github/workflows/repository-bootstrap.yml
+  implementation_file: tools/repository_bootstrap.py
+  cli_file: scripts/repository_bootstrap.py
+  request_issue_title_pattern: "[REPO CREATE] <repository-name>"
+  request_authority: finite_creation_request_and_recovery_record
+  resulting_control_title_pattern: "[REPO] <repository-name>"
+  resulting_control_authority: cross_repository_current_state_summary
+  executor_semantics: deterministic_no_llm
+  idempotency: ensure_or_fail_closed
+  required_template_v1: minimal
+  safe_defaults:
+    visibility: private
+    devflow_managed_unless_excluded: true
+    license: null
+    force_repository_base: false
+  trusted_author_associations:
+    - OWNER
+    - MEMBER
+    - COLLABORATOR
+  secret_boundary:
+    name: REPOSITORY_BOOTSTRAP_TOKEN
+    validation_job_receives_secret: false
+    provisioning_requires_valid_request: true
+    provisioning_requires_trusted_author: true
+    credential_creation_rotation_storage_permission_change: human_confirmation
+  operational_e2e:
+    credential_required: true
+    current_status: pending_approved_credential
+    test_visibility: private
+    automatic_cleanup_delete: false
+
 repository_rename:
   previous: kinoko34077/devflow-test
   current: kinoko34077/devflow
