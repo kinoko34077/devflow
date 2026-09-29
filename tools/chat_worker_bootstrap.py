@@ -1,8 +1,8 @@
 """Reference classifier for the Chat Worker Bootstrap Contract v1 (devflow#191).
 
-Pure and deterministic: it performs no I/O.  A worker (Codex, Claude or
+Pure and deterministic: it performs no I/O. A worker (Codex, Claude or
 ChatGPT) gathers live evidence itself, then this module turns the validated
-request plus that evidence into exactly one disposition.  The normative
+request plus that evidence into exactly one disposition. The normative
 contract is ``docs/spec/CHAT_WORKER_BOOTSTRAP.md``; this module exists so the
 contract's examples are executable and provider-neutral by construction.
 """
@@ -19,6 +19,14 @@ EVIDENCE_SCHEMA = "chat-worker-bootstrap-evidence.v1"
 RESULT_SCHEMA = "chat-worker-bootstrap-result.v1"
 
 WORKER_SYSTEMS = ("codex", "claude", "chatgpt")
+WORK_CLASSES = (
+    "audit",
+    "triage",
+    "sync-check",
+    "quickfix",
+    "implementation",
+    "formal-review",
+)
 
 DISPOSITIONS = (
     "CLAIM_AND_WORK",
@@ -30,7 +38,7 @@ DISPOSITIONS = (
     "NEEDS_EVIDENCE",
 )
 
-# Stable typed reason vocabulary.  The set is closed for v1; adding a code is
+# Stable typed reason vocabulary. The set is closed for v1; adding a code is
 # a contract change.
 REASON_CODES = (
     # selection
@@ -71,6 +79,7 @@ OMISSION_REASONS = (
     "EXTERNAL_BLOCKER",
     "ROLE_UNSUPPORTED",
     "REPOSITORY_NOT_ACTIVE",
+    "WORK_CLASS_MISMATCH",
 )
 
 NEXT_STEPS = {
@@ -83,16 +92,26 @@ NEXT_STEPS = {
     "NEEDS_EVIDENCE": "RESOLVE_EVIDENCE",
 }
 
-# Candidate role -> (disposition, reason, selection precedence).  Finishing
+# Candidate role -> (disposition, reason, selection precedence). Finishing
 # in-flight work precedes starting new work: recovery, then review, then
-# fresh implementation.
+# fresh implementation. Stage 1 work-class filtering happens before this
+# precedence is applied when the request explicitly constrains work classes.
 ROLE_TRACKS = {
     "recovery": ("RECOVERY_WORK", "ELIGIBLE_RECOVERY_DEMAND", 0),
     "reviewer": ("REVIEW_WORK", "ELIGIBLE_REVIEW_DEMAND", 1),
     "implementer": ("CLAIM_AND_WORK", "ELIGIBLE_FRESH_CANDIDATE", 2),
 }
 
-# Provider-local tool surfaces required before any work disposition.  These
+# Compatibility for candidates published before devflow#215 Stage 1. The
+# fallback is deliberately narrow: an old implementer/recovery candidate is
+# ordinary implementation, never inferred to be audit/triage/sync/quickfix.
+LEGACY_ROLE_WORK_CLASS = {
+    "reviewer": "formal-review",
+    "implementer": "implementation",
+    "recovery": "implementation",
+}
+
+# Provider-local tool surfaces required before any work disposition. These
 # are availability facts about the chat's tools, never capabilities.
 REQUIRED_WORK_SURFACES = ("github:read", "github:write", "coordinator:claim")
 
@@ -104,7 +123,6 @@ _CONTROL_REF = re.compile(r"^kinoko34077/devflow#[1-9][0-9]*$")
 _TAG = re.compile(r"^[a-z0-9][a-z0-9_.:/-]{0,63}$")
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
-# Metadata must never carry secret material; reject obvious shapes outright.
 _SECRET_SHAPE = re.compile(
     r"(ghp_|gho_|ghs_|github_pat_|sk-|xox[abp]-|bearer|token|secret|password|cookie|session_key)",
     re.IGNORECASE,
@@ -142,6 +160,19 @@ def _tags(value: object, field: str, code: str) -> list[str]:
     return sorted(tags)
 
 
+def _work_classes(value: object, field: str, code: str) -> list[str]:
+    _require(isinstance(value, list) and value, code, f"{field} must be a non-empty array")
+    classes: list[str] = []
+    for work_class in value:
+        _require(work_class in WORK_CLASSES, code, f"{field} has an unknown work class")
+        classes.append(work_class)
+    _require(len(set(classes)) == len(classes), code, f"{field} has duplicate work classes")
+    return sorted(classes)
+
+
+# REQUEST_FIELDS remains the required v1 envelope. Optional additive Stage 1
+# fields are separate so existing schema-consistency tests and old clients keep
+# the exact required contract.
 REQUEST_FIELDS = frozenset(
     {
         "schema_version",
@@ -156,10 +187,11 @@ REQUEST_FIELDS = frozenset(
         "observed_at",
     }
 )
+REQUEST_OPTIONAL_FIELDS = frozenset({"accepted_work_classes"})
 
 
 def normalize_request(request: object) -> dict[str, Any]:
-    """Validate and normalize a v1 request.  Raises ``ContractError``."""
+    """Validate and normalize a v1 request. Raises ``ContractError``."""
 
     _require(isinstance(request, dict), "REQUEST_INVALID", "request must be an object")
     _require(
@@ -167,7 +199,7 @@ def normalize_request(request: object) -> dict[str, Any]:
         "SCHEMA_UNSUPPORTED",
         "unsupported request schema_version",
     )
-    unknown = set(request) - REQUEST_FIELDS
+    unknown = set(request) - REQUEST_FIELDS - REQUEST_OPTIONAL_FIELDS
     _require(not unknown, "REQUEST_INVALID", f"unknown request fields: {sorted(unknown)}")
     target = request.get("target_repository")
     _require(
@@ -194,11 +226,22 @@ def normalize_request(request: object) -> dict[str, Any]:
             f"{field} is malformed",
         )
         _require(_SECRET_SHAPE.search(value) is None, "REQUEST_INVALID", f"{field} must not carry secret material")
+
+    accepted_work_classes = None
+    if "accepted_work_classes" in request:
+        accepted_work_classes = _work_classes(
+            request["accepted_work_classes"],
+            "accepted_work_classes",
+            "REQUEST_INVALID",
+        )
+
     return {
         "schema_version": REQUEST_SCHEMA,
         "target_repository": target,
-        # Intent is recorded for audit only; it never selects or ranks work.
+        # Intent is recorded for audit only. It never selects or ranks work;
+        # callers must provide the structured field above when constraining it.
         "work_intent": intent,
+        "accepted_work_classes": accepted_work_classes,
         "worker_system": request["worker_system"],
         "worker_session_id": request["worker_session_id"],
         "execution_attempt_id": request["execution_attempt_id"],
@@ -218,11 +261,27 @@ def coordinator_worker_id(request: dict[str, Any]) -> str:
 def _candidate(value: object) -> dict[str, Any]:
     code = "EVIDENCE_INVALID"
     _require(isinstance(value, dict), code, "candidate must be an object")
-    _require(isinstance(value.get("task_ref"), str) and _TASK_REF.fullmatch(value["task_ref"]) is not None, code, "candidate task_ref is malformed")
-    _require(isinstance(value.get("role"), str), code, "candidate role must be a string")
+    _require(
+        isinstance(value.get("task_ref"), str) and _TASK_REF.fullmatch(value["task_ref"]) is not None,
+        code,
+        "candidate task_ref is malformed",
+    )
+    role = value.get("role")
+    _require(isinstance(role, str), code, "candidate role must be a string")
     _require(isinstance(value.get("action"), str) and value["action"], code, "candidate action must be a string")
-    _require(isinstance(value.get("fingerprint"), str) and _FINGERPRINT.fullmatch(value["fingerprint"]) is not None, code, "candidate fingerprint is malformed")
-    for flag in ("digest_fresh", "dependency_ready", "human_gate", "external_blocker", "reviewer_independence_conflict", "published_by_this_attempt"):
+    _require(
+        isinstance(value.get("fingerprint"), str) and _FINGERPRINT.fullmatch(value["fingerprint"]) is not None,
+        code,
+        "candidate fingerprint is malformed",
+    )
+    for flag in (
+        "digest_fresh",
+        "dependency_ready",
+        "human_gate",
+        "external_blocker",
+        "reviewer_independence_conflict",
+        "published_by_this_attempt",
+    ):
         _require(type(value.get(flag)) is bool, code, f"candidate {flag} must be boolean")
     _require(value.get("claimability") in CLAIMABILITY, code, "candidate claimability is unknown")
     rank = value.get("rank_key")
@@ -236,16 +295,31 @@ def _candidate(value: object) -> dict[str, Any]:
         code,
         "candidate rank_key must be a list of non-negative integers/strings",
     )
+
+    work_class = value.get("work_class")
+    if work_class is None:
+        work_class = LEGACY_ROLE_WORK_CLASS.get(role)
+    else:
+        _require(work_class in WORK_CLASSES, code, "candidate work_class is unknown")
+
     return {
         **value,
+        "work_class": work_class,
         "required_capabilities": _tags(value.get("required_capabilities"), "required_capabilities", code),
         "required_environment": _tags(value.get("required_environment"), "required_environment", code),
     }
 
 
-def _result(request: dict[str, Any] | None, disposition: str, reason_code: str, *, detail: str | None = None,
-            source_refs: list[str] | None = None, selected: dict[str, Any] | None = None,
-            omissions: list[dict[str, str]] | None = None) -> dict[str, Any]:
+def _result(
+    request: dict[str, Any] | None,
+    disposition: str,
+    reason_code: str,
+    *,
+    detail: str | None = None,
+    source_refs: list[str] | None = None,
+    selected: dict[str, Any] | None = None,
+    omissions: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schema_version": RESULT_SCHEMA,
         "disposition": disposition,
@@ -261,7 +335,10 @@ def _result(request: dict[str, Any] | None, disposition: str, reason_code: str, 
         "claim_required": False,
         "claim_candidate_fingerprint": None,
         "coordinator_worker_id": None,
-        "omissions": sorted(omissions or [], key=lambda item: (item["task_ref"], item["role"], item["reason"])),
+        "omissions": sorted(
+            omissions or [],
+            key=lambda item: (item["task_ref"], item["role"], item["reason"]),
+        ),
         "next_authoritative_step": NEXT_STEPS[disposition],
     }
     if selected is not None:
@@ -315,7 +392,11 @@ def _portfolio_spread_key(request: dict[str, Any], item: dict[str, Any]) -> tupl
 def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     # 1. Evidence envelope.
     _require(isinstance(evidence, dict), "EVIDENCE_INVALID", "evidence must be an object")
-    _require(evidence.get("schema_version") == EVIDENCE_SCHEMA, "SCHEMA_UNSUPPORTED", "unsupported evidence schema_version")
+    _require(
+        evidence.get("schema_version") == EVIDENCE_SCHEMA,
+        "SCHEMA_UNSUPPORTED",
+        "unsupported evidence schema_version",
+    )
     observed = _timestamp(evidence.get("observed_at"), "evidence observed_at", "EVIDENCE_INVALID")
     fresh_until = _timestamp(evidence.get("fresh_until"), "evidence fresh_until", "EVIDENCE_INVALID")
     request_time = _timestamp(request["observed_at"], "request observed_at", "REQUEST_INVALID")
@@ -326,32 +407,56 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
 
     # 2. Live bootstrap canon.
     if evidence.get("agents_md_read") is not True:
-        return _result(request, "NEEDS_EVIDENCE", "BOOTSTRAP_UNREAD", detail="live devflow/AGENTS.md was not read")
+        return _result(
+            request,
+            "NEEDS_EVIDENCE",
+            "BOOTSTRAP_UNREAD",
+            detail="live devflow/AGENTS.md was not read",
+        )
 
     # 3. Validate Control observations. Repository scope resolves one Control
-    # immediately; portfolio scope resolves one exact Control per candidate
-    # after the complete frontier has been read.
+    # immediately; portfolio scope resolves one exact Control per candidate.
     controls = evidence.get("controls")
     _require(isinstance(controls, list), "EVIDENCE_INVALID", "controls must be an array")
     for control in controls:
-        _require(isinstance(control, dict) and isinstance(control.get("ref"), str) and _CONTROL_REF.fullmatch(control["ref"]) is not None,
-                 "EVIDENCE_INVALID", "control ref must be kinoko34077/devflow#N")
-        _require(isinstance(control.get("managed_repository"), str), "EVIDENCE_INVALID", "control managed_repository missing")
+        _require(
+            isinstance(control, dict)
+            and isinstance(control.get("ref"), str)
+            and _CONTROL_REF.fullmatch(control["ref"]) is not None,
+            "EVIDENCE_INVALID",
+            "control ref must be kinoko34077/devflow#N",
+        )
+        _require(
+            isinstance(control.get("managed_repository"), str),
+            "EVIDENCE_INVALID",
+            "control managed_repository missing",
+        )
 
     refs: list[str] = []
     repo_control: dict[str, Any] | None = None
     if not portfolio:
         matching = [
-            control for control in controls
+            control
+            for control in controls
             if control["managed_repository"].casefold() == request["target_repository"].casefold()
             and control.get("state") == "open"
         ]
         refs = [control["ref"] for control in matching]
         if not matching:
-            return _result(request, "NEEDS_EVIDENCE", "CONTROL_NOT_FOUND", detail="no open Repository Control for target")
+            return _result(
+                request,
+                "NEEDS_EVIDENCE",
+                "CONTROL_NOT_FOUND",
+                detail="no open Repository Control for target",
+            )
         if len(matching) > 1:
-            return _result(request, "NEEDS_EVIDENCE", "CONTROL_DUPLICATE", source_refs=refs,
-                           detail="more than one open Repository Control claims the target")
+            return _result(
+                request,
+                "NEEDS_EVIDENCE",
+                "CONTROL_DUPLICATE",
+                source_refs=refs,
+                detail="more than one open Repository Control claims the target",
+            )
         repo_control = matching[0]
         if repo_control.get("trusted") is not True:
             return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=refs)
@@ -364,26 +469,36 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
 
     # 4. Accepted frontier and runtime state must both be available. For
     # portfolio scope, gatherers set complete=false if any ordinary candidate
-    # lacks accepted fresh ranking/requirements metadata; no fallback is used.
+    # lacks accepted fresh scheduling evidence; no fallback is used.
     frontier = evidence.get("frontier")
     if not isinstance(frontier, dict) or frontier.get("complete") is not True:
         return _result(request, "NEEDS_EVIDENCE", "FRONTIER_UNAVAILABLE", source_refs=refs)
     if evidence.get("coordinator_state_read") is not True:
-        return _result(request, "NEEDS_EVIDENCE", "COORDINATOR_STATE_UNAVAILABLE", source_refs=refs)
+        return _result(
+            request,
+            "NEEDS_EVIDENCE",
+            "COORDINATOR_STATE_UNAVAILABLE",
+            source_refs=refs,
+        )
     raw_candidates = frontier.get("candidates")
     _require(isinstance(raw_candidates, list), "EVIDENCE_INVALID", "frontier candidates must be an array")
     candidates = [_candidate(item) for item in raw_candidates]
     keys = [(item["task_ref"], item["role"]) for item in candidates]
-    _require(len(set(keys)) == len(keys), "EVIDENCE_INVALID", "frontier has duplicate (task, role) candidates")
+    _require(
+        len(set(keys)) == len(keys),
+        "EVIDENCE_INVALID",
+        "frontier has duplicate (task, role) candidates",
+    )
     if not candidates:
         return _result(request, "NO_ELIGIBLE_WORK", "NO_CANDIDATES_PUBLISHED", source_refs=refs)
 
-    # 5. Hard filters. Portfolio scope applies live Control vetoes per
-    # candidate repository so one gated repository does not suppress unrelated
-    # eligible work, while missing/duplicate/untrusted Control identity fails
-    # the whole cycle closed.
+    # 5. Hard filters. Safety/freshness/runtime/capability gates keep their
+    # precedence. The optional work-class preference is then applied before
+    # track/rank selection so a maintenance worker cannot be absorbed by an
+    # unrelated formal-review lane.
     capabilities = set(request["capabilities"])
     environment = set(request["environment"])
+    accepted_work_classes = request["accepted_work_classes"]
     eligible: list[dict[str, Any]] = []
     omissions: list[dict[str, str]] = []
     portfolio_refs: set[str] = set()
@@ -393,20 +508,35 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
         if portfolio:
             repository = _candidate_repository(item["task_ref"])
             matching = [
-                control for control in controls
+                control
+                for control in controls
                 if control["managed_repository"].casefold() == repository.casefold()
                 and control.get("state") == "open"
             ]
             matching_refs = [control["ref"] for control in matching]
             if not matching:
-                return _result(request, "NEEDS_EVIDENCE", "CONTROL_NOT_FOUND",
-                               detail=f"no open Repository Control for portfolio candidate {repository}")
+                return _result(
+                    request,
+                    "NEEDS_EVIDENCE",
+                    "CONTROL_NOT_FOUND",
+                    detail=f"no open Repository Control for portfolio candidate {repository}",
+                )
             if len(matching) > 1:
-                return _result(request, "NEEDS_EVIDENCE", "CONTROL_DUPLICATE", source_refs=matching_refs,
-                               detail=f"more than one open Repository Control claims portfolio candidate {repository}")
+                return _result(
+                    request,
+                    "NEEDS_EVIDENCE",
+                    "CONTROL_DUPLICATE",
+                    source_refs=matching_refs,
+                    detail=f"more than one open Repository Control claims portfolio candidate {repository}",
+                )
             control = matching[0]
             if control.get("trusted") is not True:
-                return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=matching_refs)
+                return _result(
+                    request,
+                    "NEEDS_EVIDENCE",
+                    "CONTROL_UNTRUSTED",
+                    source_refs=matching_refs,
+                )
             selected_item["_source_ref"] = control["ref"]
             portfolio_refs.add(control["ref"])
             if control.get("repository_state") != "ACTIVE":
@@ -437,30 +567,60 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                 reason = "CAPABILITY_MISMATCH"
             elif not set(item["required_environment"]) <= environment:
                 reason = "ENVIRONMENT_MISMATCH"
+            elif accepted_work_classes is not None and item["work_class"] not in accepted_work_classes:
+                reason = "WORK_CLASS_MISMATCH"
         if reason is None:
             eligible.append(selected_item)
         else:
-            omissions.append({"task_ref": item["task_ref"], "role": item["role"], "reason": reason})
+            omissions.append(
+                {"task_ref": item["task_ref"], "role": item["role"], "reason": reason}
+            )
 
     cycle_refs = sorted(portfolio_refs) if portfolio else refs
     if not eligible:
         omitted = {item["reason"] for item in omissions}
         if "HUMAN_GATE" in omitted:
-            return _result(request, "NEEDS_HUMAN", "HUMAN_GATE", source_refs=cycle_refs, omissions=omissions)
+            return _result(
+                request,
+                "NEEDS_HUMAN",
+                "HUMAN_GATE",
+                source_refs=cycle_refs,
+                omissions=omissions,
+            )
         if "EXTERNAL_BLOCKER" in omitted:
-            return _result(request, "WAIT_EXTERNAL", "EXTERNAL_BLOCKER", source_refs=cycle_refs, omissions=omissions)
-        return _result(request, "NO_ELIGIBLE_WORK", "ALL_CANDIDATES_OMITTED", source_refs=cycle_refs, omissions=omissions)
+            return _result(
+                request,
+                "WAIT_EXTERNAL",
+                "EXTERNAL_BLOCKER",
+                source_refs=cycle_refs,
+                omissions=omissions,
+            )
+        return _result(
+            request,
+            "NO_ELIGIBLE_WORK",
+            "ALL_CANDIDATES_OMITTED",
+            source_refs=cycle_refs,
+            omissions=omissions,
+        )
 
     # 6. Provider-local mutation surface. Checked only once work exists and
     # never used as capability evidence.
-    missing = [surface for surface in REQUIRED_WORK_SURFACES if surface not in request["tool_surfaces"]]
+    missing = [
+        surface for surface in REQUIRED_WORK_SURFACES if surface not in request["tool_surfaces"]
+    ]
     if missing:
-        return _result(request, "NEEDS_EVIDENCE", "PROVIDER_SURFACE_MISSING", source_refs=cycle_refs,
-                       detail="missing tool surfaces: " + ",".join(missing), omissions=omissions)
+        return _result(
+            request,
+            "NEEDS_EVIDENCE",
+            "PROVIDER_SURFACE_MISSING",
+            source_refs=cycle_refs,
+            detail="missing tool surfaces: " + ",".join(missing),
+            omissions=omissions,
+        )
 
-    # 7. Selection. Repository scope keeps the accepted v1 lexical behavior.
-    # Portfolio scope first fixes the best track + rank class, then spreads
-    # workers deterministically inside that class. At most one is returned.
+    # 7. Selection. With no accepted_work_classes constraint this is exactly
+    # the accepted legacy track/rank behavior. With a constraint, only the
+    # matching subset reaches this point.
     if portfolio:
         best_track = min(ROLE_TRACKS[item["role"]][2] for item in eligible)
         track_items = [item for item in eligible if ROLE_TRACKS[item["role"]][2] == best_track]
@@ -471,11 +631,23 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     else:
         selected = min(
             eligible,
-            key=lambda item: (ROLE_TRACKS[item["role"]][2], _normalized_rank_key(item), item["task_ref"], item["role"]),
+            key=lambda item: (
+                ROLE_TRACKS[item["role"]][2],
+                _normalized_rank_key(item),
+                item["task_ref"],
+                item["role"],
+            ),
         )
         selected_refs = refs
     disposition, reason_code, _ = ROLE_TRACKS[selected["role"]]
-    return _result(request, disposition, reason_code, source_refs=selected_refs, selected=selected, omissions=omissions)
+    return _result(
+        request,
+        disposition,
+        reason_code,
+        source_refs=selected_refs,
+        selected=selected,
+        omissions=omissions,
+    )
 
 
 RESULT_FIELDS = (
@@ -502,14 +674,40 @@ def validate_result(result: object) -> None:
     """Check a result against the v1 envelope invariants."""
 
     _require(isinstance(result, dict), "EVIDENCE_INVALID", "result must be an object")
-    _require(tuple(sorted(result)) == tuple(sorted(RESULT_FIELDS)), "EVIDENCE_INVALID", "result fields differ from v1 envelope")
+    _require(
+        tuple(sorted(result)) == tuple(sorted(RESULT_FIELDS)),
+        "EVIDENCE_INVALID",
+        "result fields differ from v1 envelope",
+    )
     _require(result["schema_version"] == RESULT_SCHEMA, "SCHEMA_UNSUPPORTED", "result schema_version")
     _require(result["disposition"] in DISPOSITIONS, "EVIDENCE_INVALID", "unknown disposition")
     _require(result["reason_code"] in REASON_CODES, "EVIDENCE_INVALID", "unknown reason_code")
-    _require(result["next_authoritative_step"] == NEXT_STEPS[result["disposition"]], "EVIDENCE_INVALID", "next step does not match disposition")
+    _require(
+        result["next_authoritative_step"] == NEXT_STEPS[result["disposition"]],
+        "EVIDENCE_INVALID",
+        "next step does not match disposition",
+    )
     work = result["disposition"] in ("CLAIM_AND_WORK", "REVIEW_WORK", "RECOVERY_WORK")
-    _require(result["claim_required"] is work, "EVIDENCE_INVALID", "claim_required must hold exactly for work dispositions")
-    for field in ("task_ref", "role", "action", "claim_candidate_fingerprint", "coordinator_worker_id"):
-        _require((result[field] is not None) is work, "EVIDENCE_INVALID", f"{field} must be set exactly for work dispositions")
+    _require(
+        result["claim_required"] is work,
+        "EVIDENCE_INVALID",
+        "claim_required must hold exactly for work dispositions",
+    )
+    for field in (
+        "task_ref",
+        "role",
+        "action",
+        "claim_candidate_fingerprint",
+        "coordinator_worker_id",
+    ):
+        _require(
+            (result[field] is not None) is work,
+            "EVIDENCE_INVALID",
+            f"{field} must be set exactly for work dispositions",
+        )
     for omission in result["omissions"]:
-        _require(omission.get("reason") in OMISSION_REASONS, "EVIDENCE_INVALID", "unknown omission reason")
+        _require(
+            omission.get("reason") in OMISSION_REASONS,
+            "EVIDENCE_INVALID",
+            "unknown omission reason",
+        )
