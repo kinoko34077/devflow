@@ -13,7 +13,7 @@ Task Checkpoint Cursor v1 adds one lightweight task-level pointer whose only job
 
 > What is the first unfinished recovery-relevant checkpoint for this owning Issue / Work Order right now?
 
-The cursor is navigation and drift detection. It is not task authority, an execution claim, a lease, a scheduler assignment, a lock, a review gate, or a replacement for evidence.
+The cursor is navigation and drift detection. It is not task authority, an execution claim, a lease, a scheduler assignment, a lock, a review gate, a readiness signal, or a replacement for evidence.
 
 ## 2. Fixed user requirements
 
@@ -28,7 +28,7 @@ The cursor is navigation and drift detection. It is not task authority, an execu
 
 Existing authority remains unchanged:
 
-- owning Issue / Work Order: durable task truth, scope, acceptance, checkpoint definitions and blockers;
+- owning Issue / Work Order: durable task truth, scope, acceptance, checkpoint definitions, readiness, dependencies and blockers;
 - Task Checkpoint Cursor: current first-unfinished checkpoint projection only;
 - Execution Session Record: one worker/session's current execution scope, provenance, bounded plan, `Last-Checkpoint`, `Next-Action`, blocker and handoff;
 - branch / PR / Actions / tests: implementation and verification evidence;
@@ -39,6 +39,8 @@ Existing authority remains unchanged:
 - chat: never durable resume authority.
 
 If the cursor conflicts with the owning Issue, accepted PR/check evidence, repository-local canon, or a live execution-coordinator claim, the cursor is reconciled from those authoritative surfaces. The cursor never overrides them.
+
+A cursor that points to checkpoint `X` means only “`X` is the first unfinished recovery unit.” It does **not** mean `X` is currently runnable. `BLOCKED`, `WAITING`, dependency, review, Human, security and other readiness gates remain owned by their existing authoritative surfaces.
 
 ## 4. Storage decision
 
@@ -100,7 +102,7 @@ Field semantics:
 - `task`: exact owning `owner/repository#issue` identity.
 - `revision`: monotonically increasing cursor revision used only to detect observed drift; it is not a lock, compare-and-swap guarantee, or fencing token.
 - `last_completed`: checkpoint identifier most recently accepted; nullable before the first checkpoint.
-- `first_unfinished`: checkpoint identifier the next worker should process; nullable only when the checkpoint sequence is terminal.
+- `first_unfinished`: checkpoint identifier the next worker should resume from; nullable only when the checkpoint sequence is terminal. It does not imply readiness to execute.
 - `head`: optional exact branch/PR/default-branch SHA relevant to the accepted movement.
 - `evidence`: optional compact references supporting the movement; not a replacement for PR/Actions/Review evidence.
 - `updated_at`: UTC timestamp for navigation/debugging; GitHub comment metadata remains the authoritative modification time.
@@ -110,6 +112,8 @@ No worker/session identity is stored in the cursor. Worker provenance stays in E
 ## 6. Checkpoint definition
 
 Checkpoint identifiers are owned by the task's durable plan/checklist. The cursor does not invent them and v1 does not infer ordering from identifier spelling.
+
+Checkpoint identifiers used by a cursor MUST be unique within the owning task and stable once published. A checkpoint identifier already referenced by a cursor or durable evidence must not later be reused for a different semantic unit. If the task plan changes materially, introduce a new identifier or explicitly reconcile the cursor against the revised plan.
 
 A checkpoint should be the smallest recovery unit for which replay after interruption would create meaningful cost, confusion, or risk. It should not represent every command or tool call.
 
@@ -127,6 +131,17 @@ Typical units include:
 
 If a task has no durable checkpoint sequence and is short enough that replay is harmless, no cursor is required.
 
+### 6.1 Single-frontier constraint
+
+v1 represents exactly one **canonical recovery frontier** per owning task: one `first_unfinished` checkpoint.
+
+It does not model multiple simultaneously runnable branches. When an owning task contains independently progressing parallel units, use the existing devflow decomposition rules:
+
+- split independently recoverable units into bounded child/owner Issues when separate ownership is warranted; or
+- keep the full parallel checklist in a progress ledger while designating one canonical task-level recovery frontier for the cursor.
+
+Do not create one cursor per worker or multiple competing cursors on one owning Issue in v1. If no single canonical recovery frontier can be defined without losing material state, the task is not eligible for a v1 cursor until it is decomposed or its progress ledger defines one.
+
 ## 7. Worker read/resume contract
 
 For an eligible task, resume order becomes:
@@ -137,15 +152,30 @@ For an eligible task, resume order becomes:
 4. read the cursor before reconstructing historical progress;
 5. verify the referenced checkpoint still exists in the owning task and compare only the live evidence needed for that checkpoint;
 6. inspect relevant Execution Session Records for active overlap/provenance;
-7. start from `first_unfinished` unless live evidence shows the cursor itself requires reconciliation.
+7. verify the owning task's current readiness, dependency, blocker and safety gates;
+8. resume from `first_unfinished` when the checkpoint is runnable, or remain at that checkpoint while the authoritative blocker/gate remains unresolved.
 
 A successor MUST NOT replay an earlier accepted checkpoint solely because chat history, Memory, or the predecessor session disappeared.
 
-Missing cursor is not an error for legacy or trivial tasks. The worker falls back to the existing Issue/Session/PR resume path and may create a cursor when the task qualifies and the next unfinished checkpoint is unambiguous.
+Missing cursor is not an error for legacy or trivial tasks. The worker falls back to the existing Issue/Session/PR resume path and may initialize a cursor when the task qualifies and the next unfinished checkpoint is unambiguous.
 
 ## 8. Cursor movement
 
-### 8.1 Normal advance
+### 8.1 Initialization
+
+When an eligible task has no recognized cursor and its canonical recovery frontier is unambiguous, `initialize` creates the first cursor with:
+
+- `revision: 1`;
+- `last_completed`: the latest accepted checkpoint, or `null` when none is complete;
+- `first_unfinished`: the first unfinished checkpoint, or `null` only when terminal;
+- optional head/evidence references;
+- `updated_at`.
+
+Initialization must be derived from the owning task and live evidence. It must not guess a frontier from chat history or from checkpoint identifier spelling.
+
+If multiple trusted cursor comments already exist, initialization is not used; return `WARN_DUPLICATE_MARKER` and reconcile.
+
+### 8.2 Normal advance
 
 Before moving the cursor, the worker re-reads the live cursor and the evidence that establishes completion of the current checkpoint.
 
@@ -165,21 +195,23 @@ If expected and live state match at comparison time, the helper prepares an upda
 - optional head/evidence;
 - `updated_at`.
 
-The GitHub comment transport is not an atomic execution lock. A transport adapter MUST re-read immediately before update and SHOULD re-read after update. Any observed difference between expected, written, and post-write live state becomes drift and sends the worker back through live-state reconciliation. Atomic ownership remains an execution-coordinator responsibility when that runtime is used.
+The GitHub comment transport is not an atomic execution lock. A transport adapter MUST re-read immediately before update and MUST re-read after update when the transport allows it. Any observed difference between expected, written, and post-write live state becomes drift and sends the worker back through live-state reconciliation. Atomic ownership remains an execution-coordinator responsibility when that runtime is used.
 
-### 8.2 Drift is advisory by default
+### 8.3 Drift is advisory by default
 
 A revision/checkpoint mismatch does not by itself prove unsafe work. v1 also does not guess whether arbitrary checkpoint identifiers are globally “ahead” or “behind.” The helper returns the observed expected/live difference and leaves the worker responsible for reading the task's actual checkpoint order and evidence.
 
 Required outcomes:
 
-- `OK_ADVANCED`: expected cursor matched at comparison time and the requested forward update was written; adapter returns the post-write live cursor when available.
+- `OK_INITIALIZED`: no recognized cursor existed and the verified initial cursor was created.
+- `OK_ADVANCED`: expected cursor matched at comparison time, the requested forward update was written, and the post-write read still reflects that update when post-write verification is available.
 - `WARN_CHECKPOINT_DRIFT`: live `first_unfinished` differs from the worker's expected checkpoint. Re-read the owning task, cursor, relevant evidence and current sessions; normally adopt the live cursor when the task proves another worker already advanced it.
 - `WARN_REVISION_DRIFT`: revision changed while the same checkpoint still appears current. Re-read cursor/evidence before continuing.
+- `WARN_POST_WRITE_DRIFT`: the adapter wrote an intended update but the immediate post-write live cursor differs from the written state. Re-read the owning task/evidence and reconcile; do not report the advance as cleanly accepted.
 - `WARN_DUPLICATE_MARKER`: more than one trusted recognized marker exists. Determine the canonical marker from live task/evidence and reconcile.
 - `WARN_MALFORMED_MARKER`: recognized marker cannot be parsed or violates v1 invariants. Reconstruct from durable task/evidence before replacing it.
 - `WARN_UNTRUSTED_MARKER`: an untrusted comment copies the cursor sentinel. Ignore it for resume decisions and report the spoof/noise.
-- `NO_MARKER`: use legacy resume logic; create a marker only when the task qualifies and state is unambiguous.
+- `NO_MARKER`: use legacy resume logic or `initialize` only when the task qualifies and state is unambiguous.
 
 Ordinary warning outcomes MUST NOT be described as runtime claim rejection or fencing failure.
 
@@ -209,7 +241,8 @@ Examples that remain warning/re-read cases:
 - revision changed during work;
 - a successor started from an old chat summary;
 - the live marker names a different checkpoint than the worker expected;
-- a stale session record disagrees with the task-level cursor.
+- a stale session record disagrees with the task-level cursor;
+- post-write verification discovers that another writer changed the cursor.
 
 Existing external safety rules remain fail-closed where applicable. Examples include:
 
@@ -230,6 +263,7 @@ Minimum operations:
 
 - `read`: discover trusted recognized markers and parse the unique canonical cursor when possible;
 - `compare`: compare expected revision/checkpoint with live cursor and return structured outcome plus expected/live data;
+- `initialize`: create the first cursor from verified owning-task/evidence state when no marker exists and one canonical frontier is unambiguous;
 - `advance`: perform the supported forward update only when the latest observed cursor matches the worker's expectation; otherwise return warning data;
 - `reconcile`: explicitly replace/repair cursor state from verified durable evidence;
 - `render`: produce canonical v1 comment text.
@@ -243,7 +277,8 @@ A GitHub Actions adapter MAY call the same helper and surface drift with GitHub 
 When an Action adapter is present:
 
 - ordinary `WARN_*` drift emits `::warning::` / job-summary guidance and does not fail the workflow solely because the cursor moved;
-- `OK_ADVANCED` updates the canonical cursor comment and reports the new revision/checkpoint;
+- `OK_INITIALIZED` / `OK_ADVANCED` update the canonical cursor comment and report the resulting revision/checkpoint;
+- `WARN_POST_WRITE_DRIFT` reports that a write occurred but the resulting live state must be reconciled rather than presenting the advance as authoritative success;
 - malformed/duplicate state reports warning plus reconciliation guidance rather than guessing;
 - safety failures originating outside cursor semantics retain their existing failing behavior;
 - Action concurrency may serialize cursor-update jobs in that adapter, but serialization is an optimization, not authority and not a lock contract.
@@ -262,25 +297,27 @@ Execution Session Record
 
 A session's `Next-Action` SHOULD normally agree with the task cursor for the slice it owns. If they differ, the worker reads live evidence and resolves the discrepancy; it does not automatically overwrite either record.
 
-A dead/stale Session Record therefore does not erase task position. The cursor remains at the first unfinished task checkpoint and a successor session can continue from there.
+A dead/stale Session Record therefore does not erase task position. The cursor remains at the first unfinished task checkpoint and a successor session can continue from there when the checkpoint is otherwise runnable.
 
 ## 14. Interaction with progress-ledger Issues
 
-A dedicated progress ledger such as `devflow#232` may continue to hold the full ordered checkpoint list, stage acceptance, blockers and evidence. The cursor is a compact projection of that ledger's first unfinished checkpoint.
+A dedicated progress ledger such as `devflow#232` may continue to hold the full ordered checkpoint list, stage acceptance, blockers and evidence. The cursor is a compact projection of that ledger's single canonical first-unfinished recovery frontier.
 
-The progress ledger remains useful when the task has many independently recoverable units. The cursor removes the need for a successor to infer current position by scanning the full ledger first.
+The progress ledger remains useful when the task has many independently recoverable units. The cursor removes the need for a successor to infer the canonical current position by scanning the full ledger first.
 
 If ledger and cursor disagree, ledger/owning-task evidence governs and the cursor is reconciled.
+
+If the ledger intentionally exposes multiple simultaneously active independent frontiers, either select and document one canonical task-level recovery frontier or split those units into separately owned tasks; v1 does not encode several parallel frontiers in one cursor.
 
 ## 15. Initial implementation scope
 
 The first implementation should remain bounded:
 
 1. add a small parser/renderer/transition module for cursor v1;
-2. add tests for valid read/render, normal advance, checkpoint drift, revision drift, duplicate marker, malformed marker, untrusted marker, missing marker, explicit reconcile, and post-write drift handling at the transport boundary;
-3. update canonical devflow docs and `.devflow/WORKFLOW.yaml` with the cursor ownership/resume contract;
-4. update `AGENTS.md` / operating manuals so eligible resume reads cursor before reconstructing historical checkpoints;
-5. provide one devflow-local reference/pilot adapter or documented GitHub API path only if needed to prove comment update behavior;
+2. add tests for valid read/render, initialization, normal advance, checkpoint drift, revision drift, post-write drift, duplicate marker, malformed marker, untrusted marker, missing marker and explicit reconcile;
+3. update canonical devflow docs and `.devflow/WORKFLOW.yaml` with the cursor ownership/resume/readiness contract and single-frontier constraint;
+4. update `AGENTS.md` / operating manuals so eligible resume reads cursor before reconstructing historical checkpoints while still checking task readiness/blockers;
+5. provide one devflow-local reference/pilot adapter or documented GitHub API path only if needed to prove comment create/update and post-write verification behavior;
 6. pilot against a bounded devflow-owned progress Issue before broader adoption.
 
 Do not require a cross-repository credential/App/permission change for v1.
@@ -290,10 +327,13 @@ Do not require a cross-repository credential/App/permission change for v1.
 The design is accepted when implementation can demonstrate all of the following:
 
 - a task has exactly one trusted recognized cursor or a typed missing/duplicate/untrusted condition;
-- the cursor directly yields the first unfinished checkpoint;
-- interruption followed by a new worker resumes from that checkpoint;
+- checkpoint IDs referenced by the cursor remain stable and are not silently repurposed;
+- the cursor directly yields one canonical first unfinished recovery frontier;
+- the cursor does not imply that the checkpoint is currently runnable and existing blocker/dependency/safety gates remain authoritative;
+- interruption followed by a new worker resumes from that checkpoint when runnable;
 - already-accepted earlier checkpoints are not replayed solely because session/chat context vanished;
 - stale/duplicate expected position produces a structured warning with expected/live data and a re-read path rather than ordinary hard rejection;
+- post-write races produce `WARN_POST_WRITE_DRIFT` rather than false clean success;
 - explicit reconciliation can correct a wrong cursor without hiding that correction;
 - normal advance never intentionally rewinds an observed cursor; any concurrent transport race remains detectable/recoverable from authoritative task evidence rather than being misrepresented as atomic exclusion;
 - Execution Session and execution-coordinator authority remain distinct;
@@ -308,6 +348,7 @@ Do not add in v1 without evidence from the pilot:
 - weighted scheduling or fairness logic;
 - automatic checkpoint generation by an LLM;
 - one cursor per worker;
+- multiple simultaneous task-level cursors for parallel branches;
 - automatic rollback based only on cursor mismatch;
 - mandatory GitHub App installation changes;
 - cursor state in GitHub Project fields;
