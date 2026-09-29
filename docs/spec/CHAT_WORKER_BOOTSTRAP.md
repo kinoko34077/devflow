@@ -1,6 +1,6 @@
 # Chat Worker Bootstrap Contract v1
 
-Status: proposed for acceptance under devflow#191 (Phase A of devflow#190)
+Status: accepted under devflow#191; extended by the accepted portfolio-v2 baseline under devflow#208 (implementation PR #220) and the accepted devflow-side work-class Stage 1 contract in devflow#215 (PR #226; runtime propagation remains separately gated)
 Authority: devflow cross-repository workflow specification
 Scope: provider-neutral bootstrap for an already-open, manually-started Codex, Claude/Claude Code or ordinary ChatGPT chat
 
