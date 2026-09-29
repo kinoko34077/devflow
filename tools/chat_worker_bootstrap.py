@@ -9,6 +9,7 @@ contract's examples are executable and provider-neutral by construction.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime
 from typing import Any
@@ -69,6 +70,7 @@ OMISSION_REASONS = (
     "HUMAN_GATE",
     "EXTERNAL_BLOCKER",
     "ROLE_UNSUPPORTED",
+    "REPOSITORY_NOT_ACTIVE",
 )
 
 NEXT_STEPS = {
@@ -288,6 +290,28 @@ def classify(request: object, evidence: object) -> dict[str, Any]:
         return _result(normalized, "NEEDS_EVIDENCE", error.code, detail=error.detail)
 
 
+def _candidate_repository(task_ref: str) -> str:
+    return task_ref.rsplit("#", 1)[0]
+
+
+def _normalized_rank_key(item: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(part).zfill(20) if isinstance(part, int) and not isinstance(part, bool) else part
+        for part in item["rank_key"]
+    )
+
+
+def _portfolio_spread_key(request: dict[str, Any], item: dict[str, Any]) -> tuple[str, str, str]:
+    material = (
+        coordinator_worker_id(request)
+        + "\0"
+        + item["task_ref"]
+        + "\0"
+        + request["execution_attempt_id"]
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest(), item["task_ref"], item["role"]
+
+
 def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     # 1. Evidence envelope.
     _require(isinstance(evidence, dict), "EVIDENCE_INVALID", "evidence must be an object")
@@ -298,44 +322,49 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     _require(fresh_until > observed, "EVIDENCE_INVALID", "fresh_until must be after observed_at")
     _require(observed <= request_time <= fresh_until, "EVIDENCE_STALE", "evidence is not fresh for this request")
 
-    # 2. Scope: portfolio entry is reserved until a later accepted phase.
-    if request["target_repository"] is None:
-        return _result(request, "NEEDS_EVIDENCE", "PORTFOLIO_ENUMERATION_UNAVAILABLE",
-                       detail="no target repository; cross-repository enumeration is not yet accepted")
+    portfolio = request["target_repository"] is None
 
-    # 3. Live bootstrap canon.
+    # 2. Live bootstrap canon.
     if evidence.get("agents_md_read") is not True:
         return _result(request, "NEEDS_EVIDENCE", "BOOTSTRAP_UNREAD", detail="live devflow/AGENTS.md was not read")
 
-    # 4. Exactly one trusted open Control for the target.
+    # 3. Validate Control observations. Repository scope resolves one Control
+    # immediately; portfolio scope resolves one exact Control per candidate
+    # after the complete frontier has been read.
     controls = evidence.get("controls")
     _require(isinstance(controls, list), "EVIDENCE_INVALID", "controls must be an array")
-    matching = []
     for control in controls:
         _require(isinstance(control, dict) and isinstance(control.get("ref"), str) and _CONTROL_REF.fullmatch(control["ref"]) is not None,
                  "EVIDENCE_INVALID", "control ref must be kinoko34077/devflow#N")
         _require(isinstance(control.get("managed_repository"), str), "EVIDENCE_INVALID", "control managed_repository missing")
-        if control["managed_repository"].casefold() == request["target_repository"].casefold() and control.get("state") == "open":
-            matching.append(control)
-    refs = [control["ref"] for control in matching]
-    if not matching:
-        return _result(request, "NEEDS_EVIDENCE", "CONTROL_NOT_FOUND", detail="no open Repository Control for target")
-    if len(matching) > 1:
-        return _result(request, "NEEDS_EVIDENCE", "CONTROL_DUPLICATE", source_refs=refs,
-                       detail="more than one open Repository Control claims the target")
-    control = matching[0]
-    if control.get("trusted") is not True:
-        return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=refs)
 
-    # 5. Repository-level state and gates (Control authority).
-    if control.get("repository_state") != "ACTIVE":
-        return _result(request, "NO_ELIGIBLE_WORK", "REPOSITORY_NOT_ACTIVE", source_refs=refs)
-    if control.get("human_gate") is True:
-        return _result(request, "NEEDS_HUMAN", "HUMAN_GATE", source_refs=refs)
-    if control.get("external_blocker") is True:
-        return _result(request, "WAIT_EXTERNAL", "EXTERNAL_BLOCKER", source_refs=refs)
+    refs: list[str] = []
+    repo_control: dict[str, Any] | None = None
+    if not portfolio:
+        matching = [
+            control for control in controls
+            if control["managed_repository"].casefold() == request["target_repository"].casefold()
+            and control.get("state") == "open"
+        ]
+        refs = [control["ref"] for control in matching]
+        if not matching:
+            return _result(request, "NEEDS_EVIDENCE", "CONTROL_NOT_FOUND", detail="no open Repository Control for target")
+        if len(matching) > 1:
+            return _result(request, "NEEDS_EVIDENCE", "CONTROL_DUPLICATE", source_refs=refs,
+                           detail="more than one open Repository Control claims the target")
+        repo_control = matching[0]
+        if repo_control.get("trusted") is not True:
+            return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=refs)
+        if repo_control.get("repository_state") != "ACTIVE":
+            return _result(request, "NO_ELIGIBLE_WORK", "REPOSITORY_NOT_ACTIVE", source_refs=refs)
+        if repo_control.get("human_gate") is True:
+            return _result(request, "NEEDS_HUMAN", "HUMAN_GATE", source_refs=refs)
+        if repo_control.get("external_blocker") is True:
+            return _result(request, "WAIT_EXTERNAL", "EXTERNAL_BLOCKER", source_refs=refs)
 
-    # 6. Accepted frontier and runtime state must both be available.
+    # 4. Accepted frontier and runtime state must both be available. For
+    # portfolio scope, gatherers set complete=false if any ordinary candidate
+    # lacks accepted fresh ranking/requirements metadata; no fallback is used.
     frontier = evidence.get("frontier")
     if not isinstance(frontier, dict) or frontier.get("complete") is not True:
         return _result(request, "NEEDS_EVIDENCE", "FRONTIER_UNAVAILABLE", source_refs=refs)
@@ -349,61 +378,104 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
     if not candidates:
         return _result(request, "NO_ELIGIBLE_WORK", "NO_CANDIDATES_PUBLISHED", source_refs=refs)
 
-    # 7. Hard filters, per candidate, with explicit omission evidence.
+    # 5. Hard filters. Portfolio scope applies live Control vetoes per
+    # candidate repository so one gated repository does not suppress unrelated
+    # eligible work, while missing/duplicate/untrusted Control identity fails
+    # the whole cycle closed.
     capabilities = set(request["capabilities"])
     environment = set(request["environment"])
     eligible: list[dict[str, Any]] = []
     omissions: list[dict[str, str]] = []
+    portfolio_refs: set[str] = set()
     for item in candidates:
         reason = None
-        if item["role"] not in ROLE_TRACKS:
-            reason = "ROLE_UNSUPPORTED"
-        elif not item["digest_fresh"]:
-            reason = "STALE_DIGEST"
-        elif item["human_gate"]:
-            reason = "HUMAN_GATE"
-        elif item["external_blocker"]:
-            reason = "EXTERNAL_BLOCKER"
-        elif not item["dependency_ready"]:
-            reason = "DEPENDENCY_NOT_READY"
-        elif item["claimability"] != "CLAIMABLE":
-            reason = "LIVE_CLAIM_CONFLICT"
-        elif item["published_by_this_attempt"]:
-            reason = "PUBLISHED_BY_THIS_ATTEMPT"
-        elif item["role"] == "reviewer" and item["reviewer_independence_conflict"]:
-            reason = "REVIEWER_INDEPENDENCE_CONFLICT"
-        elif not set(item["required_capabilities"]) <= capabilities:
-            reason = "CAPABILITY_MISMATCH"
-        elif not set(item["required_environment"]) <= environment:
-            reason = "ENVIRONMENT_MISMATCH"
+        selected_item = dict(item)
+        if portfolio:
+            repository = _candidate_repository(item["task_ref"])
+            matching = [
+                control for control in controls
+                if control["managed_repository"].casefold() == repository.casefold()
+                and control.get("state") == "open"
+            ]
+            matching_refs = [control["ref"] for control in matching]
+            if not matching:
+                return _result(request, "NEEDS_EVIDENCE", "CONTROL_NOT_FOUND",
+                               detail=f"no open Repository Control for portfolio candidate {repository}")
+            if len(matching) > 1:
+                return _result(request, "NEEDS_EVIDENCE", "CONTROL_DUPLICATE", source_refs=matching_refs,
+                               detail=f"more than one open Repository Control claims portfolio candidate {repository}")
+            control = matching[0]
+            if control.get("trusted") is not True:
+                return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=matching_refs)
+            selected_item["_source_ref"] = control["ref"]
+            portfolio_refs.add(control["ref"])
+            if control.get("repository_state") != "ACTIVE":
+                reason = "REPOSITORY_NOT_ACTIVE"
+            elif control.get("human_gate") is True:
+                reason = "HUMAN_GATE"
+            elif control.get("external_blocker") is True:
+                reason = "EXTERNAL_BLOCKER"
+
         if reason is None:
-            eligible.append(item)
+            if item["role"] not in ROLE_TRACKS:
+                reason = "ROLE_UNSUPPORTED"
+            elif not item["digest_fresh"]:
+                reason = "STALE_DIGEST"
+            elif item["human_gate"]:
+                reason = "HUMAN_GATE"
+            elif item["external_blocker"]:
+                reason = "EXTERNAL_BLOCKER"
+            elif not item["dependency_ready"]:
+                reason = "DEPENDENCY_NOT_READY"
+            elif item["claimability"] != "CLAIMABLE":
+                reason = "LIVE_CLAIM_CONFLICT"
+            elif item["published_by_this_attempt"]:
+                reason = "PUBLISHED_BY_THIS_ATTEMPT"
+            elif item["role"] == "reviewer" and item["reviewer_independence_conflict"]:
+                reason = "REVIEWER_INDEPENDENCE_CONFLICT"
+            elif not set(item["required_capabilities"]) <= capabilities:
+                reason = "CAPABILITY_MISMATCH"
+            elif not set(item["required_environment"]) <= environment:
+                reason = "ENVIRONMENT_MISMATCH"
+        if reason is None:
+            eligible.append(selected_item)
         else:
             omissions.append({"task_ref": item["task_ref"], "role": item["role"], "reason": reason})
 
+    cycle_refs = sorted(portfolio_refs) if portfolio else refs
     if not eligible:
         omitted = {item["reason"] for item in omissions}
         if "HUMAN_GATE" in omitted:
-            return _result(request, "NEEDS_HUMAN", "HUMAN_GATE", source_refs=refs, omissions=omissions)
+            return _result(request, "NEEDS_HUMAN", "HUMAN_GATE", source_refs=cycle_refs, omissions=omissions)
         if "EXTERNAL_BLOCKER" in omitted:
-            return _result(request, "WAIT_EXTERNAL", "EXTERNAL_BLOCKER", source_refs=refs, omissions=omissions)
-        return _result(request, "NO_ELIGIBLE_WORK", "ALL_CANDIDATES_OMITTED", source_refs=refs, omissions=omissions)
+            return _result(request, "WAIT_EXTERNAL", "EXTERNAL_BLOCKER", source_refs=cycle_refs, omissions=omissions)
+        return _result(request, "NO_ELIGIBLE_WORK", "ALL_CANDIDATES_OMITTED", source_refs=cycle_refs, omissions=omissions)
 
-    # 8. Provider-local mutation surface.  Checked only once work exists, and
+    # 6. Provider-local mutation surface. Checked only once work exists and
     # never used as capability evidence.
     missing = [surface for surface in REQUIRED_WORK_SURFACES if surface not in request["tool_surfaces"]]
     if missing:
-        return _result(request, "NEEDS_EVIDENCE", "PROVIDER_SURFACE_MISSING", source_refs=refs,
+        return _result(request, "NEEDS_EVIDENCE", "PROVIDER_SURFACE_MISSING", source_refs=cycle_refs,
                        detail="missing tool surfaces: " + ",".join(missing), omissions=omissions)
 
-    # 9. Deterministic selection: track precedence, then the accepted rank
-    # key supplied by the frontier, then canonical identity.  At most one.
-    selected = min(
-        eligible,
-        key=lambda item: (ROLE_TRACKS[item["role"]][2], [str(part).zfill(20) if isinstance(part, int) else part for part in item["rank_key"]], item["task_ref"], item["role"]),
-    )
+    # 7. Selection. Repository scope keeps the accepted v1 lexical behavior.
+    # Portfolio scope first fixes the best track + rank class, then spreads
+    # workers deterministically inside that class. At most one is returned.
+    if portfolio:
+        best_track = min(ROLE_TRACKS[item["role"]][2] for item in eligible)
+        track_items = [item for item in eligible if ROLE_TRACKS[item["role"]][2] == best_track]
+        best_rank = min(_normalized_rank_key(item) for item in track_items)
+        rank_class = [item for item in track_items if _normalized_rank_key(item) == best_rank]
+        selected = min(rank_class, key=lambda item: _portfolio_spread_key(request, item))
+        selected_refs = [selected["_source_ref"]]
+    else:
+        selected = min(
+            eligible,
+            key=lambda item: (ROLE_TRACKS[item["role"]][2], _normalized_rank_key(item), item["task_ref"], item["role"]),
+        )
+        selected_refs = refs
     disposition, reason_code, _ = ROLE_TRACKS[selected["role"]]
-    return _result(request, disposition, reason_code, source_refs=refs, selected=selected, omissions=omissions)
+    return _result(request, disposition, reason_code, source_refs=selected_refs, selected=selected, omissions=omissions)
 
 
 RESULT_FIELDS = (

@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/execution-portfolio-metadata.v1.schema.json",
+  "title": "Devflow execution portfolio metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_ref",
+    "repository",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "execution-portfolio-metadata.v1"
+    },
+    "source_ref": {
+      "type": "string",
+      "pattern": "^kinoko34077/devflow#[1-9][0-9]*$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task",
+          "role",
+          "task_body_sha256",
+          "candidate_fingerprint",
+          "controller_urgency",
+          "dependency_ready",
+          "dependency_order",
+          "readiness_class",
+          "ready_at",
+          "required_capabilities",
+          "required_environment",
+          "observed_at",
+          "fresh_until"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+          },
+          "role": {
+            "enum": [
+              "implementer",
+              "reviewer",
+              "verifier",
+              "integrator"
+            ]
+          },
+          "task_body_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "candidate_fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "controller_urgency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dependency_ready": {
+            "type": "boolean"
+          },
+          "dependency_order": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readiness_class": {
+            "enum": [
+              "SPECIFY",
+              "IMPLEMENT",
+              "VERIFY",
+              "REVIEW",
+              "MERGE"
+            ]
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "required_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+            },
+            "uniqueItems": true
+          },
+          "required_environment": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_.:/-]{0,63}$"
+            },
+            "uniqueItems": true
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "fresh_until": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "dependency_ready": {
+                  "const": true
+                }
+              },
+              "required": [
+                "dependency_ready"
+              ]
+            },
+            "then": {
+              "properties": {
+                "dependency_order": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "dependency_ready": {
+                  "const": false
+                }
+              },
+              "required": [
+                "dependency_ready"
+              ]
+            },
+            "then": {
+              "properties": {
+                "dependency_order": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

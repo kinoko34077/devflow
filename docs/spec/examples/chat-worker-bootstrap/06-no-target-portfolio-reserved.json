@@ -1,5 +1,5 @@
 {
-  "summary": "No target repository: portfolio enumeration is not accepted yet.",
+  "summary": "Portfolio scope selects one eligible candidate from complete authoritative evidence.",
   "request": {
     "schema_version": "chat-worker-bootstrap-request.v1",
     "target_repository": null,
@@ -72,20 +72,23 @@
   },
   "expected": {
     "schema_version": "chat-worker-bootstrap-result.v1",
-    "disposition": "NEEDS_EVIDENCE",
+    "disposition": "CLAIM_AND_WORK",
     "worker_session_id": "claude-20260928-a",
     "execution_attempt_id": "claude-20260928-a:c1",
     "target_repository": null,
-    "task_ref": null,
-    "role": null,
-    "action": null,
-    "source_refs": [],
-    "reason_code": "PORTFOLIO_ENUMERATION_UNAVAILABLE",
-    "reason_detail": "no target repository; cross-repository enumeration is not yet accepted",
-    "claim_required": false,
-    "claim_candidate_fingerprint": null,
-    "coordinator_worker_id": null,
+    "task_ref": "kinoko34077/execution-coordinator#80",
+    "role": "implementer",
+    "action": "IMPLEMENT",
+    "source_refs": [
+      "kinoko34077/devflow#107",
+      "kinoko34077/execution-coordinator#80"
+    ],
+    "reason_code": "ELIGIBLE_FRESH_CANDIDATE",
+    "reason_detail": null,
+    "claim_required": true,
+    "claim_candidate_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinator_worker_id": "claude:claude-20260928-a",
     "omissions": [],
-    "next_authoritative_step": "RESOLVE_EVIDENCE"
+    "next_authoritative_step": "CLAIM_THEN_ACKNOWLEDGE"
   }
 }

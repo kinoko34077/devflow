@@ -35,7 +35,6 @@ class ExampleTests(unittest.TestCase):
 
     def test_required_negative_cases_from_191(self):
         expected = {
-            "06-no-target-portfolio-reserved": ("NEEDS_EVIDENCE", "PORTFOLIO_ENUMERATION_UNAVAILABLE"),
             "07-control-not-found": ("NEEDS_EVIDENCE", "CONTROL_NOT_FOUND"),
             "08-duplicate-controls": ("NEEDS_EVIDENCE", "CONTROL_DUPLICATE"),
             "09-untrusted-control": ("NEEDS_EVIDENCE", "CONTROL_UNTRUSTED"),
@@ -153,6 +152,88 @@ class ContractPropertyTests(unittest.TestCase):
                 result = cwb.classify(base["request"], evidence)
                 self.assertEqual("NEEDS_EVIDENCE", result["disposition"])
                 self.assertIsNone(result["task_ref"])
+
+
+class PortfolioV2ContractTests(unittest.TestCase):
+    def _portfolio_case(self):
+        data = copy.deepcopy(example("02-two-fresh-candidates-rank-order"))
+        data["request"]["target_repository"] = None
+        data["request"]["worker_session_id"] = "chatgpt-portfolio-a"
+        data["request"]["execution_attempt_id"] = "chatgpt-portfolio-a:c1"
+        data["request"]["worker_system"] = "chatgpt"
+        data["request"]["tool_surfaces"] = ["coordinator:claim", "github:read", "github:write"]
+        data["evidence"]["controls"] = [
+            {"ref":"kinoko34077/devflow#28","managed_repository":"kinoko34077/refil-viewer","state":"open","trusted":True,"repository_state":"ACTIVE","human_gate":False,"external_blocker":False},
+            {"ref":"kinoko34077/devflow#59","managed_repository":"kinoko34077/kinotch-repo-monitor","state":"open","trusted":True,"repository_state":"ACTIVE","human_gate":False,"external_blocker":False},
+        ]
+        a,b=data["evidence"]["frontier"]["candidates"][:2]
+        a.update(task_ref="kinoko34077/refil-viewer#6", role="reviewer", action="REVIEW", fingerprint="sha256:"+"a"*64, rank_key=[1,0,0,3,1,""])
+        b.update(task_ref="kinoko34077/kinotch-repo-monitor#30", role="implementer", action="IMPLEMENT", fingerprint="sha256:"+"b"*64, rank_key=[2,0,0,1,1,""])
+        for item in (a,b):
+            item.update(digest_fresh=True, dependency_ready=True, human_gate=False, external_blocker=False, reviewer_independence_conflict=False, published_by_this_attempt=False, claimability="CLAIMABLE", required_capabilities=[], required_environment=[])
+        data["evidence"]["frontier"]["candidates"]=[a,b]
+        return data
+
+    def test_null_target_selects_from_complete_cross_repository_frontier(self):
+        data=self._portfolio_case()
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("REVIEW_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
+        self.assertEqual(["kinoko34077/devflow#28", "kinoko34077/refil-viewer#6"], result["source_refs"])
+
+    def test_portfolio_candidate_order_does_not_change_selection(self):
+        data=self._portfolio_case()
+        baseline=cwb.classify(data["request"], data["evidence"])
+        data["evidence"]["frontier"]["candidates"].reverse()
+        self.assertEqual(baseline, cwb.classify(data["request"], data["evidence"]))
+
+    def test_portfolio_skips_human_gated_repository_when_another_candidate_is_eligible(self):
+        data=self._portfolio_case()
+        data["evidence"]["controls"][0]["human_gate"] = True
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
+
+    def test_portfolio_duplicate_control_for_candidate_repository_fails_closed(self):
+        data=self._portfolio_case()
+        duplicate=copy.deepcopy(data["evidence"]["controls"][0])
+        duplicate["ref"]="kinoko34077/devflow#228"
+        data["evidence"]["controls"].append(duplicate)
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(("NEEDS_EVIDENCE","CONTROL_DUPLICATE"),(result["disposition"],result["reason_code"]))
+
+    def test_portfolio_spreads_equal_rank_class_by_worker_attempt_hash(self):
+        import hashlib
+        data=self._portfolio_case()
+        a,b=data["evidence"]["frontier"]["candidates"]
+        a.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
+        b.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
+        worker="chatgpt:" + data["request"]["worker_session_id"]
+        attempt=data["request"]["execution_attempt_id"]
+        expected=min(
+            (a,b),
+            key=lambda item:(hashlib.sha256((worker+"\0"+item["task_ref"]+"\0"+attempt).encode()).hexdigest(),item["task_ref"],item["role"]),
+        )["task_ref"]
+        self.assertEqual(expected, cwb.classify(data["request"],data["evidence"])["task_ref"])
+
+    def test_portfolio_metadata_schema_encodes_dependency_pair_invariant(self):
+        schema=load(SCHEMAS / "execution-portfolio-metadata.v1.schema.json")
+        entry=schema["properties"]["entries"]["items"]
+        self.assertIn("allOf", entry)
+        encoded=json.dumps(entry["allOf"], sort_keys=True)
+        self.assertIn("dependency_ready", encoded)
+        self.assertIn("dependency_order", encoded)
+
+    def test_portfolio_metadata_contract_is_versioned_and_fingerprint_bound(self):
+        schema_path=SCHEMAS / "execution-portfolio-metadata.v1.schema.json"
+        self.assertTrue(schema_path.exists(), "portfolio metadata schema must exist")
+        schema=load(schema_path)
+        self.assertEqual("execution-portfolio-metadata.v1", schema["properties"]["schema_version"]["const"])
+        required=set(schema["properties"]["entries"]["items"]["required"])
+        self.assertTrue({"task","role","task_body_sha256","candidate_fingerprint","dependency_ready","dependency_order","readiness_class","required_capabilities","required_environment","observed_at","fresh_until"} <= required)
+        spec=(ROOT / "docs/spec/PORTFOLIO_PICKUP_V2.md").read_text(encoding="utf-8") if (ROOT / "docs/spec/PORTFOLIO_PICKUP_V2.md").exists() else ""
+        self.assertIn("DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN", spec)
+        self.assertIn("worker-scoped", spec)
 
 
 class SchemaConsistencyTests(unittest.TestCase):

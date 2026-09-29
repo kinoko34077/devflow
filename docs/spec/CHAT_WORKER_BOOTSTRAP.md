@@ -96,7 +96,7 @@ The classifier then applies the **first matching rule**:
 | --- | --- | --- |
 | 1 | request malformed / unknown schema / secret-shaped | `NEEDS_EVIDENCE` (`REQUEST_INVALID` / `SCHEMA_UNSUPPORTED`) |
 | 2 | evidence malformed, or its `[observed_at, fresh_until]` window does not cover the request | `NEEDS_EVIDENCE` (`EVIDENCE_INVALID` / `EVIDENCE_STALE`) |
-| 3 | `target_repository` is `null` | `NEEDS_EVIDENCE` (`PORTFOLIO_ENUMERATION_UNAVAILABLE`) |
+| 3 | `target_repository` is `null` | apply the accepted portfolio-v2 path from `PORTFOLIO_PICKUP_V2.md`; a complete frontier is mandatory and no repo-scoped fallback is allowed |
 | 4 | live AGENTS.md not read | `NEEDS_EVIDENCE` (`BOOTSTRAP_UNREAD`) |
 | 5 | no open Control / more than one open Control / untrusted Control for the target | `NEEDS_EVIDENCE` (`CONTROL_NOT_FOUND` / `CONTROL_DUPLICATE` / `CONTROL_UNTRUSTED`) |
 | 6 | Control `Repository State` is not `ACTIVE` | `NO_ELIGIBLE_WORK` (`REPOSITORY_NOT_ACTIVE`) |
@@ -109,7 +109,7 @@ The classifier then applies the **first matching rule**:
 
 A later rule never overrides an earlier integrity or safety rule.
 
-Portfolio scope (`target_repository = null`) is reserved. It must return `NEEDS_EVIDENCE` until a later accepted phase (#190 Phase D) supplies authoritative cross-repository enumeration.
+Portfolio scope (`target_repository = null`) is defined by `PORTFOLIO_PICKUP_V2.md` under #208. Repository-scoped behavior remains v1-compatible. `PORTFOLIO_ENUMERATION_UNAVAILABLE` is retained as a legacy typed code for older implementations but is not the accepted #208 portfolio outcome.
 
 ## 5. Dispositions and vocabulary
 
@@ -164,16 +164,17 @@ Adding a code is a contract change.
 
 Filters are applied in this order. The first failing filter becomes the candidate's single omission `reason`.
 
-1. `ROLE_UNSUPPORTED`: the role is not `implementer`, `reviewer` or `recovery`.
-2. `STALE_DIGEST`: the owning-body SHA-256 no longer matches (#125).
-3. `HUMAN_GATE`: a task-level Human/User gate.
-4. `EXTERNAL_BLOCKER`: a task-level external blocker.
-5. `DEPENDENCY_NOT_READY`.
-6. `LIVE_CLAIM_CONFLICT`: claimability is not `CLAIMABLE` (`BLOCKED_LIVE` / `EXPIRED_UNSWEPT`).
-7. `PUBLISHED_BY_THIS_ATTEMPT`: decision 3C; this attempt published or relaxed the candidate.
-8. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only.
-9. `CAPABILITY_MISMATCH`: `required_capabilities ⊄ capabilities`.
-10. `ENVIRONMENT_MISMATCH`: `required_environment ⊄ environment`.
+1. `REPOSITORY_NOT_ACTIVE` (portfolio only): the candidate's exact trusted Control is not `ACTIVE`.
+2. `ROLE_UNSUPPORTED`: the role is not `implementer`, `reviewer` or `recovery`.
+3. `STALE_DIGEST`: the owning-body SHA-256 no longer matches (#125).
+4. `HUMAN_GATE`: a task-level Human/User gate.
+5. `EXTERNAL_BLOCKER`: a task-level external blocker.
+6. `DEPENDENCY_NOT_READY`.
+7. `LIVE_CLAIM_CONFLICT`: claimability is not `CLAIMABLE` (`BLOCKED_LIVE` / `EXPIRED_UNSWEPT`).
+8. `PUBLISHED_BY_THIS_ATTEMPT`: decision 3C; this attempt published or relaxed the candidate.
+9. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only.
+10. `CAPABILITY_MISMATCH`: `required_capabilities ⊄ capabilities`.
+11. `ENVIRONMENT_MISMATCH`: `required_environment ⊄ environment`.
 
 Capability/environment matching is an exact tag subset check. `worker_system`, the model name, `work_intent`, repository language and prior success never add tags.
 
@@ -190,6 +191,7 @@ track: recovery = 0, reviewer = 1, implementer = 2
 - `rank_key` is the accepted execution-coordinator Phase 2 rank key (priority, urgency, dependency order, readiness, `ready_at`, …), carried verbatim. Integers compare numerically.
 - No free-form semantic scoring, model preference, Issue age, branch-existence or chat-memory heuristic participates.
 - Candidates arrive through accepted projections. Candidate order in the input does not affect the result.
+- Portfolio scope first fixes the best track and rank class, then applies the worker-scoped SHA-256 spread defined in `PORTFOLIO_PICKUP_V2.md`; repository-scoped v1 keeps the existing lexical tie-break.
 
 ## 6. Identity boundary (decision 4)
 
@@ -237,7 +239,7 @@ A missing Issue number in the user prompt is **not** a reason to ask the user. I
 
 The worker asks the user only when the missing information is authoritative and cannot be derived safely:
 
-- the target repository cannot be determined uniquely (the request would carry `target_repository = null`);
+- portfolio evidence itself is unavailable or ambiguous after `target_repository = null` is resolved through the accepted #208 contract;
 - the disposition is `NEEDS_HUMAN`;
 - proceeding would require a credential/session/permission change;
 - `PROVIDER_SURFACE_MISSING` holds and no safe read-only path satisfies the task.
