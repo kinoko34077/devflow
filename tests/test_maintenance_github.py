@@ -372,6 +372,13 @@ class MaintenanceGitHubTests(unittest.TestCase):
                 self.paths.append(path)
                 if path.endswith("/issues/1"):
                     return {
+                        "number": 1,
+                        "title": "[REPO] r",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/1"
+                        ),
                         "body": body,
                         "author_association": "OWNER",
                         "updated_at": "2026-10-01T00:00:00Z",
@@ -437,7 +444,12 @@ class MaintenanceGitHubTests(unittest.TestCase):
                 if path.endswith("/issues/59"):
                     return {
                         "number": 59,
+                        "title": "[REPO] kinotch-repo-monitor",
                         "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/59"
+                        ),
                         "body": control_body,
                         "author_association": "OWNER",
                         "updated_at": "2026-09-30T02:06:31Z",
@@ -446,6 +458,10 @@ class MaintenanceGitHubTests(unittest.TestCase):
                     return {
                         "number": 35,
                         "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "kinotch-repo-monitor/issues/35"
+                        ),
                         "body": owner_body,
                         "author_association": "OWNER",
                         "updated_at": "2026-09-30T00:00:00Z",
