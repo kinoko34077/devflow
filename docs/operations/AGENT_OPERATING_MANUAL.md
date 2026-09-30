@@ -148,6 +148,8 @@ Do not turn the Session Record into a shell transcript, tool-call log, CI log, o
 
 #### Interruption-prone chat work and bounded progress Issues
 
+Every qualifying GitHub-backed unit of work first establishes or reuses a durable progress surface and checkpoints it before the next materially distinct unit; see `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md` for the mandatory trigger set, minimum recoverable state, update ordering, working-note labels, missing/stale repair and bounded re-verification rules. The guidance below adds the stronger decomposition pattern for interruption-prone work.
+
 Apply the stronger recovery pattern when work is long-running or multi-turn, spans multiple sessions/commits, includes browser/E2E or external waits, or otherwise has a realistic timeout/interruption risk.
 
 - Keep one owning Issue when one Session Record and checklist make the next unfinished milestone unambiguous.
