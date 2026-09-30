@@ -1,8 +1,10 @@
 import unittest
 
 try:
+    from tools import maintenance_audit as ma
     from tools import maintenance_triage as mt
 except ImportError:
+    ma = None
     mt = None
 
 
@@ -37,6 +39,10 @@ class MaintenanceTriageTests(unittest.TestCase):
         self.assertIsNotNone(
             mt,
             "maintenance_triage module must exist",
+        )
+        self.assertIsNotNone(
+            ma,
+            "maintenance_audit module must exist",
         )
 
     def test_clean_state_is_not_tracked(self):
@@ -138,6 +144,47 @@ class MaintenanceTriageTests(unittest.TestCase):
             "RECORD_NONRUNNABLE_FINDING",
         )
         self.assertIsNone(missing_owner.work_class)
+
+
+    def test_real_audit_report_carries_owner_into_sync_check_triage(self):
+        observation = {
+            "repository": "o/r",
+            "observed_at": "2026-10-01T00:00:00Z",
+            "control_count": 1,
+            "control": {
+                "ref": "kinoko34077/devflow#1",
+                "repository": "o/r",
+                "trusted": True,
+                "revision": "a" * 40,
+                "active_owner_ref": "o/r#7",
+                "candidate_present": True,
+            },
+            "owner": {
+                "ref": "o/r#7",
+                "repository": "o/r",
+                "revision": "b" * 40,
+                "state": "CLOSED",
+                "runnable": False,
+                "terminal": True,
+            },
+            "source_status": "OK",
+            "producer_active": False,
+            "reviewer_gate": False,
+            "human_gate": False,
+            "external_wait": False,
+            "semantic_projection_suspected": False,
+            "search_state": None,
+            "evidence_refs": [
+                "kinoko34077/devflow#1",
+                "o/r#7",
+            ],
+        }
+
+        audit_report = ma.classify_repository(observation)
+        decision = mt.triage(audit_report)
+
+        self.assertEqual(decision.action, "PLAN_SYNC_CHECK")
+        self.assertEqual(decision.owner_ref, "o/r#7")
 
     def test_same_report_identity_yields_same_decision(self):
         first = mt.triage(report())
