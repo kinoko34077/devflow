@@ -72,6 +72,22 @@ class CursorAdvanceCanonicalityTests(unittest.TestCase):
                 updated_at="2026-09-30T06:21:00Z",
             )
 
+    def test_stale_drift_precedes_noop_frontier_rejection(self):
+        live = state(revision=8, first_unfinished="S1.4")
+        result = advance_cursor(
+            live,
+            expected_revision=7,
+            expected_first_unfinished="S1.3",
+            completed_checkpoint="S1.3",
+            next_first_unfinished="S1.3",
+            head="b" * 40,
+            evidence=(),
+            updated_at="2026-09-30T06:21:00Z",
+        )
+        self.assertEqual(result.code, "WARN_CHECKPOINT_DRIFT")
+        self.assertIsNone(result.cursor)
+        self.assertEqual(result.live, live)
+
 
 if __name__ == "__main__":
     unittest.main()
