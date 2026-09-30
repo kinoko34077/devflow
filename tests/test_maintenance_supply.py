@@ -1359,7 +1359,7 @@ class MaintenanceSupplyDocumentationTests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            "default \`GITHUB_TOKEN\` remains read-only",
+            "default `GITHUB_TOKEN` remains read-only",
             text,
         )
 
