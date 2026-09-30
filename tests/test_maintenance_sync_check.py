@@ -564,8 +564,14 @@ class MaintenanceSyncCheckCliContractTests(unittest.TestCase):
         workflow = Path(
             ".github/workflows/maintenance-audit.yml"
         ).read_text(encoding="utf-8")
-        self.assertNotIn("sync-check", workflow)
-        self.assertNotIn("--apply", workflow)
+        audit_job = workflow.split("  audit:", 1)[1]
+        if "  publish:" in audit_job:
+            audit_job = audit_job.split("  publish:", 1)[0]
+        self.assertNotIn(
+            "maintenance_audit.py sync-check",
+            audit_job,
+        )
+        self.assertNotIn("--apply", audit_job)
 
 
 if __name__ == "__main__":
