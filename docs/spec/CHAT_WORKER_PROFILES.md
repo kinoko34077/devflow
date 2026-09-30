@@ -1,6 +1,6 @@
 # Chat Worker Profiles v1
 
-Status: accepted under devflow#195; operational profile contract for the accepted chat-worker bootstrap path
+Status: accepted baseline under devflow#195; optional direct Review Provenance profile evidence is defined by devflow#211 and follows that owner's acceptance evidence
 Authority: devflow cross-repository workflow specification
 Depends on: [`CHAT_WORKER_BOOTSTRAP.md`](./CHAT_WORKER_BOOTSTRAP.md) section 12
 
