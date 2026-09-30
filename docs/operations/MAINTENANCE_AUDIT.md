@@ -67,7 +67,7 @@ Manual publication is exposed as:
 
 `python scripts/maintenance_audit.py publish-supply ... --apply`
 
-and as the explicit `workflow_dispatch` mode `publish`. The publish job has job-level Issue write permission; the audit job remains read-only.
+and as the explicit `workflow_dispatch` mode `publish`. The workflow's default `GITHUB_TOKEN` remains read-only in both jobs; the publish operation receives write authority only from the preconfigured `MAINTENANCE_SUPPLY_TOKEN`. The audit job remains read-only.
 
 A compact `devflow#209` transition comment is emitted only when the machine-readable supply set materially changes. Repeated identical publication is a no-op.
 
