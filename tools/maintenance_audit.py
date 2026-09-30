@@ -31,12 +31,65 @@ def _require_dict(value: object, name: str) -> dict[str, Any]:
 
 def normalize_observation(value: object) -> dict[str, object]:
     data = _require_dict(value, "observation")
+    repository = data.get("repository")
+    if not isinstance(repository, str) or "/" not in repository:
+        raise AuditContractError("repository identity is invalid")
+    source_status = data.get("source_status")
+    if not isinstance(source_status, str) or not source_status:
+        raise AuditContractError("source_status is required")
+    if not isinstance(data.get("observed_at"), str):
+        raise AuditContractError("observed_at is required")
+    if not isinstance(data.get("evidence_refs"), list) or not all(
+        isinstance(item, str) for item in data["evidence_refs"]
+    ):
+        raise AuditContractError("evidence_refs must be a list of strings")
+
+    # A required-source failure is itself valid audit evidence. Normalize the
+    # incomplete transport/discovery envelope into an explicit unavailable
+    # projection so classification can preserve NEEDS_EVIDENCE in the
+    # portfolio instead of aborting or silently reporting clean.
+    if source_status != "OK":
+        control_ref = data.get("control_ref")
+        if not isinstance(control_ref, str) or not control_ref:
+            control_ref = "UNAVAILABLE"
+        unavailable_owner = f"{repository}#UNAVAILABLE"
+        data.setdefault("control_count", 0)
+        data.setdefault(
+            "control",
+            {
+                "ref": control_ref,
+                "repository": repository,
+                "trusted": False,
+                "revision": "0" * 40,
+                "active_owner_ref": unavailable_owner,
+                "candidate_present": False,
+            },
+        )
+        data.setdefault(
+            "owner",
+            {
+                "ref": unavailable_owner,
+                "repository": repository,
+                "revision": "0" * 40,
+                "state": "UNKNOWN",
+                "runnable": False,
+                "terminal": False,
+            },
+        )
+        for field in (
+            "producer_active",
+            "reviewer_gate",
+            "human_gate",
+            "external_wait",
+            "semantic_projection_suspected",
+        ):
+            data.setdefault(field, False)
+        data.setdefault("search_state", None)
+        return data
+
     missing = sorted(_REQUIRED_TOP - data.keys())
     if missing:
         raise AuditContractError(f"missing required source fields: {', '.join(missing)}")
-    repository = data["repository"]
-    if not isinstance(repository, str) or "/" not in repository:
-        raise AuditContractError("repository identity is invalid")
     if data["control_count"] != 1:
         raise AuditContractError("exactly one trusted Repository Control is required")
 
