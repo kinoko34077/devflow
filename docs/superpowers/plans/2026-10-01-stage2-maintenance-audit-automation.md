@@ -19,7 +19,7 @@
 - Owning Issues/Work Orders remain durable task truth; Repository Controls remain cross-repository summaries/projections; GitHub Project and chat are never task authority.
 - No second queue/database, provider scheduler, semantic/LLM scheduler, claim/lease system or permanent worker-per-class pool.
 - No runnable demand from Issue age, labels, branch existence, search similarity, provider/model identity, idle workers, clean scans or a desire to keep workers busy.
-- Stage-2 scheduled runs are read-only audit/triage in the initial accepted version. Sync-check mutation is never enabled merely because a schedule exists.
+- Stage-2 scheduled runs are read-only audit/triage in the initial accepted version. Sync-check mutation and supply publication/withdrawal are never enabled merely because a schedule exists.
 - The initial S2.4 mutation allowlist is one concrete machine-readable projection repair: withdraw a stale `DEVFLOW_EXECUTION_CANDIDATES_V1` entry after its exact owning task is proven terminal/non-runnable and no stronger gate/producer conflict exists. Human-readable Control prose, README and Current State semantic rewriting stay outside automatic mutation.
 - Every mutation executor re-reads the exact Control body and owning task identity immediately before write, compares expected freshness/digest, preserves all unrelated body bytes, performs a post-write readback, and is idempotent on the second run.
 - `devflow#249` is regression-fixture provenance/backstop only; it is not runtime task truth and is not polled as an authority source by the auditor.
@@ -157,7 +157,7 @@ Follow existing standard-library HTTP/error/redaction patterns from repository b
 
 Extend `tests/test_maintenance_github.py` to assert `.github/workflows/maintenance-audit.yml` initially has:
 - `workflow_dispatch` only; no `schedule` yet;
-- `contents: read`, with no repository-write permission in the read-only job;
+- read-only job permissions (`contents: read` and only the read permissions required for Issues/PR evidence);
 - checkout/setup-python pinned consistently with current devflow workflows;
 - default mode `audit` only;
 - portfolio execution requires an already-configured `MAINTENANCE_AUDIT_TOKEN` secret and fails clearly when absent rather than falling back to incomplete cross-repo data;
@@ -328,11 +328,11 @@ Expected: FAIL because maintenance supply module does not exist.
 
 Reuse accepted work-class/candidate fields. Do not create a new candidate schema or infer role/capabilities from provider/model identity.
 
-- [ ] **Step 4: Add bounded publication adapter to the CLI/workflow**
+- [ ] **Step 4: Add bounded publication adapter as an explicit manual publish job**
 
-Publication writes only the relevant machine-readable Repository Control candidate projection and records a compact transition on `devflow#209` only when the supply set materially changes. Clean/repeated runs do not append comments.
+Add a `workflow_dispatch` publish mode/job with job-level write permissions. It may write only the relevant machine-readable Repository Control candidate projection and a compact transition on `devflow#209` when the supply set materially changes. Clean/repeated runs do not append comments.
 
-Scheduled mode still does not execute sync-check mutation or consume newly published supply.
+The scheduled/read-only audit job never receives write permission, never publishes/withdraws supply, never invokes sync-check apply, and never consumes newly published supply.
 
 - [ ] **Step 5: Write/verify operator documentation**
 
@@ -341,10 +341,10 @@ Scheduled mode still does not execute sync-check mutation or consume newly publi
 - audit/triage/supply/sync-check separation;
 - credential boundary;
 - report/artifact format;
-- manual sync-check apply path;
+- manual supply publish and sync-check apply paths;
 - failure/recovery behavior;
 - no-task-inflation and 3C rules;
-- scheduled mode is read-only audit/triage + bounded existing-owner supply reconciliation only.
+- scheduled mode is read-only audit/triage only; supply reconciliation requires explicit manual publish mode or a later separately accepted publisher automation.
 
 - [ ] **Step 6: Run focused/full regression**
 
@@ -393,9 +393,11 @@ If no real allowlisted drift exists, do not manufacture one in live GitHub. Use 
 
 If one exists, require immediate re-read guards, one mutation, post-write confirmation and second-run no-op.
 
-- [ ] **Step 5: Re-read runtime/supply after publication**
+- [ ] **Step 5: Exercise supply publication separately from audit execution**
 
-Verify the publisher did not consume its own changed supply and execution-coordinator claims remain unchanged unless a later independent consumer legitimately claims work.
+If an existing-owner runnable finding exists, invoke the explicit manual publish mode in a separate execution attempt, then re-read Control/#209/runtime state. Verify the publisher did not consume its own changed supply and execution-coordinator claims remain unchanged unless a later independent consumer legitimately claims work.
+
+If no qualifying existing-owner finding exists, record `NO_LIVE_SUPPLY_CANDIDATE`; do not manufacture one.
 
 - [ ] **Step 6: Record pilot disposition on `devflow#232/#215/#249`**
 
@@ -409,13 +411,13 @@ Verify the publisher did not consume its own changed supply and execution-coordi
 
 **Interfaces:**
 - Consumes accepted pilot from Task 6.
-- Produces scheduled GitHub Actions audit/triage with no automatic sync-check apply.
+- Produces scheduled GitHub Actions audit/triage with no write-capable scheduled job and no automatic sync-check apply.
 
 - [ ] **Step 1: Add the schedule only after the S2.6 pilot is accepted**
 
 Add once-daily cron `23 18 * * *` (03:23 JST) to `.github/workflows/maintenance-audit.yml`.
 
-Scheduled execution is fixed to read-only exact portfolio audit + deterministic triage + bounded existing-owner supply reconciliation. It MUST NOT invoke manual `sync-check --apply`.
+Scheduled execution is fixed to read-only exact portfolio audit + deterministic triage. It MUST NOT publish/withdraw supply, comment on Issues, update Controls, invoke `sync-check --apply`, or receive the write-capable token used by manual publish/apply jobs.
 
 - [ ] **Step 2: Add concurrency/failure fencing**
 
@@ -450,8 +452,9 @@ Accept Stage 2 only when:
 - required-source failure does not appear clean;
 - active producer/Human/reviewer gates are yielded to;
 - unchanged reruns do not create duplicate tasks/comments/supply;
-- existing-owner supply is withdrawn when owner freshness/readiness changes;
+- explicit manual existing-owner supply publication withdraws when owner freshness/readiness changes;
 - sync-check manual apply is exact-identity guarded and idempotent;
+- no scheduled job has write authority;
 - no second queue/state machine/claim authority exists;
 - execution-coordinator remains sole runtime claim authority.
 
@@ -463,4 +466,4 @@ Then and only then may `devflow#232/#215` evaluate Stage-3 release under their e
 - **Step granularity:** each implementation task has an explicit RED test, focused GREEN verification, full regression and commit boundary; real-pilot/acceptance tasks contain only external integration steps.
 - **Type consistency:** audit report -> `TriageDecision` -> optional `SyncCheckPlan` / existing-owner candidate is one-way; canonical Development Reconciliation disposition is preserved at every boundary.
 - **Review Focus coverage:** exact-vs-search, source failure, live producer yield, semantic ambiguity and stale-plan re-observation each have a named test/task owner.
-- **Proportion/YAGNI:** initial scheduled mode does not auto-apply sync-check; S2.4 supports exactly one machine-readable candidate-withdrawal mutation class; no new task database, health dashboard, scheduler or LLM semantic auditor is added.
+- **Proportion/YAGNI:** scheduled execution is read-only; manual write jobs are separately permissioned; S2.4 supports exactly one machine-readable candidate-withdrawal mutation class; no new task database, health dashboard, scheduler or LLM semantic auditor is added.
