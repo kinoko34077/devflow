@@ -69,10 +69,19 @@ jobs:
               echo "single-repository mode requires control issue number" >&2
               exit 2
             fi
+            if [[ "$AUDIT_REPOSITORY" == "kinoko34077/devflow" ]]; then
+              AUDIT_TOKEN_ENV=GITHUB_TOKEN
+            else
+              if [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
+                echo "cross-repository targeted audit requires the preconfigured MAINTENANCE_AUDIT_TOKEN secret" >&2
+                exit 2
+              fi
+              AUDIT_TOKEN_ENV=MAINTENANCE_AUDIT_TOKEN
+            fi
             python scripts/maintenance_audit.py repository \
               --repository "$AUDIT_REPOSITORY" \
               --control "$AUDIT_CONTROL" \
-              --token-env GITHUB_TOKEN \
+              --token-env "$AUDIT_TOKEN_ENV" \
               --output maintenance-audit-report.json
           else
             if [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
@@ -81,6 +90,7 @@ jobs:
             fi
             python scripts/maintenance_audit.py portfolio \
               --token-env MAINTENANCE_AUDIT_TOKEN \
+              --triage \
               --output maintenance-audit-report.json
           fi
       - name: Write aggregate summary
