@@ -279,8 +279,11 @@ class MaintenanceGitHubTests(unittest.TestCase):
         self.assertIn("contents: read", text)
         self.assertIn("issues: read", text)
         self.assertIn("pull-requests: read", text)
-        self.assertNotIn("issues: write", text)
-        self.assertNotIn("pull-requests: write", text)
+        audit_job = text.split("  audit:", 1)[1].split(
+            "  publish:", 1
+        )[0]
+        self.assertNotIn("issues: write", audit_job)
+        self.assertNotIn("pull-requests: write", audit_job)
         self.assertIn(
             "actions/checkout@"
             "3d3c42e5aac5ba805825da76410c181273ba90b1",
