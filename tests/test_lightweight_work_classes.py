@@ -107,6 +107,28 @@ class LightweightWorkClassTests(unittest.TestCase):
         self.assertEqual("REVIEW_WORK", result["disposition"])
         self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
 
+    def test_explicit_reviewer_non_formal_review_fails_closed(self):
+        data = self._portfolio_case()
+        data["evidence"]["frontier"]["candidates"][0]["work_class"] = "quickfix"
+        data["request"]["accepted_work_classes"] = ["quickfix"]
+        result = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(
+            ("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+            (result["disposition"], result["reason_code"]),
+        )
+
+    def test_explicit_formal_review_non_reviewer_fails_closed(self):
+        data = self._portfolio_case()
+        implementer = data["evidence"]["frontier"]["candidates"][1]
+        implementer["work_class"] = "formal-review"
+        data["evidence"]["frontier"]["candidates"] = [implementer]
+        data["request"]["accepted_work_classes"] = ["formal-review"]
+        result = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(
+            ("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+            (result["disposition"], result["reason_code"]),
+        )
+
     def test_missing_candidate_work_class_uses_narrow_legacy_role_default(self):
         data = self._portfolio_case()
         for item in data["evidence"]["frontier"]["candidates"]:
