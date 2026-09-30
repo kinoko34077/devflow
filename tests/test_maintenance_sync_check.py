@@ -574,5 +574,104 @@ class MaintenanceSyncCheckCliContractTests(unittest.TestCase):
         self.assertNotIn("--apply", audit_job)
 
 
+class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
+    def test_live_control_next_action_human_gate_blocks_recheck(self):
+        import json
+        from scripts import maintenance_audit as cli
+
+        body = control_snapshot()["body"].replace(
+            "before\n",
+            (
+                "## Repository\n\n\`o/r\`\n\n"
+                "## Repository State\n\n\`ACTIVE\`\n\n"
+                "## Next Action\n\n"
+                "\`[HUMAN_GATE] confirm\`\n\n"
+            ),
+        )
+        issue = {
+            "number": 1,
+            "title": "[REPO] r",
+            "state": "open",
+            "html_url": (
+                "https://github.com/kinoko34077/"
+                "devflow/issues/1"
+            ),
+            "author_association": "OWNER",
+            "body": body,
+        }
+
+        class Response:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(issue).encode()
+
+        transport = cli._SyncCheckGitHubTransport(
+            "token",
+            opener=lambda request, timeout=0: Response(),
+        )
+        snapshot = transport.get_control(
+            "o/r",
+            "kinoko34077/devflow#1",
+        )
+        self.assertTrue(snapshot["human_gate"])
+
+    def test_write_transport_redacts_token_from_url_error(self):
+        import json
+        from urllib.error import URLError
+        from scripts import maintenance_audit as cli
+
+        token = "secret-write-token"
+        issue = {
+            "number": 1,
+            "title": "[REPO] r",
+            "state": "open",
+            "html_url": (
+                "https://github.com/kinoko34077/"
+                "devflow/issues/1"
+            ),
+            "author_association": "OWNER",
+            "body": control_snapshot()["body"],
+        }
+
+        class Response:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(issue).encode()
+
+        def opener(request, timeout=0):
+            if request.method == "GET":
+                return Response()
+            raise URLError("transport failed " + token)
+
+        transport = cli._SyncCheckGitHubTransport(
+            token,
+            opener=opener,
+        )
+        with self.assertRaises(Exception) as ctx:
+            transport.update_control_body(
+                "o/r",
+                "kinoko34077/devflow#1",
+                canonical_body_sha256(
+                    control_snapshot()["body"]
+                ),
+                control_snapshot()["body"],
+            )
+        self.assertNotIn(token, str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
