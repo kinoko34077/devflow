@@ -433,8 +433,18 @@ def _p4d_live_snapshots(
             return _P4DFakeResponse(
                 {
                     "number": 1,
+                    "title": "[REPO] r",
                     "state": "open",
-                    "body": control_body,
+                    "html_url": (
+                        "https://github.com/kinoko34077/"
+                        "devflow/issues/1"
+                    ),
+                    "body": (
+                        "## Repository\n\n`o/r`\n\n"
+                        "## Repository State\n\n`ACTIVE`\n\n"
+                        "## Next Action\n\n`[WAIT] exact test`\n\n"
+                        + control_body
+                    ),
                     "author_association": "OWNER",
                 }
             )
@@ -443,6 +453,7 @@ def _p4d_live_snapshots(
                 {
                     "number": 7,
                     "state": owner_state,
+                    "html_url": "https://github.com/o/r/issues/7",
                     "body": (
                         "## Work Status\n\n"
                         f"`{owner_work_status}`\n"
