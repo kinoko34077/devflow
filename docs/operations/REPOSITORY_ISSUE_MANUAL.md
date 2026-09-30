@@ -145,6 +145,7 @@ Minimum record:
 Execution-Session-ID: <stable unique id>
 Worker-System: ChatGPT | Codex | Claude Code | Human | other
 Worker-Model: <model/version or unknown>
+Conversation-Title-At-Start: <exact observed title | UNAVAILABLE>
 Role: implementer | reviewer | verifier | integrator | investigator
 Status: CLAIMED | RUNNING | WAITING | HANDOFF | RELEASED | FAILED
 Scope: <exact semantic/work boundary>
@@ -156,6 +157,10 @@ Last-Checkpoint: <latest completed bounded milestone>
 Next-Action: <first unfinished bounded milestone>
 Blocker: <none or explicit dependency>
 ```
+
+For every new ChatGPT, Codex, or Claude/Claude Code Session Record, capture `Conversation-Title-At-Start` exactly once from the conversation/thread title actually visible to the worker/client when the record is established. Preserve observed spelling, case, and punctuation. If the title is not exposed to the worker context, record exactly `UNAVAILABLE`; do not infer it from the prompt/task and do not ask the user merely to obtain it. A later UI rename does not invalidate or rewrite the start-time snapshot. Existing historical Session Records without this field remain valid and require no backfill.
+
+`Conversation-Title-At-Start` is human-readable display/provenance metadata only. It MUST NOT participate in `Execution-Session-ID` generation/equality, execution-coordinator worker/claim identity, stale/takeover timing, collision authority, Formal Review Provenance/different-reviewer equality, authentication, access control, or any security/cryptographic identity decision.
 
 The same comment carries a bounded checklist plan. The checklist records recovery-relevant milestones such as live-state check, failure reproduction/RED, implementation, GREEN/verification, PR/review, merge/disposition and Issue/Current State/Control reconciliation. It is not a command transcript.
 
@@ -182,7 +187,7 @@ Lifecycle meaning:
 
 This manual convention is a **soft lock**. It improves collision detection, handoff and recovery but does not provide atomic exclusion, leases or generation fencing. Those semantics belong to execution-coordinator when an actual runtime claim is used. Never describe a manual Session Record as a runtime claim/lease unless that coordinator state actually exists.
 
-Operational provenance (`Worker-System`, `Worker-Model`, `Execution-Session-ID`) is attribution only. It is separate from Formal Review Provenance v2 and does not prove reviewer independence or security identity.
+Operational identity provenance (`Worker-System`, `Worker-Model`, `Execution-Session-ID`) is attribution only. `Conversation-Title-At-Start` is secondary human-readable display provenance and never joins that identity tuple. Neither kind of Session provenance is Formal Review Provenance v2 or proof of reviewer independence/security identity.
 
 Stale/takeover rule:
 
