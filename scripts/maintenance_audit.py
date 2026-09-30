@@ -478,6 +478,10 @@ def _owner_supply_snapshot(
 
     issue = transport.get_issue(owner_repo, number)
     body = str(issue.get("body") or "")
+    if not body.strip():
+        raise MaintenanceSupplyError(
+            "owning Issue body must be non-empty"
+        )
     association = str(
         issue.get("author_association") or ""
     ).upper()
@@ -486,6 +490,36 @@ def _owner_supply_snapshot(
         "MEMBER",
         "COLLABORATOR",
     }
+
+    work_order_ref = admission.get("work_order_ref")
+    if work_order_ref is not None:
+        work_order_repo, work_order_number = _split_issue_ref(
+            str(work_order_ref)
+        )
+        if work_order_repo != DEVFLOW_REPOSITORY:
+            raise MaintenanceSupplyError(
+                "work_order_ref must identify a devflow Work Order"
+            )
+        work_order = transport.get_issue(
+            work_order_repo,
+            work_order_number,
+        )
+        work_order_association = str(
+            work_order.get("author_association") or ""
+        ).upper()
+        if (
+            str(work_order.get("state") or "").lower() != "open"
+            or "pull_request" in work_order
+            or work_order_association
+            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+            or not str(work_order.get("title") or "")
+            .strip()
+            .startswith("[WORK ORDER]")
+        ):
+            raise MaintenanceSupplyError(
+                "work_order_ref does not resolve to a trusted open [WORK ORDER] Issue"
+            )
+
     return {
         "task_ref": owner_ref,
         "repository": repository,
