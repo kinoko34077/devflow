@@ -122,8 +122,11 @@ def parse_cursor_comment(body: str) -> CursorState:
     rejects ambiguous duplicate/unknown keys.
     """
 
-    if not isinstance(body, str) or body.count(SENTINEL) != 1:
+    if not isinstance(body, str):
         raise CursorFormatError("cursor sentinel missing or duplicated")
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    if body.count(SENTINEL) != 1 or body.lstrip().split("\n", 1)[0] != SENTINEL:
+        raise CursorFormatError("cursor sentinel missing, duplicated, or not canonical")
 
     marker_index = body.index(SENTINEL) + len(SENTINEL)
     blocks = _YAML_BLOCK_RE.findall(body[marker_index:])
@@ -249,7 +252,10 @@ def inspect_cursor_comments(
 
     for comment in comments:
         body = comment.get("body")
-        if not isinstance(body, str) or SENTINEL not in body:
+        if not isinstance(body, str):
+            continue
+        normalized_body = body.replace("\r\n", "\n").replace("\r", "\n")
+        if normalized_body.lstrip().split("\n", 1)[0] != SENTINEL:
             continue
         if _is_trusted_comment(comment):
             trusted.append(body)
@@ -334,6 +340,8 @@ def advance_cursor(
 ) -> CursorResult:
     """Prepare one forward movement only when expected/live state matches."""
 
+    if live.first_unfinished is None or completed_checkpoint is None:
+        raise ValueError("terminal cursor requires explicit reconcile")
     if completed_checkpoint != expected_first_unfinished:
         raise ValueError("completed_checkpoint must equal expected_first_unfinished")
     _validate_checkpoint(completed_checkpoint, "completed_checkpoint")
