@@ -11,6 +11,7 @@ from tools.task_checkpoint_cursor import (
     parse_cursor_comment,
     reconcile_cursor,
     render_cursor_comment,
+    verify_initialization,
     verify_post_write,
 )
 
@@ -48,6 +49,11 @@ class CursorFormatTests(unittest.TestCase):
         original = state()
         body = render_cursor_comment(original)
         self.assertIn(SENTINEL, body)
+        self.assertEqual(parse_cursor_comment(body), original)
+
+    def test_crlf_cursor_round_trips(self):
+        original = state()
+        body = render_cursor_comment(original).replace("\n", "\r\n")
         self.assertEqual(parse_cursor_comment(body), original)
 
     def test_terminal_first_unfinished_round_trips(self):
@@ -109,6 +115,13 @@ class CursorInspectionTests(unittest.TestCase):
         self.assertEqual(result.code, "NO_MARKER")
         self.assertIsNone(result.cursor)
         self.assertEqual(result.warnings, ())
+
+    def test_trusted_inline_sentinel_mention_is_not_marker(self):
+        body = render_cursor_comment(state())
+        mention = f"FYI the cursor uses `{SENTINEL}` as sentinel"
+        result = inspect_cursor_comments([comment(body), comment(mention)], TASK)
+        self.assertEqual(result.code, "OK_CURSOR")
+        self.assertEqual(result.cursor, state())
 
     def test_untrusted_only_marker_is_noise(self):
         result = inspect_cursor_comments(
@@ -188,6 +201,17 @@ class CursorTransitionTests(unittest.TestCase):
         self.assertIsNone(cursor.last_completed)
         self.assertEqual(cursor.first_unfinished, "BOOTSTRAP")
 
+    def test_initialization_readback_is_typed(self):
+        cursor = initialize_cursor(
+            task=TASK,
+            last_completed=None,
+            first_unfinished="BOOTSTRAP",
+            head=None,
+            evidence=(),
+            updated_at=STAMP,
+        )
+        self.assertEqual(verify_initialization(cursor, cursor).code, "OK_INITIALIZED")
+
     def test_normal_advance_increments_and_moves_frontier(self):
         live = state()
         result = advance_cursor(
@@ -204,6 +228,20 @@ class CursorTransitionTests(unittest.TestCase):
         self.assertEqual(result.cursor.revision, 8)
         self.assertEqual(result.cursor.last_completed, "S1.3")
         self.assertEqual(result.cursor.first_unfinished, "S1.4")
+
+    def test_terminal_cursor_cannot_normal_advance(self):
+        live = state(last_completed="S1.9", first_unfinished=None)
+        with self.assertRaises(ValueError):
+            advance_cursor(
+                live,
+                expected_revision=7,
+                expected_first_unfinished=None,
+                completed_checkpoint=None,
+                next_first_unfinished="S10",
+                head=None,
+                evidence=(),
+                updated_at="2026-09-30T04:31:00Z",
+            )
 
     def test_advance_with_drift_prepares_no_replacement(self):
         live = state(revision=8, first_unfinished="S1.4")
