@@ -376,7 +376,7 @@ def _explicit_no_active_work(control_body: str) -> bool:
         ),
         "",
     )
-    return re.match(r"^None(?:\\.|\\s|$)", first, re.IGNORECASE) is not None
+    return re.match(r"^None(?:\.|\s|$)", first, re.IGNORECASE) is not None
 
 
 def _active_owner_ref(
