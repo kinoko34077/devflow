@@ -1343,5 +1343,26 @@ class MaintenanceSupplyReportingFailureTests(unittest.TestCase):
         self.assertIn("reporting_error", output[-1])
 
 
+class MaintenanceSupplyDocumentationTests(unittest.TestCase):
+    def test_operator_doc_describes_read_only_default_publish_token(self):
+        from pathlib import Path
+
+        text = Path(
+            "docs/operations/MAINTENANCE_AUDIT.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "publish job has job-level Issue write permission",
+            text,
+        )
+        self.assertIn(
+            "MAINTENANCE_SUPPLY_TOKEN",
+            text,
+        )
+        self.assertIn(
+            "default \`GITHUB_TOKEN\` remains read-only",
+            text,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
