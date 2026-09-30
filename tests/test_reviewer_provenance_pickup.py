@@ -24,7 +24,7 @@ def base_case():
 
 
 class ReviewerProvenancePickupTests(unittest.TestCase):
-    def test_ordinary_review_remains_valid_without_worker_model(self):
+    def test_ordinary_review_remains_valid_without_review_provenance(self):
         data = base_case()
         result = cwb.classify(data["request"], data["evidence"])
         self.assertEqual(("REVIEW_WORK", "ELIGIBLE_REVIEW_DEMAND"), (result["disposition"], result["reason_code"]))
@@ -38,6 +38,18 @@ class ReviewerProvenancePickupTests(unittest.TestCase):
         }
         result = cwb.classify(data["request"], data["evidence"])
         self.assertEqual(("NO_ELIGIBLE_WORK", "ALL_CANDIDATES_OMITTED"), (result["disposition"], result["reason_code"]))
+        self.assertEqual("REVIEWER_INDEPENDENCE_CONFLICT", result["omissions"][0]["reason"])
+
+    def test_provider_transport_identity_does_not_override_review_signature(self):
+        data = base_case()
+        data["request"]["worker_system"] = "chatgpt"
+        data["request"]["review_provenance"] = {"system": "Claude Code", "model": "Claude Sonnet 5"}
+        data["evidence"]["frontier"]["candidates"][0]["different_reviewer_requirement"] = {
+            "implementer_system": "Claude Code",
+            "implementer_model": "Claude Sonnet 5",
+        }
+        result = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("NO_ELIGIBLE_WORK", result["disposition"])
         self.assertEqual("REVIEWER_INDEPENDENCE_CONFLICT", result["omissions"][0]["reason"])
 
     def test_explicit_different_reviewer_different_model_is_eligible(self):
@@ -60,6 +72,17 @@ class ReviewerProvenancePickupTests(unittest.TestCase):
         }
         result = cwb.classify(data["request"], data["evidence"])
         self.assertEqual(("REVIEW_WORK", "ELIGIBLE_REVIEW_DEMAND"), (result["disposition"], result["reason_code"]))
+
+    def test_unrelated_work_class_does_not_require_reviewer_provenance(self):
+        data = base_case()
+        data["request"]["accepted_work_classes"] = ["quickfix"]
+        data["evidence"]["frontier"]["candidates"][0]["different_reviewer_requirement"] = {
+            "implementer_system": "Claude Code",
+            "implementer_model": "Claude Sonnet 5",
+        }
+        result = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(("NO_ELIGIBLE_WORK", "ALL_CANDIDATES_OMITTED"), (result["disposition"], result["reason_code"]))
+        self.assertEqual("WORK_CLASS_MISMATCH", result["omissions"][0]["reason"])
 
     def test_explicit_different_reviewer_missing_reviewer_provenance_fails_closed(self):
         data = base_case()
