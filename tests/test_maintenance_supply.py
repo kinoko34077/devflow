@@ -790,6 +790,116 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
         )
 
 
+    def test_reporting_failure_preserves_applied_partial_success(self):
+        import argparse
+        import os
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class FakeTransport:
+            instances = []
+
+            def __init__(self, token):
+                self.token = token
+                self.owner_body = "durable scope"
+                digest = cli.canonical_body_sha256(
+                    self.owner_body
+                )
+                self.body = (
+                    "## Repository\n\n`o/r`\n\n"
+                    "## Repository State\n\n`ACTIVE`\n\n"
+                    "## Next Action\n\n`[IMPLEMENT]`\n\n"
+                    + existing_candidate_control_body().replace(
+                        BODY_SHA,
+                        digest,
+                    )
+                )
+                self.writes = []
+                self.posts = 0
+                type(self).instances.append(self)
+
+            def get_issue(self, repository, number):
+                if (repository, number) == (
+                    "kinoko34077/devflow",
+                    1,
+                ):
+                    return {
+                        "number": 1,
+                        "state": "open",
+                        "title": "[REPO] r",
+                        "body": self.body,
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "number": 7,
+                        "state": "open",
+                        "title": "owner",
+                        "body": self.owner_body,
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError((repository, number))
+
+            def update_control_body(
+                self,
+                repository,
+                control_ref,
+                expected_body_sha256,
+                body,
+            ):
+                self.writes.append(body)
+                self.body = body
+                return True
+
+            def get_control(self, repository, control_ref):
+                return {
+                    "repository": repository,
+                    "control_ref": control_ref,
+                    "body": self.body,
+                }
+
+            def post_supply_transition(self, body):
+                self.posts += 1
+                return False
+
+        args = argparse.Namespace(
+            repository="o/r",
+            control=1,
+            owner="o/r#7",
+            work_class="sync-check",
+            attempt_id="attempt-partial",
+            token_env="MAINTENANCE_SUPPLY_TOKEN",
+            observed_at="2026-10-01T00:00:00Z",
+            output=None,
+            apply=True,
+        )
+        output = []
+        with patch.dict(
+            os.environ,
+            {"MAINTENANCE_SUPPLY_TOKEN": "token"},
+            clear=False,
+        ), patch.object(
+            cli,
+            "_SyncCheckGitHubTransport",
+            FakeTransport,
+        ), patch.object(
+            cli,
+            "_write",
+            lambda value, _output: output.append(value),
+        ):
+            result = cli._publish_supply(args)
+
+        transport = FakeTransport.instances[-1]
+        payload = output[-1]
+        self.assertNotEqual(result, 0)
+        self.assertEqual(len(transport.writes), 1)
+        self.assertEqual(transport.posts, 1)
+        self.assertTrue(payload["applied"])
+        self.assertFalse(payload["transition_recorded"])
+        self.assertIn("reporting_error", payload)
+
+
 
 class MaintenanceSupplyApplyPathTests(unittest.TestCase):
     def test_supply_transport_posts_compact_transition_to_209(self):
