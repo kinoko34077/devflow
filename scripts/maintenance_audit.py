@@ -752,12 +752,25 @@ def _publish_supply(args: argparse.Namespace) -> int:
         "owning Issue freshness; publication is not a runtime claim and cannot "
         "be consumed by the same execution attempt."
     )
-    if not transport.post_supply_transition(transition):
-        raise MaintenanceSupplyError(
-            "supply changed but #209 transition comment was not confirmed"
-        )
     payload["applied"] = True
     payload["action"] = action
+    try:
+        transition_recorded = transport.post_supply_transition(
+            transition
+        )
+    except GitHubReadError as exc:
+        payload["transition_recorded"] = False
+        payload["reporting_error"] = str(exc)
+        _write(payload, args.output)
+        return 2
+    if not transition_recorded:
+        payload["transition_recorded"] = False
+        payload["reporting_error"] = (
+            "supply changed but #209 transition comment was not confirmed"
+        )
+        _write(payload, args.output)
+        return 2
+    payload["transition_recorded"] = True
     _write(payload, args.output)
     return 0
 
