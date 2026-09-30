@@ -174,6 +174,7 @@ class GitHubReadTransport:
         value = self.get_json(f"/repos/{repository}/issues/{number}")
         if not isinstance(value, dict):
             raise GitHubReadError("Issue read did not return an object")
+        _validate_issue_identity(value, repository, number)
         return value
 
     def get_pull(self, repository: str, number: int) -> dict[str, Any]:
@@ -615,6 +616,12 @@ def collect_repository(
         }
         source_status = "UNAVAILABLE"
 
+    owner_association = str(
+        owner.get("author_association") or ""
+    ).upper()
+    if owner_association not in TRUSTED_ASSOCIATIONS:
+        source_status = "UNAVAILABLE"
+
     owner_sections = _sections(str(owner.get("body") or ""))
     work_status = (
         _scalar_section(owner_sections, "Work Status") or ""
@@ -628,6 +635,12 @@ def collect_repository(
     }
     producer_active = work_status == "IMPLEMENTING"
     reviewer_gate = work_status == "AWAITING_REVIEW"
+
+    next_action = sections.get("Next Action", "")
+    control_human_gate = (
+        "[USER_DECISION]" in next_action
+        or "[HUMAN_GATE]" in next_action
+    )
 
     return {
         "repository": repository,
@@ -652,7 +665,7 @@ def collect_repository(
         "source_status": source_status,
         "producer_active": producer_active,
         "reviewer_gate": reviewer_gate,
-        "human_gate": False,
+        "human_gate": control_human_gate,
         "external_wait": False,
         "semantic_projection_suspected": False,
         "search_state": None,
