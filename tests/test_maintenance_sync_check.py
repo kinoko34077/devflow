@@ -189,5 +189,217 @@ class MaintenanceSyncCheckPlanningTests(unittest.TestCase):
             )
 
 
+def body_with_second_candidate():
+    first = control_snapshot()["body"]
+    second = (
+        "    },\n"
+        "    {\n"
+        '      "task": "o/r#8",\n'
+        '      "task_body_sha256": "sha256:' + "d" * 64 + '",\n'
+        '      "task_work_status": "READY_FOR_IMPLEMENTATION",\n'
+        '      "entry_ref": "https://github.com/o/r/issues/8",\n'
+        '      "scope_ready": true,\n'
+        '      "blocked": false,\n'
+        '      "requires_user_confirmation": false,\n'
+        '      "conflict_keys": ["component:o/r:other"],\n'
+        '      "roles": [{"role":"implementer","next_action_tag":"IMPLEMENT"}]\n'
+        "    }\n"
+    )
+    return first.replace("    }\n  ]\n}", second + "  ]\n}")
+
+
+class FakeSyncTransport:
+    def __init__(self, control, owner):
+        self.control = dict(control)
+        self.owner = dict(owner)
+        self.writes = []
+
+    def get_control(self, repository, control_ref):
+        self.assert_identity(
+            repository == self.control["repository"],
+            control_ref == self.control["control_ref"],
+        )
+        return dict(self.control)
+
+    def get_owner(self, repository, owner_ref):
+        self.assert_identity(
+            repository == self.owner["repository"],
+            owner_ref == self.owner["owner_ref"],
+        )
+        return dict(self.owner)
+
+    def update_control_body(
+        self,
+        repository,
+        control_ref,
+        expected_body_sha256,
+        body,
+    ):
+        self.assert_identity(
+            repository == self.control["repository"],
+            control_ref == self.control["control_ref"],
+            expected_body_sha256 == self.control["body_sha256"],
+        )
+        self.writes.append(body)
+        self.control["body"] = body
+        self.control["body_sha256"] = ms.canonical_body_sha256(body)
+        self.control["candidate_tasks"] = (
+            ["o/r#7"] if '"task": "o/r#7"' in body else []
+        )
+        return True
+
+    @staticmethod
+    def assert_identity(*conditions):
+        if not all(conditions):
+            raise AssertionError("transport identity guard failed")
+
+
+class MaintenanceSyncCheckExecutorTests(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(
+            ms,
+            "maintenance_sync_check module must exist",
+        )
+
+    def _plan_and_transport(self):
+        control = control_snapshot()
+        owner = owner_snapshot()
+        plan = ms.build_sync_check_plan(
+            report(),
+            control,
+            owner,
+        )
+        self.assertIsNotNone(plan)
+        return plan, FakeSyncTransport(control, owner)
+
+    def test_projection_editor_preserves_outside_and_other_candidate(self):
+        body = body_with_second_candidate()
+        edited = ms.withdraw_candidate_projection(
+            body,
+            repository="o/r",
+            task_ref="o/r#7",
+        )
+        self.assertNotIn('"task": "o/r#7"', edited)
+        self.assertIn('"task": "o/r#8"', edited)
+        before_prefix, before_rest = body.split(
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->",
+            1,
+        )
+        after_prefix, after_rest = edited.split(
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->",
+            1,
+        )
+        self.assertEqual(after_prefix, before_prefix)
+        before_suffix = before_rest.split(
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->",
+            1,
+        )[1]
+        after_suffix = after_rest.split(
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->",
+            1,
+        )[1]
+        self.assertEqual(after_suffix, before_suffix)
+
+    def test_projection_editor_rejects_duplicate_markers(self):
+        body = control_snapshot()["body"]
+        malformed = body + (
+            "\n<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            "{}\n"
+        )
+        with self.assertRaises(ms.SyncCheckContractError):
+            ms.withdraw_candidate_projection(
+                malformed,
+                repository="o/r",
+                task_ref="o/r#7",
+            )
+
+    def test_executor_unchanged_identity_writes_once_and_confirms(self):
+        plan, transport = self._plan_and_transport()
+        result = ms.execute_sync_check(plan, transport)
+        self.assertTrue(result.applied)
+        self.assertFalse(result.already_applied)
+        self.assertEqual(result.disposition, "AUTO_ADVANCE")
+        self.assertEqual(len(transport.writes), 1)
+        self.assertNotIn(
+            '"task": "o/r#7"',
+            transport.control["body"],
+        )
+
+    def test_executor_control_or_owner_drift_writes_nothing(self):
+        for target in ("control", "owner"):
+            with self.subTest(target=target):
+                plan, transport = self._plan_and_transport()
+                if target == "control":
+                    transport.control["body_sha256"] = (
+                        "sha256:" + "e" * 64
+                    )
+                else:
+                    transport.owner["body_sha256"] = (
+                        "sha256:" + "f" * 64
+                    )
+                result = ms.execute_sync_check(
+                    plan,
+                    transport,
+                )
+                self.assertFalse(result.applied)
+                self.assertFalse(result.already_applied)
+                self.assertEqual(
+                    result.disposition,
+                    "NEEDS_EVIDENCE",
+                )
+                self.assertEqual(transport.writes, [])
+
+    def test_executor_new_gate_writes_nothing(self):
+        cases = (
+            ("human_gate", "NEEDS_HUMAN"),
+            ("security_gate", "NEEDS_HUMAN"),
+            ("reviewer_gate", "NEEDS_REVIEWER"),
+            ("external_wait", "WAIT_EXTERNAL"),
+            ("producer_active", "NO_ACTION"),
+        )
+        for field, disposition in cases:
+            with self.subTest(field=field):
+                plan, transport = self._plan_and_transport()
+                transport.owner[field] = True
+                result = ms.execute_sync_check(
+                    plan,
+                    transport,
+                )
+                self.assertFalse(result.applied)
+                self.assertEqual(
+                    result.disposition,
+                    disposition,
+                )
+                self.assertEqual(transport.writes, [])
+
+    def test_executor_second_run_is_already_applied_noop(self):
+        plan, transport = self._plan_and_transport()
+        first = ms.execute_sync_check(plan, transport)
+        second = ms.execute_sync_check(plan, transport)
+        self.assertTrue(first.applied)
+        self.assertFalse(second.applied)
+        self.assertTrue(second.already_applied)
+        self.assertEqual(
+            second.disposition,
+            "NO_ACTION",
+        )
+        self.assertEqual(len(transport.writes), 1)
+
+    def test_semantic_report_never_reaches_executor_plan(self):
+        self.assertIsNone(
+            ms.build_sync_check_plan(
+                report(
+                    disposition="NEEDS_EVIDENCE",
+                    finding_classes=[
+                        "SEMANTIC_PROJECTION_SUSPECTED"
+                    ],
+                    next_transition=None,
+                ),
+                control_snapshot(),
+                owner_snapshot(),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
