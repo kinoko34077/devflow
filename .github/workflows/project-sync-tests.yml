@@ -49,3 +49,5 @@ jobs:
           tools/maintenance_audit.py
           tools/maintenance_github.py
           tools/maintenance_triage.py
+          tools/maintenance_sync_check.py
+          tools/maintenance_supply.py
