@@ -59,6 +59,48 @@ class MaintenanceAuditContractTests(unittest.TestCase):
     def fixture(self, name):
         return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
+    def test_clean_future_spec_is_no_action(self):
+        report = ma.classify_repository(self.fixture("clean.json"))
+        self.assertEqual(report["disposition"], "NO_ACTION")
+        self.assertNotIn("next_transition", report)
+
+    def test_terminal_owner_stale_control_proposes_sync_check(self):
+        report = ma.classify_repository(self.fixture("stale-control-owner-terminal.json"))
+        self.assertEqual(report["disposition"], "AUTO_ADVANCE")
+        self.assertIn("CONTROL_ACTIVE_WORK_TERMINAL", report["finding_classes"])
+        self.assertEqual(report["next_transition"], "WITHDRAW_STALE_CONTROL_CANDIDATE")
+
+    def test_active_producer_yields(self):
+        report = ma.classify_repository(self.fixture("active-producer-yield.json"))
+        self.assertEqual(report["disposition"], "NO_ACTION")
+        self.assertIn("ACTIVE_PRODUCER_YIELD", report["finding_classes"])
+
+    def test_reviewer_gate_yields(self):
+        report = ma.classify_repository(self.fixture("reviewer-gate.json"))
+        self.assertEqual(report["disposition"], "NEEDS_REVIEWER")
+        self.assertIn("REVIEW_GATE_YIELD", report["finding_classes"])
+
+    def test_human_gate_yields(self):
+        report = ma.classify_repository(self.fixture("human-gate.json"))
+        self.assertEqual(report["disposition"], "NEEDS_HUMAN")
+        self.assertIn("HUMAN_GATE_YIELD", report["finding_classes"])
+
+    def test_source_unavailable_fails_closed(self):
+        report = ma.classify_repository(self.fixture("source-unavailable.json"))
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertIn("SOURCE_UNAVAILABLE_OR_AMBIGUOUS", report["finding_classes"])
+
+    def test_semantic_projection_is_triage_only(self):
+        report = ma.classify_repository(self.fixture("semantic-projection-suspected.json"))
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertIn("SEMANTIC_PROJECTION_SUSPECTED", report["finding_classes"])
+        self.assertNotIn("next_transition", report)
+
+    def test_exact_terminal_truth_wins_over_stale_search(self):
+        report = ma.classify_repository(self.fixture("search-stale-exact-terminal.json"))
+        self.assertEqual(report["disposition"], "AUTO_ADVANCE")
+        self.assertIn("SEARCH_INDEX_DISAGREES_WITH_EXACT", report["finding_classes"])
+
 
 if __name__ == "__main__":
     unittest.main()
