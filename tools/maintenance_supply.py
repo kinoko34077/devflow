@@ -441,6 +441,156 @@ def _parse_projection_block(
     return value, start, end
 
 
+def extract_existing_admission(
+    body: str,
+    *,
+    repository: str,
+    control_ref: str,
+    task_ref: str,
+) -> dict[str, Any] | None:
+    if not isinstance(body, str):
+        raise MaintenanceSupplyError("Control body must be a string")
+    repository = _string(repository, "repository")
+    control_ref = _string(control_ref, "control_ref")
+    task_ref = _string(task_ref, "task_ref")
+    if not task_ref.startswith(repository + "#"):
+        raise MaintenanceSupplyError(
+            "task_ref must belong to the projected repository"
+        )
+
+    projection, _start, _end = _parse_projection_block(
+        body,
+        start_marker=CANDIDATE_BEGIN,
+        end_marker=CANDIDATE_END,
+        repository=repository,
+        control_ref=control_ref,
+        schema_version=ADMISSION_SCHEMA_VERSION,
+        array_key="candidates",
+    )
+    candidates = projection["candidates"]
+    allowed = {
+        "task",
+        "task_body_sha256",
+        "task_work_status",
+        "entry_ref",
+        "scope_ready",
+        "blocked",
+        "requires_user_confirmation",
+        "conflict_keys",
+        "work_order_ref",
+        "roles",
+    }
+    required = {
+        "task",
+        "task_body_sha256",
+        "task_work_status",
+        "entry_ref",
+        "scope_ready",
+        "blocked",
+        "requires_user_confirmation",
+        "roles",
+    }
+    seen: set[str] = set()
+    matched: dict[str, Any] | None = None
+    for item in candidates:
+        if not isinstance(item, dict):
+            raise MaintenanceSupplyError(
+                "candidate projection entries must be objects"
+            )
+        unknown = set(item) - allowed
+        missing = required - set(item)
+        if unknown or missing:
+            raise MaintenanceSupplyError(
+                "candidate projection has unsupported or missing fields"
+            )
+        task = _string(item.get("task"), "candidate.task")
+        if task in seen:
+            raise MaintenanceSupplyError(
+                "candidate projection contains duplicate task envelopes"
+            )
+        seen.add(task)
+        _sha(
+            item.get("task_body_sha256"),
+            "candidate.task_body_sha256",
+        )
+        _string(
+            item.get("task_work_status"),
+            "candidate.task_work_status",
+        )
+        entry_ref = _string(
+            item.get("entry_ref"),
+            "candidate.entry_ref",
+        )
+        issue_number = task.rsplit("#", 1)[1]
+        expected_entry = (
+            "https://github.com/"
+            + task.rsplit("#", 1)[0]
+            + "/issues/"
+            + issue_number
+        )
+        if entry_ref != expected_entry:
+            raise MaintenanceSupplyError(
+                "candidate entry_ref does not identify the exact task"
+            )
+        for field in (
+            "scope_ready",
+            "blocked",
+            "requires_user_confirmation",
+        ):
+            _bool(item.get(field), f"candidate.{field}")
+
+        conflict_keys = item.get("conflict_keys", [])
+        if not isinstance(conflict_keys, list) or not all(
+            isinstance(value, str) and value
+            for value in conflict_keys
+        ):
+            raise MaintenanceSupplyError(
+                "candidate conflict_keys must be an array of strings"
+            )
+        if len(conflict_keys) != len(set(conflict_keys)):
+            raise MaintenanceSupplyError(
+                "candidate conflict_keys must be unique"
+            )
+        if "work_order_ref" in item:
+            _string(
+                item.get("work_order_ref"),
+                "candidate.work_order_ref",
+            )
+
+        roles = item.get("roles")
+        if not isinstance(roles, list) or not roles:
+            raise MaintenanceSupplyError(
+                "candidate roles must be a non-empty array"
+            )
+        role_names: list[str] = []
+        for role in roles:
+            if not isinstance(role, dict) or set(role) != {
+                "role",
+                "next_action_tag",
+            }:
+                raise MaintenanceSupplyError(
+                    "candidate role entry is malformed"
+                )
+            role_name = _string(
+                role.get("role"),
+                "candidate.role",
+            )
+            _string(
+                role.get("next_action_tag"),
+                "candidate.next_action_tag",
+            )
+            role_names.append(role_name)
+        if len(role_names) != len(set(role_names)):
+            raise MaintenanceSupplyError(
+                "candidate roles must be unique"
+            )
+
+        if task == task_ref:
+            matched = dict(item)
+
+    return matched
+
+
 def _replace_projection_payload(
     body: str,
     *,
@@ -543,6 +693,11 @@ def reconcile_control_projection_body(
         raise MaintenanceSupplyError(
             "candidate projection contains duplicate task envelopes"
         )
+    existing_matches = [
+        dict(item)
+        for item in candidates
+        if item.get("task") == task_ref
+    ]
     next_candidates = [
         dict(item)
         for item in candidates
@@ -554,7 +709,15 @@ def reconcile_control_projection_body(
             raise MaintenanceSupplyError(
                 "desired supply admission is missing"
             )
-        next_candidates.append(dict(admission))
+        if len(existing_matches) != 1:
+            raise MaintenanceSupplyError(
+                "supply publication cannot manufacture a missing candidate admission"
+            )
+        if existing_matches[0] != admission:
+            raise MaintenanceSupplyError(
+                "desired supply admission must match the existing exact candidate projection"
+            )
+        next_candidates.append(existing_matches[0])
     next_candidates.sort(key=lambda item: str(item.get("task") or ""))
     candidate["candidates"] = next_candidates
     edited = _replace_projection_payload(
