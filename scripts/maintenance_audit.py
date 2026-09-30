@@ -31,6 +31,7 @@ from tools.maintenance_sync_check import (  # noqa: E402
 from tools.maintenance_supply import (  # noqa: E402
     MaintenanceSupplyError,
     build_existing_owner_candidate,
+    extract_existing_admission,
     reconcile_control_projection_body,
 )
 from tools.maintenance_github import (  # noqa: E402
@@ -453,16 +454,30 @@ def _owner_supply_snapshot(
     transport: _SyncCheckGitHubTransport,
     repository: str,
     owner_ref: str,
+    admission: dict[str, object],
 ) -> dict[str, object]:
     owner_repo, number = _split_issue_ref(owner_ref)
     if owner_repo != repository:
         raise MaintenanceSupplyError(
             "owner repository does not match publication repository"
         )
+    if admission.get("task") != owner_ref:
+        raise MaintenanceSupplyError(
+            "existing candidate admission does not match owner"
+        )
+    roles = admission.get("roles")
+    if roles != [
+        {
+            "role": "implementer",
+            "next_action_tag": "IMPLEMENT",
+        }
+    ]:
+        raise MaintenanceSupplyError(
+            "maintenance supply requires an existing implementer/IMPLEMENT admission"
+        )
+
     issue = transport.get_issue(owner_repo, number)
     body = str(issue.get("body") or "")
-    sections = _sections(body)
-    work_status = (_scalar_section(sections, "Work Status") or "").upper()
     association = str(
         issue.get("author_association") or ""
     ).upper()
@@ -471,35 +486,30 @@ def _owner_supply_snapshot(
         "MEMBER",
         "COLLABORATOR",
     }
-    user_gate = (
-        "[USER_DECISION]" in body
-        or "[HUMAN_GATE]" in body
-    )
     return {
         "task_ref": owner_ref,
         "repository": repository,
         "body_sha256": canonical_body_sha256(body),
         "state": str(issue.get("state") or "UNKNOWN").upper(),
-        "work_status": work_status,
-        "scope_ready": work_status == "READY_FOR_IMPLEMENTATION",
-        "blocked": work_status == "BLOCKED",
-        "requires_user_confirmation": user_gate,
-        "conflict_keys": (),
+        "work_status": admission.get("task_work_status"),
+        "scope_ready": admission.get("scope_ready"),
+        "blocked": admission.get("blocked"),
+        "requires_user_confirmation": admission.get(
+            "requires_user_confirmation"
+        ),
+        "conflict_keys": tuple(
+            admission.get("conflict_keys") or ()
+        ),
+        "work_order_ref": admission.get("work_order_ref"),
         "trusted": trusted,
         "is_pull_request": "pull_request" in issue,
-        "entry_ref": str(
-            issue.get("html_url")
-            or (
-                "https://github.com/"
-                + repository
-                + "/issues/"
-                + str(number)
-            )
+        "entry_ref": admission.get("entry_ref"),
+        "human_gate": admission.get(
+            "requires_user_confirmation"
         ),
-        "human_gate": user_gate,
-        "reviewer_gate": work_status == "AWAITING_REVIEW",
-        "external_wait": work_status == "WAIT",
-        "security_gate": "[SECURITY_GATE]" in body,
+        "reviewer_gate": False,
+        "external_wait": admission.get("blocked"),
+        "security_gate": False,
         "required_capabilities": (),
         "required_environment": (),
     }
@@ -510,10 +520,10 @@ def _control_supply_snapshot(
     repository: str,
     control_ref: str,
     *,
+    owner_ref: str,
     observed_at: str,
     attempt_id: str,
-    owner_body_sha256: str,
-) -> tuple[dict[str, object], str]:
+) -> tuple[dict[str, object], str, dict[str, object] | None]:
     control_repo, number = _split_issue_ref(control_ref)
     issue = transport.get_issue(control_repo, number)
     body = str(issue.get("body") or "")
@@ -527,34 +537,41 @@ def _control_supply_snapshot(
         issue.get("author_association") or ""
     ).upper()
     next_action = sections.get("Next Action", "")
+    admission = extract_existing_admission(
+        body,
+        repository=repository,
+        control_ref=control_ref,
+        task_ref=owner_ref,
+    )
     observed = dt.datetime.fromisoformat(
         observed_at.replace("Z", "+00:00")
     )
     fresh_until = (
         observed + dt.timedelta(hours=1)
     ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return (
-        {
-            "repository": repository,
-            "control_ref": control_ref,
-            "repository_state": (
-                _scalar_section(sections, "Repository State")
-                or ""
-            ),
-            "trusted": association
-            in {"OWNER", "MEMBER", "COLLABORATOR"},
-            "human_gate": (
-                "[USER_DECISION]" in next_action
-                or "[HUMAN_GATE]" in next_action
-            ),
-            "external_wait": "[WAIT]" in next_action,
-            "observed_at": observed_at,
-            "fresh_until": fresh_until,
-            "publisher_execution_attempt_id": attempt_id,
-            "expected_owner_body_sha256": owner_body_sha256,
-        },
-        body,
-    )
+    snapshot: dict[str, object] = {
+        "repository": repository,
+        "control_ref": control_ref,
+        "repository_state": (
+            _scalar_section(sections, "Repository State")
+            or ""
+        ),
+        "trusted": association
+        in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "human_gate": (
+            "[USER_DECISION]" in next_action
+            or "[HUMAN_GATE]" in next_action
+        ),
+        "external_wait": False,
+        "observed_at": observed_at,
+        "fresh_until": fresh_until,
+        "publisher_execution_attempt_id": attempt_id,
+    }
+    if admission is not None:
+        snapshot["expected_owner_body_sha256"] = admission[
+            "task_body_sha256"
+        ]
+    return snapshot, body, admission
 
 
 def _publish_supply(args: argparse.Namespace) -> int:
@@ -562,45 +579,49 @@ def _publish_supply(args: argparse.Namespace) -> int:
     transport = _SyncCheckGitHubTransport(token)
     observed_at = args.observed_at or _utc_now()
     control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
-    owner_snapshot = _owner_supply_snapshot(
-        transport,
-        args.repository,
-        args.owner,
-    )
-    control_snapshot, control_body = _control_supply_snapshot(
+
+    control_snapshot, control_body, admission = _control_supply_snapshot(
         transport,
         args.repository,
         control_ref,
+        owner_ref=args.owner,
         observed_at=observed_at,
         attempt_id=args.attempt_id,
-        owner_body_sha256=str(
-            owner_snapshot["body_sha256"]
-        ),
     )
-    decision = {
-        "action": "PUBLISH_EXISTING_OWNER",
-        "report_id": (
-            "sha256:"
-            + hashlib.sha256(
-                (
-                    args.repository
-                    + "\0"
-                    + args.owner
-                    + "\0"
-                    + args.work_class
-                ).encode("utf-8")
-            ).hexdigest()
-        ),
-        "disposition": "AUTO_ADVANCE",
-        "work_class": args.work_class,
-        "owner_ref": args.owner,
-        "reason_codes": ("EXISTING_OWNER_SUPPLY",),
-    }
-    desired = build_existing_owner_candidate(
-        decision,
-        owner_snapshot,
-        control_snapshot,
-    )
+
+    desired = None
+    if admission is not None:
+        owner_snapshot = _owner_supply_snapshot(
+            transport,
+            args.repository,
+            args.owner,
+            admission,
+        )
+        decision = {
+            "action": "PUBLISH_EXISTING_OWNER",
+            "report_id": (
+                "sha256:"
+                + hashlib.sha256(
+                    (
+                        args.repository
+                        + "\0"
+                        + args.owner
+                        + "\0"
+                        + args.work_class
+                    ).encode("utf-8")
+                ).hexdigest()
+            ),
+            "disposition": "AUTO_ADVANCE",
+            "work_class": args.work_class,
+            "owner_ref": args.owner,
+            "reason_codes": ("EXISTING_OWNER_SUPPLY",),
+        }
+        desired = build_existing_owner_candidate(
+            decision,
+            owner_snapshot,
+            control_snapshot,
+        )
+
     edited, changed = reconcile_control_projection_body(
         control_body,
         desired,
@@ -651,9 +672,9 @@ def _publish_supply(args: argparse.Namespace) -> int:
         f"- work_class: `{args.work_class}`\n"
         f"- action: **{action}**\n"
         f"- publisher attempt: `{args.attempt_id}`\n"
-        "- authority: exact existing owner + Repository Control projection; "
-        "publication is not a runtime claim and cannot be consumed by the "
-        "same execution attempt."
+        "- authority: exact existing machine-readable candidate admission + "
+        "owning Issue freshness; publication is not a runtime claim and cannot "
+        "be consumed by the same execution attempt."
     )
     if not transport.post_supply_transition(transition):
         raise MaintenanceSupplyError(
