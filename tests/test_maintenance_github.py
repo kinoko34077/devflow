@@ -302,5 +302,50 @@ class MaintenanceGitHubTests(unittest.TestCase):
         )
 
 
+    def test_collector_source_failure_classifies_as_needs_evidence(self):
+        from tools import maintenance_audit as ma
+
+        class Broken:
+            def get_json(self, path):
+                raise mg.GitHubReadError("unavailable")
+
+        observation = mg.collect_repository(
+            Broken(),
+            "o/r",
+            "kinoko34077/devflow#1",
+            "2026-10-01T00:00:00Z",
+        )
+        report = ma.classify_repository(observation)
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertIn(
+            "SOURCE_UNAVAILABLE_OR_AMBIGUOUS",
+            report["finding_classes"],
+        )
+
+    def test_duplicate_control_failure_classifies_as_needs_evidence(self):
+        from tools import maintenance_audit as ma
+
+        class NoReads:
+            def get_json(self, path):
+                raise AssertionError("must not read owner")
+
+        observations = mg.collect_portfolio(
+            NoReads(),
+            [
+                {
+                    "repository": "o/r",
+                    "control_ref": "kinoko34077/devflow#1",
+                },
+                {
+                    "repository": "o/r",
+                    "control_ref": "kinoko34077/devflow#2",
+                },
+            ],
+            "2026-10-01T00:00:00Z",
+        )
+        reports = ma.classify_portfolio(observations)
+        self.assertEqual(reports[0]["disposition"], "NEEDS_EVIDENCE")
+
+
 if __name__ == "__main__":
     unittest.main()
