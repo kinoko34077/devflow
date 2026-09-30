@@ -531,6 +531,11 @@ def collect_repository(
         str(control.get("author_association") or "").upper()
         in TRUSTED_ASSOCIATIONS
     )
+    next_action = sections.get("Next Action", "")
+    control_human_gate = (
+        "[USER_DECISION]" in next_action
+        or "[HUMAN_GATE]" in next_action
+    )
     try:
         owner_ref, candidate_present = _active_owner_ref(
             body,
@@ -586,7 +591,7 @@ def collect_repository(
             "source_status": source_status,
             "producer_active": False,
             "reviewer_gate": False,
-            "human_gate": False,
+            "human_gate": control_human_gate,
             "external_wait": False,
             "semantic_projection_suspected": False,
             "search_state": None,
@@ -635,12 +640,6 @@ def collect_repository(
     }
     producer_active = work_status == "IMPLEMENTING"
     reviewer_gate = work_status == "AWAITING_REVIEW"
-
-    next_action = sections.get("Next Action", "")
-    control_human_gate = (
-        "[USER_DECISION]" in next_action
-        or "[HUMAN_GATE]" in next_action
-    )
 
     return {
         "repository": repository,
