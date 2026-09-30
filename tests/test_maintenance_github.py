@@ -652,5 +652,115 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
         )
 
 
+    def test_transport_get_issue_rejects_mismatched_exact_identity(self):
+        bad = {
+            "number": 2,
+            "state": "open",
+            "html_url": "https://github.com/o/r/issues/2",
+            "body": "x",
+        }
+
+        def opener(request, timeout=0):
+            return FakeResponse(bad)
+
+        transport = mg.GitHubReadTransport(
+            "token",
+            opener=opener,
+        )
+        with self.assertRaises(mg.GitHubReadError):
+            transport.get_issue("o/r", 1)
+
+    def test_untrusted_owner_fails_closed(self):
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "author_association": "OWNER",
+                        "body": (
+                            "## Repository\n\n"
+                            "\`kinoko34077/example\`\n\n"
+                            "## Active Work\n\n"
+                            "\`kinoko34077/example#7\`\n"
+                        ),
+                    }
+                if path.endswith("/issues/7"):
+                    return {
+                        "number": 7,
+                        "state": "closed",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "example/issues/7"
+                        ),
+                        "author_association": "NONE",
+                        "body": "## Work Status\n\n\`DONE\`\n",
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertEqual(
+            observation["source_status"],
+            "UNAVAILABLE",
+        )
+
+    def test_control_human_gate_yields_needs_human(self):
+        from tools import maintenance_audit as ma
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "author_association": "OWNER",
+                        "body": (
+                            "## Repository\n\n"
+                            "\`kinoko34077/example\`\n\n"
+                            "## Active Work\n\n"
+                            "\`kinoko34077/example#7\`\n\n"
+                            "## Next Action\n\n"
+                            "\`[HUMAN_GATE] confirm permission\`\n"
+                        ),
+                    }
+                if path.endswith("/issues/7"):
+                    return {
+                        "number": 7,
+                        "state": "closed",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "example/issues/7"
+                        ),
+                        "author_association": "OWNER",
+                        "body": "## Work Status\n\n\`DONE\`\n",
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertTrue(observation["human_gate"])
+        report = ma.classify_repository(observation)
+        self.assertEqual(report["disposition"], "NEEDS_HUMAN")
+
+
 if __name__ == "__main__":
     unittest.main()
