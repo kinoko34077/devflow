@@ -673,7 +673,19 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                 self.token = token
                 self.comments = []
                 self.writes = []
-                self.body = existing_candidate_control_body()
+                owner_body = "durable scope"
+                digest = cli.canonical_body_sha256(owner_body)
+                candidate_body = existing_candidate_control_body().replace(
+                    BODY_SHA,
+                    digest,
+                )
+                self.body = (
+                    "## Repository\n\n`o/r`\n\n"
+                    "## Repository State\n\n`ACTIVE`\n\n"
+                    "## Next Action\n\n`[IMPLEMENT]`\n\n"
+                    + candidate_body
+                )
+                self.owner_body = owner_body
                 type(self).instances.append(self)
 
             def get_issue(self, repository, number):
@@ -693,7 +705,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "number": 7,
                         "state": "open",
                         "title": "owner",
-                        "body": "durable scope",
+                        "body": self.owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
                     }
