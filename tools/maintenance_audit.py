@@ -138,7 +138,9 @@ def classify_repository(value: object) -> dict[str, object]:
     data = normalize_observation(value)
     disposition, reasons, findings, owner_class, transition, trigger = _classification(data)
     control = data["control"]
+    owner = data["owner"]
     assert isinstance(control, dict)
+    assert isinstance(owner, dict)
     report: dict[str, object] = {
         "schema_version": REPORT_SCHEMA,
         "report_id": _logical_identity(data, findings, transition),
