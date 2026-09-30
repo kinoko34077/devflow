@@ -129,6 +129,16 @@ class LightweightWorkClassTests(unittest.TestCase):
             (result["disposition"], result["reason_code"]),
         )
 
+    def test_explicit_recovery_quickfix_remains_valid(self):
+        data = self._portfolio_case()
+        recovery = data["evidence"]["frontier"]["candidates"][1]
+        recovery.update(role="recovery", action="RECOVERY_ASSESSMENT", work_class="quickfix")
+        data["evidence"]["frontier"]["candidates"] = [recovery]
+        data["request"]["accepted_work_classes"] = ["quickfix"]
+        result = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("RECOVERY_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
+
     def test_missing_candidate_work_class_uses_narrow_legacy_role_default(self):
         data = self._portfolio_case()
         for item in data["evidence"]["frontier"]["candidates"]:
@@ -174,12 +184,20 @@ class LightweightWorkClassTests(unittest.TestCase):
         self.assertIn("work_class", candidate["properties"])
         self.assertNotIn("work_class", candidate["required"])
         self.assertEqual(list(cwb.WORK_CLASSES), candidate["properties"]["work_class"]["enum"])
+        self.assertEqual("formal-review", candidate["allOf"][0]["if"]["properties"]["work_class"]["const"])
+        self.assertEqual("reviewer", candidate["allOf"][0]["then"]["properties"]["role"]["const"])
+        self.assertEqual("reviewer", candidate["allOf"][1]["if"]["properties"]["role"]["const"])
+        self.assertEqual("formal-review", candidate["allOf"][1]["then"]["properties"]["work_class"]["const"])
 
         portfolio_schema = load(SCHEMAS / "execution-portfolio-metadata.v1.schema.json")
         entry = portfolio_schema["properties"]["entries"]["items"]
         self.assertIn("work_class", entry["properties"])
         self.assertNotIn("work_class", entry["required"])
         self.assertEqual(list(cwb.WORK_CLASSES), entry["properties"]["work_class"]["enum"])
+        self.assertEqual("formal-review", entry["allOf"][2]["if"]["properties"]["work_class"]["const"])
+        self.assertEqual("reviewer", entry["allOf"][2]["then"]["properties"]["role"]["const"])
+        self.assertEqual("reviewer", entry["allOf"][3]["if"]["properties"]["role"]["const"])
+        self.assertEqual("formal-review", entry["allOf"][3]["then"]["properties"]["work_class"]["const"])
 
         result_schema = load(SCHEMAS / "chat-worker-bootstrap-result.v1.schema.json")
         reasons = result_schema["properties"]["omissions"]["items"]["properties"]["reason"]["enum"]
