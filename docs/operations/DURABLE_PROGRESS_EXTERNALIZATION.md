@@ -2,7 +2,7 @@
 
 Status: Standing operational policy
 Standing summary: `devflow#49` (this checked-in document is the canonical static contract)
-Change tracking: `devflow#236`
+Change tracking: `devflow#251`
 
 ## 1. Purpose
 
@@ -10,10 +10,11 @@ Agent work must remain recoverable when a chat, tool session, worker process, pr
 
 For GitHub-backed work, durable progress is therefore an execution precondition rather than an end-of-task reporting convenience.
 
-The rule is designed to prevent two failure modes:
+The rule is designed to prevent three failure modes:
 
 1. completed work becomes practically unusable because no explicit resume position survived;
-2. a successor reconstructs state from indirect artifacts or chat, creating speculation and unnecessary re-verification.
+2. a successor reconstructs state from indirect artifacts or chat, creating speculation and unnecessary re-verification;
+3. an accepted transition leaves directly affected Issues, Controls, Current State or routing records stale, forcing later audit workers to rediscover and repair producer-owned drift.
 
 ## 2. Priority
 
@@ -21,7 +22,7 @@ Within already-authorized work, use this order:
 
 ```text
 Safety / explicit Human gate
-> durable progress externalization
+> durable progress externalization and affected-surface reconciliation
 > throughput / shortest-path / convenience / chat concision
 ```
 
@@ -73,13 +74,45 @@ Before crossing into the next materially distinct recovery unit:
 1. finish the current bounded unit;
 2. externalize its accepted/result state to the durable progress surface;
 3. set the first unfinished next action;
-4. only then begin the next unit.
+4. reconcile the directly affected durable surfaces when the accepted transition would otherwise leave them stale, contradictory, or misleading;
+5. only then begin the next unit.
 
-Do not use "write progress at the end" or "write progress when replying in chat" as the normal schedule.
+Do not use "write progress at the end", "clean it up later", or "write progress when replying in chat" as the normal schedule.
 
-Checkpoint externalization precedes the next material unit.
+Checkpoint externalization and affected-surface reconciliation precede the next material unit.
 
-## 7. Working notes are allowed
+## 7. Affected-surface reconciliation before exit
+
+The worker that causes an accepted state transition owns the cleanup of the finite set of durable surfaces made stale, contradictory, or concretely suspect by that transition.
+
+Before entering the next materially distinct unit, or before leaving the current task as `DONE`, `RELEASED`, `HANDOFF`, `WAITING`, or equivalent, inspect the directly affected surfaces as applicable. Typical members of this affected set include:
+
+- owning Issue / Work Order `Work Status`, `Blocker`, acceptance and `Next Action`;
+- durable progress ledger / checkpoint;
+- Execution Session state;
+- branch / PR / accepted exact-head references;
+- parent, child or dependency Issues whose current routing changed;
+- active-work, candidate, supply or routing projections that still advertise retired work;
+- repository Current State when accepted repository-level state changed;
+- specification / ADR when accepted durable requirements or design changed;
+- Repository Control when the cross-repository summary changed.
+
+This is not a full-repository or all-Issue sweep. The closure set is bounded to surfaces that the current transition directly changed or gave a concrete reason to suspect are stale.
+
+When an in-scope stale status, resolved blocker, obsolete route/reference, or contradictory current-state projection can be corrected safely within existing authority, correct it as part of the bounded unit before exit.
+
+Do not take over another active worker's semantic scope, cross a Human/security/permission gate, or absorb an independent unrelated defect merely because it was discovered during reconciliation. Instead, leave a durable finding/reference on the appropriate owning surface.
+
+A bounded unit is not operationally complete until:
+
+1. its target change or disposition is accepted;
+2. required verification/review evidence is current;
+3. its durable checkpoint is current;
+4. directly affected durable projections agree with the accepted state transition.
+
+Cross-repository or periodic consistency audits are a backstop for missed drift, interaction defects and policy gaps. They are not the routine garbage collector for stale state produced by ordinary workers.
+
+## 8. Working notes are allowed
 
 The progress surface may also contain concise temporary material such as:
 
@@ -92,7 +125,7 @@ The progress surface may also contain concise temporary material such as:
 
 Temporary notes do not become specification, Current State, accepted finding, or verification evidence merely by being written there. Promote only accepted durable information to the surface that owns it.
 
-## 8. Missing or stale progress is an operational defect
+## 9. Missing or stale progress is an operational defect
 
 If qualifying work has no usable durable progress surface, or the latest checkpoint / first unfinished action is ambiguous:
 
@@ -104,7 +137,7 @@ If qualifying work has no usable durable progress surface, or the latest checkpo
 
 This is fail-to-reconcile, not fail-to-work: ordinary missing progress does not invalidate accepted artifacts, but it must be repaired before broad continuation.
 
-## 9. Resume and re-verification
+## 10. Resume and re-verification
 
 A successor starts from the latest explicit durable checkpoint and first unfinished action.
 
@@ -118,7 +151,7 @@ Re-observation or re-verification after resume should be bounded to:
 
 Do not rerun the entire historical workflow just to gain confidence after context loss.
 
-## 10. Relation to other devflow records
+## 11. Relation to other devflow records
 
 - Owning Issue / Work Order: durable task truth, scope, acceptance and blocker authority.
 - Durable progress surface: recoverable execution position and temporary working context.
@@ -126,11 +159,12 @@ Do not rerun the entire historical workflow just to gain confidence after contex
 - Task Checkpoint Cursor: compact first-unfinished navigation/drift projection when implemented; it does not replace the progress surface or evidence.
 - PR / Actions / tests / Formal Review: concrete diff and verification/review evidence.
 - Repository Current State/specification: accepted repository-level state and durable requirements/design, not temporary progress chronology.
+- Repository Control: cross-repository summary projection that must be reconciled when the accepted transition changes the summary it owns.
 
-## 11. Chat behavior
+## 12. Chat behavior
 
 Chat may remain concise and need not duplicate the full ledger.
 
-However, chat concision is never a reason to omit GitHub externalization. The durable record must exist independently of whether progress is mentioned in the user-facing reply.
+However, chat concision is never a reason to omit GitHub externalization or affected-surface reconciliation. The durable record and directly affected projections must be coherent independently of whether progress is mentioned in the user-facing reply.
 
 Standing operational detail is also summarized in `devflow#49`.
