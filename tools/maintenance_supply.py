@@ -10,6 +10,10 @@ from typing import Any, Mapping
 ADMISSION_SCHEMA_VERSION = 1
 PORTFOLIO_SCHEMA_VERSION = "execution-portfolio-metadata.v1"
 SUPPLY_SCHEMA_VERSION = "maintenance-existing-owner-supply.v1"
+CANDIDATE_BEGIN = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
+CANDIDATE_END = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
+PORTFOLIO_BEGIN = "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN -->"
+PORTFOLIO_END = "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_END -->"
 _ALLOWED_WORK_CLASSES = frozenset(
     {"audit", "triage", "sync-check", "quickfix", "implementation"}
 )
@@ -376,3 +380,245 @@ def published_by_attempt(
         value.get("publisher_execution_attempt_id")
         == execution_attempt_id
     )
+
+
+def _parse_projection_block(
+    body: str,
+    *,
+    start_marker: str,
+    end_marker: str,
+    repository: str,
+    control_ref: str,
+    schema_version: object,
+    array_key: str,
+) -> tuple[dict[str, Any], int, int]:
+    if body.count(start_marker) != 1 or body.count(end_marker) != 1:
+        raise MaintenanceSupplyError(
+            "Control projection block is missing or ambiguous"
+        )
+    start = body.index(start_marker) + len(start_marker)
+    end = body.index(end_marker)
+    if end <= start:
+        raise MaintenanceSupplyError(
+            "Control projection markers are out of order"
+        )
+    payload = body[start:end].strip()
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise MaintenanceSupplyError(
+            "Control projection contains invalid JSON"
+        ) from exc
+    if not isinstance(value, dict):
+        raise MaintenanceSupplyError(
+            "Control projection must be an object"
+        )
+    if set(value) != {
+        "schema_version",
+        "source_ref",
+        "repository",
+        array_key,
+    }:
+        raise MaintenanceSupplyError(
+            "Control projection contains unsupported outer fields"
+        )
+    if value.get("schema_version") != schema_version:
+        raise MaintenanceSupplyError(
+            "Control projection schema version mismatch"
+        )
+    if value.get("source_ref") != control_ref:
+        raise MaintenanceSupplyError(
+            "Control projection source_ref mismatch"
+        )
+    if value.get("repository") != repository:
+        raise MaintenanceSupplyError(
+            "Control projection repository mismatch"
+        )
+    if not isinstance(value.get(array_key), list):
+        raise MaintenanceSupplyError(
+            f"Control projection {array_key} must be an array"
+        )
+    return value, start, end
+
+
+def _replace_projection_payload(
+    body: str,
+    *,
+    start: int,
+    end: int,
+    value: dict[str, Any],
+) -> str:
+    payload = (
+        "\n"
+        + json.dumps(
+            value,
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
+    return body[:start] + payload + body[end:]
+
+
+def reconcile_control_projection_body(
+    body: str,
+    desired_supply: object,
+    *,
+    task_ref: str,
+) -> tuple[str, bool]:
+    if not isinstance(body, str):
+        raise MaintenanceSupplyError("Control body must be a string")
+    task_ref = _string(task_ref, "task_ref")
+
+    supply: dict[str, Any] | None
+    if desired_supply is None:
+        supply = None
+        repository = task_ref.rsplit("#", 1)[0]
+        control_ref = None
+    else:
+        supply = _mapping(desired_supply, "desired_supply")
+        repository = _string(
+            supply.get("repository"),
+            "desired_supply.repository",
+        )
+        control_ref = _string(
+            supply.get("control_ref"),
+            "desired_supply.control_ref",
+        )
+        if _supply_task(supply) != task_ref:
+            raise MaintenanceSupplyError(
+                "desired supply task does not match task_ref"
+            )
+
+    if control_ref is None:
+        # Withdrawal still validates the existing block identities and derives
+        # the exact Control reference from the admission block.
+        if body.count(CANDIDATE_BEGIN) != 1:
+            raise MaintenanceSupplyError(
+                "candidate projection block is missing or ambiguous"
+            )
+        start = body.index(CANDIDATE_BEGIN) + len(CANDIDATE_BEGIN)
+        end = body.index(CANDIDATE_END)
+        try:
+            existing_outer = json.loads(body[start:end].strip())
+        except json.JSONDecodeError as exc:
+            raise MaintenanceSupplyError(
+                "candidate projection contains invalid JSON"
+            ) from exc
+        if not isinstance(existing_outer, dict):
+            raise MaintenanceSupplyError(
+                "candidate projection must be an object"
+            )
+        control_ref = _string(
+            existing_outer.get("source_ref"),
+            "candidate projection source_ref",
+        )
+        if existing_outer.get("repository") != repository:
+            raise MaintenanceSupplyError(
+                "candidate projection repository mismatch"
+            )
+
+    candidate, cstart, cend = _parse_projection_block(
+        body,
+        start_marker=CANDIDATE_BEGIN,
+        end_marker=CANDIDATE_END,
+        repository=repository,
+        control_ref=control_ref,
+        schema_version=ADMISSION_SCHEMA_VERSION,
+        array_key="candidates",
+    )
+    candidates = candidate["candidates"]
+    if not all(isinstance(item, dict) for item in candidates):
+        raise MaintenanceSupplyError(
+            "candidate projection entries must be objects"
+        )
+    candidate_tasks = [
+        item.get("task") for item in candidates
+    ]
+    if not all(isinstance(item, str) and item for item in candidate_tasks):
+        raise MaintenanceSupplyError(
+            "candidate projection task is malformed"
+        )
+    if len(set(candidate_tasks)) != len(candidate_tasks):
+        raise MaintenanceSupplyError(
+            "candidate projection contains duplicate task envelopes"
+        )
+    next_candidates = [
+        dict(item)
+        for item in candidates
+        if item.get("task") != task_ref
+    ]
+    if supply is not None:
+        admission = supply.get("admission")
+        if not isinstance(admission, dict):
+            raise MaintenanceSupplyError(
+                "desired supply admission is missing"
+            )
+        next_candidates.append(dict(admission))
+    next_candidates.sort(key=lambda item: str(item.get("task") or ""))
+    candidate["candidates"] = next_candidates
+    edited = _replace_projection_payload(
+        body,
+        start=cstart,
+        end=cend,
+        value=candidate,
+    )
+
+    portfolio, pstart, pend = _parse_projection_block(
+        edited,
+        start_marker=PORTFOLIO_BEGIN,
+        end_marker=PORTFOLIO_END,
+        repository=repository,
+        control_ref=control_ref,
+        schema_version=PORTFOLIO_SCHEMA_VERSION,
+        array_key="entries",
+    )
+    entries = portfolio["entries"]
+    if not all(isinstance(item, dict) for item in entries):
+        raise MaintenanceSupplyError(
+            "portfolio projection entries must be objects"
+        )
+    keys = [
+        (item.get("task"), item.get("role"))
+        for item in entries
+    ]
+    if not all(
+        isinstance(task, str)
+        and task
+        and isinstance(role, str)
+        and role
+        for task, role in keys
+    ):
+        raise MaintenanceSupplyError(
+            "portfolio projection identity is malformed"
+        )
+    if len(set(keys)) != len(keys):
+        raise MaintenanceSupplyError(
+            "portfolio projection contains duplicate task/role entries"
+        )
+    next_entries = [
+        dict(item)
+        for item in entries
+        if item.get("task") != task_ref
+    ]
+    if supply is not None:
+        metadata = supply.get("portfolio")
+        if not isinstance(metadata, dict):
+            raise MaintenanceSupplyError(
+                "desired supply portfolio metadata is missing"
+            )
+        next_entries.append(dict(metadata))
+    next_entries.sort(
+        key=lambda item: (
+            str(item.get("task") or ""),
+            str(item.get("role") or ""),
+        )
+    )
+    portfolio["entries"] = next_entries
+    final = _replace_projection_payload(
+        edited,
+        start=pstart,
+        end=pend,
+        value=portfolio,
+    )
+    return final, final != body
