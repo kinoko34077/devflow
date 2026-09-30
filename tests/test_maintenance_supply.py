@@ -618,5 +618,166 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
         )
 
 
+class MaintenanceSupplyApplyPathTests(unittest.TestCase):
+    def test_write_transport_posts_compact_209_transition(self):
+        import json
+        from scripts import maintenance_audit as cli
+
+        seen = []
+
+        class Response:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({"id": 1}).encode("utf-8")
+
+        def opener(request, timeout=0):
+            seen.append(request)
+            return Response()
+
+        transport = cli._SyncCheckGitHubTransport(
+            "secret-token",
+            opener=opener,
+        )
+        self.assertTrue(
+            transport.post_supply_transition("compact transition")
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].method, "POST")
+        self.assertTrue(
+            seen[0].full_url.endswith(
+                "/repos/kinoko34077/devflow/issues/209/comments"
+            )
+        )
+        self.assertIn(
+            b"compact transition",
+            seen[0].data,
+        )
+
+    def _run_publish(self, *, apply):
+        import argparse
+        import os
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class FakeTransport:
+            instances = []
+
+            def __init__(self, token):
+                self.token = token
+                self.comments = []
+                self.writes = []
+                self.body = existing_candidate_control_body()
+                type(self).instances.append(self)
+
+            def get_issue(self, repository, number):
+                if (repository, number) == (
+                    "kinoko34077/devflow",
+                    1,
+                ):
+                    return {
+                        "number": 1,
+                        "state": "open",
+                        "title": "[REPO] r",
+                        "body": self.body,
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "number": 7,
+                        "state": "open",
+                        "title": "owner",
+                        "body": "durable scope",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError((repository, number))
+
+            def update_control_body(
+                self,
+                repository,
+                control_ref,
+                expected_body_sha256,
+                body,
+            ):
+                self.writes.append(body)
+                self.body = body
+                return True
+
+            def get_control(self, repository, control_ref):
+                return {
+                    "repository": repository,
+                    "control_ref": control_ref,
+                    "body": self.body,
+                }
+
+            def post_supply_transition(self, body):
+                self.comments.append(body)
+                return True
+
+        args = argparse.Namespace(
+            repository="o/r",
+            control=1,
+            owner="o/r#7",
+            work_class="sync-check",
+            attempt_id="attempt-p5",
+            token_env="MAINTENANCE_SUPPLY_TOKEN",
+            observed_at="2026-10-01T00:00:00Z",
+            output=None,
+            apply=apply,
+        )
+        output = []
+        with patch.dict(
+            os.environ,
+            {"MAINTENANCE_SUPPLY_TOKEN": "token"},
+            clear=False,
+        ), patch.object(
+            cli,
+            "_SyncCheckGitHubTransport",
+            FakeTransport,
+        ), patch.object(
+            cli,
+            "_write",
+            lambda value, _output: output.append(value),
+        ):
+            result = cli._publish_supply(args)
+
+        return (
+            result,
+            FakeTransport.instances[-1],
+            output[-1],
+        )
+
+    def test_publish_supply_dry_run_never_posts_transition(self):
+        result, transport, payload = self._run_publish(
+            apply=False,
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue(payload["changed"])
+        self.assertFalse(payload["applied"])
+        self.assertEqual(transport.writes, [])
+        self.assertEqual(transport.comments, [])
+
+    def test_material_apply_posts_one_transition_after_control_confirm(self):
+        result, transport, payload = self._run_publish(
+            apply=True,
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue(payload["applied"])
+        self.assertEqual(len(transport.writes), 1)
+        self.assertEqual(len(transport.comments), 1)
+        self.assertIn(
+            "Stage-2 maintenance supply transition",
+            transport.comments[0],
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
