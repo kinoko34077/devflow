@@ -29,6 +29,7 @@ _ALLOWED_KEYS = (
 _TASK_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$")
 _CHECKPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+_CANONICAL_POSITIVE_INT_RE = re.compile(r"^[1-9][0-9]*$")
 _TIMESTAMP_RE = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
 )
@@ -94,7 +95,15 @@ def _validate_state(cursor: CursorState) -> None:
     if not isinstance(cursor.evidence, tuple):
         raise CursorFormatError("evidence must be a tuple")
     for item in cursor.evidence:
-        if not isinstance(item, str) or not item or item.strip() != item or "\n" in item or "\r" in item:
+        if (
+            not isinstance(item, str)
+            or not item
+            or item.strip() != item
+            or "\n" in item
+            or "\r" in item
+            or SENTINEL in item
+            or item.startswith("```")
+        ):
             raise CursorFormatError("invalid evidence item")
     _validate_timestamp(cursor.updated_at)
 
@@ -162,6 +171,16 @@ def parse_cursor_comment(body: str) -> CursorState:
         if key in values:
             raise CursorFormatError(f"duplicate key: {key}")
 
+        if key in {"schema_version", "revision"}:
+            if not raw_value.startswith(" ") or raw_value.startswith("  "):
+                raise CursorFormatError(f"invalid canonical integer: {key}")
+            integer_token = raw_value[1:]
+            if not _CANONICAL_POSITIVE_INT_RE.fullmatch(integer_token):
+                raise CursorFormatError(f"invalid canonical integer: {key}")
+            values[key] = integer_token
+            current_list = None
+            continue
+
         raw_value = raw_value.lstrip(" ")
         if key == "evidence":
             if raw_value:
@@ -179,11 +198,8 @@ def parse_cursor_comment(body: str) -> CursorState:
     if missing:
         raise CursorFormatError("missing keys: " + ", ".join(missing))
 
-    try:
-        schema_version = int(str(values["schema_version"]))
-        revision = int(str(values["revision"]))
-    except ValueError as exc:
-        raise CursorFormatError("schema_version and revision must be integers") from exc
+    schema_version = int(str(values["schema_version"]))
+    revision = int(str(values["revision"]))
 
     evidence_value = values["evidence"]
     if not isinstance(evidence_value, list):
@@ -354,6 +370,8 @@ def advance_cursor(
     comparison = compare_cursor(live, expected_revision, expected_first_unfinished)
     if comparison.code != "OK_MATCH":
         return comparison
+    if next_first_unfinished == completed_checkpoint:
+        raise ValueError("normal advance must move the frontier or terminate")
 
     prepared = CursorState(
         schema_version=1,
