@@ -214,7 +214,9 @@ def _scalar_section(sections: dict[str, str], name: str) -> str | None:
     return text or None
 
 
-def _candidate_tasks_from_body(body: str) -> list[str]:
+def _candidate_snapshot_from_body(
+    body: str,
+) -> tuple[list[str], bool, bool]:
     begin = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
     end = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
     if body.count(begin) != 1 or body.count(end) != 1:
@@ -241,17 +243,35 @@ def _candidate_tasks_from_body(body: str) -> list[str]:
         raise SyncCheckContractError(
             "Control candidate projection schema is invalid"
         )
-    tasks = []
+    tasks: list[str] = []
+    human_gate = False
+    external_wait = False
     for item in value["candidates"]:
         if not isinstance(item, dict) or not isinstance(item.get("task"), str):
             raise SyncCheckContractError(
                 "Control candidate projection entry is invalid"
             )
+        blocked = item.get("blocked")
+        requires_confirmation = item.get("requires_user_confirmation")
+        if not isinstance(blocked, bool) or not isinstance(
+            requires_confirmation,
+            bool,
+        ):
+            raise SyncCheckContractError(
+                "candidate blocked/confirmation gates must be boolean"
+            )
         tasks.append(item["task"])
+        external_wait = external_wait or blocked
+        human_gate = human_gate or requires_confirmation
     if len(set(tasks)) != len(tasks):
         raise SyncCheckContractError(
             "Control candidate projection contains duplicate task refs"
         )
+    return tasks, human_gate, external_wait
+
+
+def _candidate_tasks_from_body(body: str) -> list[str]:
+    tasks, _human_gate, _external_wait = _candidate_snapshot_from_body(body)
     return tasks
 
 
@@ -264,16 +284,19 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         control_repo, number = _split_issue_ref(control_ref)
         issue = self.get_issue(control_repo, number)
         body = str(issue.get("body") or "")
+        candidate_tasks, human_gate, external_wait = (
+            _candidate_snapshot_from_body(body)
+        )
         return {
             "repository": repository,
             "control_ref": control_ref,
             "body": body,
             "body_sha256": canonical_body_sha256(body),
-            "candidate_tasks": _candidate_tasks_from_body(body),
+            "candidate_tasks": candidate_tasks,
             "producer_active": False,
-            "human_gate": False,
+            "human_gate": human_gate,
             "reviewer_gate": False,
-            "external_wait": False,
+            "external_wait": external_wait,
             "security_gate": False,
         }
 
@@ -308,7 +331,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             "producer_active": work_status == "IMPLEMENTING",
             "human_gate": False,
             "reviewer_gate": work_status == "AWAITING_REVIEW",
-            "external_wait": False,
+            "external_wait": work_status in {"BLOCKED", "WAIT"},
             "security_gate": False,
         }
 
