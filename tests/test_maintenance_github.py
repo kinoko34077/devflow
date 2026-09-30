@@ -347,5 +347,64 @@ class MaintenanceGitHubTests(unittest.TestCase):
         self.assertEqual(reports[0]["disposition"], "NEEDS_EVIDENCE")
 
 
+    def test_audited_none_active_work_does_not_reactivate_historical_owner(self):
+        from tools import maintenance_audit as ma
+
+        body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n"
+            "None. `o/r#9` was completed by PR #10 and main-verified.\n\n"
+            "## Next Action\n\n"
+            "`[WAIT] Resume only for a concrete new finding.`\n\n"
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            '{"schema_version":1,"source_ref":"kinoko34077/devflow#1",'
+            '"repository":"o/r","candidates":[]}\n'
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+        )
+
+        class Transport:
+            def __init__(self):
+                self.paths = []
+
+            def get_json(self, path):
+                self.paths.append(path)
+                if path.endswith("/issues/1"):
+                    return {
+                        "body": body,
+                        "author_association": "OWNER",
+                        "updated_at": "2026-10-01T00:00:00Z",
+                    }
+                raise AssertionError(
+                    "historical completed owner must not be fetched"
+                )
+
+        transport = Transport()
+        observation = mg.collect_repository(
+            transport,
+            "o/r",
+            "kinoko34077/devflow#1",
+            "2026-10-01T00:05:00Z",
+        )
+        report = ma.classify_repository(observation)
+
+        self.assertEqual(observation["source_status"], "OK")
+        self.assertIsNone(
+            observation["control"]["active_owner_ref"]
+        )
+        self.assertIsNone(observation["owner"]["ref"])
+        self.assertEqual(report["disposition"], "NO_ACTION")
+        self.assertIsNone(report["owner_ref"])
+        self.assertEqual(
+            report["reason_codes"],
+            ["AUTHORITATIVE_SOURCES_CONSISTENT"],
+        )
+        self.assertEqual(
+            transport.paths,
+            ["/repos/kinoko34077/devflow/issues/1"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
