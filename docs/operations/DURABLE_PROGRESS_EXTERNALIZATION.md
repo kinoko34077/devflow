@@ -2,7 +2,7 @@
 
 Status: Standing operational policy
 Standing summary: `devflow#49` (this checked-in document is the canonical static contract)
-Change tracking: `devflow#251`
+Change tracking: `devflow#251`, `devflow#233`
 
 ## 1. Purpose
 
@@ -48,7 +48,7 @@ Use the narrowest owning surface that survives interruption:
 - existing owning Issue / Work Order;
 - trusted comment on that Issue / Work Order;
 - dedicated bounded progress Issue/ledger when it improves recovery;
-- an accepted task checkpoint cursor as a compact projection when that mechanism is available.
+- an accepted Task Checkpoint Cursor as an **optional compact projection** when that mechanism is available; it **does not replace the durable progress surface**.
 
 Do not create one Issue per checkpoint. Prefer updating one progress surface for one bounded operation unless independent completion, handoff, or acceptance justifies decomposition.
 
@@ -89,6 +89,7 @@ Before entering the next materially distinct unit, or before leaving the current
 
 - owning Issue / Work Order `Work Status`, `Blocker`, acceptance and `Next Action`;
 - durable progress ledger / checkpoint;
+- Task Checkpoint Cursor when its projected frontier changes;
 - Execution Session state;
 - branch / PR / accepted exact-head references;
 - parent, child or dependency Issues whose current routing changed;
@@ -96,6 +97,8 @@ Before entering the next materially distinct unit, or before leaving the current
 - repository Current State when accepted repository-level state changed;
 - specification / ADR when accepted durable requirements or design changed;
 - Repository Control when the cross-repository summary changed.
+
+When a cursor frontier changes, that cursor is a **directly affected durable surface** and must be reconciled before the bounded unit exits.
 
 This is not a full-repository or all-Issue sweep. The closure set is bounded to surfaces that the current transition directly changed or gave a concrete reason to suspect are stale.
 
@@ -141,6 +144,8 @@ This is fail-to-reconcile, not fail-to-work: ordinary missing progress does not 
 
 A successor starts from the latest explicit durable checkpoint and first unfinished action.
 
+When an accepted Task Checkpoint Cursor exists, use its `first_unfinished` value as the compact resume projection before reconstructing historical checkpoint chronology. Validate that projection against the owning task, current durable progress surface, volatile evidence, active Session overlap, and current readiness/safety gates. Cursor drift means warn/re-read/reconcile; it does not authorize replay or hard rejection by itself.
+
 Already accepted earlier units are not repeated solely because previous chat/provider state disappeared.
 
 Re-observation or re-verification after resume should be bounded to:
@@ -151,12 +156,14 @@ Re-observation or re-verification after resume should be bounded to:
 
 Do not rerun the entire historical workflow just to gain confidence after context loss.
 
+Detailed cursor procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
+
 ## 11. Relation to other devflow records
 
 - Owning Issue / Work Order: durable task truth, scope, acceptance and blocker authority.
 - Durable progress surface: recoverable execution position and temporary working context.
 - Execution Session Record: worker/session provenance, bounded scope and active handoff/collision state.
-- Task Checkpoint Cursor: compact first-unfinished navigation/drift projection when implemented; it does not replace the progress surface or evidence.
+- Task Checkpoint Cursor: optional compact first-unfinished navigation/drift projection; it does not replace the durable progress surface or evidence and is not readiness/claim authority.
 - PR / Actions / tests / Formal Review: concrete diff and verification/review evidence.
 - Repository Current State/specification: accepted repository-level state and durable requirements/design, not temporary progress chronology.
 - Repository Control: cross-repository summary projection that must be reconciled when the accepted transition changes the summary it owns.
