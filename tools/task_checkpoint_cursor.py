@@ -313,6 +313,14 @@ def initialize_cursor(
     )
 
 
+def verify_initialization(written: CursorState, observed: CursorState) -> CursorResult:
+    """Classify immediate initialization readback without claiming atomicity."""
+
+    if written == observed:
+        return CursorResult(code="OK_INITIALIZED", cursor=observed, live=observed)
+    return CursorResult(code="WARN_POST_WRITE_DRIFT", live=observed)
+
+
 def advance_cursor(
     live: CursorState,
     *,
