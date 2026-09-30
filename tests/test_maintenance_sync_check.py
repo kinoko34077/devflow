@@ -401,6 +401,130 @@ class MaintenanceSyncCheckExecutorTests(unittest.TestCase):
         )
 
 
+class _P4DFakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+        self.headers = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        import json
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def _p4d_live_snapshots(
+    *,
+    control_body,
+    owner_work_status="DONE",
+    owner_state="closed",
+):
+    from scripts import maintenance_audit as cli
+
+    def opener(request, timeout=0):
+        url = request.full_url
+        if url.endswith(
+            "/repos/kinoko34077/devflow/issues/1"
+        ):
+            return _P4DFakeResponse(
+                {
+                    "number": 1,
+                    "state": "open",
+                    "body": control_body,
+                    "author_association": "OWNER",
+                }
+            )
+        if url.endswith("/repos/o/r/issues/7"):
+            return _P4DFakeResponse(
+                {
+                    "number": 7,
+                    "state": owner_state,
+                    "body": (
+                        "## Work Status\n\n"
+                        f"`{owner_work_status}`\n"
+                    ),
+                    "author_association": "OWNER",
+                }
+            )
+        raise AssertionError(f"unexpected read: {url}")
+
+    transport = cli._SyncCheckGitHubTransport(
+        "token",
+        opener=opener,
+    )
+    return (
+        transport.get_control(
+            "o/r",
+            "kinoko34077/devflow#1",
+        ),
+        transport.get_owner("o/r", "o/r#7"),
+    )
+
+
+class MaintenanceSyncCheckStructuredGateEvidenceTests(unittest.TestCase):
+    def test_candidate_user_confirmation_blocks_plan(self):
+        body = control_snapshot()["body"].replace(
+            '"requires_user_confirmation": false',
+            '"requires_user_confirmation": true',
+        )
+        control, owner = _p4d_live_snapshots(
+            control_body=body,
+        )
+        self.assertTrue(control["human_gate"])
+        self.assertIsNone(
+            ms.build_sync_check_plan(
+                report(),
+                control,
+                owner,
+            )
+        )
+
+    def test_candidate_blocked_flag_blocks_plan(self):
+        body = control_snapshot()["body"].replace(
+            '"blocked": false',
+            '"blocked": true',
+        )
+        control, owner = _p4d_live_snapshots(
+            control_body=body,
+        )
+        self.assertTrue(control["external_wait"])
+        self.assertIsNone(
+            ms.build_sync_check_plan(
+                report(),
+                control,
+                owner,
+            )
+        )
+
+    def test_terminal_owner_blocked_or_wait_status_blocks_plan(self):
+        for status in ("BLOCKED", "WAIT"):
+            with self.subTest(status=status):
+                control, owner = _p4d_live_snapshots(
+                    control_body=control_snapshot()["body"],
+                    owner_work_status=status,
+                )
+                self.assertTrue(owner["external_wait"])
+                self.assertIsNone(
+                    ms.build_sync_check_plan(
+                        report(),
+                        control,
+                        owner,
+                    )
+                )
+
+    def test_candidate_gate_fields_must_be_boolean(self):
+        body = control_snapshot()["body"].replace(
+            '"requires_user_confirmation": false',
+            '"requires_user_confirmation": "false"',
+        )
+        with self.assertRaises(ms.SyncCheckContractError):
+            _p4d_live_snapshots(control_body=body)
+
+
 class MaintenanceSyncCheckCliContractTests(unittest.TestCase):
     def test_cli_exposes_manual_sync_check_apply_only(self):
         from scripts import maintenance_audit as cli
