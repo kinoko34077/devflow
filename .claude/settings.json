@@ -1,0 +1,15 @@
+{
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "In kinoko34077/* repositories, Claude may review, mark ready, and merge (merge commit) pull requests it authored or fixed itself, including verifying main afterwards, when full repository checks pass on the exact head. The user accepts this because merges are revertible."
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__github__merge_pull_request",
+      "mcp__github__update_pull_request",
+      "mcp__github__pull_request_review_write"
+    ]
+  }
+}
