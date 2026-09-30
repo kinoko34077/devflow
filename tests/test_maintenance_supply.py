@@ -1093,5 +1093,144 @@ class MaintenanceSupplyTransitionTransportTests(unittest.TestCase):
                 ] = old_token
 
 
+class MaintenanceSupplyReportingFailureTests(unittest.TestCase):
+    def test_post_write_reporting_failure_preserves_partial_success_result(self):
+        import argparse
+        import json
+        import os
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        owner_body = "durable owner body\n"
+        owner_digest = cli.canonical_body_sha256(owner_body)
+        admission = {
+            "task": "o/r#7",
+            "task_body_sha256": owner_digest,
+            "task_work_status": "READY_FOR_IMPLEMENTATION",
+            "entry_ref": "https://github.com/o/r/issues/7",
+            "scope_ready": True,
+            "blocked": False,
+            "requires_user_confirmation": False,
+            "conflict_keys": [],
+            "roles": [
+                {
+                    "role": "implementer",
+                    "next_action_tag": "IMPLEMENT",
+                }
+            ],
+        }
+        candidate = {
+            "schema_version": 1,
+            "source_ref": "kinoko34077/devflow#1",
+            "repository": "o/r",
+            "candidates": [admission],
+        }
+        portfolio = {
+            "schema_version": "execution-portfolio-metadata.v1",
+            "source_ref": "kinoko34077/devflow#1",
+            "repository": "o/r",
+            "entries": [],
+        }
+        initial_body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Next Action\n\n`[IMPLEMENT] continue`\n\n"
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            + json.dumps(candidate)
+            + "\n<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+            "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN -->\n"
+            + json.dumps(portfolio)
+            + "\n<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_END -->\n"
+        )
+
+        class FakeTransport:
+            instances = []
+
+            def __init__(self, token):
+                self.body = initial_body
+                self.writes = 0
+                self.comments = 0
+                type(self).instances.append(self)
+
+            def get_issue(self, repository, number):
+                if (repository, number) == (
+                    "kinoko34077/devflow",
+                    1,
+                ):
+                    return {
+                        "state": "open",
+                        "title": "[REPO] r",
+                        "body": self.body,
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "state": "open",
+                        "title": "owner",
+                        "body": owner_body,
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError((repository, number))
+
+            def update_control_body(
+                self,
+                repository,
+                control_ref,
+                expected_body_sha256,
+                body,
+            ):
+                self.writes += 1
+                self.body = body
+                return True
+
+            def get_control(self, repository, control_ref):
+                return {
+                    "repository": repository,
+                    "control_ref": control_ref,
+                    "body": self.body,
+                }
+
+            def post_supply_transition(self, body):
+                self.comments += 1
+                return False
+
+        args = argparse.Namespace(
+            repository="o/r",
+            control=1,
+            owner="o/r#7",
+            work_class="sync-check",
+            attempt_id="attempt-report-fail",
+            token_env="MAINTENANCE_SUPPLY_TOKEN",
+            observed_at="2026-10-01T00:00:00Z",
+            output=None,
+            apply=True,
+        )
+        output = []
+        with patch.object(
+            cli,
+            "_SyncCheckGitHubTransport",
+            FakeTransport,
+        ), patch.dict(
+            os.environ,
+            {"MAINTENANCE_SUPPLY_TOKEN": "token"},
+            clear=False,
+        ), patch.object(
+            cli,
+            "_write",
+            lambda value, _output: output.append(value),
+        ):
+            result = cli._publish_supply(args)
+
+        transport = FakeTransport.instances[-1]
+        self.assertEqual(result, 2)
+        self.assertEqual(transport.writes, 1)
+        self.assertEqual(transport.comments, 1)
+        self.assertTrue(output[-1]["applied"])
+        self.assertFalse(output[-1]["transition_recorded"])
+        self.assertEqual(output[-1]["action"], "published")
+        self.assertIn("reporting_error", output[-1])
+
+
 if __name__ == "__main__":
     unittest.main()
