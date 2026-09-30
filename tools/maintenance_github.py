@@ -328,37 +328,68 @@ def _split_ref(value: str) -> tuple[str, int]:
     return match.group(1), int(match.group(2))
 
 
-def _candidate_tasks(body: str) -> list[str]:
-    if (
-        body.count(CANDIDATE_BEGIN) != 1
-        or body.count(CANDIDATE_END) != 1
-    ):
+def _candidate_tasks(
+    body: str,
+    repository: str | None = None,
+    control_ref: str | None = None,
+) -> list[str]:
+    begin_count = body.count(CANDIDATE_BEGIN)
+    end_count = body.count(CANDIDATE_END)
+    if begin_count == 0 and end_count == 0:
         return []
+    if begin_count != 1 or end_count != 1:
+        raise GitHubReadError(
+            "candidate projection markers are missing or duplicated"
+        )
     start = body.index(CANDIDATE_BEGIN) + len(CANDIDATE_BEGIN)
     end = body.index(CANDIDATE_END)
     if end <= start:
-        return []
+        raise GitHubReadError("candidate projection markers are out of order")
     payload = body[start:end].strip()
     if payload.startswith("```json"):
         payload = payload[len("```json"):].lstrip("\r\n")
-        if payload.endswith("```"):
-            payload = payload[:-3].rstrip()
+        if not payload.endswith("```"):
+            raise GitHubReadError(
+                "candidate projection JSON fence is not closed"
+            )
+        payload = payload[:-3].rstrip()
     try:
         value = json.loads(payload)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(value, dict) or not isinstance(
-        value.get("candidates"), list
+    except json.JSONDecodeError as exc:
+        raise GitHubReadError(
+            "candidate projection contains invalid JSON"
+        ) from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("candidates"), list)
     ):
-        return []
-    return sorted(
-        {
-            item.get("task")
-            for item in value["candidates"]
-            if isinstance(item, dict)
-            and isinstance(item.get("task"), str)
-        }
-    )
+        raise GitHubReadError("candidate projection schema is invalid")
+    if repository is not None and value.get("repository") != repository:
+        raise GitHubReadError(
+            "candidate projection repository identity mismatch"
+        )
+    if control_ref is not None and value.get("source_ref") != control_ref:
+        raise GitHubReadError(
+            "candidate projection source identity mismatch"
+        )
+
+    tasks: list[str] = []
+    for item in value["candidates"]:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("task"), str)
+            or not item["task"]
+        ):
+            raise GitHubReadError(
+                "candidate projection contains malformed task entry"
+            )
+        tasks.append(item["task"])
+    if len(set(tasks)) != len(tasks):
+        raise GitHubReadError(
+            "candidate projection contains duplicate task refs"
+        )
+    return sorted(tasks)
 
 
 def _explicit_no_active_work(control_body: str) -> bool:
@@ -382,10 +413,15 @@ def _explicit_no_active_work(control_body: str) -> bool:
 def _active_owner_ref(
     control_body: str,
     repository: str,
+    control_ref: str | None = None,
 ) -> tuple[str | None, bool]:
     candidates = [
         ref
-        for ref in _candidate_tasks(control_body)
+        for ref in _candidate_tasks(
+            control_body,
+            repository,
+            control_ref,
+        )
         if ref.rsplit("#", 1)[0] == repository
     ]
     if len(candidates) == 1:
@@ -406,6 +442,39 @@ def _active_owner_ref(
     if len(refs) == 1:
         return refs[0], refs[0] in candidates
     return None, False
+
+
+
+def _expected_issue_url(repository: str, number: int) -> str:
+    return f"https://github.com/{repository}/issues/{number}"
+
+
+def _validate_issue_identity(
+    issue: dict[str, Any],
+    repository: str,
+    number: int,
+    *,
+    expected_title: str | None = None,
+    require_open: bool = False,
+) -> None:
+    if issue.get("number") != number:
+        raise GitHubReadError("Issue number identity mismatch")
+    if "pull_request" in issue:
+        raise GitHubReadError("PR object cannot satisfy Issue authority")
+    if issue.get("html_url") != _expected_issue_url(repository, number):
+        raise GitHubReadError("Issue URL identity mismatch")
+    repository_url = issue.get("repository_url")
+    if repository_url is not None and repository_url != (
+        f"https://api.github.com/repos/{repository}"
+    ):
+        raise GitHubReadError("Issue repository identity mismatch")
+    state = str(issue.get("state") or "").lower()
+    if state not in {"open", "closed"}:
+        raise GitHubReadError("Issue state is unavailable")
+    if require_open and state != "open":
+        raise GitHubReadError("canonical Control Issue is not open")
+    if expected_title is not None and issue.get("title") != expected_title:
+        raise GitHubReadError("canonical Control title mismatch")
 
 
 def _unavailable(
@@ -439,6 +508,13 @@ def collect_repository(
             raise GitHubReadError(
                 "Control read did not return an object"
             )
+        _validate_issue_identity(
+            control,
+            control_repo,
+            control_number,
+            expected_title=f"[REPO] {repository.rsplit('/', 1)[-1]}",
+            require_open=True,
+        )
     except (GitHubReadError, ValueError) as exc:
         return _unavailable(
             repository,
@@ -454,7 +530,19 @@ def collect_repository(
         str(control.get("author_association") or "").upper()
         in TRUSTED_ASSOCIATIONS
     )
-    owner_ref, candidate_present = _active_owner_ref(body, repository)
+    try:
+        owner_ref, candidate_present = _active_owner_ref(
+            body,
+            repository,
+            control_ref,
+        )
+    except GitHubReadError as exc:
+        return _unavailable(
+            repository,
+            observed_at,
+            control_ref,
+            str(exc),
+        )
     work_status = (
         _scalar_section(sections, "Work Status") or ""
     ).upper()
@@ -513,6 +601,11 @@ def collect_repository(
             raise GitHubReadError(
                 "owner read did not return an object"
             )
+        _validate_issue_identity(
+            owner,
+            owner_repo,
+            owner_number,
+        )
     except GitHubReadError:
         owner = {
             "number": owner_number,
