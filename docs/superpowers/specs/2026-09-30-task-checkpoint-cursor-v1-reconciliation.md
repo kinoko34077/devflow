@@ -1,16 +1,18 @@
 # Task Checkpoint Cursor v1 — Current-Main Reconciliation
 
-Status: Approved design reconciliation for implementation  
+Status: Accepted implementation reconciliation (initial v1); follow-up P3 hardening accepted  
 Date: 2026-09-30  
 Owning Work Order: `devflow#233`  
 Original reviewed design: `docs/superpowers/specs/2026-09-29-task-checkpoint-cursor-design.md` / PR #234  
-Current accepted devflow base: `e51ce12405b867215e4d2c1eb8b5eb9fcace2a39`
+Implementation base at reconciliation: `e51ce12405b867215e4d2c1eb8b5eb9fcace2a39`
 
 ## 1. Approval and purpose
 
 KiNoTch. explicitly directed continuation of the Task Checkpoint Cursor work on 2026-09-30. The written-spec approval boundary recorded by `devflow#233` is therefore satisfied.
 
 The reviewed PR #234 design remains the feature contract. This addendum reconciles that design with the durable-progress and affected-surface policies accepted on devflow main after PR #234 was written.
+
+The initial v1 implementation was accepted through PR #257. The later bounded canonical-validation hardening from `devflow#260` / PR #261 did not alter the authority model; its accepted behavior is reflected by the canonical design and operator documentation.
 
 ## 2. Relationship to durable progress
 
@@ -85,7 +87,9 @@ Pilot state is progress evidence, not permanent specification authority.
 
 ## 7. Review boundary
 
-Because this work changes devflow operational authority/source-of-truth semantics and adds executable helper behavior, final acceptance requires:
+### Initial v1 acceptance
+
+Initial v1 acceptance required a qualifying different-system/model review because the initial feature changed devflow operational authority/source-of-truth semantics and added executable helper behavior. The initial acceptance gates were:
 
 - Required PR gate GREEN on the exact implementation head;
 - current-head Formal Review;
@@ -93,4 +97,8 @@ Because this work changes devflow operational authority/source-of-truth semantic
 - review-readiness GREEN;
 - directly affected durable surfaces reconciled before acceptance/exit.
 
-No merge, release, deployment, publication, credential/session/permission change, destructive action, shared-history rewrite or RDC use is authorized by this work.
+### Later bounded maintenance
+
+Later bounded maintenance, including P3 canonical-validation hardening, is classified under its own PR review policy; it does not inherit a permanent different-reviewer requirement when authority semantics are unchanged.
+
+The initial v1 design approval did not authorize release, deployment, publication, credential/session/permission change, destructive action, shared-history rewrite or RDC use; subsequent bounded maintenance remains subject to the same external safety gates.
