@@ -779,5 +779,127 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
 
 
 
+class MaintenanceSupplyApplyPathTests(unittest.TestCase):
+    def test_supply_transport_posts_compact_transition_to_209(self):
+        import json
+        from scripts import maintenance_audit as cli
+
+        calls = []
+
+        class Response:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"id": 1}'
+
+        def opener(request, timeout=0):
+            calls.append(request)
+            return Response()
+
+        transport = cli._SyncCheckGitHubTransport(
+            "secret-token",
+            opener=opener,
+        )
+        self.assertTrue(
+            transport.post_supply_transition("compact transition")
+        )
+        self.assertEqual(len(calls), 1)
+        request = calls[0]
+        self.assertEqual(request.method, "POST")
+        self.assertTrue(
+            request.full_url.endswith(
+                "/repos/kinoko34077/devflow/issues/209/comments"
+            )
+        )
+        self.assertEqual(
+            json.loads(request.data.decode("utf-8")),
+            {"body": "compact transition"},
+        )
+
+    def test_publish_supply_dry_run_never_posts_transition(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class FakeTransport:
+            instances = []
+
+            def __init__(self, token):
+                self.token = token
+                self.posts = 0
+                self.__class__.instances.append(self)
+
+            def get_issue(self, repository, number):
+                if (repository, number) == (
+                    "kinoko34077/devflow",
+                    1,
+                ):
+                    return {
+                        "state": "open",
+                        "title": "[REPO] r",
+                        "body": existing_candidate_control_body(),
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/1"
+                        ),
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "state": "open",
+                        "title": "owner",
+                        "body": "owner body",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError((repository, number))
+
+            def post_supply_transition(self, body):
+                self.posts += 1
+                raise AssertionError("dry-run must not post")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = directory + "/result.json"
+            args = cli._parser().parse_args(
+                [
+                    "publish-supply",
+                    "--repository",
+                    "o/r",
+                    "--control",
+                    "1",
+                    "--owner",
+                    "o/r#7",
+                    "--work-class",
+                    "sync-check",
+                    "--attempt-id",
+                    "attempt-p5",
+                    "--observed-at",
+                    "2026-10-01T00:00:00Z",
+                    "--output",
+                    output,
+                ]
+            )
+            with patch.object(
+                cli,
+                "_SyncCheckGitHubTransport",
+                FakeTransport,
+            ), patch.dict(
+                os.environ,
+                {"MAINTENANCE_SUPPLY_TOKEN": "secret-token"},
+            ):
+                self.assertEqual(cli._publish_supply(args), 0)
+            self.assertEqual(
+                FakeTransport.instances[-1].posts,
+                0,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
