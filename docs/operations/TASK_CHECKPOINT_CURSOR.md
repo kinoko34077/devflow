@@ -83,6 +83,8 @@ When there is `NO_MARKER` and the owning durable state exposes one unambiguous f
 
 Initialization must not infer a checkpoint from chat history or checkpoint-name ordering. If a trusted marker already exists, use normal read/compare semantics. If multiple trusted markers exist, return `WARN_DUPLICATE_MARKER` and reconcile instead of initializing another marker.
 
+The pure helper prepares the initial `CursorState`; the caller writes the canonical comment and immediately re-reads it when transport permits. If the readback exactly equals the intended initial state, classify `OK_INITIALIZED`. Any different canonical state is `WARN_POST_WRITE_DRIFT` and must be reconciled rather than reported as clean initialization.
+
 ## 7. Compare and advance
 
 Before movement, re-read the live cursor and the evidence establishing completion of its current `first_unfinished` checkpoint.
@@ -109,7 +111,7 @@ The pure helper prepares/classifies state; it performs no GitHub network write.
 
 ## 8. Post-write verification
 
-If the immediate readback exactly matches the written canonical state, classify `OK_ADVANCED`.
+If an advance readback exactly matches the written canonical state, classify `OK_ADVANCED`. If an initialization readback exactly matches the intended initial state, classify `OK_INITIALIZED`.
 
 If any canonical field differs, classify `WARN_POST_WRITE_DRIFT`. A write occurred, but the movement must not be reported as clean acceptance. Re-read the owning task/evidence and reconcile.
 
@@ -129,9 +131,10 @@ The v1 helper uses these operational outcomes:
 
 - `OK_CURSOR` — one trusted valid cursor was found;
 - `NO_MARKER` — no trusted cursor exists;
+- `OK_INITIALIZED` — initial-create readback equals the intended initial cursor;
 - `OK_MATCH` — expected and live position match;
 - `OK_PREPARED` — a forward replacement state was prepared after a clean comparison;
-- `OK_ADVANCED` — post-write readback equals the intended state;
+- `OK_ADVANCED` — advance readback equals the intended state;
 - `WARN_CHECKPOINT_DRIFT` — live checkpoint differs from expected;
 - `WARN_REVISION_DRIFT` — revision differs while checkpoint is unchanged;
 - `WARN_POST_WRITE_DRIFT` — post-write live state differs from the intended write;
