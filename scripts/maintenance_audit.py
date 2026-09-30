@@ -28,6 +28,11 @@ from tools.maintenance_sync_check import (  # noqa: E402
     canonical_body_sha256,
     execute_sync_check,
 )
+from tools.maintenance_supply import (  # noqa: E402
+    MaintenanceSupplyError,
+    build_existing_owner_candidate,
+    reconcile_control_projection_body,
+)
 from tools.maintenance_github import (  # noqa: E402
     DEVFLOW_REPOSITORY,
     GitHubReadError,
@@ -361,6 +366,46 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         return True
 
 
+    def post_supply_transition(self, body: str) -> bool:
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(
+                f"/repos/{DEVFLOW_REPOSITORY}/issues/209/comments"
+            ),
+            data=payload,
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-supply",
+            },
+        )
+        try:
+            with self._opener(
+                request,
+                timeout=self._timeout,
+            ) as response:
+                raw = response.read()
+                if raw:
+                    value = json.loads(raw.decode("utf-8"))
+                    return isinstance(value, dict)
+                return True
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub supply transition comment failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError as exc:
+            detail = str(exc.reason).replace(
+                self._token,
+                "[REDACTED]",
+            )
+            raise GitHubReadError(
+                f"GitHub supply transition comment failed: {detail}"
+            ) from None
+
+
 def _sync_check(args: argparse.Namespace) -> int:
     token = _token_from_env(args.token_env)
     transport = _SyncCheckGitHubTransport(token)
@@ -417,6 +462,222 @@ def _sync_check(args: argparse.Namespace) -> int:
         payload["result"] = asdict(
             execute_sync_check(plan, transport)
         )
+    _write(payload, args.output)
+    return 0
+
+
+def _owner_supply_snapshot(
+    transport: _SyncCheckGitHubTransport,
+    repository: str,
+    owner_ref: str,
+) -> dict[str, object]:
+    owner_repo, number = _split_issue_ref(owner_ref)
+    if owner_repo != repository:
+        raise MaintenanceSupplyError(
+            "owner repository does not match publication repository"
+        )
+    issue = transport.get_issue(owner_repo, number)
+    body = str(issue.get("body") or "")
+    sections = _sections(body)
+    work_status = (_scalar_section(sections, "Work Status") or "").upper()
+    association = str(
+        issue.get("author_association") or ""
+    ).upper()
+    trusted = association in {
+        "OWNER",
+        "MEMBER",
+        "COLLABORATOR",
+    }
+    user_gate = (
+        "[USER_DECISION]" in body
+        or "[HUMAN_GATE]" in body
+    )
+    return {
+        "task_ref": owner_ref,
+        "repository": repository,
+        "body_sha256": canonical_body_sha256(body),
+        "state": str(issue.get("state") or "UNKNOWN").upper(),
+        "work_status": work_status,
+        "scope_ready": work_status == "READY_FOR_IMPLEMENTATION",
+        "blocked": work_status == "BLOCKED",
+        "requires_user_confirmation": user_gate,
+        "conflict_keys": (),
+        "trusted": trusted,
+        "is_pull_request": "pull_request" in issue,
+        "entry_ref": str(
+            issue.get("html_url")
+            or (
+                "https://github.com/"
+                + repository
+                + "/issues/"
+                + str(number)
+            )
+        ),
+        "human_gate": user_gate,
+        "reviewer_gate": work_status == "AWAITING_REVIEW",
+        "external_wait": work_status == "WAIT",
+        "security_gate": "[SECURITY_GATE]" in body,
+        "required_capabilities": (),
+        "required_environment": (),
+    }
+
+
+def _control_supply_snapshot(
+    transport: _SyncCheckGitHubTransport,
+    repository: str,
+    control_ref: str,
+    *,
+    observed_at: str,
+    attempt_id: str,
+    owner_body_sha256: str,
+) -> tuple[dict[str, object], str]:
+    control_repo, number = _split_issue_ref(control_ref)
+    issue = transport.get_issue(control_repo, number)
+    body = str(issue.get("body") or "")
+    sections = _sections(body)
+    managed = _scalar_section(sections, "Repository")
+    if managed != repository:
+        raise MaintenanceSupplyError(
+            "Control repository identity mismatch"
+        )
+    association = str(
+        issue.get("author_association") or ""
+    ).upper()
+    next_action = sections.get("Next Action", "")
+    observed = dt.datetime.fromisoformat(
+        observed_at.replace("Z", "+00:00")
+    )
+    fresh_until = (
+        observed + dt.timedelta(hours=1)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        {
+            "repository": repository,
+            "control_ref": control_ref,
+            "repository_state": (
+                _scalar_section(sections, "Repository State")
+                or ""
+            ),
+            "trusted": association
+            in {"OWNER", "MEMBER", "COLLABORATOR"},
+            "human_gate": (
+                "[USER_DECISION]" in next_action
+                or "[HUMAN_GATE]" in next_action
+            ),
+            "external_wait": "[WAIT]" in next_action,
+            "observed_at": observed_at,
+            "fresh_until": fresh_until,
+            "publisher_execution_attempt_id": attempt_id,
+            "expected_owner_body_sha256": owner_body_sha256,
+        },
+        body,
+    )
+
+
+def _publish_supply(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+    owner_snapshot = _owner_supply_snapshot(
+        transport,
+        args.repository,
+        args.owner,
+    )
+    control_snapshot, control_body = _control_supply_snapshot(
+        transport,
+        args.repository,
+        control_ref,
+        observed_at=observed_at,
+        attempt_id=args.attempt_id,
+        owner_body_sha256=str(
+            owner_snapshot["body_sha256"]
+        ),
+    )
+    decision = {
+        "action": "PUBLISH_EXISTING_OWNER",
+        "report_id": (
+            "sha256:"
+            + hashlib.sha256(
+                (
+                    args.repository
+                    + "\0"
+                    + args.owner
+                    + "\0"
+                    + args.work_class
+                ).encode("utf-8")
+            ).hexdigest()
+        ),
+        "disposition": "AUTO_ADVANCE",
+        "work_class": args.work_class,
+        "owner_ref": args.owner,
+        "reason_codes": ("EXISTING_OWNER_SUPPLY",),
+    }
+    desired = build_existing_owner_candidate(
+        decision,
+        owner_snapshot,
+        control_snapshot,
+    )
+    edited, changed = reconcile_control_projection_body(
+        control_body,
+        desired,
+        task_ref=args.owner,
+    )
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-supply-publication.v1",
+        "repository": args.repository,
+        "control_ref": control_ref,
+        "owner_ref": args.owner,
+        "work_class": args.work_class,
+        "changed": changed,
+        "desired_publication_id": (
+            desired.get("publication_id")
+            if isinstance(desired, dict)
+            else None
+        ),
+        "applied": False,
+    }
+    if not changed or not args.apply:
+        _write(payload, args.output)
+        return 0
+
+    expected = canonical_body_sha256(control_body)
+    if not transport.update_control_body(
+        args.repository,
+        control_ref,
+        expected,
+        edited,
+    ):
+        raise MaintenanceSupplyError(
+            "Control changed before bounded supply publication"
+        )
+    observed = transport.get_control(
+        args.repository,
+        control_ref,
+    )
+    if observed.get("body") != edited:
+        raise MaintenanceSupplyError(
+            "post-write Control body differs from intended supply projection"
+        )
+
+    action = "published" if desired is not None else "withdrawn"
+    transition = (
+        "## Stage-2 maintenance supply transition\n\n"
+        f"- repository: `{args.repository}`\n"
+        f"- owner: `{args.owner}`\n"
+        f"- work_class: `{args.work_class}`\n"
+        f"- action: **{action}**\n"
+        f"- publisher attempt: `{args.attempt_id}`\n"
+        "- authority: exact existing owner + Repository Control projection; "
+        "publication is not a runtime claim and cannot be consumed by the "
+        "same execution attempt."
+    )
+    if not transport.post_supply_transition(transition):
+        raise MaintenanceSupplyError(
+            "supply changed but #209 transition comment was not confirmed"
+        )
+    payload["applied"] = True
+    payload["action"] = action
     _write(payload, args.output)
     return 0
 
@@ -520,6 +781,39 @@ def _parser() -> argparse.ArgumentParser:
     )
     sync_check.set_defaults(func=_sync_check)
 
+    publish = sub.add_parser("publish-supply")
+    publish.add_argument("--repository", required=True)
+    publish.add_argument(
+        "--control",
+        required=True,
+        type=int,
+    )
+    publish.add_argument("--owner", required=True)
+    publish.add_argument(
+        "--work-class",
+        required=True,
+        choices=(
+            "audit",
+            "triage",
+            "sync-check",
+            "quickfix",
+            "implementation",
+        ),
+    )
+    publish.add_argument("--attempt-id", required=True)
+    publish.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    publish.add_argument("--observed-at")
+    publish.add_argument("--output")
+    publish.add_argument(
+        "--apply",
+        action="store_true",
+        help="apply bounded existing-owner supply publication/withdrawal",
+    )
+    publish.set_defaults(func=_publish_supply)
+
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--input", required=True)
     summarize.set_defaults(func=_summarize)
@@ -536,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
         GitHubReadError,
         AuditContractError,
         SyncCheckContractError,
+        MaintenanceSupplyError,
         OSError,
         json.JSONDecodeError,
         ValueError,
