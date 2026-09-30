@@ -31,6 +31,7 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 | Cross-repository coordinated work | devflow Work Order |
 | Repository-specific requirements/specs/current technical detail | owning repository |
 | Repository-specific implementation task/finding | owning repository Issue / Work Order |
+| Durable recovery position | owning Issue / Work Order or its durable progress surface; optional Task Checkpoint Cursor is only a projection |
 | Short-lived manual execution-session checkpoint | worker-owned record on the owning Issue / Work Order |
 | Code diff and verification evidence | owning repository PR / Actions / tests |
 | Display/overview | GitHub Project; never canonical |
@@ -70,6 +71,8 @@ Before non-trivial mutation, inspect active Execution Session Records for overla
 
 Durable progress externalization is a mandatory execution precondition, not end-of-task reporting. When a GitHub repository exists and work involves mutation, implementation, review, verification, audit, investigation, more than one recovery-relevant step, or likely continuation by another worker, create or reuse one durable GitHub progress surface before substantive continuation, and update it before entering each next materially distinct unit. Priority: safety / explicit Human gate > durable progress externalization and affected-surface reconciliation > throughput / shortest-path / convenience / chat concision; this never authorizes crossing an existing Human-gated boundary. A single-step read-only lookup with no continuation value is exempt. Canonical contract: `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md`.
 
+When an owning task has an accepted **Task Checkpoint Cursor**, read its `first_unfinished` projection **before reconstructing historical checkpoint chronology**. Then re-read only the owning durable state, active Session overlap, current head/checks/Review, blockers, and **readiness and safety gates** needed to validate that frontier. Cursor drift is a warning to re-read/reconcile; the cursor is not task, readiness, claim, lease or fencing authority. Detailed procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
+
 Before moving into the next materially distinct unit or leaving the task as DONE / RELEASED / HANDOFF / WAITING, the worker that caused the accepted transition must reconcile the finite set of durable surfaces that transition directly made stale or concretely suspect. This is bounded cleanup, not a global Issue sweep: repair safe in-scope stale status/blocker/routing/Current State/Control projections, but do not take over another active worker, cross a Human/security/permission gate, or absorb an unrelated defect. Leave a durable finding/reference for the proper owner instead. Cross-repository audits are a backstop for missed drift, not the routine garbage collector for producer-owned stale state.
 
 For long-running, multi-turn, or interruption-prone chat work, GitHub is the recovery ledger. Before crossing materially distinct recovery, verification, fix, or handoff units, externalize the completed state. When one owning task contains independently recoverable units and splitting improves deterministic resume, use bounded repository-local Issues; do not fragment trivial work. A successor starts from the first unfinished checkpoint and does not repeat already accepted setup or verification solely because chat history is missing, stale, edited, or resubmitted. Whether ChatGPT appends a new message or edits/resubmits an earlier message does not change this durability rule. Standing detail: `devflow#49`.
@@ -82,6 +85,7 @@ Control Issue / local canon read
 → create or reuse repository-local Issue when durable task tracking is warranted
 → inspect overlapping Execution Session Records
 → establish/resume one worker-owned Execution Session + bounded checklist
+→ read accepted Task Checkpoint Cursor when present
 → dedicated branch
 → implementation with checkpoint updates between bounded milestones
 → tests + regression + real-entry verification as applicable
@@ -89,7 +93,7 @@ Control Issue / local canon read
 → re-audit changed scope
 → merge if authorized, low-risk, and safely revertible
 → update repository-local canon/current state where owned information changed
-→ reconcile the finite directly affected Issue/Session/routing/Current-State/Control set
+→ reconcile the finite directly affected Issue/Session/cursor/routing/Current-State/Control set
 → update devflow Control Issue only when cross-repository summary changed
 → release/handoff the Execution Session with recoverable next state
 → Project display follows synchronization
@@ -136,11 +140,14 @@ If a merged change is wrong, use a dedicated rollback branch + revert PR. Do not
 A new worker resumes from GitHub evidence, not from the previous chat narrative:
 
 1. Control Issue;
-2. referenced local Issue/Work Order;
-3. active or latest relevant Execution Session Record(s);
-4. linked branch/PR and current head;
-5. recorded Audit SHA versus current branch/PR head;
-6. latest completed checkpoint and first unchecked / unverified milestone.
+2. referenced local Issue/Work Order and durable progress surface;
+3. accepted Task Checkpoint Cursor when present, using its `first_unfinished` as the compact projected frontier;
+4. active or latest relevant Execution Session Record(s);
+5. linked branch/PR and current head;
+6. recorded Audit SHA versus current branch/PR head;
+7. current blocker/readiness/safety evidence for the projected first unfinished milestone.
+
+If the cursor is absent, ambiguous, malformed, duplicated, stale, or inconsistent with the owning durable state, use the ordinary durable-progress reconciliation path; do not infer a position from chat or silently choose among competing markers.
 
 If an apparently active session may be stale because the worker disappeared or a request timed out, use the Manual Execution Session stale rule: `CLAIMED` / `RUNNING` require 1 hour with no trusted record update and no linked activity; `WAITING` remains active while its named blocker exists. A takeover posts a successor Session Record, re-reads the Issue, and only then mutates. Detailed collision rules are in the operating manuals.
 
@@ -188,6 +195,8 @@ Read before creating a request:
 
 - Agent operations: `docs/operations/AGENT_OPERATING_MANUAL.md`
 - Repository-local Issue usage: `docs/operations/REPOSITORY_ISSUE_MANUAL.md`
+- Durable progress: `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md`
+- Task Checkpoint Cursor: `docs/operations/TASK_CHECKPOINT_CURSOR.md`
 - MCP access/client setup: `docs/operations/DEVFLOW_MCP.md`
 - Canonical control-plane spec: `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`
 - Machine-readable workflow: `.devflow/WORKFLOW.yaml`
