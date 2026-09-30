@@ -43,3 +43,4 @@ jobs:
           tools/devflow_mcp.py
           tools/repository_bootstrap.py
           tools/task_checkpoint_cursor.py
+          tools/maintenance_audit.py
