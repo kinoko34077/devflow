@@ -856,7 +856,12 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                     return {
                         "state": "open",
                         "title": "[REPO] r",
-                        "body": existing_candidate_control_body(),
+                        "body": (
+                            "## Repository\n\n`o/r`\n\n"
+                            "## Repository State\n\n`ACTIVE`\n\n"
+                            "## Next Action\n\n`[IMPLEMENT]`\n\n"
+                            + existing_candidate_control_body()
+                        ),
                         "html_url": (
                             "https://github.com/kinoko34077/"
                             "devflow/issues/1"
