@@ -161,8 +161,146 @@ A downstream implementation that needs a new disposition, evidence source or tra
 
 ## Related authority
 
-- devflow#155 — GitHub-native Development Reconciliation Loop
+- devflow#155 — GitHub-native Development Reconciliation Loop parent
 - devflow#111 — Formal Review policy
 - devflow#142/#144 — Manual Execution Session semantics
 - devflow#105/#125 — execution allocation/candidate-source authority
 - devflow#151 — read-only portfolio projection design input
+
+## 10. Stage-2 bounded maintenance producer contract
+
+This section is the canonical contract extension owned by `devflow#264` under the staged lightweight-work authority `devflow#215/#232`.
+
+Its purpose is to let Stage 2 automate deterministic `audit`, `triage`, and `sync-check` work without adding a second task database, disposition vocabulary, scheduler, claim authority, or semantic/LLM authority.
+
+### 10.1 Reuse existing authorities
+
+Stage-2 maintenance production reuses the existing layers rather than replacing them:
+
+- this contract owns evidence validation, disposition precedence, bounded transition semantics, and fail-closed behavior;
+- `DEVELOPMENT_RECONCILIATION_PUBLICATION.md` owns freshness-bound/idempotent reviewer/recovery work publications and Repository Control projection rules;
+- the accepted durable-candidate source contract under `devflow#125` owns ordinary machine admission in the unique Repository Control and exact owning-body freshness binding;
+- Stage-1 work-class semantics under `devflow#215` own the closed work-class vocabulary and explicit role/work-class compatibility;
+- `devflow#209` owns runnable supply publication/withdrawal policy;
+- execution-coordinator remains the sole runtime claim/lease/generation/fencing authority.
+
+A Stage-2 producer MUST NOT duplicate those authorities in a private queue or parallel lifecycle.
+
+### 10.2 Deterministic portfolio observation
+
+A Stage-2 producer may classify only evidence obtained from exact live authoritative sources needed by the applicable rule, including:
+
+- the unique open managed Repository Control;
+- explicitly referenced owning Issue/Work Order;
+- explicitly referenced PR, checks and Formal Reviews;
+- trusted Manual Execution Session records;
+- accepted repository Current State/specification when that surface owns the fact being assessed;
+- exact current/default-branch identity where required.
+
+Every required source must preserve exact object identity plus a revision, digest, SHA, or equivalent freshness binding and an observation time.
+
+GitHub Project fields, search-index results, Issue age, labels, branch existence, free-form similarity, provider/model identity, idle worker state, or a desire to keep workers busy MUST NOT establish closure, readiness, mutation authority, or runnable demand.
+
+Discovery/search may identify a possible source, but exact authoritative readback MUST confirm the relevant fact before classification or mutation. Search/index disagreement with exact source truth is an evidence signal, never closure authority.
+
+A required source that is unreadable, missing, duplicate, contradictory, identity-mismatched, or insufficiently fresh yields `NEEDS_EVIDENCE`; it MUST NOT be silently treated as clean or `NO_ACTION`.
+
+### 10.3 Finding metadata is not a second disposition vocabulary
+
+Stage-2 rule/finding names are diagnostic metadata and reason detail only. Examples include:
+
+- `CONTROL_AUDIT_SHA_MISMATCH`;
+- `CONTROL_ACTIVE_WORK_TERMINAL`;
+- `OWNER_TERMINAL_CONTROL_ACTIVE`;
+- `PR_TERMINAL_OWNER_STALE`;
+- `STALE_NEXT_ACTION_TARGET`;
+- `ORPHAN_OPEN_PR`;
+- `OBSOLETE_UNMERGED_PR`;
+- `ACTIVE_PRODUCER_YIELD`;
+- `REVIEW_GATE_YIELD`;
+- `HUMAN_GATE_YIELD`;
+- `RECOVERY_CANDIDATE`;
+- `SOURCE_UNAVAILABLE_OR_AMBIGUOUS`;
+- `SEMANTIC_PROJECTION_SUSPECTED`.
+
+They do not create a new lifecycle. Every report still resolves through the existing dispositions from Section 3.
+
+### 10.4 Read-only first and sync-check mutation allowlist
+
+Initial Stage-2 producer execution is read-only.
+
+A later `sync-check` executor may mutate durable state only when the transition is explicitly accepted by this canonical contract, all required preconditions are machine-provable, and the executor re-observes the exact identity immediately before mutation.
+
+The initial bounded mutation class that S2.4 may implement is limited to machine-owned or projection state whose desired value follows deterministically from exact durable authority, such as:
+
+- retire or replace a stale Control Active Work / Next Action projection after the exact bounded owner is proven terminal and no active producer, Human/security, external, or reviewer gate remains;
+- withdraw or supersede stale machine-readable supply publication whose freshness/owner evidence no longer matches;
+- update an explicitly machine-owned health/projection surface from exact authoritative evidence.
+
+These candidates are not implementation merely by appearing here. S2.4 must still define and test each concrete transition before enabling mutation.
+
+The following remain outside automatic sync-check mutation unless a later bounded canonical change explicitly admits them:
+
+- semantic rewriting of README or Current State prose;
+- ambiguous parent/spec Issue closure;
+- arbitrary Issue closure;
+- arbitrary PR merge;
+- source-code changes or semantic fixes merely because prose or search output appears stale.
+
+Such cases route through `NEEDS_EVIDENCE`, a durable triage finding, an existing Human/review gate, or another separately owned task as applicable.
+
+### 10.5 Stable bounded report identity
+
+One Stage-2 observation run produces a bounded report containing at least:
+
+- observed repository and Control identity;
+- exact source/evidence references and freshness bindings;
+- canonical Development Reconciliation disposition;
+- reason codes;
+- diagnostic finding class when applicable;
+- current owner/producer/gate classification;
+- optional bounded transition request;
+- explicit recheck trigger when no mutation is permitted.
+
+A logical finding/report identity is derived from canonical repository/object identity, relevant evidence revision/digest/SHA, rule/finding identity, and transition identity when applicable. Observation timestamps are not part of logical identity.
+
+Re-observing unchanged logical evidence therefore yields the same logical identity. Changed authority/evidence yields a different identity and requires reclassification.
+
+### 10.6 No task inflation and durable tracking boundary
+
+A producer MUST NOT create runnable demand merely because:
+
+- a managed repository exists;
+- a worker is idle;
+- a previous audit once found drift;
+- a clean run occurred;
+- an Issue is old;
+- search/index output looks stale;
+- provider/model identity appears suitable;
+- keeping workers busy would be convenient.
+
+The default handling is:
+
+- clean state, intentional wait, active trusted producer, or accepted future-spec state -> no synthetic task;
+- source-unavailable, contradictory, or semantic-only ambiguity -> `NEEDS_EVIDENCE` / triage evidence, not autonomous implementation supply;
+- Human/security/device/publication/credential/destructive/reviewer gate -> yield/route through the existing gate rather than manufacturing maintenance implementation;
+- durable Issue or supply mutation occurs only when a concrete finding materially changes and the already-accepted tracking/publication criteria are satisfied.
+
+The observation collector itself creates no Issue, claim, merge, branch, credential change, or provider launch.
+
+### 10.7 Publication / consumption separation
+
+Stage 2 preserves 3C publication/consumption separation. A worker/execution attempt that creates, adds, or relaxes a candidate/publication MUST NOT consume that changed supply in the same execution attempt.
+
+Publication remains a durable projection of current authority, not assignment. Runtime ownership begins only after a later consumer re-reads the publication and succeeds through execution-coordinator claim/acknowledge semantics.
+
+### 10.8 Derived implementation boundaries
+
+The Stage-2 sequence is intentionally split so each later unit has one responsibility:
+
+- **S2.2 read-only audit core:** immutable observation normalization, deterministic rules, and accepted historical regression fixtures; no GitHub mutation.
+- **S2.3 deterministic triage:** map findings to the existing disposition vocabulary and to track/publish/no-op decisions; prove clean, active-producer, gate and semantic-ambiguity cases do not inflate task supply.
+- **S2.4 bounded sync-check:** implement only explicitly accepted low-risk projection repairs, with immediate identity re-read, expected-identity guard, idempotent second run, and fail-closed changed evidence.
+- **S2.5 supply integration:** publish only currently valid bounded demand through existing #209/candidate authorities while preserving 3C and retirement on readiness/freshness change.
+
+A later unit that needs a new disposition, evidence source, mutable surface, or transition beyond this contract must update this canonical contract first through a bounded reviewed change.
