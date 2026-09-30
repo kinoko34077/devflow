@@ -846,6 +846,19 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
             def __init__(self, token):
                 self.token = token
                 self.posts = 0
+                self.owner_body = "owner body"
+                digest = cli.canonical_body_sha256(
+                    self.owner_body
+                )
+                self.control_body = (
+                    "## Repository\n\n`o/r`\n\n"
+                    "## Repository State\n\n`ACTIVE`\n\n"
+                    "## Next Action\n\n`[IMPLEMENT]`\n\n"
+                    + existing_candidate_control_body().replace(
+                        BODY_SHA,
+                        digest,
+                    )
+                )
                 self.__class__.instances.append(self)
 
             def get_issue(self, repository, number):
@@ -856,12 +869,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                     return {
                         "state": "open",
                         "title": "[REPO] r",
-                        "body": (
-                            "## Repository\n\n`o/r`\n\n"
-                            "## Repository State\n\n`ACTIVE`\n\n"
-                            "## Next Action\n\n`[IMPLEMENT]`\n\n"
-                            + existing_candidate_control_body()
-                        ),
+                        "body": self.control_body,
                         "html_url": (
                             "https://github.com/kinoko34077/"
                             "devflow/issues/1"
@@ -872,7 +880,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                     return {
                         "state": "open",
                         "title": "owner",
-                        "body": "owner body",
+                        "body": self.owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
                     }
