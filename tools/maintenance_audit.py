@@ -149,6 +149,7 @@ def classify_repository(value: object) -> dict[str, object]:
         "reason_codes": reasons,
         "finding_classes": findings,
         "owner_class": owner_class,
+        "owner_ref": owner["ref"],
         "evidence_refs": list(data["evidence_refs"]),
         "recheck_trigger": trigger,
     }
