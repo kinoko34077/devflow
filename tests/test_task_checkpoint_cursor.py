@@ -243,6 +243,22 @@ class CursorTransitionTests(unittest.TestCase):
                 updated_at="2026-09-30T04:31:00Z",
             )
 
+    def test_stale_expectation_against_terminal_live_is_drift_warning(self):
+        live = state(revision=8, last_completed="S1.9", first_unfinished=None)
+        result = advance_cursor(
+            live,
+            expected_revision=7,
+            expected_first_unfinished="S1.3",
+            completed_checkpoint="S1.3",
+            next_first_unfinished="S1.4",
+            head=None,
+            evidence=(),
+            updated_at="2026-09-30T04:31:00Z",
+        )
+        self.assertEqual(result.code, "WARN_CHECKPOINT_DRIFT")
+        self.assertIsNone(result.cursor)
+        self.assertEqual(result.live, live)
+
     def test_advance_with_drift_prepares_no_replacement(self):
         live = state(revision=8, first_unfinished="S1.4")
         result = advance_cursor(

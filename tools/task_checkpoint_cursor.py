@@ -340,7 +340,11 @@ def advance_cursor(
 ) -> CursorResult:
     """Prepare one forward movement only when expected/live state matches."""
 
-    if live.first_unfinished is None or completed_checkpoint is None:
+    # A caller-side request to advance from a terminal position is invalid
+    # input; reopening a terminal cursor requires explicit reconcile. A live
+    # terminal cursor seen by a stale worker is ordinary drift and is reported
+    # by compare_cursor below rather than raised.
+    if completed_checkpoint is None:
         raise ValueError("terminal cursor requires explicit reconcile")
     if completed_checkpoint != expected_first_unfinished:
         raise ValueError("completed_checkpoint must equal expected_first_unfinished")
