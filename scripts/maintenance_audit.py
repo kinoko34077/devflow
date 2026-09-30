@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,7 @@ from tools.maintenance_audit import (  # noqa: E402
     AuditContractError,
     classify_repository,
 )
+from tools.maintenance_triage import triage  # noqa: E402
 from tools.maintenance_github import (  # noqa: E402
     DEVFLOW_REPOSITORY,
     GitHubReadError,
@@ -153,6 +155,11 @@ def _portfolio(args: argparse.Namespace) -> int:
         "repository_count": len(reports),
         "reports": reports,
     }
+    if args.triage:
+        payload["triage"] = [
+            asdict(triage(report))
+            for report in reports
+        ]
     _write(payload, args.output)
     return 0
 
@@ -228,6 +235,11 @@ def _parser() -> argparse.ArgumentParser:
         default="MAINTENANCE_AUDIT_TOKEN",
     )
     portfolio.add_argument("--observed-at")
+    portfolio.add_argument(
+        "--triage",
+        action="store_true",
+        help="include deterministic triage decisions",
+    )
     portfolio.add_argument("--output")
     portfolio.set_defaults(func=_portfolio)
 
