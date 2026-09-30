@@ -389,6 +389,48 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             ) from None
         return True
 
+    def post_supply_transition(self, body: str) -> bool:
+        if not isinstance(body, str) or not body.strip():
+            raise MaintenanceSupplyError(
+                "supply transition body must be non-empty"
+            )
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(
+                "/repos/kinoko34077/devflow/issues/209/comments"
+            ),
+            data=payload,
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-supply",
+            },
+        )
+        try:
+            with self._opener(
+                request,
+                timeout=self._timeout,
+            ) as response:
+                raw = response.read()
+                if not raw:
+                    return False
+                try:
+                    value = json.loads(raw.decode("utf-8"))
+                except (UnicodeError, json.JSONDecodeError):
+                    return False
+                return isinstance(value, dict)
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub #209 transition comment failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError:
+            raise GitHubReadError(
+                "GitHub #209 transition comment transport failed"
+            ) from None
+
 
 def _sync_check(args: argparse.Namespace) -> int:
     token = _token_from_env(args.token_env)
