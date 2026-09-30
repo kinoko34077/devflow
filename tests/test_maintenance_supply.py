@@ -321,6 +321,55 @@ def existing_candidate_control_body():
     )
 
 
+class MaintenanceSupplyConsumerParityTests(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(ms)
+
+    def test_candidate_fingerprint_matches_execution_coordinator_contract(self):
+        import hashlib
+        import json
+
+        supply = ms.build_existing_owner_candidate(
+            decision(),
+            owner(),
+            control(),
+        )
+        payload = {
+            "task": "o/r#7",
+            "role": "implementer",
+            "entry_ref": "https://github.com/o/r/issues/7",
+            "conflict_keys": ["component:o/r:maintenance"],
+            "scope_ready": True,
+            "blocked": False,
+            "requires_user_confirmation": False,
+        }
+        expected = "sha256:" + hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            supply["candidate_fingerprint"],
+            expected,
+        )
+        self.assertEqual(
+            supply["portfolio"]["candidate_fingerprint"],
+            expected,
+        )
+
+    def test_invalid_protocol_conflict_key_is_not_publishable(self):
+        self.assertIsNone(
+            ms.build_existing_owner_candidate(
+                decision(),
+                owner(conflict_keys=("free-form key",)),
+                control(),
+            )
+        )
+
+
 class MaintenanceSupplyProjectionTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(ms)
