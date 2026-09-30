@@ -66,11 +66,13 @@ def normalize_observation(value: object) -> dict[str, object]:
         "producer": producer,
         "gates": gates,
         "search": _mapping(root.get("search", {}), "search"),
+        "source_error": root.get("source_error"),
+        "semantic_projection_suspected": root.get("semantic_projection_suspected") is True,
     }
     return normalized
 
 
-def _logical_identity(value: dict[str, object]) -> str:
+def _report_id(value: dict[str, object], finding_classes: list[str], next_transition: str | None) -> str:
     control = value["control"]
     owner = value["owner"]
     assert isinstance(control, dict)
@@ -83,6 +85,8 @@ def _logical_identity(value: dict[str, object]) -> str:
         "owner_revision": owner["revision"],
         "owner_state": owner.get("state"),
         "owner_work_status": owner.get("work_status"),
+        "finding_classes": finding_classes,
+        "next_transition": next_transition,
     }
     encoded = json.dumps(logical, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
@@ -90,21 +94,75 @@ def _logical_identity(value: dict[str, object]) -> str:
 
 def classify_repository(value: object) -> dict[str, object]:
     normalized = normalize_observation(value)
+    control = normalized["control"]
     owner = normalized["owner"]
+    producer = normalized["producer"]
+    gates = normalized["gates"]
+    search = normalized["search"]
+    assert isinstance(control, dict)
     assert isinstance(owner, dict)
-    return {
+    assert isinstance(producer, dict)
+    assert isinstance(gates, dict)
+    assert isinstance(search, dict)
+
+    disposition = "NO_ACTION"
+    reason_codes: list[str] = []
+    findings: list[str] = []
+    next_transition: str | None = None
+
+    if normalized["source_error"]:
+        disposition = "NEEDS_EVIDENCE"
+        reason_codes.append("REQUIRED_SOURCE_UNAVAILABLE")
+        findings.append("SOURCE_UNAVAILABLE_OR_AMBIGUOUS")
+    elif gates.get("human") or gates.get("security"):
+        disposition = "NEEDS_HUMAN"
+        reason_codes.append("HUMAN_OR_SECURITY_GATE")
+        findings.append("HUMAN_GATE_YIELD")
+    elif gates.get("reviewer"):
+        disposition = "NEEDS_REVIEWER"
+        reason_codes.append("REVIEW_GATE")
+        findings.append("REVIEW_GATE_YIELD")
+    elif gates.get("external"):
+        disposition = "WAIT_EXTERNAL"
+        reason_codes.append("EXTERNAL_WAIT")
+    elif producer.get("active"):
+        reason_codes.append("ACTIVE_TRUSTED_PRODUCER")
+        findings.append("ACTIVE_PRODUCER_YIELD")
+    elif normalized["semantic_projection_suspected"]:
+        disposition = "NEEDS_EVIDENCE"
+        reason_codes.append("SEMANTIC_DESIRED_VALUE_NOT_MACHINE_PROVABLE")
+        findings.append("SEMANTIC_PROJECTION_SUSPECTED")
+    elif (
+        str(owner.get("state", "")).upper() in {"CLOSED", "MERGED", "DONE", "TERMINAL"}
+        and control.get("candidate_active") is True
+    ):
+        disposition = "AUTO_ADVANCE"
+        reason_codes.append("OWNER_TERMINAL_CONTROL_ACTIVE")
+        findings.append("CONTROL_ACTIVE_WORK_TERMINAL")
+        next_transition = "WITHDRAW_STALE_CONTROL_CANDIDATE"
+
+    if (
+        search.get("state")
+        and str(search.get("state")).upper() != str(owner.get("state", "")).upper()
+    ):
+        findings.append("SEARCH_INDEX_DISAGREES_WITH_EXACT")
+
+    report: dict[str, object] = {
         "schema_version": REPORT_SCHEMA,
-        "report_id": _logical_identity(normalized),
+        "report_id": _report_id(normalized, findings, next_transition),
         "repository": normalized["repository"],
         "control_ref": normalized["control_ref"],
         "observed_at": normalized["observed_at"],
-        "disposition": "NO_ACTION",
-        "reason_codes": [],
-        "finding_classes": [],
+        "disposition": disposition,
+        "reason_codes": reason_codes,
+        "finding_classes": findings,
         "owner_class": owner.get("work_status", "UNKNOWN"),
         "evidence_refs": [normalized["control_ref"], owner["ref"]],
         "recheck_trigger": "AUTHORITATIVE_EVIDENCE_CHANGE",
     }
+    if next_transition is not None:
+        report["next_transition"] = next_transition
+    return report
 
 
 def classify_portfolio(values: list[object]) -> list[dict[str, object]]:
