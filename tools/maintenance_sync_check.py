@@ -4,12 +4,12 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 
 ALLOWLISTED_KIND = "WITHDRAW_STALE_CONTROL_CANDIDATE"
-CANDIDATE_BEGIN = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
-CANDIDATE_END = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
+START_MARKER = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
+END_MARKER = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _GATES = (
     "producer_active",
@@ -41,29 +41,15 @@ class SyncCheckResult:
     applied: bool
     already_applied: bool
     disposition: str
-    reason: str
+    detail: str | None = None
 
 
-class SyncCheckTransport(Protocol):
-    def get_control(
-        self,
-        repository: str,
-        control_ref: str,
-    ) -> dict[str, object]: ...
-
-    def get_owner(
-        self,
-        repository: str,
-        owner_ref: str,
-    ) -> dict[str, object]: ...
-
-    def update_control_body(
-        self,
-        repository: str,
-        control_ref: str,
-        expected_body_sha256: str,
-        body: str,
-    ) -> bool: ...
+def canonical_body_sha256(body: str | None) -> str:
+    text = "" if body is None else body
+    if not isinstance(text, str):
+        raise SyncCheckContractError("body must be a string or null")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _mapping(value: object, name: str) -> Mapping[str, Any]:
@@ -101,43 +87,12 @@ def _bool(value: object, field: str) -> bool:
     return value
 
 
-def canonical_body_sha256(body: str | None) -> str:
-    if body is None:
-        body = ""
-    if not isinstance(body, str):
-        raise SyncCheckContractError("body must be a string or null")
-    normalized = body.replace("\r\n", "\n").replace("\r", "\n")
-    return (
-        "sha256:"
-        + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    )
-
-
 def _gate_active(*sources: Mapping[str, Any]) -> bool:
     for source in sources:
         for field in _GATES:
             if field in source and _bool(source[field], field):
                 return True
     return False
-
-
-def _gate_disposition(*sources: Mapping[str, Any]) -> str | None:
-    for source in sources:
-        if (
-            source.get("human_gate") is True
-            or source.get("security_gate") is True
-        ):
-            return "NEEDS_HUMAN"
-    for source in sources:
-        if source.get("reviewer_gate") is True:
-            return "NEEDS_REVIEWER"
-    for source in sources:
-        if source.get("external_wait") is True:
-            return "WAIT_EXTERNAL"
-    for source in sources:
-        if source.get("producer_active") is True:
-            return "NO_ACTION"
-    return None
 
 
 def _candidate_tasks(control: Mapping[str, Any]) -> tuple[str, ...]:
@@ -156,81 +111,102 @@ def _candidate_tasks(control: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _candidate_block(
-    body: str,
-    *,
-    repository: str,
-) -> tuple[str, dict[str, Any], str]:
+def _marker_payload(body: str) -> tuple[str, str, str]:
     if not isinstance(body, str):
         raise SyncCheckContractError("Control body must be a string")
-    if (
-        body.count(CANDIDATE_BEGIN) != 1
-        or body.count(CANDIDATE_END) != 1
-    ):
+    if body.count(START_MARKER) != 1 or body.count(END_MARKER) != 1:
         raise SyncCheckContractError(
-            "Control must contain exactly one candidate block"
+            "Control body must contain exactly one candidate projection block"
         )
-    start = body.index(CANDIDATE_BEGIN) + len(CANDIDATE_BEGIN)
-    end = body.index(CANDIDATE_END)
+    start = body.index(START_MARKER) + len(START_MARKER)
+    end = body.index(END_MARKER)
     if end <= start:
-        raise SyncCheckContractError(
-            "candidate block markers are out of order"
-        )
+        raise SyncCheckContractError("candidate projection markers are out of order")
+    return body[:start], body[start:end], body[end:]
 
-    prefix = body[:start]
-    suffix = body[end:]
-    payload_text = body[start:end]
-    payload = payload_text.strip()
-    fenced = False
-    if payload.startswith("```json"):
-        fenced = True
-        payload = payload[len("```json"):].lstrip("\r\n")
-        if not payload.endswith("```"):
-            raise SyncCheckContractError(
-                "candidate JSON fence is not closed"
-            )
-        payload = payload[:-3].rstrip()
+
+def _projection_object(payload: str, repository: str) -> dict[str, Any]:
     try:
-        value = json.loads(payload)
-    except json.JSONDecodeError as exc:
+        value = json.loads(payload.strip())
+    except (TypeError, json.JSONDecodeError) as exc:
         raise SyncCheckContractError(
-            "candidate block contains invalid JSON"
+            "candidate projection must contain one valid JSON object"
         ) from exc
     if not isinstance(value, dict):
-        raise SyncCheckContractError(
-            "candidate block root must be an object"
-        )
+        raise SyncCheckContractError("candidate projection must be an object")
     if value.get("schema_version") != 1:
-        raise SyncCheckContractError(
-            "candidate block schema_version must be 1"
-        )
+        raise SyncCheckContractError("unsupported candidate projection schema")
     if value.get("repository") != repository:
-        raise SyncCheckContractError(
-            "candidate block repository identity mismatch"
-        )
+        raise SyncCheckContractError("candidate projection repository mismatch")
+    if not isinstance(value.get("source_ref"), str) or not value["source_ref"]:
+        raise SyncCheckContractError("candidate projection source_ref is missing")
     candidates = value.get("candidates")
     if not isinstance(candidates, list):
-        raise SyncCheckContractError(
-            "candidate block candidates must be an array"
-        )
-    task_refs: list[str] = []
+        raise SyncCheckContractError("candidate projection candidates must be an array")
+    tasks: list[str] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
-            raise SyncCheckContractError(
-                "candidate entry must be an object"
-            )
+            raise SyncCheckContractError("candidate projection entry must be an object")
         task = candidate.get("task")
         if not isinstance(task, str) or not task:
-            raise SyncCheckContractError(
-                "candidate task identity is invalid"
-            )
-        task_refs.append(task)
-    if len(task_refs) != len(set(task_refs)):
-        raise SyncCheckContractError(
-            "candidate block contains duplicate task identities"
-        )
-    value["_render_fenced"] = fenced
-    return prefix, value, suffix
+            raise SyncCheckContractError("candidate projection task is malformed")
+        tasks.append(task)
+    if len(set(tasks)) != len(tasks):
+        raise SyncCheckContractError("candidate projection has duplicate task refs")
+    return value
+
+
+def _array_element_spans(payload: str, array_start: int) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    index = array_start + 1
+    length = len(payload)
+    while index < length:
+        while index < length and payload[index].isspace():
+            index += 1
+        if index < length and payload[index] == "]":
+            return spans
+        start = index
+        depth = 0
+        in_string = False
+        escaped = False
+        while index < length:
+            char = payload[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char in "{[":
+                    depth += 1
+                elif char in "}]":
+                    if depth == 0:
+                        if char == "]":
+                            spans.append((start, index))
+                            return spans
+                        raise SyncCheckContractError(
+                            "malformed candidate projection array"
+                        )
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    spans.append((start, index))
+                    index += 1
+                    break
+            index += 1
+        else:
+            raise SyncCheckContractError("unterminated candidate projection array")
+    raise SyncCheckContractError("unterminated candidate projection array")
+
+
+def _candidate_array_start(payload: str) -> int:
+    match = re.search(r'"candidates"\s*:\s*\[', payload)
+    if match is None:
+        raise SyncCheckContractError("candidate projection candidates array missing")
+    return payload.find("[", match.start())
 
 
 def withdraw_candidate_projection(
@@ -239,42 +215,43 @@ def withdraw_candidate_projection(
     repository: str,
     task_ref: str,
 ) -> str:
-    prefix, value, suffix = _candidate_block(
-        body,
-        repository=repository,
-    )
-    candidates = value["candidates"]
-    assert isinstance(candidates, list)
+    prefix, payload, suffix = _marker_payload(body)
+    projection = _projection_object(payload, repository)
+    candidates = projection["candidates"]
     matches = [
-        candidate
-        for candidate in candidates
-        if isinstance(candidate, dict)
-        and candidate.get("task") == task_ref
+        index
+        for index, candidate in enumerate(candidates)
+        if candidate.get("task") == task_ref
     ]
     if len(matches) > 1:
-        raise SyncCheckContractError(
-            "target task appears more than once"
-        )
+        raise SyncCheckContractError("target candidate is duplicated")
     if not matches:
         return body
 
-    value["candidates"] = [
-        candidate
-        for candidate in candidates
-        if not (
-            isinstance(candidate, dict)
-            and candidate.get("task") == task_ref
+    array_start = _candidate_array_start(payload)
+    spans = _array_element_spans(payload, array_start)
+    if len(spans) != len(candidates):
+        raise SyncCheckContractError(
+            "candidate projection text does not match parsed candidate count"
         )
-    ]
-    fenced = bool(value.pop("_render_fenced", False))
-    rendered = json.dumps(
-        value,
-        indent=2,
-        ensure_ascii=False,
-    )
-    if fenced:
-        rendered = "```json\n" + rendered + "\n```"
-    return prefix + "\n" + rendered + "\n" + suffix
+    target_index = matches[0]
+    start, end = spans[target_index]
+
+    if len(spans) == 1:
+        edited_payload = payload[:start] + payload[end:]
+    elif target_index < len(spans) - 1:
+        next_start = spans[target_index + 1][0]
+        edited_payload = payload[:start] + payload[next_start:]
+    else:
+        previous_end = spans[target_index - 1][1]
+        comma = payload.find(",", previous_end, start)
+        if comma < 0:
+            raise SyncCheckContractError("candidate separator is missing")
+        edited_payload = payload[:comma] + payload[end:]
+
+    edited = prefix + edited_payload + suffix
+    _projection_object(_marker_payload(edited)[1], repository)
+    return edited
 
 
 def build_sync_check_plan(
@@ -390,224 +367,142 @@ def build_sync_check_plan(
     )
 
 
-def _executor_snapshot(
-    value: object,
+def _result(
+    disposition: str,
     *,
-    repository: str,
-    identity_field: str,
-    identity_value: str,
-    name: str,
-) -> Mapping[str, Any]:
-    snapshot = _mapping(value, name)
-    if snapshot.get("repository") != repository:
-        raise SyncCheckContractError(
-            f"{name} repository identity mismatch"
-        )
-    if snapshot.get(identity_field) != identity_value:
-        raise SyncCheckContractError(
-            f"{name} object identity mismatch"
-        )
-    return snapshot
-
-
-def execute_sync_check(
-    plan: SyncCheckPlan,
-    transport: SyncCheckTransport,
+    applied: bool = False,
+    already_applied: bool = False,
+    detail: str | None = None,
 ) -> SyncCheckResult:
+    return SyncCheckResult(
+        applied=applied,
+        already_applied=already_applied,
+        disposition=disposition,
+        detail=detail,
+    )
+
+
+def _live_gate_disposition(
+    control: Mapping[str, Any],
+    owner: Mapping[str, Any],
+) -> str | None:
+    if bool(control.get("human_gate")) or bool(owner.get("human_gate")):
+        return "NEEDS_HUMAN"
+    if bool(control.get("security_gate")) or bool(owner.get("security_gate")):
+        return "NEEDS_HUMAN"
+    if bool(control.get("reviewer_gate")) or bool(owner.get("reviewer_gate")):
+        return "NEEDS_REVIEWER"
+    if bool(control.get("external_wait")) or bool(owner.get("external_wait")):
+        return "WAIT_EXTERNAL"
+    if bool(control.get("producer_active")) or bool(owner.get("producer_active")):
+        return "NO_ACTION"
+    return None
+
+
+def execute_sync_check(plan: SyncCheckPlan, transport: Any) -> SyncCheckResult:
     if not isinstance(plan, SyncCheckPlan):
-        raise SyncCheckContractError(
-            "plan must be a SyncCheckPlan"
-        )
+        raise SyncCheckContractError("plan must be a SyncCheckPlan")
     if plan.kind != ALLOWLISTED_KIND:
-        raise SyncCheckContractError(
-            "unsupported sync-check plan kind"
-        )
+        raise SyncCheckContractError("sync-check kind is not allowlisted")
 
-    try:
-        control = _executor_snapshot(
-            transport.get_control(
-                plan.repository,
-                plan.control_ref,
-            ),
-            repository=plan.repository,
-            identity_field="control_ref",
-            identity_value=plan.control_ref,
-            name="control",
-        )
-        owner = _executor_snapshot(
-            transport.get_owner(
-                plan.repository,
-                plan.owner_ref,
-            ),
-            repository=plan.repository,
-            identity_field="owner_ref",
-            identity_value=plan.owner_ref,
-            name="owner",
-        )
-        control_body = _string(
-            control.get("body"),
-            "control.body",
-        )
-        assert isinstance(control_body, str)
-        _prefix, parsed, _suffix = _candidate_block(
-            control_body,
-            repository=plan.repository,
-        )
-        candidates = parsed.get("candidates")
-        assert isinstance(candidates, list)
-        current_tasks = {
-            candidate.get("task")
-            for candidate in candidates
-            if isinstance(candidate, dict)
-        }
-    except SyncCheckContractError as exc:
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            str(exc),
-        )
+    control = _mapping(
+        transport.get_control(plan.repository, plan.control_ref),
+        "live control",
+    )
+    owner = _mapping(
+        transport.get_owner(plan.repository, plan.owner_ref),
+        "live owner",
+    )
 
-    gate = _gate_disposition(control, owner)
-    if gate is not None:
-        return SyncCheckResult(
-            False,
-            False,
-            gate,
-            "a stronger gate appeared before sync-check apply",
-        )
+    if (
+        control.get("repository") != plan.repository
+        or control.get("control_ref") != plan.control_ref
+        or owner.get("repository") != plan.repository
+        or owner.get("owner_ref") != plan.owner_ref
+    ):
+        return _result("NEEDS_EVIDENCE", detail="live identity changed")
 
-    if plan.candidate_task_ref not in current_tasks:
-        return SyncCheckResult(
-            False,
-            True,
+    live_candidates = _candidate_tasks(control)
+    if plan.candidate_task_ref not in live_candidates:
+        return _result(
             "NO_ACTION",
-            "target candidate is already absent",
-        )
-
-    try:
-        current_control_sha = _sha256(
-            control.get("body_sha256"),
-            "control.body_sha256",
-        )
-        current_owner_sha = _sha256(
-            owner.get("body_sha256"),
-            "owner.body_sha256",
-        )
-    except SyncCheckContractError as exc:
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            str(exc),
+            already_applied=True,
+            detail="candidate already absent",
         )
 
     if (
-        current_control_sha
-        != plan.expected_control_body_sha256
-        or current_owner_sha
-        != plan.expected_owner_body_sha256
+        control.get("body_sha256") != plan.expected_control_body_sha256
+        or owner.get("body_sha256") != plan.expected_owner_body_sha256
     ):
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            "Control or owner body identity changed",
-        )
+        return _result("NEEDS_EVIDENCE", detail="freshness identity changed")
+
+    gate_disposition = _live_gate_disposition(control, owner)
+    if gate_disposition is not None:
+        return _result(gate_disposition, detail="stronger live gate appeared")
 
     if (
         owner.get("terminal") is not True
         or owner.get("runnable") is not False
         or str(owner.get("state") or "").upper() != "CLOSED"
     ):
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            "owner lifecycle changed before sync-check apply",
-        )
+        return _result("NEEDS_EVIDENCE", detail="owner terminal state changed")
+
+    body = control.get("body")
+    if not isinstance(body, str):
+        return _result("NEEDS_EVIDENCE", detail="Control body unavailable")
 
     try:
-        updated_body = withdraw_candidate_projection(
-            control_body,
+        edited = withdraw_candidate_projection(
+            body,
             repository=plan.repository,
             task_ref=plan.candidate_task_ref,
         )
     except SyncCheckContractError as exc:
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            str(exc),
-        )
-    if updated_body == control_body:
-        return SyncCheckResult(
-            False,
-            True,
+        return _result("NEEDS_EVIDENCE", detail=str(exc))
+
+    if edited == body:
+        return _result(
             "NO_ACTION",
-            "target candidate is already absent",
+            already_applied=True,
+            detail="candidate already absent from projection",
         )
 
-    confirmed = transport.update_control_body(
+    updated = transport.update_control_body(
         plan.repository,
         plan.control_ref,
         plan.expected_control_body_sha256,
-        updated_body,
+        edited,
     )
-    if confirmed is not True:
-        return SyncCheckResult(
-            False,
-            False,
-            "NEEDS_EVIDENCE",
-            "bounded Control update was not confirmed",
-        )
+    if updated is not True:
+        return _result("NEEDS_EVIDENCE", detail="Control update was not accepted")
+
+    observed = _mapping(
+        transport.get_control(plan.repository, plan.control_ref),
+        "post-write control",
+    )
+    if (
+        observed.get("repository") != plan.repository
+        or observed.get("control_ref") != plan.control_ref
+    ):
+        return _result("NEEDS_EVIDENCE", detail="post-write identity changed")
 
     try:
-        observed = _executor_snapshot(
-            transport.get_control(
-                plan.repository,
-                plan.control_ref,
-            ),
-            repository=plan.repository,
-            identity_field="control_ref",
-            identity_value=plan.control_ref,
-            name="post_write_control",
-        )
-        observed_body = _string(
-            observed.get("body"),
-            "post_write_control.body",
-        )
-        assert isinstance(observed_body, str)
-        _p, observed_block, _s = _candidate_block(
-            observed_body,
-            repository=plan.repository,
-        )
-        observed_candidates = observed_block.get("candidates")
-        assert isinstance(observed_candidates, list)
-        if any(
-            isinstance(candidate, dict)
-            and candidate.get("task")
-            == plan.candidate_task_ref
-            for candidate in observed_candidates
-        ):
-            raise SyncCheckContractError(
-                "post-write readback still contains target candidate"
-            )
-        if observed_body != updated_body:
-            raise SyncCheckContractError(
-                "post-write Control body differs from bounded update"
-            )
+        observed_candidates = _candidate_tasks(observed)
     except SyncCheckContractError as exc:
-        return SyncCheckResult(
-            False,
-            False,
+        return _result("NEEDS_EVIDENCE", detail=str(exc))
+    if plan.candidate_task_ref in observed_candidates:
+        return _result(
             "NEEDS_EVIDENCE",
-            str(exc),
+            detail="post-write candidate withdrawal was not observed",
+        )
+    if observed.get("body") != edited:
+        return _result(
+            "NEEDS_EVIDENCE",
+            detail="post-write Control body differs from intended write",
         )
 
-    return SyncCheckResult(
-        True,
-        False,
+    return _result(
         "AUTO_ADVANCE",
-        "stale Control candidate withdrawal confirmed",
+        applied=True,
+        detail="stale candidate projection withdrawn and confirmed",
     )
