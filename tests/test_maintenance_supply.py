@@ -111,6 +111,44 @@ class MaintenanceSupplyTests(unittest.TestCase):
             supply["candidate_fingerprint"].startswith("sha256:")
         )
 
+    def test_candidate_fingerprint_matches_execution_coordinator_contract(self):
+        import hashlib
+        import json
+
+        supply = ms.build_existing_owner_candidate(
+            decision(),
+            owner(),
+            control(),
+        )
+        admission = supply["admission"]
+        role = admission["roles"][0]["role"]
+        expected_payload = {
+            "task": admission["task"],
+            "role": role,
+            "entry_ref": admission["entry_ref"],
+            "conflict_keys": admission["conflict_keys"],
+            "scope_ready": admission["scope_ready"],
+            "blocked": admission["blocked"],
+            "requires_user_confirmation": admission[
+                "requires_user_confirmation"
+            ],
+        }
+        encoded = json.dumps(
+            expected_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        expected = "sha256:" + hashlib.sha256(encoded).hexdigest()
+        self.assertEqual(
+            supply["candidate_fingerprint"],
+            expected,
+        )
+        self.assertEqual(
+            supply["portfolio"]["candidate_fingerprint"],
+            expected,
+        )
+
     def test_no_existing_owner_never_creates_supply(self):
         self.assertIsNone(
             ms.build_existing_owner_candidate(
