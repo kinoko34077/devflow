@@ -129,6 +129,41 @@ class GitHubReadTransport:
             )
         return items
 
+    def get_paginated_key(
+        self,
+        path_or_url: str,
+        key: str,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        next_url: str | None = path_or_url
+        seen: set[str] = set()
+        while next_url is not None:
+            absolute = self._url(next_url)
+            if absolute in seen:
+                raise GitHubReadError(
+                    "GitHub pagination loop detected"
+                )
+            seen.add(absolute)
+            payload, headers = self._request(next_url)
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get(key), list)
+            ):
+                raise GitHubReadError(
+                    f"GitHub paginated read missing array: {key}"
+                )
+            items.extend(
+                dict(item)
+                for item in payload[key]
+                if isinstance(item, dict)
+            )
+            next_url = _next_link(
+                headers.get("Link")
+                if hasattr(headers, "get")
+                else None
+            )
+        return items
+
     def get_repository(self, repository: str) -> dict[str, Any]:
         value = self.get_json(f"/repos/{repository}")
         if not isinstance(value, dict):
@@ -152,20 +187,13 @@ class GitHubReadTransport:
         repository: str,
         head_sha: str,
     ) -> list[dict[str, Any]]:
-        value = self.get_json(
-            f"/repos/{repository}/commits/{head_sha}/check-runs?per_page=100"
+        return self.get_paginated_key(
+            (
+                f"/repos/{repository}/commits/{head_sha}/"
+                "check-runs?per_page=100"
+            ),
+            "check_runs",
         )
-        if not isinstance(value, dict) or not isinstance(
-            value.get("check_runs"), list
-        ):
-            raise GitHubReadError(
-                "check-run read did not return the expected object"
-            )
-        return [
-            dict(item)
-            for item in value["check_runs"]
-            if isinstance(item, dict)
-        ]
 
     def get_reviews(
         self,
@@ -205,11 +233,26 @@ class GitHubReadTransport:
         head_sha = head.get("sha") if isinstance(head, dict) else None
         if not isinstance(head_sha, str) or len(head_sha) != 40:
             raise GitHubReadError("PR head SHA is unavailable")
+        reviews = self.get_reviews(repository, number)
+        current_reviews = [
+            review
+            for review in reviews
+            if review.get("commit_id") == head_sha
+        ]
+        stale_reviews = [
+            review
+            for review in reviews
+            if review.get("commit_id") != head_sha
+        ]
         return {
             "pull": pull,
             "head_sha": head_sha,
-            "check_runs": self.get_check_runs(repository, head_sha),
-            "reviews": self.get_reviews(repository, number),
+            "check_runs": self.get_check_runs(
+                repository,
+                head_sha,
+            ),
+            "reviews": current_reviews,
+            "stale_reviews": stale_reviews,
         }
 
 
