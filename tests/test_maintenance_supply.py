@@ -901,5 +901,172 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
             )
 
 
+class MaintenanceSupplyTransitionTransportTests(unittest.TestCase):
+    def test_sync_transport_posts_supply_transition_only_to_209_comments(self):
+        import json
+        from scripts import maintenance_audit as cli
+
+        seen = []
+
+        class Response:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"body": "transition body"}
+                ).encode("utf-8")
+
+        def opener(request, timeout=0):
+            seen.append(request)
+            return Response()
+
+        transport = cli._SyncCheckGitHubTransport(
+            "secret-token",
+            opener=opener,
+        )
+        self.assertTrue(
+            transport.post_supply_transition(
+                "transition body"
+            )
+        )
+        self.assertEqual(len(seen), 1)
+        request = seen[0]
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(
+            request.full_url,
+            "https://api.github.com/repos/"
+            "kinoko34077/devflow/issues/209/comments",
+        )
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {"body": "transition body"},
+        )
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer secret-token",
+        )
+
+    def test_publish_supply_dry_run_posts_no_transition(self):
+        import argparse
+        import json
+        from scripts import maintenance_audit as cli
+
+        owner_body = "durable owner body\n"
+        owner_digest = cli.canonical_body_sha256(owner_body)
+        admission = {
+            "task": "o/r#7",
+            "task_body_sha256": owner_digest,
+            "task_work_status": "READY_FOR_IMPLEMENTATION",
+            "entry_ref": "https://github.com/o/r/issues/7",
+            "scope_ready": True,
+            "blocked": False,
+            "requires_user_confirmation": False,
+            "conflict_keys": [],
+            "roles": [
+                {
+                    "role": "implementer",
+                    "next_action_tag": "IMPLEMENT",
+                }
+            ],
+        }
+        candidate = {
+            "schema_version": 1,
+            "source_ref": "kinoko34077/devflow#1",
+            "repository": "o/r",
+            "candidates": [admission],
+        }
+        portfolio = {
+            "schema_version": "execution-portfolio-metadata.v1",
+            "source_ref": "kinoko34077/devflow#1",
+            "repository": "o/r",
+            "entries": [],
+        }
+        control_body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Next Action\n\n`[IMPLEMENT] continue`\n\n"
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            + json.dumps(candidate)
+            + "\n<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+            "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN -->\n"
+            + json.dumps(portfolio)
+            + "\n<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_END -->\n"
+        )
+
+        class FakeTransport:
+            transition_calls = 0
+            update_calls = 0
+
+            def __init__(self, token):
+                self.token = token
+
+            def get_issue(self, repository, number):
+                if (repository, number) == (
+                    "kinoko34077/devflow",
+                    1,
+                ):
+                    return {
+                        "body": control_body,
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "state": "open",
+                        "body": owner_body,
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError((repository, number))
+
+            def update_control_body(self, *args, **kwargs):
+                type(self).update_calls += 1
+                raise AssertionError("dry-run must not write")
+
+            def post_supply_transition(self, body):
+                type(self).transition_calls += 1
+                raise AssertionError("dry-run must not comment")
+
+        original = cli._SyncCheckGitHubTransport
+        cli._SyncCheckGitHubTransport = FakeTransport
+        old_token = __import__("os").environ.get(
+            "MAINTENANCE_SUPPLY_TOKEN"
+        )
+        __import__("os").environ[
+            "MAINTENANCE_SUPPLY_TOKEN"
+        ] = "token"
+        try:
+            args = argparse.Namespace(
+                token_env="MAINTENANCE_SUPPLY_TOKEN",
+                observed_at="2026-10-01T00:00:00Z",
+                repository="o/r",
+                control=1,
+                owner="o/r#7",
+                work_class="sync-check",
+                attempt_id="attempt-dry-run",
+                output=None,
+                apply=False,
+            )
+            self.assertEqual(cli._publish_supply(args), 0)
+            self.assertEqual(FakeTransport.update_calls, 0)
+            self.assertEqual(FakeTransport.transition_calls, 0)
+        finally:
+            cli._SyncCheckGitHubTransport = original
+            if old_token is None:
+                del __import__("os").environ[
+                    "MAINTENANCE_SUPPLY_TOKEN"
+                ]
+            else:
+                __import__("os").environ[
+                    "MAINTENANCE_SUPPLY_TOKEN"
+                ] = old_token
+
+
 if __name__ == "__main__":
     unittest.main()
