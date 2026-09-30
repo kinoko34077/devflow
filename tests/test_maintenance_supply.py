@@ -226,5 +226,121 @@ class MaintenanceSupplyTests(unittest.TestCase):
         )
 
 
+def empty_control_body():
+    return (
+        "before\n"
+        "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+        "{\n"
+        '  "schema_version": 1,\n'
+        '  "source_ref": "kinoko34077/devflow#1",\n'
+        '  "repository": "o/r",\n'
+        '  "candidates": []\n'
+        "}\n"
+        "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+        "middle\n"
+        "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN -->\n"
+        "{\n"
+        '  "schema_version": "execution-portfolio-metadata.v1",\n'
+        '  "source_ref": "kinoko34077/devflow#1",\n'
+        '  "repository": "o/r",\n'
+        '  "entries": []\n'
+        "}\n"
+        "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_END -->\n"
+        "after\n"
+    )
+
+
+class MaintenanceSupplyProjectionTests(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(ms)
+
+    def test_projection_editor_adds_both_blocks_and_is_idempotent(self):
+        supply = ms.build_existing_owner_candidate(
+            decision(),
+            owner(),
+            control(),
+        )
+        first, changed = ms.reconcile_control_projection_body(
+            empty_control_body(),
+            supply,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertIn('"task": "o/r#7"', first)
+        self.assertIn('"work_class": "sync-check"', first)
+        self.assertTrue(first.startswith("before\n"))
+        self.assertTrue(first.endswith("after\n"))
+
+        second, changed_again = ms.reconcile_control_projection_body(
+            first,
+            supply,
+            task_ref="o/r#7",
+        )
+        self.assertFalse(changed_again)
+        self.assertEqual(second, first)
+
+    def test_projection_editor_withdraws_both_blocks(self):
+        supply = ms.build_existing_owner_candidate(
+            decision(),
+            owner(),
+            control(),
+        )
+        published, _ = ms.reconcile_control_projection_body(
+            empty_control_body(),
+            supply,
+            task_ref="o/r#7",
+        )
+        withdrawn, changed = ms.reconcile_control_projection_body(
+            published,
+            None,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertNotIn('"task": "o/r#7"', withdrawn)
+        self.assertIn('"candidates": []', withdrawn)
+        self.assertIn('"entries": []', withdrawn)
+
+    def test_cli_and_workflow_expose_manual_publish_only(self):
+        from pathlib import Path
+        from scripts import maintenance_audit as cli
+
+        args = cli._parser().parse_args(
+            [
+                "publish-supply",
+                "--repository",
+                "o/r",
+                "--control",
+                "1",
+                "--owner",
+                "o/r#7",
+                "--work-class",
+                "sync-check",
+                "--attempt-id",
+                "attempt-p5",
+                "--apply",
+            ]
+        )
+        self.assertEqual(args.command, "publish-supply")
+        self.assertTrue(args.apply)
+        self.assertEqual(
+            args.token_env,
+            "MAINTENANCE_SUPPLY_TOKEN",
+        )
+
+        workflow = Path(
+            ".github/workflows/maintenance-audit.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("- publish", workflow)
+        self.assertIn("  publish:", workflow)
+        self.assertIn("inputs.mode == 'publish'", workflow)
+        publish_job = workflow.split("  publish:", 1)[1]
+        self.assertIn("issues: write", publish_job)
+        audit_job = workflow.split("  audit:", 1)[1].split(
+            "  publish:", 1
+        )[0]
+        self.assertNotIn("issues: write", audit_job)
+        self.assertNotIn("publish-supply", audit_job)
+
+
 if __name__ == "__main__":
     unittest.main()
