@@ -31,13 +31,13 @@ Each entry binds exactly one already-valid v1 candidate role using both `task_bo
 
 The entry carries only scheduling/worker-match data: optional controller urgency, explicit dependency readiness/order, readiness class, optional `ready_at`, exact required capability/environment tags, optional `work_class`, and `observed_at`/`fresh_until`. The exact live trusted Control `Priority` field supplies `control_priority`; it is deliberately not duplicated. Owning-Issue scope/acceptance remains in the owning repository.
 
-`work_class`, when present, uses the closed Stage-1 vocabulary from `CHAT_WORKER_BOOTSTRAP.md`: `audit`, `triage`, `sync-check`, `quickfix`, `implementation`, `formal-review`. It describes task content and is independent of the participation `role`. It is optional for backward compatibility; consumers apply only the conservative legacy fallback defined in the bootstrap contract when it is absent.
+`work_class`, when present, uses the closed Stage-1 vocabulary from `CHAT_WORKER_BOOTSTRAP.md`: `audit`, `triage`, `sync-check`, `quickfix`, `implementation`, `formal-review`. It describes task content and is independent of the participation `role` as an axis, but explicit evidence must remain compatible at the review boundary: `work_class == formal-review` iff `role == reviewer`. A contradictory explicit pair is malformed portfolio evidence and fails closed; it is not treated as a worker-preference mismatch. `work_class` remains optional for backward compatibility, and absence continues to use the conservative legacy role-to-class fallback from the bootstrap contract.
 
 `dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags or a work class.
 
 ## 3. Complete frontier rule
 
-Portfolio enumeration begins from the exact live managed `[REPO]` Controls and retains source/discovery failures. For ordinary fresh candidates, the frontier is complete only when each participating candidate has one unique fresh matching companion entry. Missing, stale, duplicate, body/fingerprint-mismatched or ambiguous ranking/requirements evidence makes portfolio evidence incomplete; consumers return `NEEDS_EVIDENCE / FRONTIER_UNAVAILABLE` rather than using the repository-scoped fallback.
+Portfolio enumeration begins from the exact live managed `[REPO]` Controls and retains source/discovery failures. For ordinary fresh candidates, the frontier is complete only when each participating candidate has one unique fresh matching companion entry. Missing, stale, duplicate, body/fingerprint-mismatched, role/work-class-contradictory or otherwise ambiguous ranking/requirements evidence makes portfolio evidence incomplete or invalid; consumers fail closed rather than using the repository-scoped fallback.
 
 The optional absence of `work_class` does not make legacy metadata incomplete. It deliberately invokes the conservative role-to-class compatibility mapping from `CHAT_WORKER_BOOTSTRAP.md`. New lightweight classes (`audit`, `triage`, `sync-check`, `quickfix`) require explicit class evidence and are never inferred from an old implementer entry.
 
@@ -47,7 +47,7 @@ Recovery demand remains a separate track. It is not converted into fresh work an
 
 Hard filters remain: trusted/fresh admission, live Control state and safety gates, dependency readiness, runtime claim/conflict compatibility, 3C publisher/consumer separation, reviewer independence, and exact capability/environment subset matching.
 
-When a bootstrap request explicitly supplies `accepted_work_classes`, work-class mismatch is an additional hard omission applied after the existing safety/capability gates and before role-track ranking. This means a maintenance-mode worker can reject unrelated `formal-review` demand without changing the global `recovery -> reviewer -> implementer` track policy for unconstrained workers.
+When a bootstrap request explicitly supplies `accepted_work_classes`, work-class mismatch is an additional hard omission applied after the existing safety/capability gates and before role-track ranking. This means a maintenance-mode worker can reject unrelated `formal-review` demand without changing the global `recovery -> reviewer -> implementer` track policy for unconstrained workers. Contradictory explicit role/work-class evidence is validated earlier as malformed evidence and never reaches this omission/ranking stage.
 
 Ordinary rank class is lexicographic over: Control priority; explicit urgency; dependency order; readiness class; explicit `ready_at`. Canonical task identity is an audit tie-breaker, not part of the rank class.
 
@@ -75,4 +75,4 @@ Stage 1 adds no effort scoring, fairness controller, persistent queue or small-b
 
 ## 7. Acceptance
 
-The original #208 acceptance requires exact-head tests/CI/review, a bounded Stage-3 pilot across at least two real managed repositories, no fallthrough after claim rejection, and final execution-coordinator runtime claims `{}`. The additive #215 Stage-1 change separately requires exact-head compatibility tests proving unconstrained legacy behavior and explicit work-class filtering before runtime propagation is accepted.
+The original #208 acceptance requires exact-head tests/CI/review, a bounded Stage-3 pilot across at least two real managed repositories, no fallthrough after claim rejection, and final execution-coordinator runtime claims `{}`. The additive #215 Stage-1 change separately requires exact-head compatibility tests proving unconstrained legacy behavior, explicit work-class filtering, and fail-closed rejection of contradictory explicit role/work-class evidence before runtime propagation is accepted.

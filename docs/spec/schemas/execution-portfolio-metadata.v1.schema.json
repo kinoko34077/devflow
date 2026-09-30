@@ -186,6 +186,32 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "required": ["work_class"],
+              "properties": {
+                "work_class": {"const": "formal-review"}
+              }
+            },
+            "then": {
+              "properties": {
+                "role": {"const": "reviewer"}
+              }
+            }
+          },
+          {
+            "if": {
+              "required": ["work_class"],
+              "properties": {
+                "role": {"const": "reviewer"}
+              }
+            },
+            "then": {
+              "properties": {
+                "work_class": {"const": "formal-review"}
+              }
+            }
           }
         ]
       }

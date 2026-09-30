@@ -198,6 +198,14 @@ A candidate may carry an explicit optional `work_class`. For compatibility with 
 - `implementer` -> `implementation`;
 - `recovery` -> `implementation`.
 
+For an **explicit** `work_class`, the participation role and class must satisfy the smallest Stage-1 compatibility invariant:
+
+```text
+work_class == formal-review  <=>  role == reviewer
+```
+
+Thus an explicit reviewer candidate with any non-`formal-review` class, or an explicit non-reviewer candidate with `formal-review`, is malformed frontier evidence and fails the cycle closed as `NEEDS_EVIDENCE / EVIDENCE_INVALID`. This validation occurs before per-candidate omission filtering; it is not downgraded to `WORK_CLASS_MISMATCH`. Omitted `work_class` remains backward compatible and continues to use the conservative legacy defaults above.
+
 No legacy candidate is inferred to be `audit`, `triage`, `sync-check` or `quickfix`. Those classes require explicit publication evidence. This avoids reclassifying an old broad implementation task as a lightweight job merely because a maintenance worker requested one.
 
 ### 5.4 Deterministic selection

@@ -301,6 +301,11 @@ def _candidate(value: object) -> dict[str, Any]:
         work_class = LEGACY_ROLE_WORK_CLASS.get(role)
     else:
         _require(work_class in WORK_CLASSES, code, "candidate work_class is unknown")
+        _require(
+            (work_class == "formal-review") == (role == "reviewer"),
+            code,
+            "candidate explicit work_class is incompatible with role",
+        )
 
     return {
         **value,
