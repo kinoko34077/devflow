@@ -6,6 +6,16 @@ from typing import Any, Protocol
 
 VALID_SHA_LEN = 40
 
+DISPOSITIONS: tuple[str, ...] = (
+    "AUTO_ADVANCE",
+    "NEEDS_REVIEWER",
+    "NEEDS_RECOVERY",
+    "NEEDS_HUMAN",
+    "WAIT_EXTERNAL",
+    "NEEDS_EVIDENCE",
+    "NO_ACTION",
+)
+
 
 @dataclass(frozen=True)
 class Decision:
