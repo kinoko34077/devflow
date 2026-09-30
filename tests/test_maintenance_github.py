@@ -685,9 +685,9 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                         "author_association": "OWNER",
                         "body": (
                             "## Repository\n\n"
-                            "\`kinoko34077/example\`\n\n"
+                            "`kinoko34077/example`\n\n"
                             "## Active Work\n\n"
-                            "\`kinoko34077/example#7\`\n"
+                            "`kinoko34077/example#7`\n"
                         ),
                     }
                 if path.endswith("/issues/7"):
@@ -699,7 +699,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/7"
                         ),
                         "author_association": "NONE",
-                        "body": "## Work Status\n\n\`DONE\`\n",
+                        "body": "## Work Status\n\n`DONE`\n",
                     }
                 raise AssertionError(path)
 
@@ -731,11 +731,11 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                         "author_association": "OWNER",
                         "body": (
                             "## Repository\n\n"
-                            "\`kinoko34077/example\`\n\n"
+                            "`kinoko34077/example`\n\n"
                             "## Active Work\n\n"
-                            "\`kinoko34077/example#7\`\n\n"
+                            "`kinoko34077/example#7`\n\n"
                             "## Next Action\n\n"
-                            "\`[HUMAN_GATE] confirm permission\`\n"
+                            "`[HUMAN_GATE] confirm permission`\n"
                         ),
                     }
                 if path.endswith("/issues/7"):
@@ -747,7 +747,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/7"
                         ),
                         "author_association": "OWNER",
-                        "body": "## Work Status\n\n\`DONE\`\n",
+                        "body": "## Work Status\n\n`DONE`\n",
                     }
                 raise AssertionError(path)
 
