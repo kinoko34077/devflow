@@ -361,6 +361,24 @@ def _candidate_tasks(body: str) -> list[str]:
     )
 
 
+def _explicit_no_active_work(control_body: str) -> bool:
+    sections = _sections(control_body)
+    active_text = (
+        sections.get("Active Work")
+        or sections.get("Active Work / current routing")
+        or ""
+    )
+    first = next(
+        (
+            line.strip()
+            for line in active_text.splitlines()
+            if line.strip()
+        ),
+        "",
+    )
+    return re.match(r"^None(?:\\.|\\s|$)", first, re.IGNORECASE) is not None
+
+
 def _active_owner_ref(
     control_body: str,
     repository: str,
@@ -378,6 +396,8 @@ def _active_owner_ref(
         or sections.get("Active Work / current routing")
         or ""
     )
+    if _explicit_no_active_work(control_body):
+        return None, False
     refs = [
         ref
         for ref in _refs(active_text)
@@ -435,12 +455,25 @@ def collect_repository(
         in TRUSTED_ASSOCIATIONS
     )
     owner_ref, candidate_present = _active_owner_ref(body, repository)
+    work_status = (
+        _scalar_section(sections, "Work Status") or ""
+    ).upper()
+    explicit_idle = (
+        owner_ref is None
+        and not candidate_present
+        and work_status == "AUDITED"
+        and _explicit_no_active_work(body)
+    )
     source_status = "OK"
-    if managed != repository or not trusted or owner_ref is None:
+    if (
+        managed != repository
+        or not trusted
+        or (owner_ref is None and not explicit_idle)
+    ):
         source_status = "AMBIGUOUS"
 
     if owner_ref is None:
-        synthetic_owner = f"{repository}#1"
+        control_revision = _issue_revision(control)
         return {
             "repository": repository,
             "observed_at": observed_at,
@@ -449,15 +482,15 @@ def collect_repository(
                 "ref": control_ref,
                 "repository": repository,
                 "trusted": trusted,
-                "revision": _issue_revision(control),
-                "active_owner_ref": synthetic_owner,
+                "revision": control_revision,
+                "active_owner_ref": None,
                 "candidate_present": candidate_present,
             },
             "owner": {
-                "ref": synthetic_owner,
+                "ref": None,
                 "repository": repository,
-                "revision": "0" * 40,
-                "state": "UNKNOWN",
+                "revision": control_revision,
+                "state": "NONE" if explicit_idle else "UNKNOWN",
                 "runnable": False,
                 "terminal": False,
             },
