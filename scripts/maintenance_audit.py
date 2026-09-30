@@ -289,7 +289,33 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
     ) -> dict[str, object]:
         control_repo, number = _split_issue_ref(control_ref)
         issue = self.get_issue(control_repo, number)
+        expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
+        association = str(
+            issue.get("author_association") or ""
+        ).upper()
+        if (
+            str(issue.get("state") or "").lower() != "open"
+            or issue.get("title") != expected_title
+            or association
+            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        ):
+            raise SyncCheckContractError(
+                "Control is not the trusted open canonical Repository Control"
+            )
         body = str(issue.get("body") or "")
+        sections = _sections(body)
+        if _scalar_section(sections, "Repository") != repository:
+            raise SyncCheckContractError(
+                "Control repository identity mismatch"
+            )
+        next_action = sections.get("Next Action", "")
+        control_human_gate = (
+            "[USER_DECISION]" in next_action
+            or "[HUMAN_GATE]" in next_action
+        )
+        repository_active = (
+            _scalar_section(sections, "Repository State") == "ACTIVE"
+        )
         candidate_tasks, human_gate, external_wait = (
             _candidate_snapshot_from_body(body)
         )
@@ -300,9 +326,9 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             "body_sha256": canonical_body_sha256(body),
             "candidate_tasks": candidate_tasks,
             "producer_active": False,
-            "human_gate": human_gate,
+            "human_gate": human_gate or control_human_gate,
             "reviewer_gate": False,
-            "external_wait": external_wait,
+            "external_wait": external_wait or not repository_active,
             "security_gate": False,
         }
 
@@ -317,6 +343,13 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
                 "owner repository does not match audit repository"
             )
         issue = self.get_issue(owner_repo, number)
+        association = str(
+            issue.get("author_association") or ""
+        ).upper()
+        if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+            raise SyncCheckContractError(
+                "owning Issue is not trusted"
+            )
         body = str(issue.get("body") or "")
         sections = _sections(body)
         work_status = (_scalar_section(sections, "Work Status") or "").upper()
@@ -384,8 +417,12 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
                 f"GitHub bounded Control update failed with HTTP {exc.code}"
             ) from None
         except urllib.error.URLError as exc:
+            reason = str(exc.reason).replace(
+                self._token,
+                "[REDACTED]",
+            )
             raise GitHubReadError(
-                f"GitHub bounded Control update failed: {exc.reason}"
+                f"GitHub bounded Control update failed: {reason}"
             ) from None
         return True
 
@@ -602,16 +639,23 @@ def _control_supply_snapshot(
 ) -> tuple[dict[str, object], str, dict[str, object] | None]:
     control_repo, number = _split_issue_ref(control_ref)
     issue = transport.get_issue(control_repo, number)
+    expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
     body = str(issue.get("body") or "")
     sections = _sections(body)
     managed = _scalar_section(sections, "Repository")
-    if managed != repository:
-        raise MaintenanceSupplyError(
-            "Control repository identity mismatch"
-        )
     association = str(
         issue.get("author_association") or ""
     ).upper()
+    if (
+        managed != repository
+        or str(issue.get("state") or "").lower() != "open"
+        or issue.get("title") != expected_title
+        or association
+        not in {"OWNER", "MEMBER", "COLLABORATOR"}
+    ):
+        raise MaintenanceSupplyError(
+            "Control is not the trusted open canonical Repository Control"
+        )
     next_action = sections.get("Next Action", "")
     admission = extract_existing_admission(
         body,
