@@ -1,9 +1,9 @@
 # Task Checkpoint Cursor v1 Design
 
-Status: Proposed written specification for review  
+Status: Accepted design; implemented by PR #257; P3 hardening by PR #261  
 Date: 2026-09-29  
 Owning Work Order: `devflow#233`  
-Base: `0d5ec291800a46e836e08c2231f4b44cdac463a5`
+Original design base: `0d5ec291800a46e836e08c2231f4b44cdac463a5`
 
 ## 1. Purpose
 
@@ -89,7 +89,7 @@ task: kinoko34077/example#123
 revision: 7
 last_completed: S1.2
 first_unfinished: S1.3
-head: abcdef1234567890
+head: 0123456789abcdef0123456789abcdef01234567
 evidence:
   - https://github.com/kinoko34077/example/actions/runs/123456
 updated_at: 2026-09-29T13:30:00Z
@@ -103,9 +103,11 @@ Field semantics:
 - `revision`: monotonically increasing cursor revision used only to detect observed drift; it is not a lock, compare-and-swap guarantee, or fencing token.
 - `last_completed`: checkpoint identifier most recently accepted; nullable before the first checkpoint.
 - `first_unfinished`: checkpoint identifier the next worker should resume from; nullable only when the checkpoint sequence is terminal. It does not imply readiness to execute.
-- `head`: optional exact branch/PR/default-branch SHA relevant to the accepted movement.
+- `head`: optional exact full 40-hex branch/PR/default-branch SHA relevant to the accepted movement.
 - `evidence`: optional compact references supporting the movement; not a replacement for PR/Actions/Review evidence.
 - `updated_at`: UTC timestamp for navigation/debugging; GitHub comment metadata remains the authoritative modification time.
+
+Canonical numeric spelling for `schema_version` and `revision` is canonical positive base-10 decimal only, with no sign, underscore/separator or extra scalar whitespace. Evidence items are single-line data and may not contain the cursor sentinel or begin with a fenced-block token; these constraints prevent a writer from emitting framing that the canonical parser cannot safely read back.
 
 No worker/session identity is stored in the cursor. Worker provenance stays in Execution Session Records.
 
@@ -194,6 +196,8 @@ If expected and live state match at comparison time, the helper prepares an upda
 - `revision` to live revision + 1;
 - optional head/evidence;
 - `updated_at`.
+
+After a clean expected/live match, a non-terminal next frontier must differ from the completed checkpoint; a no-op frontier is invalid through normal advance and correction uses explicit `reconcile`. Stale live checkpoint/revision drift is classified before this no-op check so ordinary stale-worker drift remains advisory.
 
 The GitHub comment transport is not an atomic execution lock. A transport adapter MUST re-read immediately before update and MUST re-read after update when the transport allows it. Any observed difference between expected, written, and post-write live state becomes drift and sends the worker back through live-state reconciliation. Atomic ownership remains an execution-coordinator responsibility when that runtime is used.
 
