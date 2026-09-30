@@ -476,5 +476,165 @@ class MaintenanceGitHubTests(unittest.TestCase):
         )
 
 
+class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
+    def test_control_exact_issue_identity_is_required(self):
+        class Transport:
+            def __init__(self, issue):
+                self.issue = issue
+
+            def get_json(self, path):
+                return dict(self.issue)
+
+        base = {
+            "number": 16,
+            "title": "[REPO] example",
+            "state": "open",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/16",
+            "author_association": "OWNER",
+            "body": (
+                "## Repository\n\n"
+                "`kinoko34077/example`\n\n"
+                "## Active Work\n\n"
+                "`kinoko34077/example#7`\n"
+            ),
+        }
+        bad = (
+            {**base, "number": 17},
+            {**base, "title": "[REPO] other"},
+            {**base, "state": "closed"},
+            {**base, "pull_request": {"url": "x"}},
+            {
+                **base,
+                "html_url": "https://github.com/kinoko34077/devflow/issues/99",
+            },
+        )
+        for issue in bad:
+            with self.subTest(issue=issue):
+                observation = mg.collect_repository(
+                    Transport(issue),
+                    "kinoko34077/example",
+                    "kinoko34077/devflow#16",
+                    "2026-10-01T00:00:00Z",
+                )
+                self.assertEqual(
+                    observation["source_status"],
+                    "UNAVAILABLE",
+                )
+
+    def test_owner_exact_issue_identity_is_required(self):
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "author_association": "OWNER",
+                        "body": (
+                            "## Repository\n\n"
+                            "`kinoko34077/example`\n\n"
+                            "## Active Work\n\n"
+                            "`kinoko34077/example#7`\n"
+                        ),
+                    }
+                if path.endswith("/issues/7"):
+                    return {
+                        "number": 8,
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "example/issues/8"
+                        ),
+                        "author_association": "OWNER",
+                        "body": (
+                            "## Work Status\n\n"
+                            "`READY_FOR_IMPLEMENTATION`\n"
+                        ),
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertEqual(
+            observation["source_status"],
+            "UNAVAILABLE",
+        )
+
+    def test_malformed_candidate_projection_is_not_treated_as_absent(self):
+        class Transport:
+            def __init__(self):
+                self.owner_reads = 0
+
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "author_association": "OWNER",
+                        "body": (
+                            "## Repository\n\n"
+                            "`kinoko34077/example`\n\n"
+                            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+                            "{not-json}\n"
+                            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n\n"
+                            "## Active Work\n\n"
+                            "`kinoko34077/example#7`\n"
+                        ),
+                    }
+                self.owner_reads += 1
+                raise AssertionError(
+                    "malformed candidate source must fail before owner read"
+                )
+
+        transport = Transport()
+        observation = mg.collect_repository(
+            transport,
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertEqual(
+            observation["source_status"],
+            "UNAVAILABLE",
+        )
+        self.assertEqual(transport.owner_reads, 0)
+
+    def test_action_portfolio_runs_deterministic_triage(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        portfolio_call = text.split(
+            "python scripts/maintenance_audit.py portfolio",
+            1,
+        )[1]
+        self.assertIn("--triage", portfolio_call)
+
+    def test_targeted_cross_repository_audit_requires_cross_repo_token(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            '[[ "$AUDIT_REPOSITORY" == "kinoko34077/devflow" ]]',
+            text,
+        )
+        self.assertIn(
+            "--token-env MAINTENANCE_AUDIT_TOKEN",
+            text,
+        )
+        self.assertIn(
+            "--token-env GITHUB_TOKEN",
+            text,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
