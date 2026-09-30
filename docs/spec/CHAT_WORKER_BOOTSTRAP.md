@@ -1,6 +1,6 @@
 # Chat Worker Bootstrap Contract v1
 
-Status: accepted under devflow#191; extended by the accepted portfolio-v2 baseline under devflow#208 (implementation PR #220) and the accepted devflow-side work-class Stage 1 contract in devflow#215 (PR #226; runtime propagation remains separately gated)
+Status: accepted under devflow#191; extended by the accepted portfolio-v2 baseline under devflow#208, the accepted work-class Stage 1 contract under devflow#215, and the bounded reviewer-provenance pickup-eligibility extension under devflow#211
 Authority: devflow cross-repository workflow specification
 Scope: provider-neutral bootstrap for an already-open, manually-started Codex, Claude/Claude Code or ordinary ChatGPT chat
 
@@ -24,18 +24,18 @@ If the prose here and the reference classifier ever disagree, the prose is norma
 
 ```text
 user broad instruction (+ current working context)
-  -> worker builds a v1 request (identity, declared tags, tool surfaces, optional structured work-class constraint)
+  -> worker builds a v1 request (runtime identity, declared tags, tool surfaces, optional work-class constraint, optional direct Review Provenance signature)
   -> worker reads live evidence in the canonical order (section 4)
   -> classify(request, evidence) -> exactly one v1 result
   -> work disposition: serialized claim -> acknowledge -> Execution Session -> bounded work
   -> any other disposition: report it and stop; no invented task
 ```
 
-The classification is a pure function of `(request, evidence)`. The provider identity never enters selection, so the same inputs yield the same result on every provider.
+The classification is a pure function of `(request, evidence)`. Provider transport identity never grants capability, priority or rank. For an explicit different-reviewer demand only, a directly supplied Review Provenance `System + Model` signature may participate as a hard eligibility gate; it is not inferred from `worker_system`.
 
 ## 2. Request envelope (`chat-worker-bootstrap-request.v1`)
 
-The original v1 fields remain required. devflow#215 Stage 1 adds one optional additive field, `accepted_work_classes`. Unknown fields are rejected.
+The original v1 fields remain required. Additive optional fields are `accepted_work_classes` (#215) and `review_provenance` (#211). Unknown fields are rejected.
 
 | Field | Type | Rule |
 | --- | --- | --- |
@@ -43,6 +43,7 @@ The original v1 fields remain required. devflow#215 Stage 1 adds one optional ad
 | `target_repository` | `owner/name` or `null` | from the user or the current working context; `null` means portfolio scope |
 | `work_intent` | string ≤ 500 or `null` | the user's broad instruction, recorded for audit only; **never selects, ranks or filters work** |
 | `accepted_work_classes` | optional non-empty closed array | explicit structured constraint over Stage-1 work classes; absent means unconstrained legacy selection |
+| `review_provenance` | optional `{system, model}` | direct Review Provenance v2 reviewer signature for eligibility checks; never inferred from provider identity and ignored unless an explicit different-reviewer candidate needs it |
 | `worker_system` | `codex` \| `claude` \| `chatgpt` | provenance only; never implies a capability |
 | `worker_session_id` | identity | one per chat/session for its lifetime (section 6) |
 | `execution_attempt_id` | identity | one per discovery cycle (section 7) |
@@ -67,6 +68,7 @@ Normalization:
 - tags must match `^[a-z0-9][a-z0-9_.:/-]{0,63}$`;
 - duplicate tags are rejected, and valid tags are sorted;
 - `accepted_work_classes`, when present, must be non-empty, unique and contain only the closed values above;
+- `review_provenance`, when present, contains exactly non-empty `system` and `model` strings; whitespace is normalized for comparison and secret-shaped values are rejected;
 - identities must match `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`;
 - `target_repository` is compared case-insensitively against Control identities, with no other transformation.
 
@@ -185,7 +187,7 @@ Filters are applied in this order. The first failing filter becomes the candidat
 6. `DEPENDENCY_NOT_READY`.
 7. `LIVE_CLAIM_CONFLICT`: claimability is not `CLAIMABLE` (`BLOCKED_LIVE` / `EXPIRED_UNSWEPT`).
 8. `PUBLISHED_BY_THIS_ATTEMPT`: decision 3C; this attempt published or relaxed the candidate.
-9. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only.
+9. `REVIEWER_INDEPENDENCE_CONFLICT`: reviewer role only; covers both live claim/session independence and an explicit durable Review Provenance signature requirement.
 10. `CAPABILITY_MISMATCH`: `required_capabilities ⊄ capabilities`.
 11. `ENVIRONMENT_MISMATCH`: `required_environment ⊄ environment`.
 12. `WORK_CLASS_MISMATCH`: the request contains `accepted_work_classes` and the candidate's effective class is outside that set.
@@ -208,6 +210,40 @@ Thus an explicit reviewer candidate with any non-`formal-review` class, or an ex
 
 No legacy candidate is inferred to be `audit`, `triage`, `sync-check` or `quickfix`. Those classes require explicit publication evidence. This avoids reclassifying an old broad implementation task as a lightweight job merely because a maintenance worker requested one.
 
+#### Explicit different-reviewer eligibility (#211)
+
+Ordinary reviewer candidates keep #111 semantics: a Formal Review authored by the implementer remains valid unless the owning policy explicitly requires a different reviewer. No reviewer signature is required at pickup for that ordinary path.
+
+An explicit different-reviewer candidate MAY carry:
+
+```json
+{
+  "different_reviewer_requirement": {
+    "implementer_system": "ChatGPT",
+    "implementer_model": "GPT-5.6 Sol"
+  }
+}
+```
+
+Presence means the durable task requires a reviewer whose eventual Review Provenance v2 signature differs from the implementer signature. The field is valid only on a `reviewer` candidate. The candidate-side requirement is accepted only through the same trusted/fresh evidence path as the candidate itself; portfolio publication binds it to the existing task-body digest, candidate fingerprint, `observed_at` and `fresh_until`.
+
+A worker that may consume such a candidate must provide direct request evidence:
+
+```json
+{
+  "review_provenance": {
+    "system": "Claude Code",
+    "model": "Claude Sonnet 5"
+  }
+}
+```
+
+`review_provenance` is the signature the worker would place in `Reviewer-System` / `Reviewer-Model`; it is not derived from `worker_system`, provider reputation or model capability. Missing or malformed required signature evidence fails closed as `NEEDS_EVIDENCE / EVIDENCE_INVALID`. A proven same signature is valid evidence but makes that candidate ineligible with `REVIEWER_INDEPENDENCE_CONFLICT`.
+
+Comparison intentionally matches the merge-time Review Provenance rule in `tools/review_readiness.py`: normalize whitespace/case; an unknown reviewer system never proves difference; different known systems prove difference; when systems match, unknown model on either side does not prove difference; otherwise models must differ.
+
+This pickup gate does **not** prove that a later Review exists or is fresh. Exact PR head, submitted Review state, blocking findings and current-head Review Provenance remain merge-time/readiness evidence. Pickup identity eligibility and merge-time Review freshness are separate gates.
+
 ### 5.4 Deterministic selection
 
 Among candidates surviving hard filtering, exactly one is selected by the existing lexicographic policy:
@@ -229,7 +265,8 @@ track: recovery = 0, reviewer = 1, implementer = 2
 | Identity | Scope | Used for |
 | --- | --- | --- |
 | `worker_session_id` | one chat/session, stable for its lifetime | equals the Manual Execution Session `Execution-Session-ID` in the worker-owned Session Record (#142/#144) |
-| `coordinator_worker_id` = `<worker_system>:<worker_session_id>` | runtime | the execution-coordinator `worker_id` for claim/acknowledge/release and reviewer-independence checks |
+| `coordinator_worker_id` = `<worker_system>:<worker_session_id>` | runtime | the execution-coordinator `worker_id` for claim/acknowledge/release and live claim/session reviewer-independence checks |
+| `review_provenance.system + model` | one review-capable session when explicitly observed | durable Review Provenance signature eligibility only; not runtime ownership, capability or rank |
 | `execution_attempt_id` | one discovery cycle | the execution-coordinator `AutonomousAttempt.attempt_id` for 3C, and the audit trail |
 
 The Session Record stays a soft, worker-owned provenance record. The runtime claim is the only atomic ownership. Neither is a cryptographic identity. Two chats must never share a `worker_session_id`.
@@ -297,6 +334,7 @@ Phase B must define, for each of `codex`, `claude` and `chatgpt`, how a session 
 - an `execution_attempt_id` generation rule;
 - `capabilities[]` and `environment[]`, each with an explainable, reproducible derivation from what the session can verify about itself, and never from the provider/model name;
 - `tool_surfaces[]` derived from the tools actually available in that chat at bootstrap time;
+- when the session explicitly reports a Review Provenance signature, preserve that direct `system + model` value without deriving it from provider identity;
 - a confirmation that no secret, token, cookie or session material enters any field.
 
-Phase B does not require `accepted_work_classes`; omission means unconstrained legacy behavior. The optional field is a Stage-1 execution preference under #215, not a permanent worker capability or persona.
+Phase B does not require `accepted_work_classes` or `review_provenance`. Omitted work classes mean unconstrained legacy behavior. Omitted review provenance preserves ordinary review behavior but makes an otherwise-eligible explicit different-reviewer demand fail closed for missing required signature evidence.
