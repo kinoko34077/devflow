@@ -1,6 +1,6 @@
 # Chat Worker Bootstrap Contract v1
 
-Status: accepted under devflow#191; extended by the accepted portfolio-v2 baseline under devflow#208, the accepted work-class Stage 1 contract under devflow#215, and the bounded reviewer-provenance pickup-eligibility extension under devflow#211
+Status: accepted baseline under devflow#191/#208/#215; this document also defines the bounded reviewer-provenance pickup-eligibility extension owned by devflow#211, whose acceptance is governed by its Issue/PR evidence
 Authority: devflow cross-repository workflow specification
 Scope: provider-neutral bootstrap for an already-open, manually-started Codex, Claude/Claude Code or ordinary ChatGPT chat
 
