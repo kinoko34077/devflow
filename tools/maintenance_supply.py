@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any, Mapping
@@ -18,6 +19,12 @@ _ALLOWED_WORK_CLASSES = frozenset(
     {"audit", "triage", "sync-check", "quickfix", "implementation"}
 )
 _SHA_PREFIX = "sha256:"
+_CONFLICT_KEY = re.compile(
+    r"^(repo:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+|"
+    r"component:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.:/-]+|"
+    r"path-group:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.:/-]+|"
+    r"(contract|schema|workflow):[A-Za-z0-9_.:/-]+)$"
+)
 
 
 class MaintenanceSupplyError(ValueError):
@@ -91,21 +98,36 @@ def _gated(*sources: Mapping[str, Any]) -> bool:
 
 
 def _candidate_fingerprint(admission: Mapping[str, Any]) -> str:
-    material = {
+    # Must be byte-for-byte compatible with
+    # execution-coordinator.ranking.candidate_fingerprint(ClaimCandidate).
+    roles = admission.get("roles")
+    if (
+        not isinstance(roles, list)
+        or len(roles) != 1
+        or not isinstance(roles[0], dict)
+        or roles[0].get("role") != "implementer"
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance supply requires exactly one implementer role"
+        )
+    payload = {
         "task": admission["task"],
-        "task_body_sha256": admission["task_body_sha256"],
-        "task_work_status": admission["task_work_status"],
+        "role": "implementer",
         "entry_ref": admission["entry_ref"],
+        "conflict_keys": admission["conflict_keys"],
         "scope_ready": admission["scope_ready"],
         "blocked": admission["blocked"],
         "requires_user_confirmation": admission[
             "requires_user_confirmation"
         ],
-        "conflict_keys": admission["conflict_keys"],
-        "work_order_ref": admission.get("work_order_ref"),
-        "roles": admission["roles"],
     }
-    return _canonical_hash(material)
+    raw = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return _SHA_PREFIX + hashlib.sha256(raw).hexdigest()
 
 
 def build_existing_owner_candidate(
@@ -217,6 +239,8 @@ def build_existing_owner_candidate(
         )
     conflict_keys = sorted(set(conflict_keys_value))
     if len(conflict_keys) != len(conflict_keys_value):
+        return None
+    if any(_CONFLICT_KEY.fullmatch(item) is None for item in conflict_keys):
         return None
 
     admission: dict[str, object] = {
