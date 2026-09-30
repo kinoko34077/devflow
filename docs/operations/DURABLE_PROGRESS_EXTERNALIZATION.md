@@ -1,7 +1,7 @@
 # Durable Progress Externalization
 
 Status: Standing operational policy
-Owner: `devflow#49`
+Standing summary: `devflow#49` (this checked-in document is the canonical static contract)
 Change tracking: `devflow#236`
 
 ## 1. Purpose
