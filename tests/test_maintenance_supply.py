@@ -492,5 +492,131 @@ class MaintenanceSupplyProjectionTests(unittest.TestCase):
         self.assertNotIn("publish-supply", audit_job)
 
 
+class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
+    def _admission(self, **overrides):
+        value = {
+            "task": "o/r#7",
+            "task_body_sha256": BODY_SHA,
+            "task_work_status": "READY_FOR_IMPLEMENTATION",
+            "entry_ref": "https://github.com/o/r/issues/7",
+            "scope_ready": True,
+            "blocked": False,
+            "requires_user_confirmation": False,
+            "conflict_keys": [],
+            "roles": [
+                {
+                    "role": "implementer",
+                    "next_action_tag": "IMPLEMENT",
+                }
+            ],
+        }
+        value.update(overrides)
+        return value
+
+    def test_owner_supply_snapshot_rejects_empty_owning_body(self):
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def get_issue(self, repository, number):
+                self.assertEqual((repository, number), ("o/r", 7))
+                return {
+                    "state": "open",
+                    "body": "",
+                    "html_url": "https://github.com/o/r/issues/7",
+                    "author_association": "OWNER",
+                }
+
+            def assertEqual(self, left, right):
+                if left != right:
+                    raise AssertionError((left, right))
+
+        with self.assertRaises(cli.MaintenanceSupplyError):
+            cli._owner_supply_snapshot(
+                Transport(),
+                "o/r",
+                "o/r#7",
+                self._admission(
+                    task_body_sha256=cli.canonical_body_sha256("")
+                ),
+            )
+
+    def test_owner_supply_snapshot_requires_valid_work_order_provenance(self):
+        from scripts import maintenance_audit as cli
+
+        admission = self._admission(
+            work_order_ref="kinoko34077/devflow#9",
+        )
+
+        class Transport:
+            def __init__(self, work_order):
+                self.work_order = work_order
+
+            def get_issue(self, repository, number):
+                if (repository, number) == ("o/r", 7):
+                    return {
+                        "state": "open",
+                        "body": "owner body",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "author_association": "OWNER",
+                    }
+                if (repository, number) == ("kinoko34077/devflow", 9):
+                    return dict(self.work_order)
+                raise AssertionError((repository, number))
+
+        bad_cases = (
+            {
+                "state": "closed",
+                "title": "[WORK ORDER] test",
+                "body": "x",
+                "author_association": "OWNER",
+            },
+            {
+                "state": "open",
+                "title": "[WORK ORDER] test",
+                "body": "x",
+                "author_association": "NONE",
+            },
+            {
+                "state": "open",
+                "title": "not a work order",
+                "body": "x",
+                "author_association": "OWNER",
+            },
+            {
+                "state": "open",
+                "title": "[WORK ORDER] test",
+                "body": "x",
+                "author_association": "OWNER",
+                "pull_request": {},
+            },
+        )
+        for work_order in bad_cases:
+            with self.subTest(work_order=work_order):
+                with self.assertRaises(cli.MaintenanceSupplyError):
+                    cli._owner_supply_snapshot(
+                        Transport(work_order),
+                        "o/r",
+                        "o/r#7",
+                        admission,
+                    )
+
+        valid = {
+            "state": "open",
+            "title": "[WORK ORDER] test",
+            "body": "x",
+            "author_association": "OWNER",
+        }
+        snapshot = cli._owner_supply_snapshot(
+            Transport(valid),
+            "o/r",
+            "o/r#7",
+            admission,
+        )
+        self.assertEqual(
+            snapshot["work_order_ref"],
+            "kinoko34077/devflow#9",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
