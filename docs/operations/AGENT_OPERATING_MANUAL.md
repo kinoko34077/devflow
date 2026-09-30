@@ -111,10 +111,12 @@ Before mutation:
 1. read the owning task, current branch/PR/head and active/recent Session Records;
 2. compare the intended semantic scope with other apparently active sessions;
 3. if overlap exists, choose an explicit disposition before continuing: continue one, split scopes, integrate, wait, or take over a stale/abandoned predecessor;
-4. create or resume the worker-owned record with `Execution-Session-ID`, worker/model, role, scope, excludes, verified base SHA, branch/PR if known, latest checkpoint, next action and blocker;
+4. create or resume the worker-owned record with `Execution-Session-ID`, worker/model, `Conversation-Title-At-Start`, role, scope, excludes, verified base SHA, branch/PR if known, latest checkpoint, next action and blocker;
 5. write a bounded checklist plan;
 6. set `Status: CLAIMED` once scope/overlap are fixed;
 7. set `Status: RUNNING` when meaningful work begins.
+
+For every new ChatGPT, Codex, or Claude/Claude Code Session Record, capture `Conversation-Title-At-Start` once from the exact conversation/thread title actually visible to the worker/client at record creation. Preserve its spelling, case, and punctuation. If the client/model context does not expose the title, record exactly `UNAVAILABLE`; do not infer it from the prompt/task and do not block or ask the user merely to obtain it. A later UI rename does not rewrite or invalidate the start-time snapshot. Existing Session Records without the field remain valid historical evidence and require no backfill.
 
 The Session Record belongs on the owning Issue / Work Order because it is task-scoped execution state. Do not copy every checkpoint into the devflow Repository Control.
 
@@ -196,9 +198,10 @@ Each Session Record carries direct operational provenance:
 Worker-System: <system>
 Worker-Model: <model/version or unknown>
 Execution-Session-ID: <stable id>
+Conversation-Title-At-Start: <exact observed title | UNAVAILABLE>
 ```
 
-This is attribution, not cryptographic identity. It is separate from Formal Review Provenance v2 and must not be treated as proof of reviewer independence, GitHub actor separation, or security identity. Multiple agent surfaces may authenticate as the same GitHub actor, so worker ownership is a procedural/provenance rule rather than a GitHub-enforced edit boundary.
+`Worker-System`, `Worker-Model`, and `Execution-Session-ID` are operational attribution, not cryptographic identity. `Conversation-Title-At-Start` is secondary human-readable display provenance only and MUST NOT participate in Session-ID equality/generation, execution-coordinator worker/claim identity, stale/takeover timing, collision authority, Formal Review Provenance/different-reviewer equality, authentication, access control, or security/cryptographic identity. These Session provenance fields remain separate from Formal Review Provenance v2. Multiple agent surfaces may authenticate as the same GitHub actor, so worker ownership is a procedural/provenance rule rather than a GitHub-enforced edit boundary.
 
 ## 4. Implementation path
 
