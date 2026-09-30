@@ -1,6 +1,6 @@
 # Portfolio-scope Broad Pickup v2
 
-Status: proposed for acceptance under devflow#208
+Status: accepted under completed devflow#208; additive work-class/reviewer-provenance extensions remain governed by their owning acceptance evidence
 Authority chain: devflow#190 Phase D -> #198 -> #208; additive work-class constraint: devflow#215 Stage 1; reviewer-provenance requirement extension: devflow#211
 Runtime consumer: `kinoko34077/execution-coordinator`
 
@@ -33,7 +33,7 @@ The entry carries only scheduling/worker-match data: optional controller urgency
 
 `work_class`, when present, uses the closed Stage-1 vocabulary from `CHAT_WORKER_BOOTSTRAP.md`: `audit`, `triage`, `sync-check`, `quickfix`, `implementation`, `formal-review`. It describes task content and is independent of the participation `role` as an axis, but explicit evidence must remain compatible at the review boundary: `work_class == formal-review` iff `role == reviewer`. A contradictory explicit pair is malformed portfolio evidence and fails closed; it is not treated as a worker-preference mismatch. `work_class` remains optional for backward compatibility, and absence continues to use the conservative legacy role-to-class fallback from the bootstrap contract.
 
-`different_reviewer_requirement` is optional and valid only for a reviewer entry. Presence records the exact implementer Review Provenance `system + model` signature against which a consuming reviewer must differ. It does not store a derived `self/independent` flag. Because it lives in the same companion entry, its authority/freshness is already bound to `task_body_sha256`, `candidate_fingerprint`, `observed_at` and `fresh_until`; no second freshness clock is introduced. Missing or ambiguous required signature evidence fails closed.
+`different_reviewer_requirement` is optional and valid only for a reviewer entry. Presence records the exact implementer Review Provenance `system + model` signature against which a consuming reviewer must differ. It does not store a derived `self/independent` flag. Because it lives in the same companion entry, its authority/freshness is already bound to `task_body_sha256`, `candidate_fingerprint`, `observed_at` and `fresh_until`; no second freshness clock is introduced. Missing or ambiguous required signature evidence fails closed. The devflow-side schema/classifier contract does not by itself authorize current execution-coordinator publishers/parsers to emit this optional field; runtime propagation remains separately gated by its owning execution-coordinator work.
 
 `dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags, a work class, or a Review Provenance signature. Review signature evidence must be direct and explicit.
 
