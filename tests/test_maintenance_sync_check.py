@@ -582,10 +582,10 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
         body = control_snapshot()["body"].replace(
             "before\n",
             (
-                "## Repository\n\n\`o/r\`\n\n"
-                "## Repository State\n\n\`ACTIVE\`\n\n"
+                "## Repository\n\n`o/r`\n\n"
+                "## Repository State\n\n`ACTIVE`\n\n"
                 "## Next Action\n\n"
-                "\`[HUMAN_GATE] confirm\`\n\n"
+                "`[HUMAN_GATE] confirm`\n\n"
             ),
         )
         issue = {
