@@ -1149,6 +1149,13 @@ class MaintenanceSupplyTransitionTransportTests(unittest.TestCase):
                     1,
                 ):
                     return {
+                        "number": 1,
+                        "title": "[REPO] r",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/1"
+                        ),
                         "body": control_body,
                         "author_association": "OWNER",
                     }
