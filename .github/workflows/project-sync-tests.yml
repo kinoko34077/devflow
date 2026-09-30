@@ -8,10 +8,12 @@ on:
       - 'AGENTS.md'
       - 'scripts/project_sync.py'
       - 'scripts/repository_bootstrap.py'
+      - 'scripts/maintenance_audit.py'
       - 'tools/**'
       - 'tests/**'
       - '.github/workflows/project-sync*.yml'
       - '.github/workflows/repository-bootstrap.yml'
+      - '.github/workflows/maintenance-audit.yml'
       - '.devflow/WORKFLOW.yaml'
       - 'schemas/repository-bootstrap.v1.schema.json'
       - 'docs/project/**'
@@ -39,8 +41,10 @@ jobs:
           python -m py_compile
           scripts/project_sync.py
           scripts/repository_bootstrap.py
+          scripts/maintenance_audit.py
           tools/devflow_mcp_core.py
           tools/devflow_mcp.py
           tools/repository_bootstrap.py
           tools/task_checkpoint_cursor.py
           tools/maintenance_audit.py
+          tools/maintenance_github.py
