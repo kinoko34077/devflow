@@ -53,7 +53,15 @@ updated_at: 2026-09-30T04:30:00Z
 ```
 ````
 
-Field rules are enforced by `tools/task_checkpoint_cursor.py`. In particular, checkpoint identifiers are stable ASCII tokens, identifier spelling does not imply order, `head` is either `null` or a full 40-hex exact SHA, and `updated_at` is UTC `Z` time.
+Field rules are enforced by `tools/task_checkpoint_cursor.py`. In particular:
+
+- checkpoint identifiers are stable ASCII tokens and identifier spelling does not imply order;
+- `schema_version` and `revision` use canonical positive base-10 decimal tokens only: no sign, underscore/separator, or extra scalar whitespace;
+- `head` is either `null` or a full 40-hex exact SHA;
+- `evidence` items are single-line data and may not contain the cursor sentinel or begin with a fenced-block token such as triple backticks;
+- `updated_at` is UTC `Z` time.
+
+These writer-side restrictions ensure `render_cursor_comment()` does not emit a cursor body that the canonical parser cannot safely recognize as one cursor.
 
 ## 4. Trust boundary
 
@@ -100,12 +108,15 @@ Checkpoint drift takes precedence because v1 does not infer global order from id
 A normal advance:
 
 1. requires the completed checkpoint to equal the expected current `first_unfinished`;
-2. increments live `revision` by one;
-3. sets `last_completed` to the completed checkpoint;
-4. sets the next `first_unfinished` or terminal `null`;
-5. records compact exact-head/evidence references where useful;
-6. writes the canonical replacement comment through the caller's GitHub transport;
-7. immediately re-reads the comment when transport permits.
+2. requires a non-terminal next `first_unfinished` to differ from the completed checkpoint; a no-op frontier is not a normal advance;
+3. increments live `revision` by one;
+4. sets `last_completed` to the completed checkpoint;
+5. sets the next `first_unfinished` or terminal `null`;
+6. records compact exact-head/evidence references where useful;
+7. writes the canonical replacement comment through the caller's GitHub transport;
+8. immediately re-reads the comment when transport permits.
+
+If authoritative evidence requires correction without a forward frontier movement, use explicit reconciliation rather than manufacturing an advance revision.
 
 The pure helper prepares/classifies state; it performs no GitHub network write.
 
