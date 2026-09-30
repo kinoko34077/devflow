@@ -1,7 +1,7 @@
 # Portfolio-scope Broad Pickup v2
 
 Status: proposed for acceptance under devflow#208
-Authority chain: devflow#190 Phase D -> #198 -> #208; additive work-class constraint: devflow#215 Stage 1
+Authority chain: devflow#190 Phase D -> #198 -> #208; additive work-class constraint: devflow#215 Stage 1; reviewer-provenance requirement extension: devflow#211
 Runtime consumer: `kinoko34077/execution-coordinator`
 
 ## 1. Purpose
@@ -29,11 +29,13 @@ The JSON shape is canonicalized by `schemas/execution-portfolio-metadata.v1.sche
 
 Each entry binds exactly one already-valid v1 candidate role using both `task_body_sha256` and `candidate_fingerprint`. The body digest prevents a newly revised owning task from silently inheriting old scheduling metadata; the fingerprint prevents a changed admission/conflict projection from inheriting it. Both must match current validated evidence.
 
-The entry carries only scheduling/worker-match data: optional controller urgency, explicit dependency readiness/order, readiness class, optional `ready_at`, exact required capability/environment tags, optional `work_class`, and `observed_at`/`fresh_until`. The exact live trusted Control `Priority` field supplies `control_priority`; it is deliberately not duplicated. Owning-Issue scope/acceptance remains in the owning repository.
+The entry carries only scheduling/worker-match data: optional controller urgency, explicit dependency readiness/order, readiness class, optional `ready_at`, exact required capability/environment tags, optional `work_class`, optional `different_reviewer_requirement`, and `observed_at`/`fresh_until`. The exact live trusted Control `Priority` field supplies `control_priority`; it is deliberately not duplicated. Owning-Issue scope/acceptance remains in the owning repository.
 
 `work_class`, when present, uses the closed Stage-1 vocabulary from `CHAT_WORKER_BOOTSTRAP.md`: `audit`, `triage`, `sync-check`, `quickfix`, `implementation`, `formal-review`. It describes task content and is independent of the participation `role` as an axis, but explicit evidence must remain compatible at the review boundary: `work_class == formal-review` iff `role == reviewer`. A contradictory explicit pair is malformed portfolio evidence and fails closed; it is not treated as a worker-preference mismatch. `work_class` remains optional for backward compatibility, and absence continues to use the conservative legacy role-to-class fallback from the bootstrap contract.
 
-`dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags or a work class.
+`different_reviewer_requirement` is optional and valid only for a reviewer entry. Presence records the exact implementer Review Provenance `system + model` signature against which a consuming reviewer must differ. It does not store a derived `self/independent` flag. Because it lives in the same companion entry, its authority/freshness is already bound to `task_body_sha256`, `candidate_fingerprint`, `observed_at` and `fresh_until`; no second freshness clock is introduced. Missing or ambiguous required signature evidence fails closed.
+
+`dependency_ready = true` requires a non-negative `dependency_order`; `false` requires `dependency_order = null`. `fresh_until` must be later than `observed_at`. `ready_at`, when present, is UTC and must not be inferred from Issue timestamps. Provider/model identity never supplies requirement tags, a work class, or a Review Provenance signature. Review signature evidence must be direct and explicit.
 
 ## 3. Complete frontier rule
 
@@ -45,7 +47,7 @@ Recovery demand remains a separate track. It is not converted into fresh work an
 
 ## 4. Ranking and worker matching
 
-Hard filters remain: trusted/fresh admission, live Control state and safety gates, dependency readiness, runtime claim/conflict compatibility, 3C publisher/consumer separation, reviewer independence, and exact capability/environment subset matching.
+Hard filters remain: trusted/fresh admission, live Control state and safety gates, dependency readiness, runtime claim/conflict compatibility, 3C publisher/consumer separation, reviewer independence, and exact capability/environment subset matching. For an explicit different-reviewer entry, reviewer independence includes direct Review Provenance signature inequality under the #111/#211 rule; this is eligibility only and does not replace exact-head merge-time Review freshness.
 
 When a bootstrap request explicitly supplies `accepted_work_classes`, work-class mismatch is an additional hard omission applied after the existing safety/capability gates and before role-track ranking. This means a maintenance-mode worker can reject unrelated `formal-review` demand without changing the global `recovery -> reviewer -> implementer` track policy for unconstrained workers. Contradictory explicit role/work-class evidence is validated earlier as malformed evidence and never reaches this omission/ranking stage.
 
