@@ -4,7 +4,7 @@ Status: accepted under devflow#195; operational profile contract for the accepte
 Authority: devflow cross-repository workflow specification
 Depends on: [`CHAT_WORKER_BOOTSTRAP.md`](./CHAT_WORKER_BOOTSTRAP.md) section 12
 
-A **worker profile** is the per-chat/session evidence that fills the identity and profile fields of a `chat-worker-bootstrap-request.v1` request. The fields are `worker_system`, `worker_session_id`, `execution_attempt_id`, `capabilities`, `environment` and `tool_surfaces`.
+A **worker profile** is the per-chat/session evidence that fills the identity and profile fields of a `chat-worker-bootstrap-request.v1` request. The required profile fields are `worker_system`, `worker_session_id`, `execution_attempt_id`, `capabilities`, `environment` and `tool_surfaces`; an optional direct `review_provenance` signature may be carried when the session has explicitly observed/declared the Review Provenance v2 `System + Model` it would submit.
 
 A profile is:
 
@@ -24,11 +24,12 @@ Reference implementation: `tools/chat_worker_profile.py` (pure, no I/O), tested 
   "worker_session_id": "<system>-<YYYYMMDDTHHMMSSZ>-<6 hex>",
   "cycle": 1,
   "observed_at": "2026-09-28T15:55:00Z",
-  "probes": { "<probe>": true | false }
+  "probes": { "<probe>": true | false },
+  "review_provenance": { "system": "Claude Code", "model": "Claude Sonnet 5" }
 }
 ```
 
-Unknown fields and unknown probes are rejected. Every probe in the provider checklist (section 4) must be reported, as `true` or `false`. A missing report is an error, never an implicit `false`.
+`review_provenance` is optional; the example shows it only to define its shape. Unknown fields and unknown probes are rejected. Every probe in the provider checklist (section 4) must be reported, as `true` or `false`. A missing report is an error, never an implicit `false`.
 
 ## 2. Identity rules
 
@@ -38,8 +39,9 @@ Unknown fields and unknown probes are rejected. Every probe in the provider chec
 | `worker_session_id` | generated **once** at the chat's first bootstrap as `<system>-<start UTC>-<6 random hex>`. It is reused for the whole chat and recorded as `Execution-Session-ID` in the chat's Session Record. It must start with its own `worker_system`. |
 | `execution_attempt_id` | `<worker_session_id>:c<N>` with `N ≥ 1`. It increments for every discovery cycle, including after a claim rejection or refresh. |
 | runtime `worker_id` | `<worker_system>:<worker_session_id>`, as defined by the bootstrap contract section 6. |
+| optional `review_provenance` | direct `system + model` strings intended for Review Provenance v2; normalized for whitespace, not inferred from `worker_system`, and used only for explicit different-reviewer eligibility. |
 
-The identifier grammar excludes secret-shaped values by construction. No credential, token, cookie or session material may appear in any profile field.
+The identifier grammar excludes secret-shaped values by construction. No credential, token, cookie or session material may appear in any profile field. Review provenance is self-asserted operational metadata, not authentication; provider/model identity does not grant capability, priority or rank.
 
 ## 3. Probe registry (closed for v1)
 
@@ -77,11 +79,11 @@ The "typical outcome" column is informative. Only the actual probe results count
 
 - `observed_at` must not be in the future, and the profile is valid for **60 minutes**. After that the probes must be re-run.
 - The request's `observed_at` is the time the profile is converted into a request.
-- Tags are sorted, and the output must pass `chat-worker-bootstrap-request.v1` validation. A profile that cannot form a valid request is rejected.
+- Tags are sorted, optional review provenance is whitespace-normalized, and the output must pass `chat-worker-bootstrap-request.v1` validation. A profile that cannot form a valid request is rejected.
 - Contradictory probes, such as two operating systems, are rejected.
 - Changing credentials, session or permission state to make a probe pass is Human-gated. A worker must not do it on its own.
 
 ## 6. Compatibility
 
 - **execution-coordinator:** the emitted tags are exactly the strings used by `CandidateRequirements.required_capabilities` / `required_environment`. Matching stays an exact subset check.
-- **Bootstrap contract:** a profile only fills request fields. Selection, ranking and claim authority are unchanged, and provider differences affect only evidence and tool availability, never task priority.
+- **Bootstrap contract:** a profile only fills request fields. Selection, ranking and claim authority are unchanged. Provider differences affect evidence/tool availability, never task priority. A direct Review Provenance signature may act only as the hard eligibility check for an explicit different-reviewer demand under #211.
