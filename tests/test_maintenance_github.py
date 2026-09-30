@@ -412,5 +412,69 @@ class MaintenanceGitHubTests(unittest.TestCase):
         )
 
 
+    def test_live_shape_reviewer_gate_yields_existing_owner(self):
+        from tools import maintenance_audit as ma
+
+        control_body = (
+            "## Repository\n\n`kinoko34077/kinotch-repo-monitor`\n\n"
+            "## Work Status\n\n`AWAITING_REVIEW`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n"
+            "Owner `kinotch-repo-monitor#35` / PR #36 implements "
+            "the bounded archive listener.\n\n"
+            "## Next Action\n\n"
+            "`[REVIEW] Obtain one fresh qualifying different-system/model "
+            "Formal Review.`\n"
+        )
+        owner_body = (
+            "## Work Status\n\n`AWAITING_REVIEW`\n\n"
+            "## Current blocker\n\n"
+            "`DIFFERENT_REVIEWER_REQUIRED` on current exact head.\n"
+        )
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/59"):
+                    return {
+                        "number": 59,
+                        "state": "open",
+                        "body": control_body,
+                        "author_association": "OWNER",
+                        "updated_at": "2026-09-30T02:06:31Z",
+                    }
+                if path.endswith("/issues/35"):
+                    return {
+                        "number": 35,
+                        "state": "open",
+                        "body": owner_body,
+                        "author_association": "OWNER",
+                        "updated_at": "2026-09-30T00:00:00Z",
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "kinoko34077/kinotch-repo-monitor",
+            "kinoko34077/devflow#59",
+            "2026-10-01T00:10:00Z",
+        )
+        report = ma.classify_repository(observation)
+
+        self.assertEqual(
+            observation["control"]["active_owner_ref"],
+            "kinoko34077/kinotch-repo-monitor#35",
+        )
+        self.assertTrue(observation["reviewer_gate"])
+        self.assertEqual(report["disposition"], "NEEDS_REVIEWER")
+        self.assertIn(
+            "REVIEW_GATE_YIELD",
+            report["finding_classes"],
+        )
+        self.assertEqual(
+            report["owner_ref"],
+            "kinoko34077/kinotch-repo-monitor#35",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
