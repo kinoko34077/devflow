@@ -1,0 +1,32 @@
+{
+  "repository": "kinoko34077/example",
+  "control_ref": "kinoko34077/devflow#16",
+  "observed_at": "2026-10-01T00:00:00Z",
+  "control": {
+    "repository": "kinoko34077/example",
+    "ref": "kinoko34077/devflow#16",
+    "trusted": true,
+    "revision": "sha256:control-v1",
+    "state": "OPEN",
+    "candidate_active": false
+  },
+  "owner": {
+    "ref": "kinoko34077/example#1",
+    "repository": "kinoko34077/example",
+    "revision": "sha256:owner-v1",
+    "state": "OPEN",
+    "work_status": "READY"
+  },
+  "producer": {
+    "active": false
+  },
+  "gates": {
+    "human": true,
+    "reviewer": false,
+    "external": false,
+    "security": false
+  },
+  "search": {
+    "state": "OPEN"
+  }
+}
