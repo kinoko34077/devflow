@@ -380,6 +380,12 @@ class MaintenanceGitHubTests(unittest.TestCase):
                     "historical completed owner must not be fetched"
                 )
 
+        self.assertTrue(mg._explicit_no_active_work(body))
+        self.assertEqual(
+            mg._active_owner_ref(body, "o/r"),
+            (None, False),
+        )
+
         transport = Transport()
         observation = mg.collect_repository(
             transport,
