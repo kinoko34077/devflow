@@ -401,5 +401,48 @@ class MaintenanceSyncCheckExecutorTests(unittest.TestCase):
         )
 
 
+class MaintenanceSyncCheckCliContractTests(unittest.TestCase):
+    def test_cli_exposes_manual_sync_check_apply_only(self):
+        from scripts import maintenance_audit as cli
+
+        parser = cli._parser()
+        dry = parser.parse_args(
+            [
+                "sync-check",
+                "--repository",
+                "o/r",
+                "--control",
+                "1",
+            ]
+        )
+        self.assertEqual(dry.command, "sync-check")
+        self.assertFalse(dry.apply)
+        self.assertEqual(
+            dry.token_env,
+            "MAINTENANCE_SYNC_TOKEN",
+        )
+
+        apply = parser.parse_args(
+            [
+                "sync-check",
+                "--repository",
+                "o/r",
+                "--control",
+                "1",
+                "--apply",
+            ]
+        )
+        self.assertTrue(apply.apply)
+
+    def test_maintenance_action_never_invokes_sync_check_apply(self):
+        from pathlib import Path
+
+        workflow = Path(
+            ".github/workflows/maintenance-audit.yml"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("sync-check", workflow)
+        self.assertNotIn("--apply", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
