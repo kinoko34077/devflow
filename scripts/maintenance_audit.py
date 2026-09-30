@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
@@ -20,6 +22,12 @@ from tools.maintenance_audit import (  # noqa: E402
     classify_repository,
 )
 from tools.maintenance_triage import triage  # noqa: E402
+from tools.maintenance_sync_check import (  # noqa: E402
+    SyncCheckContractError,
+    build_sync_check_plan,
+    canonical_body_sha256,
+    execute_sync_check,
+)
 from tools.maintenance_github import (  # noqa: E402
     DEVFLOW_REPOSITORY,
     GitHubReadError,
@@ -164,6 +172,255 @@ def _portfolio(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_issue_ref(value: str) -> tuple[str, int]:
+    if "#" not in value:
+        raise SyncCheckContractError("Issue reference is malformed")
+    repository, number = value.rsplit("#", 1)
+    if (
+        "/" not in repository
+        or not number.isdigit()
+        or int(number) < 1
+    ):
+        raise SyncCheckContractError("Issue reference is malformed")
+    return repository, int(number)
+
+
+def _sections(body: str) -> dict[str, str]:
+    result: dict[str, list[str]] = {}
+    current: str | None = None
+    normalized = body.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized.split("\n"):
+        if line.startswith("## "):
+            current = line[3:].strip()
+            result.setdefault(current, [])
+        elif current is not None:
+            result[current].append(line)
+    return {
+        key: "\n".join(lines).strip()
+        for key, lines in result.items()
+    }
+
+
+def _scalar_section(sections: dict[str, str], name: str) -> str | None:
+    value = sections.get(name)
+    if value is None:
+        return None
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    text = lines[0]
+    if len(text) >= 2 and text[0] == text[-1] == "`":
+        text = text[1:-1].strip()
+    return text or None
+
+
+def _candidate_tasks_from_body(body: str) -> list[str]:
+    begin = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
+    end = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
+    if body.count(begin) != 1 or body.count(end) != 1:
+        raise SyncCheckContractError(
+            "Control candidate projection block is missing or ambiguous"
+        )
+    start = body.index(begin) + len(begin)
+    stop = body.index(end)
+    if stop <= start:
+        raise SyncCheckContractError(
+            "Control candidate projection markers are out of order"
+        )
+    try:
+        value = json.loads(body[start:stop].strip())
+    except json.JSONDecodeError as exc:
+        raise SyncCheckContractError(
+            "Control candidate projection is invalid JSON"
+        ) from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("candidates"), list)
+    ):
+        raise SyncCheckContractError(
+            "Control candidate projection schema is invalid"
+        )
+    tasks = []
+    for item in value["candidates"]:
+        if not isinstance(item, dict) or not isinstance(item.get("task"), str):
+            raise SyncCheckContractError(
+                "Control candidate projection entry is invalid"
+            )
+        tasks.append(item["task"])
+    if len(set(tasks)) != len(tasks):
+        raise SyncCheckContractError(
+            "Control candidate projection contains duplicate task refs"
+        )
+    return tasks
+
+
+class _SyncCheckGitHubTransport(GitHubReadTransport):
+    def get_control(
+        self,
+        repository: str,
+        control_ref: str,
+    ) -> dict[str, object]:
+        control_repo, number = _split_issue_ref(control_ref)
+        issue = self.get_issue(control_repo, number)
+        body = str(issue.get("body") or "")
+        return {
+            "repository": repository,
+            "control_ref": control_ref,
+            "body": body,
+            "body_sha256": canonical_body_sha256(body),
+            "candidate_tasks": _candidate_tasks_from_body(body),
+            "producer_active": False,
+            "human_gate": False,
+            "reviewer_gate": False,
+            "external_wait": False,
+            "security_gate": False,
+        }
+
+    def get_owner(
+        self,
+        repository: str,
+        owner_ref: str,
+    ) -> dict[str, object]:
+        owner_repo, number = _split_issue_ref(owner_ref)
+        if owner_repo != repository:
+            raise SyncCheckContractError(
+                "owner repository does not match audit repository"
+            )
+        issue = self.get_issue(owner_repo, number)
+        body = str(issue.get("body") or "")
+        sections = _sections(body)
+        work_status = (_scalar_section(sections, "Work Status") or "").upper()
+        state = str(issue.get("state") or "UNKNOWN").upper()
+        terminal = state == "CLOSED" or work_status == "DONE"
+        runnable = work_status in {
+            "READY_FOR_IMPLEMENTATION",
+            "AWAITING_REVIEW",
+            "WORK_ORDER_READY",
+        }
+        return {
+            "repository": repository,
+            "owner_ref": owner_ref,
+            "body_sha256": canonical_body_sha256(body),
+            "state": state,
+            "terminal": terminal,
+            "runnable": runnable,
+            "producer_active": work_status == "IMPLEMENTING",
+            "human_gate": False,
+            "reviewer_gate": work_status == "AWAITING_REVIEW",
+            "external_wait": False,
+            "security_gate": False,
+        }
+
+    def update_control_body(
+        self,
+        repository: str,
+        control_ref: str,
+        expected_body_sha256: str,
+        body: str,
+    ) -> bool:
+        control_repo, number = _split_issue_ref(control_ref)
+        live = self.get_issue(control_repo, number)
+        live_body = str(live.get("body") or "")
+        if canonical_body_sha256(live_body) != expected_body_sha256:
+            return False
+
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(
+                f"/repos/{control_repo}/issues/{number}"
+            ),
+            data=payload,
+            method="PATCH",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-sync-check",
+            },
+        )
+        try:
+            with self._opener(
+                request,
+                timeout=self._timeout,
+            ) as response:
+                raw = response.read()
+                if raw:
+                    value = json.loads(raw.decode("utf-8"))
+                    if not isinstance(value, dict):
+                        return False
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub bounded Control update failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError as exc:
+            raise GitHubReadError(
+                f"GitHub bounded Control update failed: {exc.reason}"
+            ) from None
+        return True
+
+
+def _sync_check(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+    observation = collect_repository(
+        transport,
+        args.repository,
+        control_ref,
+        observed_at,
+    )
+    report = _classify_observation(observation)
+    owner_ref = report.get("owner_ref")
+    if not isinstance(owner_ref, str):
+        payload = {
+            "schema_version": "maintenance-sync-check-result.v1",
+            "report": report,
+            "plan": None,
+            "result": None,
+        }
+        _write(payload, args.output)
+        return 0
+
+    control_snapshot = transport.get_control(
+        args.repository,
+        control_ref,
+    )
+    owner_snapshot = transport.get_owner(
+        args.repository,
+        owner_ref,
+    )
+    plan = build_sync_check_plan(
+        report,
+        control_snapshot,
+        owner_snapshot,
+    )
+    if plan is None:
+        payload = {
+            "schema_version": "maintenance-sync-check-result.v1",
+            "report": report,
+            "plan": None,
+            "result": None,
+        }
+        _write(payload, args.output)
+        return 0
+
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-sync-check-result.v1",
+        "report": report,
+        "plan": asdict(plan),
+        "result": None,
+    }
+    if args.apply:
+        payload["result"] = asdict(
+            execute_sync_check(plan, transport)
+        )
+    _write(payload, args.output)
+    return 0
+
+
 def _summarize(args: argparse.Namespace) -> int:
     value = json.loads(
         Path(args.input).read_text(encoding="utf-8")
@@ -243,6 +500,26 @@ def _parser() -> argparse.ArgumentParser:
     portfolio.add_argument("--output")
     portfolio.set_defaults(func=_portfolio)
 
+    sync_check = sub.add_parser("sync-check")
+    sync_check.add_argument("--repository", required=True)
+    sync_check.add_argument(
+        "--control",
+        required=True,
+        type=int,
+    )
+    sync_check.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SYNC_TOKEN",
+    )
+    sync_check.add_argument("--observed-at")
+    sync_check.add_argument("--output")
+    sync_check.add_argument(
+        "--apply",
+        action="store_true",
+        help="apply the single allowlisted Control projection repair",
+    )
+    sync_check.set_defaults(func=_sync_check)
+
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--input", required=True)
     summarize.set_defaults(func=_summarize)
@@ -258,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         GitHubReadError,
         AuditContractError,
+        SyncCheckContractError,
         OSError,
         json.JSONDecodeError,
         ValueError,
