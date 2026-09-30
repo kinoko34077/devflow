@@ -250,18 +250,51 @@ def empty_control_body():
     )
 
 
+def existing_candidate_control_body():
+    supply = ms.build_existing_owner_candidate(
+        decision(),
+        owner(),
+        control(),
+    )
+    admission = supply["admission"]
+    payload = (
+        "{\n"
+        '  "schema_version": 1,\n'
+        '  "source_ref": "kinoko34077/devflow#1",\n'
+        '  "repository": "o/r",\n'
+        '  "candidates": [\n'
+        + __import__("json").dumps(
+            admission,
+            indent=4,
+            ensure_ascii=False,
+        ).replace("\n", "\n    ")
+        + "\n  ]\n"
+        "}\n"
+    )
+    return empty_control_body().replace(
+        "{\n"
+        '  "schema_version": 1,\n'
+        '  "source_ref": "kinoko34077/devflow#1",\n'
+        '  "repository": "o/r",\n'
+        '  "candidates": []\n'
+        "}\n",
+        payload,
+        1,
+    )
+
+
 class MaintenanceSupplyProjectionTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(ms)
 
-    def test_projection_editor_adds_both_blocks_and_is_idempotent(self):
+    def test_projection_editor_adds_portfolio_metadata_without_manufacturing_candidate(self):
         supply = ms.build_existing_owner_candidate(
             decision(),
             owner(),
             control(),
         )
         first, changed = ms.reconcile_control_projection_body(
-            empty_control_body(),
+            existing_candidate_control_body(),
             supply,
             task_ref="o/r#7",
         )
@@ -279,6 +312,36 @@ class MaintenanceSupplyProjectionTests(unittest.TestCase):
         self.assertFalse(changed_again)
         self.assertEqual(second, first)
 
+    def test_projection_editor_refuses_to_create_missing_admission(self):
+        supply = ms.build_existing_owner_candidate(
+            decision(),
+            owner(),
+            control(),
+        )
+        with self.assertRaises(ms.MaintenanceSupplyError):
+            ms.reconcile_control_projection_body(
+                empty_control_body(),
+                supply,
+                task_ref="o/r#7",
+            )
+
+    def test_existing_admission_is_exact_machine_source(self):
+        admission = ms.extract_existing_admission(
+            existing_candidate_control_body(),
+            repository="o/r",
+            control_ref="kinoko34077/devflow#1",
+            task_ref="o/r#7",
+        )
+        self.assertEqual(admission["task"], "o/r#7")
+        self.assertEqual(
+            admission["task_body_sha256"],
+            BODY_SHA,
+        )
+        self.assertFalse(
+            admission["requires_user_confirmation"],
+        )
+        self.assertFalse(admission["blocked"])
+
     def test_projection_editor_withdraws_both_blocks(self):
         supply = ms.build_existing_owner_candidate(
             decision(),
@@ -286,7 +349,7 @@ class MaintenanceSupplyProjectionTests(unittest.TestCase):
             control(),
         )
         published, _ = ms.reconcile_control_projection_body(
-            empty_control_body(),
+            existing_candidate_control_body(),
             supply,
             task_ref="o/r#7",
         )
