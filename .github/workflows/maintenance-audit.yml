@@ -1,0 +1,76 @@
+name: Maintenance audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only maintenance audit mode
+        type: choice
+        required: true
+        default: audit
+        options:
+          - audit
+      repository:
+        description: Optional owner/name for a single-repository diagnostic audit
+        required: false
+        type: string
+      control:
+        description: Required Control issue number for single-repository mode
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  checks: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Run read-only maintenance audit
+        env:
+          MAINTENANCE_AUDIT_TOKEN: ${{ secrets.MAINTENANCE_AUDIT_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_REPOSITORY: ${{ inputs.repository }}
+          AUDIT_CONTROL: ${{ inputs.control }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$AUDIT_REPOSITORY" ]]; then
+            if [[ -z "$AUDIT_CONTROL" ]]; then
+              echo "single-repository mode requires control issue number" >&2
+              exit 2
+            fi
+            python scripts/maintenance_audit.py repository \
+              --repository "$AUDIT_REPOSITORY" \
+              --control "$AUDIT_CONTROL" \
+              --token-env GITHUB_TOKEN \
+              --output maintenance-audit-report.json
+          else
+            if [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
+              echo "portfolio audit requires the preconfigured MAINTENANCE_AUDIT_TOKEN secret" >&2
+              exit 2
+            fi
+            python scripts/maintenance_audit.py portfolio \
+              --token-env MAINTENANCE_AUDIT_TOKEN \
+              --output maintenance-audit-report.json
+          fi
+      - name: Write aggregate summary
+        if: always() && hashFiles('maintenance-audit-report.json') != ''
+        run: >-
+          python scripts/maintenance_audit.py summarize
+          --input maintenance-audit-report.json
+          >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload machine report
+        if: always() && hashFiles('maintenance-audit-report.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: maintenance-audit-report
+          path: maintenance-audit-report.json
