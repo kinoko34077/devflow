@@ -762,5 +762,52 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
         self.assertEqual(report["disposition"], "NEEDS_HUMAN")
 
 
+    def test_audited_idle_control_human_gate_is_not_clean(self):
+        from tools import maintenance_audit as ma
+
+        body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n"
+            "None.\n\n"
+            "## Next Action\n\n"
+            "`[HUMAN_GATE] await explicit decision`\n\n"
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            '{"schema_version":1,'
+            '"source_ref":"kinoko34077/devflow#1",'
+            '"repository":"o/r","candidates":[]}\n'
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+        )
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/1"):
+                    return {
+                        "number": 1,
+                        "title": "[REPO] r",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/1"
+                        ),
+                        "body": body,
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "o/r",
+            "kinoko34077/devflow#1",
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertTrue(observation["human_gate"])
+        self.assertEqual(
+            ma.classify_repository(observation)["disposition"],
+            "NEEDS_HUMAN",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
