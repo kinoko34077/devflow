@@ -49,6 +49,10 @@ class FakeApi:
         self.sha_counter += 1
         return {"commit_sha": f"{self.sha_counter:040x}"}
 
+    def get_default_branch_name(self, full_name):
+        self._maybe_fail("get_default_branch_name")
+        return self.repos[full_name]["default_branch"]
+
     def get_default_branch_head(self, full_name):
         self._maybe_fail("get_default_branch_head")
         return f"{max(self.sha_counter, 1):040x}"
@@ -139,6 +143,8 @@ class RepositoryBootstrapExecutorTests(unittest.TestCase):
         self.assertEqual(controls[0]["title"], "[REPO] example-repo")
         self.assertIn("## Audit SHA", controls[0]["body"])
         self.assertIn(result.head_sha, controls[0]["body"])
+        self.assertIn("## Audit Ref", controls[0]["body"])
+        self.assertIn("`main`", controls[0]["body"])
         self.assertEqual(result.repository_url, "https://github.com/kinoko34077/example-repo")
         self.assertEqual(len(result.issue_urls), 1)
         self.assertIsNotNone(result.control_url)
