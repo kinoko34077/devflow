@@ -158,21 +158,24 @@ class ClientAndSyncTests(unittest.TestCase):
             def get_project_identity(self, owner, number):
                 return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
             def get_project_fields(self, project_id):
-                return [
-                    {"id": "F_STATUS", "name": "Status", "kind": "single", "options": [{"id": "O_DONE", "name": "DONE"}, {"id": "O_IMPL", "name": "IMPLEMENTING"}]},
-                    {"id": "F_PRIORITY", "name": "Priority", "kind": "single", "options": [{"id": "O_P1", "name": "P1"}]},
-                    {"id": "F_RISK", "name": "Risk", "kind": "single", "options": [{"id": "O_LOW", "name": "LOW"}]},
-                    {"id": "F_TYPE", "name": "Work Type", "kind": "single", "options": [{"id": "O_INFRA", "name": "INFRA"}]},
-                    {"id": "F_RS", "name": "Repository State", "kind": "single", "options": [{"id": "O_ACTIVE", "name": "ACTIVE"}]},
-                    {"id": "F_REPO", "name": "Managed Repository", "kind": "text", "options": []},
-                    {"id": "F_NEXT", "name": "Next Action", "kind": "text", "options": []},
-                    {"id": "F_SHA", "name": "Audit SHA", "kind": "text", "options": []},
-                ]
+                out = []
+                for name in project_sync.EXPECTED_FIELDS:
+                    if name in project_sync.SELECT_OPTIONS:
+                        options = [
+                            {"id": f"{name}-{value}", "name": value}
+                            for value in project_sync.SELECT_OPTIONS[name]
+                        ]
+                        out.append({"id": name, "name": name, "kind": "single", "options": options})
+                    elif name in project_sync.DATE_FIELDS:
+                        out.append({"id": name, "name": name, "kind": "date", "options": []})
+                    else:
+                        out.append({"id": name, "name": name, "kind": "text", "options": []})
+                return out
             def get_project_items(self, project_id):
                 return [{"id": "I1", "content_id": "ISSUE1", "number": 1, "repository": "kinoko34077/devflow", "fields": {"Priority": "P1"}}]
         snap = project_sync.discover_project(FakeGraphQL(), "kinoko34077", 1)
         self.assertEqual(snap.id, "P")
-        self.assertEqual(snap.fields["Priority"].options["P1"], "O_P1")
+        self.assertEqual(snap.fields["Priority"].options["P1"], "Priority-P1")
         self.assertEqual(snap.items_by_content_id["ISSUE1"].fields["Priority"], "P1")
 
     def test_sync_one_verify_is_read_only_and_reconcile_mutates_only_drift(self):
@@ -305,7 +308,10 @@ class StructuralValidationTests(unittest.TestCase):
         class FakeGraphQL:
             def get_project_identity(self, owner, number): return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
             def get_project_fields(self, project_id):
-                return [{"id": name, "name": name, "kind": "text", "options": []} for name in project_sync.EXPECTED_FIELDS]
+                return [
+                    {"id": name, "name": name, "kind": "date" if name in project_sync.DATE_FIELDS else "text", "options": []}
+                    for name in project_sync.EXPECTED_FIELDS
+                ]
             def get_project_items(self, project_id): return []
         with self.assertRaises(project_sync.ConfigError):
             project_sync.discover_project(FakeGraphQL(), project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
@@ -320,6 +326,8 @@ class StructuralValidationTests(unittest.TestCase):
                         opts = [{"id": f"{name}-1", "name": v} for v in project_sync.SELECT_OPTIONS[name]]
                         if name == "Priority": opts.append({"id": "dup", "name": "P1"})
                         out.append({"id": name, "name": name, "kind": "single", "options": opts})
+                    elif name in project_sync.DATE_FIELDS:
+                        out.append({"id": name, "name": name, "kind": "date", "options": []})
                     else:
                         out.append({"id": name, "name": name, "kind": "text", "options": []})
                 return out
