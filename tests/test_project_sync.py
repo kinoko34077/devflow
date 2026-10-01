@@ -419,6 +419,58 @@ class AuditProvenanceTests(unittest.TestCase):
         self.assertEqual(created_names, set(project_sync.AUDIT_PROJECT_FIELD_SPECS))
         self.assertNotIn("Audit SHA", created_names)
 
+    def test_audit_timestamp_projects_to_date_without_losing_control_timestamp(self):
+        issue = {
+            "state": "open",
+            "body": (
+                "## Last Audit At\n\n`2026-10-01T08:15:44Z`\n\n"
+                "## Last Deep Audit At\n\n`2026-09-30T23:59:59+00:00`"
+            ),
+        }
+        fields = project_sync.desired_project_fields(issue)
+        self.assertEqual(fields["Last Audit"], "2026-10-01")
+        self.assertEqual(fields["Last Deep Audit"], "2026-09-30")
+
+    def test_process_projects_freshness_without_mutating_control_audit_sha(self):
+        issue = {
+            "node_id": "ISSUE",
+            "number": 9,
+            "state": "open",
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`main`\n\n"
+                "## Last Audit At\n\n`2026-10-01T08:15:44Z`\n\n"
+                "## Audit Depth\n\n`CONTROL`"
+            ),
+        }
+        fields = {
+            "Audit SHA": project_sync.ProjectField("SHA", "Audit SHA", "text", {}),
+            "Audit Ref": project_sync.ProjectField("REF", "Audit Ref", "text", {}),
+            "Last Audit": project_sync.ProjectField("LAST", "Last Audit", "date", {}),
+            "Audit Depth": project_sync.ProjectField("DEPTH", "Audit Depth", "single", {"CONTROL": "C"}),
+            "Audit Freshness": project_sync.ProjectField("FRESH", "Audit Freshness", "single", {"CURRENT": "CUR"}),
+        }
+        current = {
+            "Audit SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Audit Ref": "main",
+            "Last Audit": "2026-10-01",
+            "Audit Depth": "CONTROL",
+            "Audit Freshness": "CURRENT",
+        }
+        snap = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, fields,
+            {"ISSUE": project_sync.ProjectItem("I", "ISSUE", 9, "kinoko34077/devflow", current)},
+        )
+        class NoWrite:
+            def __getattr__(self, name):
+                raise AssertionError(name)
+        summary = project_sync.process_issues(
+            [issue], snap, NoWrite(), "verify",
+            freshness_resolver=lambda repository, ref: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        self.assertEqual(summary["drift_fields"], 0)
+        self.assertEqual(summary["errors"], [])
     def test_project_workflow_supplies_read_token_for_freshness(self):
         path = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
         text = path.read_text(encoding="utf-8")
