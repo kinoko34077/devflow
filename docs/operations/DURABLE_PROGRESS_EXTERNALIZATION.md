@@ -171,7 +171,7 @@ Detailed cursor procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
 ## 11. Relation to other devflow records
 
 - Owning Issue / Work Order: durable task truth, scope, acceptance and blocker authority.
-- Durable progress surface: recoverable execution position and temporary working context.
+- Durable progress surface: detailed recoverable progress/evidence and temporary working context; it is not the compact structural current-position locator.
 - Execution Session Record: worker/session provenance, bounded scope and active handoff/collision state.
 - Task Checkpoint Cursor: compact roadmap/current-frontier navigation and drift projection for eligible single-frontier work; it complements rather than replaces the detailed durable progress surface or evidence and is not readiness/claim authority.
 - PR / Actions / tests / Formal Review: concrete diff and verification/review evidence.
