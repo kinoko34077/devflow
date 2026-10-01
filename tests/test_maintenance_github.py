@@ -809,5 +809,99 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
         )
 
 
+class MaintenanceGitHubP6PilotRegressionTests(unittest.TestCase):
+    def test_no_active_phrase_does_not_resurrect_completed_owner(self):
+        from tools import maintenance_audit as ma
+
+        body = (
+            "## Repository\n\n`kinoko34077/example`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Active Work\n\n"
+            "No active `devflow#153` repair remains for this repository.\n\n"
+            "Completed:\n"
+            "- `example#5` / PR #10 — historical completed repair.\n\n"
+            "## Next Action\n\n"
+            "`[WAIT] Re-audit when state changes.`\n"
+        )
+
+        class Transport:
+            def __init__(self):
+                self.owner_reads = 0
+
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "body": body,
+                        "author_association": "OWNER",
+                    }
+                self.owner_reads += 1
+                raise AssertionError(
+                    "historical Completed owner must not be re-read as active"
+                )
+
+        transport = Transport()
+        observation = mg.collect_repository(
+            transport,
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T08:42:21Z",
+        )
+        self.assertEqual(transport.owner_reads, 0)
+        self.assertEqual(observation["source_status"], "OK")
+        self.assertIsNone(observation["control"]["active_owner_ref"])
+        self.assertEqual(observation["owner"]["state"], "NONE")
+        self.assertEqual(
+            ma.classify_repository(observation)["disposition"],
+            "NO_ACTION",
+        )
+
+    def test_wait_none_control_is_valid_intentional_idle(self):
+        from tools import maintenance_audit as ma
+
+        body = (
+            "## Repository\n\n`kinoko34077/example`\n\n"
+            "## Work Status\n\n`WAIT`\n\n"
+            "## Active Work\n\nNone.\n\n"
+            "## Next Action\n\n"
+            "`[WAIT] No active repository-local implementation.`\n"
+        )
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/16"):
+                    return {
+                        "number": 16,
+                        "title": "[REPO] example",
+                        "state": "open",
+                        "html_url": (
+                            "https://github.com/kinoko34077/"
+                            "devflow/issues/16"
+                        ),
+                        "body": body,
+                        "author_association": "OWNER",
+                    }
+                raise AssertionError(path)
+
+        observation = mg.collect_repository(
+            Transport(),
+            "kinoko34077/example",
+            "kinoko34077/devflow#16",
+            "2026-10-01T08:42:21Z",
+        )
+        self.assertEqual(observation["source_status"], "OK")
+        self.assertEqual(observation["owner"]["state"], "NONE")
+        self.assertEqual(
+            ma.classify_repository(observation)["disposition"],
+            "NO_ACTION",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

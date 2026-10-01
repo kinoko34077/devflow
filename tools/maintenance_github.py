@@ -408,7 +408,11 @@ def _explicit_no_active_work(control_body: str) -> bool:
         ),
         "",
     )
-    return re.match(r"^None(?:\.|\s|$)", first, re.IGNORECASE) is not None
+    return re.match(
+        r"^(?:None(?:\.|\s|$)|No\s+active(?:\s|$))",
+        first,
+        re.IGNORECASE,
+    ) is not None
 
 
 def _active_owner_ref(
@@ -549,13 +553,9 @@ def collect_repository(
             control_ref,
             str(exc),
         )
-    work_status = (
-        _scalar_section(sections, "Work Status") or ""
-    ).upper()
     explicit_idle = (
         owner_ref is None
         and not candidate_present
-        and work_status == "AUDITED"
         and _explicit_no_active_work(body)
     )
     source_status = "OK"
