@@ -59,6 +59,8 @@ A new Issue is optional for a truly trivial, low-risk, single-PR change when the
 
 Before creating a new Issue, search open Issues and current `Active Work` to avoid duplicates.
 
+When an owning Issue / Work Order already exists, do not create a second Issue whose only purpose is progress storage, chat/context-limit minutes, restart instructions, or hosting a Task Checkpoint Cursor. Keep recoverable progress on the owning surface, keep worker provenance in its Execution Session Record, and keep the single current recovery frontier in the owning task's Cursor when eligible. A separate progress Issue requires an independent bounded objective/recovery/acceptance/handoff responsibility or the absence of a suitable owning surface; context loss alone is not such a responsibility.
+
 ## 3. Information ownership boundary
 
 Keep each fact in the surface that owns it. Link or summarize elsewhere instead of maintaining multiple full canonical copies.
