@@ -422,7 +422,7 @@ class AuditProvenanceTests(unittest.TestCase):
     def test_project_workflow_supplies_read_token_for_freshness(self):
         path = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
         text = path.read_text(encoding="utf-8")
-        self.assertIn("MAINTENANCE_AUDIT_TOKEN", text)
+        self.assertEqual(text.count("MAINTENANCE_AUDIT_TOKEN"), 2)
 
 
 if __name__ == "__main__":
