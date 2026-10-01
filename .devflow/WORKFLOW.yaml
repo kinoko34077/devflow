@@ -120,6 +120,15 @@ issue_authority:
     normal_review_boundary: true
 
 repository_control:
+  control_only_wait_source_state:
+    value: WAIT
+    allowed_only_for_repository_control: true
+    meaning: no_currently_runnable_or_active_repository_local_work
+    general_work_state: false
+    project_status_projection: PARKED
+    repository_state_unchanged: true
+    next_action_must_name_wait_condition: true
+    authority: devflow#162
   one_open_issue_per_managed_repository: true
   excluded_repositories:
     - pc-files
