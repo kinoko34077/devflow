@@ -445,6 +445,7 @@ class AuditProvenanceTests(unittest.TestCase):
             ),
         }
         fields = {
+            "Managed Repository": project_sync.ProjectField("REPO", "Managed Repository", "text", {}),
             "Audit SHA": project_sync.ProjectField("SHA", "Audit SHA", "text", {}),
             "Audit Ref": project_sync.ProjectField("REF", "Audit Ref", "text", {}),
             "Last Audit": project_sync.ProjectField("LAST", "Last Audit", "date", {}),
@@ -452,6 +453,7 @@ class AuditProvenanceTests(unittest.TestCase):
             "Audit Freshness": project_sync.ProjectField("FRESH", "Audit Freshness", "single", {"CURRENT": "CUR"}),
         }
         current = {
+            "Managed Repository": "kinoko34077/demo",
             "Audit SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "Audit Ref": "main",
             "Last Audit": "2026-10-01",
@@ -474,7 +476,7 @@ class AuditProvenanceTests(unittest.TestCase):
     def test_project_workflow_supplies_read_token_for_freshness(self):
         path = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
         text = path.read_text(encoding="utf-8")
-        self.assertEqual(text.count("MAINTENANCE_AUDIT_TOKEN"), 2)
+        self.assertEqual(text.count("MAINTENANCE_AUDIT_TOKEN"), 4)
 
 
 if __name__ == "__main__":
