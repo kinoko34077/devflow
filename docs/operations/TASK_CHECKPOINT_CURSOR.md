@@ -159,7 +159,7 @@ Ordinary `WARN_*` outcomes mean re-observe/reconcile. They are not execution-coo
 
 ## 11. Relation to durable progress and Sessions
 
-The owning Issue / Work Order owns task truth. The durable progress surface owns recoverable execution position and enough context to continue. The Task Checkpoint Cursor is an optional compact projection of that durable state. The Execution Session Record owns worker/session provenance, bounded scope and collision/handoff state. PR/Actions/tests/Formal Review own concrete implementation and verification evidence.
+The owning Issue / Work Order owns task truth. The durable progress surface owns detailed recoverable progress, evidence, findings, decisions, blockers and enough context to continue. The Task Checkpoint Cursor is required for eligible single-frontier multi-step work and is the compact structural current-position projection that complements that durable state. The Execution Session Record owns worker/session provenance, bounded scope and collision/handoff state. PR/Actions/tests/Formal Review own concrete implementation and verification evidence.
 
 The cursor does not replace the durable progress surface or its evidence. A dead/stale Session does not erase the task frontier; a successor reads the live durable state and cursor, checks collision/readiness, and continues from the current frontier.
 
