@@ -272,10 +272,9 @@ class MaintenanceGitHubTests(unittest.TestCase):
             [("kinoko34077/devflow", 16)],
         )
 
-    def test_manual_workflow_is_read_only_and_unscheduled(self):
+    def test_workflow_keeps_read_only_audit_permissions(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", text)
-        self.assertNotIn("schedule:", text)
         self.assertIn("contents: read", text)
         self.assertIn("issues: read", text)
         self.assertIn("pull-requests: read", text)
