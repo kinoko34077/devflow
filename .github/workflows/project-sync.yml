@@ -44,6 +44,7 @@ jobs:
         if: github.event_name == 'issues' && github.event.issue.title != '[SYSTEM] GitHub Project Sync Health'
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          MAINTENANCE_AUDIT_TOKEN: ${{ secrets.MAINTENANCE_AUDIT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/project_sync.py event-sync
 
