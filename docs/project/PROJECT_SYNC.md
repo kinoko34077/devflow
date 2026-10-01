@@ -34,6 +34,17 @@ Project values are never used to rewrite canonical Issues.
 | Repository | `Managed Repository` |
 | Next Action | `Next Action` |
 | Audit SHA | `Audit SHA` |
+| Audit Ref | `Audit Ref` |
+| Last Audit At | `Last Audit` |
+| Audit Depth | `Audit Depth` |
+| Audit Scope | `Audit Scope` |
+| Audit Evidence | `Audit Evidence` |
+| Last Deep Audit At | `Last Deep Audit` |
+| derived Audit Freshness | `Audit Freshness` |
+
+Audit provenance remains canonical in the Repository Control. `Audit Freshness` is derived from exact `Audit SHA` versus the explicit `Audit Ref` head and is never reverse-synced into the Control. `Last Audit`/`Audit Depth` describe the latest accepted audit event, while `Audit SHA`/`Audit Ref` preserve the latest accepted repository-revision audit binding. A CONTROL-only audit may update the former without advancing the latter. If the ref is absent or cannot be resolved safely, freshness is `UNKNOWN`; the synchronizer does not guess the default branch.
+
+`Audit Depth` uses `CONTROL | STANDARD | DEEP`. Project date fields display the calendar date from the canonical UTC audit timestamp while the full timestamp remains in the Control/evidence surface.
 
 Missing Issue sections are not guessed or used to clear existing Project values. Unknown select values fail explicitly.
 
@@ -51,7 +62,7 @@ Event sync runs for devflow Issue events:
 Manual workflow modes:
 
 - `verify`: read-only comparison of canonical devflow state against Project state.
-- `reconcile`: repairs supported Project drift from canonical devflow state and then verifies again.
+- `reconcile`: creates/validates the bounded audit-provenance Project fields when needed, repairs supported Project drift from canonical devflow state, and then verifies again.
 - optional `issue_number`: limit manual work to one Issue.
 
 There is no periodic schedule in v1.
@@ -121,11 +132,19 @@ The capable agent must:
 
 Current state: the secret is configured and authenticated Project access is operational.
 
+For audit freshness, the synchronizer also consumes the read credential already used by the Stage-2 maintenance auditor:
+
+`MAINTENANCE_AUDIT_TOKEN`
+
+That credential is used only to resolve the explicit repository/ref named by `Audit Ref`. Missing/unresolvable read evidence yields `Audit Freshness = UNKNOWN`; it does not authorize Project -> Control reverse writes or repository mutation.
+
 For recreation or credential rotation, use a Project-capable personal access token and save only the token value as that repository secret.
 
 Do not place the token in source code, Issue bodies, workflow YAML, comments, or logs.
 
 After credential recreation/rotation, run full `reconcile` then full `verify` and confirm Sync Health returns an accepted state before considering the credential change complete.
+
+When audit Project fields are introduced or structurally changed, use explicit full `reconcile` to create/validate them, then full `verify`, followed by direct Project inspection because field structure is an API/UI structural boundary. Event sync and ordinary verify do not create Project fields.
 
 ## 8. Failure handling
 

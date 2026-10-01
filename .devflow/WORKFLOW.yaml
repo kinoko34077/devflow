@@ -138,6 +138,7 @@ repository_control:
     - canonical_entry_points
   update_when:
     - accepted_audit_sha_changes
+    - accepted_audit_provenance_changes
     - work_status_changes
     - repository_state_changes
     - cross_repository_priority_or_risk_changes
@@ -151,6 +152,33 @@ repository_control:
     - repeated_test_with_same_outcome
     - minor_implementation_comment
     - local_detail_without_cross_repository_state_change
+
+  audit_provenance:
+    machine_owned: true
+    latest_fields:
+      - audit_sha
+      - audit_ref
+      - last_audit_at
+      - audit_depth
+      - audit_scope
+      - audit_evidence
+      - last_deep_audit_at
+    audit_depths:
+      - CONTROL
+      - STANDARD
+      - DEEP
+    derived_freshness:
+      values:
+        - CURRENT
+        - DRIFTED
+        - UNKNOWN
+      compare: audit_sha_to_explicit_audit_ref_head
+      missing_or_unresolvable_audit_ref: UNKNOWN
+      default_branch_guess_when_ref_missing: false
+    historical_backfill:
+      infer_timestamp_from_commit_time: false
+      infer_depth_from_work_status: false
+      require_exact_evidence: true
 
 repository_local_issue:
   durable_tracking_expected_when:
@@ -273,6 +301,14 @@ project_display:
     repository: Managed Repository
     next_action: Next Action
     audit_sha: Audit SHA
+    audit_ref: Audit Ref
+    last_audit_at: Last Audit
+    audit_depth: Audit Depth
+    audit_scope: Audit Scope
+    audit_evidence: Audit Evidence
+    last_deep_audit_at: Last Deep Audit
+  derived_field_mapping:
+    audit_freshness: Audit Freshness
   builtin_repository_is_issue_owner_only: true
   required_views:
     - Repository Overview
@@ -302,6 +338,7 @@ project_sync:
   implementation_file: scripts/project_sync.py
   operations_doc: docs/project/PROJECT_SYNC.md
   secret_name: PROJECTS_TOKEN
+  cross_repository_read_secret_name: MAINTENANCE_AUDIT_TOKEN
   event_modes:
     - event-sync
   manual_modes:

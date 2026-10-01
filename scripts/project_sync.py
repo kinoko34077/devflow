@@ -30,6 +30,12 @@ FIELD_MAP = {
     "Repository": "Managed Repository",
     "Next Action": "Next Action",
     "Audit SHA": "Audit SHA",
+    "Audit Ref": "Audit Ref",
+    "Last Audit At": "Last Audit",
+    "Audit Depth": "Audit Depth",
+    "Audit Scope": "Audit Scope",
+    "Audit Evidence": "Audit Evidence",
+    "Last Deep Audit At": "Last Deep Audit",
 }
 # WAIT is a valid devflow Control state; map it only at the Project display boundary.
 # The source Control remains WAIT, while the existing Project Status option is PARKED.
@@ -44,9 +50,30 @@ SELECT_OPTIONS = {
     "Priority": {"P0", "P1", "P2", "P3"},
     "Risk": {"LOW", "MEDIUM", "HIGH", "CRITICAL"},
     "Work Type": {"FEATURE", "BUG", "SPEC", "AUDIT", "REFACTOR", "MAINTENANCE", "RESEARCH", "INFRA", "DOCS"},
+    "Audit Depth": {"CONTROL", "STANDARD", "DEEP"},
+    "Audit Freshness": {"CURRENT", "DRIFTED", "UNKNOWN"},
 }
-TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA"}
-EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS
+TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA", "Audit Ref", "Audit Scope", "Audit Evidence"}
+DATE_FIELDS = {"Last Audit", "Last Deep Audit"}
+EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS | DATE_FIELDS
+
+AUDIT_PROJECT_FIELD_SPECS = {
+    "Audit Ref": {"kind": "text", "options": []},
+    "Last Audit": {"kind": "date", "options": []},
+    "Audit Depth": {"kind": "single", "options": [
+        {"name": "CONTROL", "color": "GRAY", "description": "Control/state consistency audit"},
+        {"name": "STANDARD", "color": "BLUE", "description": "Repository-local standard audit"},
+        {"name": "DEEP", "color": "PURPLE", "description": "Broad repository-local deep audit"},
+    ]},
+    "Audit Scope": {"kind": "text", "options": []},
+    "Audit Evidence": {"kind": "text", "options": []},
+    "Last Deep Audit": {"kind": "date", "options": []},
+    "Audit Freshness": {"kind": "single", "options": [
+        {"name": "CURRENT", "color": "GREEN", "description": "Audit SHA matches Audit Ref HEAD"},
+        {"name": "DRIFTED", "color": "YELLOW", "description": "Audit Ref HEAD advanced past Audit SHA"},
+        {"name": "UNKNOWN", "color": "GRAY", "description": "Audit Ref or exact head cannot be established"},
+    ]},
+}
 
 
 class SyncError(RuntimeError):
@@ -90,6 +117,20 @@ def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> d
     return {name: _strip_scalar("\n".join(value)) for name, value in sections.items()}
 
 
+def _project_date(value: str, section: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.date().isoformat()
+    except ValueError:
+        try:
+            return dt.date.fromisoformat(text).isoformat()
+        except ValueError as exc:
+            raise ConfigError(f"invalid {section}: expected ISO date/time") from exc
+
+
 def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
     sections = parse_sections(
         str(issue.get("body") or ""),
@@ -100,11 +141,40 @@ def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
         value = sections.get(section, "").strip()
         if section == "Work Status":
             value = PROJECT_STATUS_ALIASES.get(value, value)
+        if section in {"Last Audit At", "Last Deep Audit At"} and value:
+            value = _project_date(value, section)
         if value:
             desired[field] = value
     if str(issue.get("state", "")).lower() == "closed":
         desired["Status"] = "DONE"
     return desired
+
+
+def derive_audit_freshness(
+    issue: dict[str, Any],
+    head_resolver: Callable[[str, str], str] | None,
+) -> str | None:
+    sections = parse_sections(str(issue.get("body") or ""))
+    repository = sections.get("Repository", "").strip().strip("`")
+    audit_sha = sections.get("Audit SHA", "").strip().strip("`")
+    audit_ref = sections.get("Audit Ref", "").strip().strip("`")
+    if not audit_sha:
+        return None
+    if (
+        not repository
+        or "/" not in repository
+        or not re.fullmatch(r"[0-9a-fA-F]{40}", audit_sha)
+        or not audit_ref
+        or head_resolver is None
+    ):
+        return "UNKNOWN"
+    try:
+        current = head_resolver(repository, audit_ref)
+    except Exception:
+        return "UNKNOWN"
+    if not isinstance(current, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", current):
+        return "UNKNOWN"
+    return "CURRENT" if current.lower() == audit_sha.lower() else "DRIFTED"
 
 
 def validate_select_values(fields: dict[str, str]) -> list[str]:
@@ -239,6 +309,7 @@ class RuntimeConfig:
     github_token: str
     owner: str = PROJECT_OWNER
     project_number: int = PROJECT_NUMBER
+    maintenance_audit_token: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | os._Environ[str] = os.environ) -> "RuntimeConfig":
@@ -248,6 +319,7 @@ class RuntimeConfig:
             github_token=env.get("GITHUB_TOKEN", ""),
             owner=env.get("PROJECT_OWNER", PROJECT_OWNER),
             project_number=int(env.get("PROJECT_NUMBER", str(PROJECT_NUMBER))),
+            maintenance_audit_token=env.get("MAINTENANCE_AUDIT_TOKEN", ""),
         )
 
 
@@ -377,7 +449,8 @@ query($id:ID!, $after:String) {
             if node.get("__typename") == "ProjectV2SingleSelectField":
                 fields.append({"id": node["id"], "name": node["name"], "kind": "single", "options": node.get("options") or []})
             elif node.get("__typename") == "ProjectV2Field":
-                kind = "text" if node.get("dataType") == "TEXT" else str(node.get("dataType", "")).lower()
+                data_type = str(node.get("dataType", "")).upper()
+                kind = "text" if data_type == "TEXT" else "date" if data_type == "DATE" else data_type.lower()
                 fields.append({"id": node["id"], "name": node["name"], "kind": kind, "options": []})
         return fields
 
@@ -404,6 +477,10 @@ query($id:ID!, $after:String) {
                 name
                 optionId
                 field { ... on ProjectV2SingleSelectField { id name } }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
+                field { ... on ProjectV2Field { id name } }
               }
             }
           }
@@ -436,6 +513,8 @@ query($id:ID!, $after:String) {
                     values[name] = field_value.get("text") or ""
                 elif field_value.get("__typename") == "ProjectV2ItemFieldSingleSelectValue":
                     values[name] = field_value.get("name") or ""
+                elif field_value.get("__typename") == "ProjectV2ItemFieldDateValue":
+                    values[name] = field_value.get("date") or ""
             items.append({
                 "id": node["id"],
                 "content_id": content.get("id"),
@@ -444,6 +523,26 @@ query($id:ID!, $after:String) {
                 "fields": values,
             })
         return items
+
+    def create_project_field(
+        self, project_id: str, name: str, kind: str, options: list[dict[str, str]]
+    ) -> None:
+        data_type = {"text": "TEXT", "date": "DATE", "single": "SINGLE_SELECT"}.get(kind)
+        if data_type is None:
+            raise ConfigError(f"unsupported Project field kind: {kind}")
+        query = """
+mutation($project:ID!, $name:String!, $dataType:ProjectV2CustomFieldType!, $options:[ProjectV2SingleSelectFieldOptionInput!]) {
+  createProjectV2Field(input:{
+    projectId:$project, name:$name, dataType:$dataType, singleSelectOptions:$options
+  }) { projectV2Field { ... on ProjectV2FieldCommon { id name } } }
+}
+"""
+        self.query(query, {
+            "project": project_id,
+            "name": name,
+            "dataType": data_type,
+            "options": options if kind == "single" else None,
+        })
 
     def add_item(self, project_id: str, content_id: str) -> str:
         query = """
@@ -478,6 +577,16 @@ mutation($project:ID!, $item:ID!, $field:ID!, $text:String!) {
 }
 """
         self.query(query, {"project": project_id, "item": item_id, "field": field_id, "text": text})
+
+    def update_date(self, project_id: str, item_id: str, field_id: str, date: str) -> None:
+        query = """
+mutation($project:ID!, $item:ID!, $field:ID!, $date:Date!) {
+  updateProjectV2ItemFieldValue(input:{
+    projectId:$project, itemId:$item, fieldId:$field, value:{date:$date}
+  }) { projectV2Item { id } }
+}
+"""
+        self.query(query, {"project": project_id, "item": item_id, "field": field_id, "date": date})
 
     def delete_item(self, project_id: str, item_id: str) -> None:
         query = """
@@ -527,6 +636,14 @@ class GitHubREST:
     def get_issue(self, number: int) -> dict[str, Any]:
         return self._request("GET", f"{self.base}/issues/{number}")
 
+    def get_commit_sha(self, ref: str) -> str:
+        encoded = urllib.parse.quote(ref, safe="")
+        value = self._request("GET", f"{self.base}/commits/{encoded}")
+        sha = value.get("sha") if isinstance(value, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            raise APIError("repository ref did not resolve to an exact commit SHA")
+        return sha
+
     def find_issue_by_title(self, title: str) -> dict[str, Any] | None:
         for issue in self.list_issues(state="all"):
             if str(issue.get("title") or "").strip() == title:
@@ -545,6 +662,39 @@ class GitHubREST:
         return self._request("PATCH", f"{self.base}/issues/{number}", payload)
 
 
+def ensure_audit_project_fields(gql: Any, owner: str, number: int) -> int:
+    identity = gql.get_project_identity(owner, number)
+    if identity.get("title") != PROJECT_TITLE:
+        raise ConfigError(f"Project title mismatch: {identity.get('title')!r}")
+    if bool(identity.get("public")):
+        raise ConfigError("Project must be Private")
+    raw_fields = gql.get_project_fields(identity["id"])
+    mutations = 0
+    for name, spec in AUDIT_PROJECT_FIELD_SPECS.items():
+        matches = [field for field in raw_fields if str(field.get("name", "")).strip() == name]
+        if len(matches) > 1:
+            raise ConfigError(f"expected at most one field named {name!r}, found {len(matches)}")
+        if not matches:
+            gql.create_project_field(
+                identity["id"], name, str(spec["kind"]), list(spec.get("options") or [])
+            )
+            mutations += 1
+            continue
+        field = matches[0]
+        expected_kind = str(spec["kind"])
+        if field.get("kind") != expected_kind:
+            raise ConfigError(
+                f"Project field kind mismatch for {name}: expected {expected_kind}, got {field.get('kind')}"
+            )
+        if expected_kind == "single":
+            expected_options = {str(option["name"]) for option in spec.get("options") or []}
+            actual_options = {str(option.get("name", "")).strip() for option in field.get("options") or []}
+            if actual_options != expected_options:
+                raise ConfigError(
+                    f"Project option mismatch for {name}: missing={sorted(expected_options - actual_options)}, extra={sorted(actual_options - expected_options)}"
+                )
+    return mutations
+
 def discover_project(gql: Any, owner: str, number: int) -> ProjectSnapshot:
     identity = gql.get_project_identity(owner, number)
     if identity.get("title") != PROJECT_TITLE:
@@ -560,6 +710,8 @@ def discover_project(gql: Any, owner: str, number: int) -> ProjectSnapshot:
             raise ConfigError(f"Project field kind mismatch for {name}: expected single, got {kind}")
         if name in TEXT_FIELDS and kind != "text":
             raise ConfigError(f"Project field kind mismatch for {name}: expected text, got {kind}")
+        if name in DATE_FIELDS and kind != "date":
+            raise ConfigError(f"Project field kind mismatch for {name}: expected date, got {kind}")
         raw_options = node.get("options") or []
         option_names = [str(option.get("name", "")).strip() for option in raw_options]
         if len(option_names) != len(set(option_names)):
@@ -599,8 +751,13 @@ def select_canonical_issues(issues: list[dict[str, Any]], tracked_items: dict[st
     return selected
 
 
-def sync_one_issue(issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, mode: str) -> dict[str, Any]:
+def sync_one_issue(
+    issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, mode: str,
+    extra_fields: dict[str, str] | None = None,
+) -> dict[str, Any]:
     desired = desired_project_fields(issue)
+    if extra_fields:
+        desired.update(extra_fields)
     errors = validate_select_values(desired)
     if errors:
         raise ConfigError("; ".join(errors))
@@ -628,6 +785,8 @@ def sync_one_issue(issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, m
                 gql.update_single_select(snapshot.id, item.id, field.id, option_id)
             elif field_name in TEXT_FIELDS:
                 gql.update_text(snapshot.id, item.id, field.id, value)
+            elif field_name in DATE_FIELDS:
+                gql.update_date(snapshot.id, item.id, field.id, value)
             else:
                 raise ConfigError(f"Unsupported Project field: {field_name}")
             mutations += 1
@@ -656,14 +815,21 @@ def _validate_project_options(snapshot: ProjectSnapshot) -> None:
             raise ConfigError(f"Project option mismatch for {field_name}: missing={missing}, extra={extra}")
 
 
-def process_issues(issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql: Any, mode: str) -> dict[str, Any]:
+def process_issues(
+    issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql: Any, mode: str,
+    freshness_resolver: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     errors: list[str] = []
     mutations = 0
     matched_items = 0
     for issue in issues:
         try:
-            result = sync_one_issue(issue, snapshot, gql, mode)
+            extra_fields: dict[str, str] = {}
+            freshness = derive_audit_freshness(issue, freshness_resolver)
+            if freshness is not None:
+                extra_fields["Audit Freshness"] = freshness
+            result = sync_one_issue(issue, snapshot, gql, mode, extra_fields=extra_fields)
             results.append(result)
             mutations += int(result.get("mutations", 0))
             if result.get("membership") == "MATCH":
@@ -685,7 +851,6 @@ def process_issues(issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql:
         "project_items": matched_items,
         "canonical_issues": len(issues),
     }
-
 
 def ensure_health_not_project_item(health_issue: dict[str, Any] | None, snapshot: ProjectSnapshot, gql: Any, mode: str) -> str:
     if not health_issue:
@@ -774,20 +939,40 @@ def run_sync(
 
     gql = gql or GitHubGraphQL(cfg.project_token)
     try:
+        if mode == "reconcile":
+            ensure_audit_project_fields(gql, cfg.owner, cfg.project_number)
         snapshot = discover_project(gql, cfg.owner, cfg.project_number)
         _validate_project_options(snapshot)
 
         health_issue = rest.find_issue_by_title(HEALTH_TITLE) if rest is not None else None
         health_item_status = ensure_health_not_project_item(health_issue, snapshot, gql, mode=mode)
 
+        freshness_clients: dict[str, GitHubREST] = {}
+        freshness_cache: dict[tuple[str, str], str] = {}
+
+        def resolve_freshness_head(repository: str, ref: str) -> str:
+            key = (repository, ref)
+            if key in freshness_cache:
+                return freshness_cache[key]
+            if not cfg.maintenance_audit_token:
+                raise APIError("maintenance audit read token unavailable")
+            client = freshness_clients.get(repository)
+            if client is None:
+                client = GitHubREST(cfg.maintenance_audit_token, repository)
+                freshness_clients[repository] = client
+            freshness_cache[key] = client.get_commit_sha(ref)
+            return freshness_cache[key]
+
+        freshness_resolver = resolve_freshness_head if cfg.maintenance_audit_token else None
+
         if mode == "event-sync":
             issue = event_issue
             if issue is None:
                 raise ConfigError("event-sync requires an issue event payload")
             issues = [issue]
-            summary = process_issues(issues, snapshot, gql, mode="event-sync")
+            summary = process_issues(issues, snapshot, gql, mode="event-sync", freshness_resolver=freshness_resolver)
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
-            verify_summary = process_issues(issues, snapshot2, gql, mode="verify")
+            verify_summary = process_issues(issues, snapshot2, gql, mode="verify", freshness_resolver=freshness_resolver)
             verify_summary["mutations"] = summary.get("mutations", 0)
             summary = verify_summary
         else:
@@ -798,7 +983,7 @@ def run_sync(
             else:
                 all_issues = rest.list_issues(state="all")
                 issues = select_canonical_issues(all_issues, snapshot.items_by_content_id)
-            summary = process_issues(issues, snapshot, gql, mode=mode)
+            summary = process_issues(issues, snapshot, gql, mode=mode, freshness_resolver=freshness_resolver)
             if mode == "reconcile" and not summary.get("errors"):
                 snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
                 _validate_project_options(snapshot2)
@@ -806,7 +991,7 @@ def run_sync(
                 health_item_status = ensure_health_not_project_item(health_issue2, snapshot2, gql, mode="reconcile")
                 snapshot3 = discover_project(gql, cfg.owner, cfg.project_number)
                 issues2 = select_target_issue(rest, issue_number) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
-                summary = process_issues(issues2, snapshot3, gql, mode="verify")
+                summary = process_issues(issues2, snapshot3, gql, mode="verify", freshness_resolver=freshness_resolver)
                 health_item_status = ensure_health_not_project_item(rest.find_issue_by_title(HEALTH_TITLE), snapshot3, gql, mode="verify")
                 snapshot = snapshot3
 
@@ -821,14 +1006,14 @@ def run_sync(
             coverage={"canonical_issues": 0, "project_items": 0, "drift_fields": 0, "errors": 1},
             messages=[str(exc)], run_url=run_url, direct_requirement="CODEX_REQUIRED" if isinstance(exc, ConfigError) else "NONE",
             direct_reason="Project structure/configuration needs direct verification." if isinstance(exc, ConfigError) else "",
-            secrets=[cfg.project_token, cfg.github_token],
+            secrets=[cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
         )
         if rest is not None:
             try:
                 upsert_health_issue(rest, body)
             except Exception:
                 pass
-        print(_redact(str(exc), [cfg.project_token, cfg.github_token]), file=sys.stderr)
+        print(_redact(str(exc), [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token]), file=sys.stderr)
         return 1
 
 def main(argv: list[str] | None = None) -> int:

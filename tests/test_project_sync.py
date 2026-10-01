@@ -158,21 +158,24 @@ class ClientAndSyncTests(unittest.TestCase):
             def get_project_identity(self, owner, number):
                 return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
             def get_project_fields(self, project_id):
-                return [
-                    {"id": "F_STATUS", "name": "Status", "kind": "single", "options": [{"id": "O_DONE", "name": "DONE"}, {"id": "O_IMPL", "name": "IMPLEMENTING"}]},
-                    {"id": "F_PRIORITY", "name": "Priority", "kind": "single", "options": [{"id": "O_P1", "name": "P1"}]},
-                    {"id": "F_RISK", "name": "Risk", "kind": "single", "options": [{"id": "O_LOW", "name": "LOW"}]},
-                    {"id": "F_TYPE", "name": "Work Type", "kind": "single", "options": [{"id": "O_INFRA", "name": "INFRA"}]},
-                    {"id": "F_RS", "name": "Repository State", "kind": "single", "options": [{"id": "O_ACTIVE", "name": "ACTIVE"}]},
-                    {"id": "F_REPO", "name": "Managed Repository", "kind": "text", "options": []},
-                    {"id": "F_NEXT", "name": "Next Action", "kind": "text", "options": []},
-                    {"id": "F_SHA", "name": "Audit SHA", "kind": "text", "options": []},
-                ]
+                out = []
+                for name in project_sync.EXPECTED_FIELDS:
+                    if name in project_sync.SELECT_OPTIONS:
+                        options = [
+                            {"id": f"{name}-{value}", "name": value}
+                            for value in project_sync.SELECT_OPTIONS[name]
+                        ]
+                        out.append({"id": name, "name": name, "kind": "single", "options": options})
+                    elif name in project_sync.DATE_FIELDS:
+                        out.append({"id": name, "name": name, "kind": "date", "options": []})
+                    else:
+                        out.append({"id": name, "name": name, "kind": "text", "options": []})
+                return out
             def get_project_items(self, project_id):
                 return [{"id": "I1", "content_id": "ISSUE1", "number": 1, "repository": "kinoko34077/devflow", "fields": {"Priority": "P1"}}]
         snap = project_sync.discover_project(FakeGraphQL(), "kinoko34077", 1)
         self.assertEqual(snap.id, "P")
-        self.assertEqual(snap.fields["Priority"].options["P1"], "O_P1")
+        self.assertEqual(snap.fields["Priority"].options["P1"], "Priority-P1")
         self.assertEqual(snap.items_by_content_id["ISSUE1"].fields["Priority"], "P1")
 
     def test_sync_one_verify_is_read_only_and_reconcile_mutates_only_drift(self):
@@ -305,7 +308,10 @@ class StructuralValidationTests(unittest.TestCase):
         class FakeGraphQL:
             def get_project_identity(self, owner, number): return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
             def get_project_fields(self, project_id):
-                return [{"id": name, "name": name, "kind": "text", "options": []} for name in project_sync.EXPECTED_FIELDS]
+                return [
+                    {"id": name, "name": name, "kind": "date" if name in project_sync.DATE_FIELDS else "text", "options": []}
+                    for name in project_sync.EXPECTED_FIELDS
+                ]
             def get_project_items(self, project_id): return []
         with self.assertRaises(project_sync.ConfigError):
             project_sync.discover_project(FakeGraphQL(), project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
@@ -320,12 +326,157 @@ class StructuralValidationTests(unittest.TestCase):
                         opts = [{"id": f"{name}-1", "name": v} for v in project_sync.SELECT_OPTIONS[name]]
                         if name == "Priority": opts.append({"id": "dup", "name": "P1"})
                         out.append({"id": name, "name": name, "kind": "single", "options": opts})
+                    elif name in project_sync.DATE_FIELDS:
+                        out.append({"id": name, "name": name, "kind": "date", "options": []})
                     else:
                         out.append({"id": name, "name": name, "kind": "text", "options": []})
                 return out
             def get_project_items(self, project_id): return []
         with self.assertRaises(project_sync.ConfigError):
             project_sync.discover_project(FakeGraphQL(), project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
+
+
+class AuditProvenanceTests(unittest.TestCase):
+    def test_audit_provenance_sections_map_to_existing_project(self):
+        self.assertEqual(project_sync.FIELD_MAP["Audit Ref"], "Audit Ref")
+        self.assertEqual(project_sync.FIELD_MAP["Last Audit At"], "Last Audit")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Depth"], "Audit Depth")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Scope"], "Audit Scope")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Evidence"], "Audit Evidence")
+        self.assertEqual(project_sync.FIELD_MAP["Last Deep Audit At"], "Last Deep Audit")
+        self.assertEqual(project_sync.SELECT_OPTIONS["Audit Depth"], {"CONTROL", "STANDARD", "DEEP"})
+        self.assertEqual(project_sync.SELECT_OPTIONS["Audit Freshness"], {"CURRENT", "DRIFTED", "UNKNOWN"})
+
+    def test_audit_freshness_uses_explicit_non_default_ref(self):
+        calls = []
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/dev_agent`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`v2/bootstrap`"
+            )
+        }
+        def resolve(repository, ref):
+            calls.append((repository, ref))
+            return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.assertEqual(project_sync.derive_audit_freshness(issue, resolve), "CURRENT")
+        self.assertEqual(calls, [("kinoko34077/dev_agent", "v2/bootstrap")])
+
+    def test_audit_freshness_unknown_without_ref_and_does_not_guess_default(self):
+        calls = []
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`"
+            )
+        }
+        def resolve(repository, ref):
+            calls.append((repository, ref))
+            return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.assertEqual(project_sync.derive_audit_freshness(issue, resolve), "UNKNOWN")
+        self.assertEqual(calls, [])
+
+    def test_audit_freshness_reports_drift(self):
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`main`"
+            )
+        }
+        self.assertEqual(
+            project_sync.derive_audit_freshness(
+                issue,
+                lambda repository, ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            "DRIFTED",
+        )
+
+    def test_runtime_config_reads_maintenance_audit_token(self):
+        cfg = project_sync.RuntimeConfig.from_env({
+            "GITHUB_REPOSITORY": "kinoko34077/devflow",
+            "PROJECTS_TOKEN": "project",
+            "GITHUB_TOKEN": "repo",
+            "MAINTENANCE_AUDIT_TOKEN": "audit",
+        })
+        self.assertEqual(cfg.maintenance_audit_token, "audit")
+
+    def test_reconcile_can_create_only_missing_audit_project_fields(self):
+        class FakeGraphQL:
+            def __init__(self):
+                self.created = []
+            def get_project_identity(self, owner, number):
+                return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
+            def get_project_fields(self, project_id):
+                return [
+                    {"id": "existing", "name": "Audit SHA", "kind": "text", "options": []},
+                ]
+            def create_project_field(self, project_id, name, kind, options):
+                self.created.append((project_id, name, kind, options))
+        gql = FakeGraphQL()
+        project_sync.ensure_audit_project_fields(gql, project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
+        created_names = {row[1] for row in gql.created}
+        self.assertEqual(created_names, set(project_sync.AUDIT_PROJECT_FIELD_SPECS))
+        self.assertNotIn("Audit SHA", created_names)
+
+    def test_audit_timestamp_projects_to_date_without_losing_control_timestamp(self):
+        issue = {
+            "state": "open",
+            "body": (
+                "## Last Audit At\n\n`2026-10-01T08:15:44Z`\n\n"
+                "## Last Deep Audit At\n\n`2026-09-30T23:59:59+00:00`"
+            ),
+        }
+        fields = project_sync.desired_project_fields(issue)
+        self.assertEqual(fields["Last Audit"], "2026-10-01")
+        self.assertEqual(fields["Last Deep Audit"], "2026-09-30")
+
+    def test_process_projects_freshness_without_mutating_control_audit_sha(self):
+        issue = {
+            "node_id": "ISSUE",
+            "number": 9,
+            "state": "open",
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`main`\n\n"
+                "## Last Audit At\n\n`2026-10-01T08:15:44Z`\n\n"
+                "## Audit Depth\n\n`CONTROL`"
+            ),
+        }
+        fields = {
+            "Managed Repository": project_sync.ProjectField("REPO", "Managed Repository", "text", {}),
+            "Audit SHA": project_sync.ProjectField("SHA", "Audit SHA", "text", {}),
+            "Audit Ref": project_sync.ProjectField("REF", "Audit Ref", "text", {}),
+            "Last Audit": project_sync.ProjectField("LAST", "Last Audit", "date", {}),
+            "Audit Depth": project_sync.ProjectField("DEPTH", "Audit Depth", "single", {"CONTROL": "C"}),
+            "Audit Freshness": project_sync.ProjectField("FRESH", "Audit Freshness", "single", {"CURRENT": "CUR"}),
+        }
+        current = {
+            "Managed Repository": "kinoko34077/demo",
+            "Audit SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Audit Ref": "main",
+            "Last Audit": "2026-10-01",
+            "Audit Depth": "CONTROL",
+            "Audit Freshness": "CURRENT",
+        }
+        snap = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, fields,
+            {"ISSUE": project_sync.ProjectItem("I", "ISSUE", 9, "kinoko34077/devflow", current)},
+        )
+        class NoWrite:
+            def __getattr__(self, name):
+                raise AssertionError(name)
+        summary = project_sync.process_issues(
+            [issue], snap, NoWrite(), "verify",
+            freshness_resolver=lambda repository, ref: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        self.assertEqual(summary["drift_fields"], 0)
+        self.assertEqual(summary["errors"], [])
+    def test_project_workflow_supplies_read_token_for_freshness(self):
+        path = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text.count("MAINTENANCE_AUDIT_TOKEN"), 4)
 
 
 if __name__ == "__main__":
