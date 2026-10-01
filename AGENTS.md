@@ -31,7 +31,8 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 | Cross-repository coordinated work | devflow Work Order |
 | Repository-specific requirements/specs/current technical detail | owning repository |
 | Repository-specific implementation task/finding | owning repository Issue / Work Order |
-| Durable recovery position | owning Issue / Work Order or its durable progress surface; optional Task Checkpoint Cursor is only a projection |
+| Durable recovery detail | owning Issue / Work Order or its designated durable progress surface, including a dedicated progress Issue/ledger when used |
+| Compact current-position projection | Task Checkpoint Cursor on the owning Issue / Work Order; roadmap/frontier locator only |
 | Short-lived manual execution-session checkpoint | worker-owned record on the owning Issue / Work Order |
 | Code diff and verification evidence | owning repository PR / Actions / tests |
 | Display/overview | GitHub Project; never canonical |
@@ -43,11 +44,13 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 1. This file: `devflow/AGENTS.md` (or the equivalent MCP bootstrap result when already connected).
 2. The target `[REPO] <repo>` Control Issue.
 3. The target repository's own agent/readme/current-state entry point.
-4. Active repository-local Issue/Work Order and PR, if any.
-5. Active or latest relevant Execution Session Record(s) on that owning Issue / Work Order when non-trivial work is active or being resumed.
-6. Task-relevant specs/code/tests.
-7. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
-8. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
+4. Active repository-local Issue / Work Order.
+5. Its accepted Task Checkpoint Cursor when eligible, reading `first_unfinished` as the compact roadmap/current-position projection.
+6. Its designated durable progress surface (same Issue/comment or dedicated progress Issue/ledger) for detailed completed work, evidence, findings, decisions, blocker and handoff context.
+7. Active or latest relevant Execution Session Record(s), then linked PR/current volatile evidence when non-trivial work is active or being resumed.
+8. Task-relevant specs/code/tests.
+9. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
+10. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
 
 ### Work on devflow itself or cross-repository rules
 
@@ -69,9 +72,9 @@ If it does not use Repository Base, use the existing repository structure record
 
 Before non-trivial mutation, inspect active Execution Session Records for overlapping semantic scope and establish or resume a worker-owned session record on the owning Issue / Work Order. Record the bounded plan, provenance, latest checkpoint and next action, then update that same record after each materially distinct milestone. For every new ChatGPT, Codex, or Claude/Claude Code Session Record, capture `Conversation-Title-At-Start` once as the exact visible conversation/thread title or `UNAVAILABLE`; never infer it or rewrite the snapshot after a later UI rename, and never use it for session/claim/reviewer/security identity, stale timing, or collision authority. This is a soft coordination convention unless an actual execution-coordinator runtime claim exists; it does not provide atomic exclusion or replace durable task truth.
 
-Durable progress externalization is a mandatory execution precondition, not end-of-task reporting. When a GitHub repository exists and work involves mutation, implementation, review, verification, audit, investigation, more than one recovery-relevant step, or likely continuation by another worker, create or reuse one durable GitHub progress surface before substantive continuation, and update it before entering each next materially distinct unit. Priority: safety / explicit Human gate > durable progress externalization and affected-surface reconciliation > throughput / shortest-path / convenience / chat concision; this never authorizes crossing an existing Human-gated boundary. A single-step read-only lookup with no continuation value is exempt. Canonical contract: `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md`.
+Durable progress externalization is a mandatory execution precondition, not end-of-task reporting. When a GitHub repository exists and work involves mutation, implementation, review, verification, audit, investigation, more than one recovery-relevant step, or likely continuation by another worker, create or reuse one **designated durable progress surface** before substantive continuation, and update it before entering each next materially distinct unit. That surface may be the owning Issue / Work Order, a trusted comment on it, or a dedicated bounded progress Issue/ledger. When a dedicated progress Issue/ledger is designated, the owning task must reference it and every successor/resuming worker must read and update it proactively; the user must not have to mention the progress Issue again to make the worker use it. Priority: safety / explicit Human gate > durable progress externalization and affected-surface reconciliation > throughput / shortest-path / convenience / chat concision; this never authorizes crossing an existing Human-gated boundary. A single-step read-only lookup with no continuation value is exempt. Canonical contract: `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md`.
 
-When an owning task has an accepted **Task Checkpoint Cursor**, read its `first_unfinished` projection **before reconstructing historical checkpoint chronology**. Then re-read only the owning durable state, active Session overlap, current head/checks/Review, blockers, and **readiness and safety gates** needed to validate that frontier. Cursor drift is a warning to re-read/reconcile; the cursor is not task, readiness, claim, lease or fencing authority. Detailed procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
+For qualifying multi-step work whose owning durable state exposes one unambiguous canonical recovery frontier, establish or reuse one accepted **Task Checkpoint Cursor** on the owning Issue / Work Order before entering the next materially distinct unit, and advance or reconcile it whenever the accepted frontier changes. The Cursor and the designated durable progress surface are complementary: the Cursor answers **where in the roadmap / which first unfinished unit is current**, while the progress surface answers **what has happened there, with detailed evidence, findings, decisions and blockers**. On resume, read the Cursor's `first_unfinished` **before reconstructing historical checkpoint chronology**, then read the designated progress surface around that frontier; do not wait for the user to name either one. Validate current **readiness and safety gates** from live evidence before acting. Cursor omission is valid only when the work is exempt or no single frontier can be represented without material information loss, such as genuinely parallel independent fronts. Cursor drift is a warning to re-read/reconcile; the cursor is not task, readiness, claim, lease or fencing authority. Detailed procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
 
 Before moving into the next materially distinct unit or leaving the task as DONE / RELEASED / HANDOFF / WAITING, the worker that caused the accepted transition must reconcile the finite set of durable surfaces that transition directly made stale or concretely suspect. This is bounded cleanup, not a global Issue sweep: repair safe in-scope stale status/blocker/routing/Current State/Control projections, but do not take over another active worker, cross a Human/security/permission gate, or absorb an unrelated defect. Leave a durable finding/reference for the proper owner instead. Cross-repository audits are a backstop for missed drift, not the routine garbage collector for producer-owned stale state.
 
@@ -85,7 +88,8 @@ Control Issue / local canon read
 → create or reuse repository-local Issue when durable task tracking is warranted
 → inspect overlapping Execution Session Records
 → establish/resume one worker-owned Execution Session + bounded checklist
-→ read accepted Task Checkpoint Cursor when present
+→ read or establish the eligible Task Checkpoint Cursor (roadmap/current frontier)
+→ read the designated durable progress surface for detailed current checkpoint evidence
 → dedicated branch
 → implementation with checkpoint updates between bounded milestones
 → tests + regression + real-entry verification as applicable
@@ -140,14 +144,15 @@ If a merged change is wrong, use a dedicated rollback branch + revert PR. Do not
 A new worker resumes from GitHub evidence, not from the previous chat narrative:
 
 1. Control Issue;
-2. referenced local Issue/Work Order and durable progress surface;
-3. accepted Task Checkpoint Cursor when present, using its `first_unfinished` as the compact projected frontier;
-4. active or latest relevant Execution Session Record(s);
-5. linked branch/PR and current head;
-6. recorded Audit SHA versus current branch/PR head;
-7. current blocker/readiness/safety evidence for the projected first unfinished milestone.
+2. referenced local Issue / Work Order;
+3. accepted Task Checkpoint Cursor when eligible, using its `first_unfinished` as the compact roadmap/current-position projection;
+4. the task's designated durable progress surface, including a dedicated progress Issue/ledger when designated, for detailed progress/evidence around that frontier;
+5. active or latest relevant Execution Session Record(s);
+6. linked branch/PR and current head;
+7. recorded Audit SHA versus current branch/PR head;
+8. current blocker/readiness/safety evidence for the projected first unfinished milestone.
 
-If the cursor is absent, ambiguous, malformed, duplicated, stale, or inconsistent with the owning durable state, use the ordinary durable-progress reconciliation path; do not infer a position from chat or silently choose among competing markers.
+If an eligible cursor is absent, ambiguous, malformed, duplicated, stale, or inconsistent with the owning durable state, use the designated durable progress surface and live evidence to repair/reconcile the cursor before broad continuation; do not infer a position from chat or silently choose among competing markers. If the designated progress surface itself is missing or stale, repair that durable detail layer as well.
 
 If an apparently active session may be stale because the worker disappeared or a request timed out, use the Manual Execution Session stale rule: `CLAIMED` / `RUNNING` require 1 hour with no trusted record update and no linked activity; `WAITING` remains active while its named blocker exists. A takeover posts a successor Session Record, re-reads the Issue, and only then mutates. Detailed collision rules are in the operating manuals.
 

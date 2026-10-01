@@ -43,14 +43,24 @@ A single-step read-only lookup with no continuation/recovery value is exempt. If
 
 ## 4. Allowed surfaces
 
-Use the narrowest owning surface that survives interruption:
+Use one **designated durable progress surface** for the bounded operation. Valid forms include:
 
-- existing owning Issue / Work Order;
-- trusted comment on that Issue / Work Order;
-- dedicated bounded progress Issue/ledger when it improves recovery;
-- an accepted Task Checkpoint Cursor as an **optional compact projection** when that mechanism is available; it **does not replace the durable progress surface**.
+- the existing owning Issue / Work Order;
+- a trusted progress comment on that Issue / Work Order;
+- a dedicated bounded progress Issue / ledger when separating detailed execution history improves recovery or coordination.
 
-Do not create one Issue per checkpoint. Prefer updating one progress surface for one bounded operation unless independent completion, handoff, or acceptance justifies decomposition.
+A dedicated progress Issue / ledger is a valid and often useful companion to the owning task. When one is used, the owning Issue / Work Order must carry an explicit durable reference to it, and successor/resuming workers must follow that reference without requiring the user to mention the progress Issue again.
+
+The progress surface and Task Checkpoint Cursor have different responsibilities:
+
+- **durable progress surface** — detailed progress: completed bounded units, evidence, findings, decisions, blockers, handoff context and failed paths worth preserving;
+- **Task Checkpoint Cursor** — compact structural position: roadmap frontier, `last_completed`, and `first_unfinished`.
+
+For qualifying single-frontier multi-step work, use both layers together. The Cursor should point a successor to the current unit; the progress surface should explain that unit in enough detail to continue safely. Cursor `evidence` should include the designated progress surface or the most relevant durable checkpoint reference when practical.
+
+For genuinely parallel or ambiguous-frontier work where one cursor would lose material state, retain the complete parallel state in the durable progress surface and omit/withhold cursor movement until one canonical task-level frontier can be represented.
+
+Do not create one Issue per checkpoint merely to simulate a cursor. Conversely, do not discard or bypass an already-designated progress Issue just because a cursor exists.
 
 Chat, Memory, provider summaries, and GitHub Project fields are not durable progress authority.
 
@@ -144,7 +154,7 @@ This is fail-to-reconcile, not fail-to-work: ordinary missing progress does not 
 
 A successor starts from the latest explicit durable checkpoint and first unfinished action.
 
-When an accepted Task Checkpoint Cursor exists, use its `first_unfinished` value as the compact resume projection before reconstructing historical checkpoint chronology. Validate that projection against the owning task, current durable progress surface, volatile evidence, active Session overlap, and current readiness/safety gates. Cursor drift means warn/re-read/reconcile; it does not authorize replay or hard rejection by itself.
+For eligible single-frontier multi-step work, establish or repair the Task Checkpoint Cursor before the next materially distinct unit if it is missing. On resume, read its `first_unfinished` value first as the compact roadmap/current-position projection, then read the **designated durable progress surface** for the detailed progress/evidence attached to that frontier. The worker must discover and consume both layers from durable references; it must not wait for the user to restate the progress Issue number or remind it that a Cursor exists. Validate the pair against volatile evidence, active Session overlap, and current readiness/safety gates. For ineligible parallel/ambiguous work, use the durable progress surface as the complete recovery model until one canonical frontier exists. Cursor drift means warn/re-read/reconcile; it does not authorize replay or hard rejection by itself.
 
 Already accepted earlier units are not repeated solely because previous chat/provider state disappeared.
 
@@ -161,9 +171,9 @@ Detailed cursor procedure: `docs/operations/TASK_CHECKPOINT_CURSOR.md`.
 ## 11. Relation to other devflow records
 
 - Owning Issue / Work Order: durable task truth, scope, acceptance and blocker authority.
-- Durable progress surface: recoverable execution position and temporary working context.
+- Durable progress surface: detailed recoverable progress/evidence and temporary working context; it is not the compact structural current-position locator.
 - Execution Session Record: worker/session provenance, bounded scope and active handoff/collision state.
-- Task Checkpoint Cursor: optional compact first-unfinished navigation/drift projection; it does not replace the durable progress surface or evidence and is not readiness/claim authority.
+- Task Checkpoint Cursor: compact roadmap/current-frontier navigation and drift projection for eligible single-frontier work; it complements rather than replaces the detailed durable progress surface or evidence and is not readiness/claim authority.
 - PR / Actions / tests / Formal Review: concrete diff and verification/review evidence.
 - Repository Current State/specification: accepted repository-level state and durable requirements/design, not temporary progress chronology.
 - Repository Control: cross-repository summary projection that must be reconciled when the accepted transition changes the summary it owns.

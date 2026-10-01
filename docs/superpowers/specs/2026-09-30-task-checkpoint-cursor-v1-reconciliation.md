@@ -14,32 +14,34 @@ The reviewed PR #234 design remains the feature contract. This addendum reconcil
 
 The initial v1 implementation was accepted through PR #257. The later bounded canonical-validation hardening from `devflow#260` / PR #261 did not alter the authority model; its accepted behavior is reflected by the canonical design and operator documentation.
 
+**Standing-policy supersession (2026-10-01):** `devflow#290` / PR #291 changes only the eligibility/default relationship with durable progress: a Task Checkpoint Cursor is required for eligible single-frontier multi-step work and is paired with the designated durable progress surface. Historical statements below that described the Cursor as optional are superseded by this note and the updated wording in §2–§3. Cursor authority remains navigation/drift projection only.
+
 ## 2. Relationship to durable progress
 
 `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md` remains the standing operational contract.
 
-Task Checkpoint Cursor v1 is an optional compact **projection** of a task's recoverable execution position. It does not replace the mandatory durable progress surface required for qualifying work.
+Task Checkpoint Cursor v1 is a compact **projection** of a task's recoverable execution position. Under the standing policy updated by `devflow#290`, it is required for eligible single-frontier multi-step work and complements rather than replaces the mandatory designated durable progress surface.
 
 Therefore:
 
 - the owning Issue / Work Order remains durable task truth;
 - the durable progress surface remains responsible for enough state to recover scope, completed position, first unfinished action, exact target version, blocker and compact evidence;
-- a cursor may project the single canonical `first_unfinished` frontier from that durable state;
-- absence of a cursor does not make an otherwise compliant durable progress surface invalid;
+- for eligible single-frontier multi-step work, a cursor must project the single canonical `first_unfinished` frontier from that durable state;
+- absence of a cursor on an eligible task is an operational gap that must be repaired before broad continuation; it does not retroactively invalidate already accepted work or erase an otherwise usable durable progress surface;
 - presence of a cursor does not make an otherwise non-compliant task durable;
 - when an accepted transition changes the projected recovery frontier, the cursor is part of the directly affected durable-surface set and must be reconciled before the bounded unit exits;
 - broad audits remain a backstop and do not own ordinary cursor cleanup.
 
 ## 3. Resume order
 
-For a task with an accepted v1 cursor:
+For eligible single-frontier multi-step work:
 
 1. read normal devflow / repository authority and the owning Issue / Work Order;
-2. identify the durable progress surface;
-3. read the unique trusted cursor projection before reconstructing historical checkpoint chronology;
+2. read or repair the unique trusted cursor and use `first_unfinished` to identify the compact current frontier before reconstructing historical checkpoint chronology;
+3. follow the owning task's durable reference to the designated progress surface and read the detailed progress/evidence around that frontier;
 4. inspect only the live evidence, Session state, blockers and readiness gates required to validate the cursor's current frontier;
 5. resume at `first_unfinished` when runnable;
-6. if cursor and authoritative durable state disagree, warn and reconcile rather than replaying accepted history by default.
+6. if cursor and authoritative durable progress disagree, warn and reconcile both layers rather than replaying accepted history by default.
 
 Chat, Memory and Project fields remain non-authoritative for resume.
 

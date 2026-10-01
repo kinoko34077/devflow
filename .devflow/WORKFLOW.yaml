@@ -259,7 +259,8 @@ handoff:
   canonical_resume_sources:
     - repository_control_issue
     - referenced_repository_local_issue_or_work_order
-    - accepted_task_checkpoint_cursor_when_present
+    - accepted_task_checkpoint_cursor_when_eligible
+    - designated_durable_progress_surface
     - referenced_pull_request
     - recorded_audit_sha_vs_current_head
     - repository_local_specs_and_current_state
@@ -269,17 +270,27 @@ handoff:
   ambiguous_local_canon_conflict: resolve_before_implementation
 
 task_checkpoint_cursor:
-  status: optional_projection
+  status: required_when_eligible_single_frontier
   schema_version: 1
   sentinel: "<!-- devflow-task-checkpoint-cursor:v1 -->"
   storage: trusted_owning_issue_comment
+  role: roadmap_and_current_frontier_projection
+  detailed_progress_owner: designated_durable_progress_surface
+  pairs_with_durable_progress_surface: true
+  designated_progress_surface_must_be_discovered_and_consumed: true
+  user_reminder_required_for_progress_surface_or_cursor: false
   first_unfinished_projection: true
   single_frontier_only: true
-  ordinary_drift_action: warn_and_reread
+  mandatory_when_eligible_single_frontier: true
+  mandatory_for_all_durable_progress: false
+  dedicated_progress_issue_allowed: true
+  cursor_evidence_should_reference_progress_surface_when_practical: true
+  ordinary_drift_action: warn_reread_and_reconcile_both_layers
   readiness_authority: false
   claim_lease_fencing_authority: false
-  mandatory_for_all_durable_progress: false
-  fallback_without_cursor: durable_progress_resume_sources
+  fallback_without_cursor:
+    eligible_single_frontier: reconcile_or_initialize_from_designated_progress_before_next_material_unit
+    parallel_or_ambiguous_frontier: designated_durable_progress_surface
   operations_doc: docs/operations/TASK_CHECKPOINT_CURSOR.md
 
 project_display:

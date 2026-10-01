@@ -1,5 +1,7 @@
 # Task Checkpoint Cursor v1 Implementation Plan
 
+> **Standing-policy note (2026-10-01):** `devflow#290` / PR #291 supersedes this historical implementation plan wherever it describes the Cursor as optional. Current standing policy requires one Cursor for eligible single-frontier multi-step work and pairs it with the designated durable progress surface. The historical task steps below are retained as implementation provenance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a lightweight, standard-library-only Task Checkpoint Cursor helper that projects one canonical first-unfinished recovery frontier, warns on drift instead of rejecting ordinary duplicate/stale work, and integrates that projection into current devflow recovery policy.
