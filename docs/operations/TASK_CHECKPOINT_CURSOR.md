@@ -1,6 +1,6 @@
 # Task Checkpoint Cursor v1
 
-Status: Optional task-level resume projection  
+Status: Required for eligible single-frontier multi-step work; otherwise not applicable / optional  
 Owning specification: `docs/superpowers/specs/2026-09-29-task-checkpoint-cursor-design.md`  
 Current-main reconciliation: `docs/superpowers/specs/2026-09-30-task-checkpoint-cursor-v1-reconciliation.md`  
 Pure helper: `tools/task_checkpoint_cursor.py`
@@ -19,11 +19,11 @@ The cursor is **not readiness authority**. It is also **not claim, lease, lock, 
 
 v1 represents exactly one **single canonical recovery frontier** per owning task.
 
-Use a cursor only when the task or its durable progress ledger can identify one canonical `first_unfinished` checkpoint without losing material parallel state. If independently progressing units have separate frontiers, split them into separately owned bounded tasks or retain the complete parallel state in the durable progress surface and designate one canonical task-level frontier.
+For durable multi-step work, a cursor is required when the task or its durable progress ledger can identify one canonical `first_unfinished` checkpoint without losing material parallel state. Initialize or reuse it on the owning Issue / Work Order before entering the next materially distinct recovery unit. If independently progressing units have separate frontiers, split them into separately owned bounded tasks or retain the complete parallel state in the durable progress surface and designate one canonical task-level frontier.
 
-Do not create one cursor per worker. Do not use multiple competing trusted cursor comments on one owning Issue.
+Do not create one cursor per worker. Do not use multiple competing trusted cursor comments on one owning Issue. Do not create a separate progress/restart/minutes Issue merely to host a cursor; the cursor is a trusted comment on the owning task.
 
-A missing cursor does not invalidate an otherwise compliant durable progress surface. Fall back to the ordinary durable-progress resume path and initialize a cursor only when the frontier is unambiguous.
+A missing cursor does not invalidate already accepted work. On an eligible task it is an operational gap: recover the unambiguous frontier from live durable evidence, initialize/reconcile the cursor, then continue. On genuinely parallel/ambiguous work where one frontier would lose material state, use the ordinary durable-progress resume path until one canonical frontier exists.
 
 ## 3. Recognized Issue comment
 
@@ -87,7 +87,7 @@ Chat, Memory and GitHub Project fields are not resume authority.
 
 ## 6. Initialize
 
-When there is `NO_MARKER` and the owning durable state exposes one unambiguous frontier, initialize revision `1` from that state.
+When there is `NO_MARKER` and the owning durable state exposes one unambiguous frontier, initialize revision `1` from that state before the next materially distinct recovery unit.
 
 Initialization must not infer a checkpoint from chat history or checkpoint-name ordering. If a trusted marker already exists, use normal read/compare semantics. If multiple trusted markers exist, return `WARN_DUPLICATE_MARKER` and reconcile instead of initializing another marker.
 
