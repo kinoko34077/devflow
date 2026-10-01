@@ -16,6 +16,7 @@ class TaskCheckpointCursorContractTests(unittest.TestCase):
         self.assertIn("single canonical recovery frontier", text)
         self.assertIn("not readiness authority", text)
         self.assertIn("not claim, lease, lock, CAS, or fencing authority", text)
+        self.assertNotIn("optional compact projection", text)
 
     def test_durable_progress_policy_pairs_detail_surface_with_cursor(self):
         text = (ROOT / "docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md").read_text(encoding="utf-8")
@@ -46,9 +47,16 @@ class TaskCheckpointCursorContractTests(unittest.TestCase):
         self.assertIn("dedicated_progress_issue_allowed: true", text)
         self.assertIn("first_unfinished_projection: true", text)
         self.assertIn("single_frontier_only: true", text)
+        self.assertIn("ordinary_drift_action: warn_reread_and_reconcile_both_layers", text)
         self.assertIn("readiness_authority: false", text)
         self.assertIn("claim_lease_fencing_authority: false", text)
         self.assertIn("github_project_is_display_only: true", text)
+
+    def test_current_main_reconciliation_uses_required_when_eligible_semantics(self):
+        text = (ROOT / "docs/superpowers/specs/2026-09-30-task-checkpoint-cursor-v1-reconciliation.md").read_text(encoding="utf-8")
+        self.assertIn("required for eligible single-frontier multi-step work", text)
+        self.assertIn("operational gap", text)
+        self.assertNotIn("Task Checkpoint Cursor v1 is an optional compact", text)
 
 
 if __name__ == "__main__":
