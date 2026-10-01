@@ -2,7 +2,7 @@ name: Maintenance audit
 
 on:
   schedule:
-    - cron: '23 18 * * *'
+    - cron: '30 13 * * *'
   workflow_dispatch:
     inputs:
       mode:

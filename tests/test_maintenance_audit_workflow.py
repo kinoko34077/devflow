@@ -17,7 +17,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
 
     def test_daily_schedule_is_exact_and_non_cancelling(self):
         self.assertIn("schedule:", self.text)
-        self.assertIn("- cron: '23 18 * * *'", self.text)
+        self.assertIn("- cron: '30 13 * * *'", self.text)
         self.assertIn("concurrency:", self.audit)
         self.assertIn(
             "group: maintenance-audit-${{ github.repository }}",
