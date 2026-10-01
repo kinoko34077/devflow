@@ -170,6 +170,67 @@ def _work_classes(value: object, field: str, code: str) -> list[str]:
     return sorted(classes)
 
 
+_UNKNOWN_REVIEW_IDENTITY = {"", "unknown"}
+
+
+def _review_identity_part(value: object, field: str, code: str) -> str:
+    _require(isinstance(value, str), code, f"{field} must be a string")
+    normalized = " ".join(value.split())
+    _require(0 < len(normalized) <= 128, code, f"{field} must be 1..128 normalized characters")
+    _require(_SECRET_SHAPE.search(normalized) is None, code, f"{field} must not carry secret material")
+    return normalized
+
+
+def _review_provenance(value: object, field: str, code: str) -> dict[str, str]:
+    _require(isinstance(value, dict), code, f"{field} must be an object")
+    _require(set(value) == {"system", "model"}, code, f"{field} must contain exactly system and model")
+    return {
+        "system": _review_identity_part(value.get("system"), f"{field}.system", code),
+        "model": _review_identity_part(value.get("model"), f"{field}.model", code),
+    }
+
+
+def _different_reviewer_requirement(value: object, role: str, code: str) -> dict[str, str]:
+    _require(isinstance(value, dict), code, "candidate different_reviewer_requirement must be an object")
+    _require(
+        set(value) == {"implementer_system", "implementer_model"},
+        code,
+        "candidate different_reviewer_requirement must contain exactly implementer_system and implementer_model",
+    )
+    _require(role == "reviewer", code, "different_reviewer_requirement is valid only for reviewer candidates")
+    return {
+        "implementer_system": _review_identity_part(
+            value.get("implementer_system"),
+            "different_reviewer_requirement.implementer_system",
+            code,
+        ),
+        "implementer_model": _review_identity_part(
+            value.get("implementer_model"),
+            "different_reviewer_requirement.implementer_model",
+            code,
+        ),
+    }
+
+
+def _signature(system: str, model: str) -> tuple[str, str]:
+    return " ".join(system.split()).casefold(), " ".join(model.split()).casefold()
+
+
+def _qualifies_as_different_reviewer(
+    reviewer_signature: tuple[str, str],
+    implementer_signature: tuple[str, str],
+) -> bool:
+    reviewer_system, reviewer_model = reviewer_signature
+    implementer_system, implementer_model = implementer_signature
+    if reviewer_system in _UNKNOWN_REVIEW_IDENTITY:
+        return False
+    if reviewer_system != implementer_system:
+        return True
+    if reviewer_model in _UNKNOWN_REVIEW_IDENTITY or implementer_model in _UNKNOWN_REVIEW_IDENTITY:
+        return False
+    return reviewer_model != implementer_model
+
+
 # REQUEST_FIELDS remains the required v1 envelope. Optional additive Stage 1
 # fields are separate so existing schema-consistency tests and old clients keep
 # the exact required contract.
@@ -187,7 +248,7 @@ REQUEST_FIELDS = frozenset(
         "observed_at",
     }
 )
-REQUEST_OPTIONAL_FIELDS = frozenset({"accepted_work_classes"})
+REQUEST_OPTIONAL_FIELDS = frozenset({"accepted_work_classes", "review_provenance"})
 
 
 def normalize_request(request: object) -> dict[str, Any]:
@@ -235,6 +296,14 @@ def normalize_request(request: object) -> dict[str, Any]:
             "REQUEST_INVALID",
         )
 
+    review_provenance = None
+    if "review_provenance" in request:
+        review_provenance = _review_provenance(
+            request["review_provenance"],
+            "review_provenance",
+            "REQUEST_INVALID",
+        )
+
     return {
         "schema_version": REQUEST_SCHEMA,
         "target_repository": target,
@@ -242,6 +311,7 @@ def normalize_request(request: object) -> dict[str, Any]:
         # callers must provide the structured field above when constraining it.
         "work_intent": intent,
         "accepted_work_classes": accepted_work_classes,
+        "review_provenance": review_provenance,
         "worker_system": request["worker_system"],
         "worker_session_id": request["worker_session_id"],
         "execution_attempt_id": request["execution_attempt_id"],
@@ -307,9 +377,18 @@ def _candidate(value: object) -> dict[str, Any]:
             "candidate explicit work_class is incompatible with role",
         )
 
+    different_reviewer_requirement = None
+    if "different_reviewer_requirement" in value:
+        different_reviewer_requirement = _different_reviewer_requirement(
+            value["different_reviewer_requirement"],
+            role,
+            code,
+        )
+
     return {
         **value,
         "work_class": work_class,
+        "different_reviewer_requirement": different_reviewer_requirement,
         "required_capabilities": _tags(value.get("required_capabilities"), "required_capabilities", code),
         "required_environment": _tags(value.get("required_environment"), "required_environment", code),
     }
@@ -569,12 +648,39 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                 reason = "PUBLISHED_BY_THIS_ATTEMPT"
             elif item["role"] == "reviewer" and item["reviewer_independence_conflict"]:
                 reason = "REVIEWER_INDEPENDENCE_CONFLICT"
-            elif not set(item["required_capabilities"]) <= capabilities:
+            elif (
+                item["role"] == "reviewer"
+                and item["different_reviewer_requirement"] is not None
+                and (accepted_work_classes is None or item["work_class"] in accepted_work_classes)
+            ):
+                provenance = request["review_provenance"]
+                _require(
+                    provenance is not None,
+                    "EVIDENCE_INVALID",
+                    "explicit different-reviewer demand requires worker Review Provenance signature",
+                )
+                requirement = item["different_reviewer_requirement"]
+                if not _qualifies_as_different_reviewer(
+                    _signature(provenance["system"], provenance["model"]),
+                    _signature(
+                        requirement["implementer_system"],
+                        requirement["implementer_model"],
+                    ),
+                ):
+                    reason = "REVIEWER_INDEPENDENCE_CONFLICT"
+            if reason is None and not set(item["required_capabilities"]) <= capabilities:
                 reason = "CAPABILITY_MISMATCH"
-            elif not set(item["required_environment"]) <= environment:
+            elif reason is None and not set(item["required_environment"]) <= environment:
                 reason = "ENVIRONMENT_MISMATCH"
-            elif accepted_work_classes is not None and item["work_class"] not in accepted_work_classes:
+            elif (
+                reason is None
+                and accepted_work_classes is not None
+                and item["work_class"] not in accepted_work_classes
+            ):
                 reason = "WORK_CLASS_MISMATCH"
+            # The remaining filters were folded above so the explicit
+            # provenance gate can share the existing reviewer-independence
+            # omission without turning provider identity into a ranking signal.
         if reason is None:
             eligible.append(selected_item)
         else:

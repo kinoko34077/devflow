@@ -53,6 +53,24 @@ class ProfileTests(unittest.TestCase):
     def test_same_observation_is_reproducible(self):
         self.assertEqual(build(observation()), build(observation()))
 
+    def test_review_provenance_is_explicit_and_not_inferred_from_provider(self):
+        plain = build(observation("claude"))
+        self.assertNotIn("review_provenance", plain)
+
+        obs = observation(
+            "claude",
+            review_provenance={
+                "system": "  Claude   Code ",
+                "model": " Claude Sonnet 5 ",
+            },
+        )
+        request = build(obs)
+        self.assertEqual(
+            {"system": "Claude Code", "model": "Claude Sonnet 5"},
+            request["review_provenance"],
+        )
+        self.assertEqual("claude", request["worker_system"])
+
     def test_provider_name_alone_grants_nothing(self):
         for system in contract.WORKER_SYSTEMS:
             with self.subTest(system=system):

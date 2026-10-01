@@ -103,7 +103,7 @@ def build_request(
 
     _check(isinstance(observation, dict), "observation must be an object")
     _check(observation.get("schema_version") == OBSERVATION_SCHEMA, "unsupported observation schema_version")
-    allowed = {"schema_version", "worker_system", "worker_session_id", "cycle", "observed_at", "probes"}
+    allowed = {"schema_version", "worker_system", "worker_session_id", "cycle", "observed_at", "probes", "review_provenance"}
     _check(not (set(observation) - allowed), "unknown observation fields")
     system = observation.get("worker_system")
     _check(system in contract.WORKER_SYSTEMS, "unknown worker_system")
@@ -143,8 +143,12 @@ def build_request(
         "tool_surfaces": sorted(fields["tool_surfaces"]),
         "observed_at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if "review_provenance" in observation:
+        request["review_provenance"] = observation["review_provenance"]
     try:
-        contract.normalize_request(request)
+        normalized = contract.normalize_request(request)
     except contract.ContractError as error:
         raise ProfileError(f"profile does not form a valid request: {error.detail}") from error
+    if "review_provenance" in request:
+        request["review_provenance"] = normalized["review_provenance"]
     return request

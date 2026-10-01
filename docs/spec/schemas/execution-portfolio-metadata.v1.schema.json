@@ -145,6 +145,26 @@
             "type": "string",
             "format": "date-time",
             "pattern": "Z$"
+          },
+          "different_reviewer_requirement": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "implementer_system",
+              "implementer_model"
+            ],
+            "properties": {
+              "implementer_system": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "implementer_model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
           }
         },
         "allOf": [
@@ -189,27 +209,53 @@
           },
           {
             "if": {
-              "required": ["work_class"],
+              "required": [
+                "work_class"
+              ],
               "properties": {
-                "work_class": {"const": "formal-review"}
+                "work_class": {
+                  "const": "formal-review"
+                }
               }
             },
             "then": {
               "properties": {
-                "role": {"const": "reviewer"}
+                "role": {
+                  "const": "reviewer"
+                }
               }
             }
           },
           {
             "if": {
-              "required": ["work_class"],
+              "required": [
+                "work_class"
+              ],
               "properties": {
-                "role": {"const": "reviewer"}
+                "role": {
+                  "const": "reviewer"
+                }
               }
             },
             "then": {
               "properties": {
-                "work_class": {"const": "formal-review"}
+                "work_class": {
+                  "const": "formal-review"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "different_reviewer_requirement"
+              ]
+            },
+            "then": {
+              "properties": {
+                "role": {
+                  "const": "reviewer"
+                }
               }
             }
           }
