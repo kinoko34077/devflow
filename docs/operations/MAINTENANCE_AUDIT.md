@@ -93,7 +93,7 @@ If a write is not confirmed by immediate exact readback, the operation stops. No
 
 ## Scheduled path
 
-The initial accepted schedule, when released after the real pilot, is read-only audit/triage only.
+The accepted Stage-2 schedule runs once daily at `23 18 * * *` UTC (03:23 JST) and is read-only audit/triage only. The audit job uses one repository-scoped `maintenance-audit-${{ github.repository }}` concurrency group with `cancel-in-progress: false`.
 
 It does not:
 
