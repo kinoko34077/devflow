@@ -117,6 +117,20 @@ def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> d
     return {name: _strip_scalar("\n".join(value)) for name, value in sections.items()}
 
 
+def _project_date(value: str, section: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.date().isoformat()
+    except ValueError:
+        try:
+            return dt.date.fromisoformat(text).isoformat()
+        except ValueError as exc:
+            raise ConfigError(f"invalid {section}: expected ISO date/time") from exc
+
+
 def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
     sections = parse_sections(
         str(issue.get("body") or ""),
@@ -127,11 +141,40 @@ def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
         value = sections.get(section, "").strip()
         if section == "Work Status":
             value = PROJECT_STATUS_ALIASES.get(value, value)
+        if section in {"Last Audit At", "Last Deep Audit At"} and value:
+            value = _project_date(value, section)
         if value:
             desired[field] = value
     if str(issue.get("state", "")).lower() == "closed":
         desired["Status"] = "DONE"
     return desired
+
+
+def derive_audit_freshness(
+    issue: dict[str, Any],
+    head_resolver: Callable[[str, str], str] | None,
+) -> str | None:
+    sections = parse_sections(str(issue.get("body") or ""))
+    repository = sections.get("Repository", "").strip().strip("`")
+    audit_sha = sections.get("Audit SHA", "").strip().strip("`")
+    audit_ref = sections.get("Audit Ref", "").strip().strip("`")
+    if not audit_sha:
+        return None
+    if (
+        not repository
+        or "/" not in repository
+        or not re.fullmatch(r"[0-9a-fA-F]{40}", audit_sha)
+        or not audit_ref
+        or head_resolver is None
+    ):
+        return "UNKNOWN"
+    try:
+        current = head_resolver(repository, audit_ref)
+    except Exception:
+        return "UNKNOWN"
+    if not isinstance(current, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", current):
+        return "UNKNOWN"
+    return "CURRENT" if current.lower() == audit_sha.lower() else "DRIFTED"
 
 
 def validate_select_values(fields: dict[str, str]) -> list[str]:
@@ -266,6 +309,7 @@ class RuntimeConfig:
     github_token: str
     owner: str = PROJECT_OWNER
     project_number: int = PROJECT_NUMBER
+    maintenance_audit_token: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | os._Environ[str] = os.environ) -> "RuntimeConfig":
@@ -275,6 +319,7 @@ class RuntimeConfig:
             github_token=env.get("GITHUB_TOKEN", ""),
             owner=env.get("PROJECT_OWNER", PROJECT_OWNER),
             project_number=int(env.get("PROJECT_NUMBER", str(PROJECT_NUMBER))),
+            maintenance_audit_token=env.get("MAINTENANCE_AUDIT_TOKEN", ""),
         )
 
 
