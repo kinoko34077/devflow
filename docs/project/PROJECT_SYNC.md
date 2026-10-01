@@ -42,7 +42,7 @@ Project values are never used to rewrite canonical Issues.
 | Last Deep Audit At | `Last Deep Audit` |
 | derived Audit Freshness | `Audit Freshness` |
 
-Audit provenance remains canonical in the Repository Control. `Audit Freshness` is derived from exact `Audit SHA` versus the explicit `Audit Ref` head and is never reverse-synced into the Control. If the ref is absent or cannot be resolved safely, freshness is `UNKNOWN`; the synchronizer does not guess the default branch.
+Audit provenance remains canonical in the Repository Control. `Audit Freshness` is derived from exact `Audit SHA` versus the explicit `Audit Ref` head and is never reverse-synced into the Control. `Last Audit`/`Audit Depth` describe the latest accepted audit event, while `Audit SHA`/`Audit Ref` preserve the latest accepted repository-revision audit binding. A CONTROL-only audit may update the former without advancing the latter. If the ref is absent or cannot be resolved safely, freshness is `UNKNOWN`; the synchronizer does not guess the default branch.
 
 `Audit Depth` uses `CONTROL | STANDARD | DEEP`. Project date fields display the calendar date from the canonical UTC audit timestamp while the full timestamp remains in the Control/evidence surface.
 
