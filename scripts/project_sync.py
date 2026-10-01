@@ -939,20 +939,40 @@ def run_sync(
 
     gql = gql or GitHubGraphQL(cfg.project_token)
     try:
+        if mode == "reconcile":
+            ensure_audit_project_fields(gql, cfg.owner, cfg.project_number)
         snapshot = discover_project(gql, cfg.owner, cfg.project_number)
         _validate_project_options(snapshot)
 
         health_issue = rest.find_issue_by_title(HEALTH_TITLE) if rest is not None else None
         health_item_status = ensure_health_not_project_item(health_issue, snapshot, gql, mode=mode)
 
+        freshness_clients: dict[str, GitHubREST] = {}
+        freshness_cache: dict[tuple[str, str], str] = {}
+
+        def resolve_freshness_head(repository: str, ref: str) -> str:
+            key = (repository, ref)
+            if key in freshness_cache:
+                return freshness_cache[key]
+            if not cfg.maintenance_audit_token:
+                raise APIError("maintenance audit read token unavailable")
+            client = freshness_clients.get(repository)
+            if client is None:
+                client = GitHubREST(cfg.maintenance_audit_token, repository)
+                freshness_clients[repository] = client
+            freshness_cache[key] = client.get_commit_sha(ref)
+            return freshness_cache[key]
+
+        freshness_resolver = resolve_freshness_head if cfg.maintenance_audit_token else None
+
         if mode == "event-sync":
             issue = event_issue
             if issue is None:
                 raise ConfigError("event-sync requires an issue event payload")
             issues = [issue]
-            summary = process_issues(issues, snapshot, gql, mode="event-sync")
+            summary = process_issues(issues, snapshot, gql, mode="event-sync", freshness_resolver=freshness_resolver)
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
-            verify_summary = process_issues(issues, snapshot2, gql, mode="verify")
+            verify_summary = process_issues(issues, snapshot2, gql, mode="verify", freshness_resolver=freshness_resolver)
             verify_summary["mutations"] = summary.get("mutations", 0)
             summary = verify_summary
         else:
@@ -963,7 +983,7 @@ def run_sync(
             else:
                 all_issues = rest.list_issues(state="all")
                 issues = select_canonical_issues(all_issues, snapshot.items_by_content_id)
-            summary = process_issues(issues, snapshot, gql, mode=mode)
+            summary = process_issues(issues, snapshot, gql, mode=mode, freshness_resolver=freshness_resolver)
             if mode == "reconcile" and not summary.get("errors"):
                 snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
                 _validate_project_options(snapshot2)
@@ -971,7 +991,7 @@ def run_sync(
                 health_item_status = ensure_health_not_project_item(health_issue2, snapshot2, gql, mode="reconcile")
                 snapshot3 = discover_project(gql, cfg.owner, cfg.project_number)
                 issues2 = select_target_issue(rest, issue_number) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
-                summary = process_issues(issues2, snapshot3, gql, mode="verify")
+                summary = process_issues(issues2, snapshot3, gql, mode="verify", freshness_resolver=freshness_resolver)
                 health_item_status = ensure_health_not_project_item(rest.find_issue_by_title(HEALTH_TITLE), snapshot3, gql, mode="verify")
                 snapshot = snapshot3
 
@@ -986,14 +1006,14 @@ def run_sync(
             coverage={"canonical_issues": 0, "project_items": 0, "drift_fields": 0, "errors": 1},
             messages=[str(exc)], run_url=run_url, direct_requirement="CODEX_REQUIRED" if isinstance(exc, ConfigError) else "NONE",
             direct_reason="Project structure/configuration needs direct verification." if isinstance(exc, ConfigError) else "",
-            secrets=[cfg.project_token, cfg.github_token],
+            secrets=[cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
         )
         if rest is not None:
             try:
                 upsert_health_issue(rest, body)
             except Exception:
                 pass
-        print(_redact(str(exc), [cfg.project_token, cfg.github_token]), file=sys.stderr)
+        print(_redact(str(exc), [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token]), file=sys.stderr)
         return 1
 
 def main(argv: list[str] | None = None) -> int:
