@@ -662,6 +662,39 @@ class GitHubREST:
         return self._request("PATCH", f"{self.base}/issues/{number}", payload)
 
 
+def ensure_audit_project_fields(gql: Any, owner: str, number: int) -> int:
+    identity = gql.get_project_identity(owner, number)
+    if identity.get("title") != PROJECT_TITLE:
+        raise ConfigError(f"Project title mismatch: {identity.get('title')!r}")
+    if bool(identity.get("public")):
+        raise ConfigError("Project must be Private")
+    raw_fields = gql.get_project_fields(identity["id"])
+    mutations = 0
+    for name, spec in AUDIT_PROJECT_FIELD_SPECS.items():
+        matches = [field for field in raw_fields if str(field.get("name", "")).strip() == name]
+        if len(matches) > 1:
+            raise ConfigError(f"expected at most one field named {name!r}, found {len(matches)}")
+        if not matches:
+            gql.create_project_field(
+                identity["id"], name, str(spec["kind"]), list(spec.get("options") or [])
+            )
+            mutations += 1
+            continue
+        field = matches[0]
+        expected_kind = str(spec["kind"])
+        if field.get("kind") != expected_kind:
+            raise ConfigError(
+                f"Project field kind mismatch for {name}: expected {expected_kind}, got {field.get('kind')}"
+            )
+        if expected_kind == "single":
+            expected_options = {str(option["name"]) for option in spec.get("options") or []}
+            actual_options = {str(option.get("name", "")).strip() for option in field.get("options") or []}
+            if actual_options != expected_options:
+                raise ConfigError(
+                    f"Project option mismatch for {name}: missing={sorted(expected_options - actual_options)}, extra={sorted(actual_options - expected_options)}"
+                )
+    return mutations
+
 def discover_project(gql: Any, owner: str, number: int) -> ProjectSnapshot:
     identity = gql.get_project_identity(owner, number)
     if identity.get("title") != PROJECT_TITLE:
@@ -677,6 +710,8 @@ def discover_project(gql: Any, owner: str, number: int) -> ProjectSnapshot:
             raise ConfigError(f"Project field kind mismatch for {name}: expected single, got {kind}")
         if name in TEXT_FIELDS and kind != "text":
             raise ConfigError(f"Project field kind mismatch for {name}: expected text, got {kind}")
+        if name in DATE_FIELDS and kind != "date":
+            raise ConfigError(f"Project field kind mismatch for {name}: expected date, got {kind}")
         raw_options = node.get("options") or []
         option_names = [str(option.get("name", "")).strip() for option in raw_options]
         if len(option_names) != len(set(option_names)):
@@ -716,8 +751,13 @@ def select_canonical_issues(issues: list[dict[str, Any]], tracked_items: dict[st
     return selected
 
 
-def sync_one_issue(issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, mode: str) -> dict[str, Any]:
+def sync_one_issue(
+    issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, mode: str,
+    extra_fields: dict[str, str] | None = None,
+) -> dict[str, Any]:
     desired = desired_project_fields(issue)
+    if extra_fields:
+        desired.update(extra_fields)
     errors = validate_select_values(desired)
     if errors:
         raise ConfigError("; ".join(errors))
@@ -745,6 +785,8 @@ def sync_one_issue(issue: dict[str, Any], snapshot: ProjectSnapshot, gql: Any, m
                 gql.update_single_select(snapshot.id, item.id, field.id, option_id)
             elif field_name in TEXT_FIELDS:
                 gql.update_text(snapshot.id, item.id, field.id, value)
+            elif field_name in DATE_FIELDS:
+                gql.update_date(snapshot.id, item.id, field.id, value)
             else:
                 raise ConfigError(f"Unsupported Project field: {field_name}")
             mutations += 1
@@ -773,14 +815,21 @@ def _validate_project_options(snapshot: ProjectSnapshot) -> None:
             raise ConfigError(f"Project option mismatch for {field_name}: missing={missing}, extra={extra}")
 
 
-def process_issues(issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql: Any, mode: str) -> dict[str, Any]:
+def process_issues(
+    issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql: Any, mode: str,
+    freshness_resolver: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     errors: list[str] = []
     mutations = 0
     matched_items = 0
     for issue in issues:
         try:
-            result = sync_one_issue(issue, snapshot, gql, mode)
+            extra_fields: dict[str, str] = {}
+            freshness = derive_audit_freshness(issue, freshness_resolver)
+            if freshness is not None:
+                extra_fields["Audit Freshness"] = freshness
+            result = sync_one_issue(issue, snapshot, gql, mode, extra_fields=extra_fields)
             results.append(result)
             mutations += int(result.get("mutations", 0))
             if result.get("membership") == "MATCH":
@@ -802,7 +851,6 @@ def process_issues(issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql:
         "project_items": matched_items,
         "canonical_issues": len(issues),
     }
-
 
 def ensure_health_not_project_item(health_issue: dict[str, Any] | None, snapshot: ProjectSnapshot, gql: Any, mode: str) -> str:
     if not health_issue:
