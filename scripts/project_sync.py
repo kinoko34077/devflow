@@ -37,8 +37,9 @@ FIELD_MAP = {
     "Audit Evidence": "Audit Evidence",
     "Last Deep Audit At": "Last Deep Audit",
 }
-# WAIT is a valid devflow Control state; map it only at the Project display boundary.
-# The source Control remains WAIT, while the existing Project Status option is PARKED.
+# WAIT is the accepted Repository Control-only source-state exception from devflow#162.
+# It is not a general Work Status. Map it only at the Project display boundary:
+# the source Control remains WAIT while the existing Project Status option is PARKED.
 PROJECT_STATUS_ALIASES = {"WAIT": "PARKED"}
 
 SELECT_OPTIONS = {

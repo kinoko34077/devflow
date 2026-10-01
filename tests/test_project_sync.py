@@ -30,6 +30,17 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(fields["Status"], "PARKED")
         self.assertEqual(project_sync.validate_select_values(fields), [])
 
+    def test_wait_exception_is_control_only_in_machine_workflow(self):
+        workflow = (Path(__file__).parents[1] / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
+        general_states = workflow.split("  work_states:", 1)[1].split("  repository_states:", 1)[0]
+        control = workflow.split("repository_control:", 1)[1].split("repository_bootstrap:", 1)[0]
+
+        self.assertNotIn("- WAIT", general_states)
+        self.assertIn("control_only_wait_source_state:", control)
+        self.assertIn("value: WAIT", control)
+        self.assertIn("general_work_state: false", control)
+        self.assertIn("project_status_projection: PARKED", control)
+
     def test_missing_sections_are_not_guessed(self):
         issue = {"state": "open", "body": "## Repository\n\nkinoko34077/demo"}
         self.assertEqual(project_sync.desired_project_fields(issue), {"Managed Repository": "kinoko34077/demo"})
