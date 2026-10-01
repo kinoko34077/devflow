@@ -1,0 +1,32 @@
+{
+  "repository": "kinoko34077/example",
+  "observed_at": "2026-10-01T00:00:00Z",
+  "control_count": 1,
+  "control": {
+    "ref": "kinoko34077/devflow#999",
+    "repository": "kinoko34077/example",
+    "trusted": true,
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "active_owner_ref": "kinoko34077/example#1",
+    "candidate_present": false
+  },
+  "owner": {
+    "ref": "kinoko34077/example#1",
+    "repository": "kinoko34077/example",
+    "revision": "cccccccccccccccccccccccccccccccccccccccc",
+    "state": "OPEN",
+    "runnable": false,
+    "terminal": false
+  },
+  "source_status": "OK",
+  "producer_active": false,
+  "reviewer_gate": false,
+  "human_gate": false,
+  "external_wait": false,
+  "semantic_projection_suspected": false,
+  "search_state": null,
+  "evidence_refs": [
+    "control:sha:a",
+    "owner:sha:c"
+  ]
+}
