@@ -526,6 +526,12 @@ class BootstrapExecutor:
             resources,
             lambda: self.repository_api.get_default_branch_head(full_name),
         )
+        audit_ref = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: self.repository_api.get_default_branch_name(full_name),
+        )
         resources.append(f"head:{head_sha}")
 
         owner_issues = self._call(
@@ -621,6 +627,7 @@ class BootstrapExecutor:
                     f"## Priority\n\n`{request.priority}`\n\n"
                     f"## Risk\n\n`{request.risk}`\n\n"
                     f"## Audit SHA\n\n`{head_sha}`\n\n"
+                    f"## Audit Ref\n\n`{audit_ref}`\n\n"
                     f"## Active Work\n\n{active_work}\n\n"
                     f"## Next Action\n\n`{request.next_action}`\n\n"
                     "## Canonical Entry Points\n\n"
@@ -798,6 +805,15 @@ class GitHubApi:
             raise GitHubApiError(f"create file {path} returned malformed response")
         commit = result.get("commit") or {}
         return {"commit_sha": commit.get("sha")}
+
+    def get_default_branch_name(self, full_name: str) -> str:
+        repo = self.get_repository(full_name)
+        if not isinstance(repo, dict):
+            raise GitHubApiError(f"repository {full_name} disappeared during bootstrap")
+        branch = repo.get("default_branch")
+        if not isinstance(branch, str) or not branch:
+            raise GitHubApiError(f"repository {full_name} has no default branch after seed")
+        return branch
 
     def get_default_branch_head(self, full_name: str) -> str:
         repo = self.get_repository(full_name)
