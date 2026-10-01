@@ -120,7 +120,9 @@ def normalize_observation(value: object) -> dict[str, object]:
 
 def _classification(data: dict[str, object]) -> tuple[str, list[str], list[str], str, str | None, str]:
     owner = data["owner"]
+    control = data["control"]
     assert isinstance(owner, dict)
+    assert isinstance(control, dict)
     reasons: list[str] = []
     findings: list[str] = []
     transition: str | None = None
@@ -143,10 +145,15 @@ def _classification(data: dict[str, object]) -> tuple[str, list[str], list[str],
     if data["semantic_projection_suspected"]:
         return ("NEEDS_EVIDENCE", ["DESIRED_TEXT_NOT_MACHINE_PROVABLE"], ["SEMANTIC_PROJECTION_SUSPECTED"],
                 "TRIAGE_ONLY", None, "AUTHORITATIVE_EVIDENCE_CHANGED")
-    if owner["terminal"] is True and data["control"]["active_owner_ref"] == owner["ref"]:
+    if owner["terminal"] is True and control["active_owner_ref"] == owner["ref"]:
         reasons.append("EXACT_OWNER_TERMINAL")
         if data.get("search_state") not in (None, owner["state"]):
             reasons.append("SEARCH_STATE_STALE")
+        if control.get("candidate_present") is not True:
+            reasons.append("DESIRED_TEXT_NOT_MACHINE_PROVABLE")
+            findings.append("SEMANTIC_PROJECTION_SUSPECTED")
+            return ("NEEDS_EVIDENCE", reasons, findings, "TRIAGE_ONLY", None,
+                    "AUTHORITATIVE_EVIDENCE_CHANGED")
         findings.append("CONTROL_ACTIVE_WORK_TERMINAL")
         transition = "WITHDRAW_STALE_CONTROL_CANDIDATE"
         return ("AUTO_ADVANCE", reasons, findings, "TERMINAL", transition,
