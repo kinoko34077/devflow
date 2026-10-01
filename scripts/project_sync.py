@@ -30,6 +30,12 @@ FIELD_MAP = {
     "Repository": "Managed Repository",
     "Next Action": "Next Action",
     "Audit SHA": "Audit SHA",
+    "Audit Ref": "Audit Ref",
+    "Last Audit At": "Last Audit",
+    "Audit Depth": "Audit Depth",
+    "Audit Scope": "Audit Scope",
+    "Audit Evidence": "Audit Evidence",
+    "Last Deep Audit At": "Last Deep Audit",
 }
 # WAIT is a valid devflow Control state; map it only at the Project display boundary.
 # The source Control remains WAIT, while the existing Project Status option is PARKED.
@@ -44,9 +50,30 @@ SELECT_OPTIONS = {
     "Priority": {"P0", "P1", "P2", "P3"},
     "Risk": {"LOW", "MEDIUM", "HIGH", "CRITICAL"},
     "Work Type": {"FEATURE", "BUG", "SPEC", "AUDIT", "REFACTOR", "MAINTENANCE", "RESEARCH", "INFRA", "DOCS"},
+    "Audit Depth": {"CONTROL", "STANDARD", "DEEP"},
+    "Audit Freshness": {"CURRENT", "DRIFTED", "UNKNOWN"},
 }
-TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA"}
-EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS
+TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA", "Audit Ref", "Audit Scope", "Audit Evidence"}
+DATE_FIELDS = {"Last Audit", "Last Deep Audit"}
+EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS | DATE_FIELDS
+
+AUDIT_PROJECT_FIELD_SPECS = {
+    "Audit Ref": {"kind": "text", "options": []},
+    "Last Audit": {"kind": "date", "options": []},
+    "Audit Depth": {"kind": "single", "options": [
+        {"name": "CONTROL", "color": "GRAY", "description": "Control/state consistency audit"},
+        {"name": "STANDARD", "color": "BLUE", "description": "Repository-local standard audit"},
+        {"name": "DEEP", "color": "PURPLE", "description": "Broad repository-local deep audit"},
+    ]},
+    "Audit Scope": {"kind": "text", "options": []},
+    "Audit Evidence": {"kind": "text", "options": []},
+    "Last Deep Audit": {"kind": "date", "options": []},
+    "Audit Freshness": {"kind": "single", "options": [
+        {"name": "CURRENT", "color": "GREEN", "description": "Audit SHA matches Audit Ref HEAD"},
+        {"name": "DRIFTED", "color": "YELLOW", "description": "Audit Ref HEAD advanced past Audit SHA"},
+        {"name": "UNKNOWN", "color": "GRAY", "description": "Audit Ref or exact head cannot be established"},
+    ]},
+}
 
 
 class SyncError(RuntimeError):
