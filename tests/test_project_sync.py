@@ -328,5 +328,94 @@ class StructuralValidationTests(unittest.TestCase):
             project_sync.discover_project(FakeGraphQL(), project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
 
 
+class AuditProvenanceTests(unittest.TestCase):
+    def test_audit_provenance_sections_map_to_existing_project(self):
+        self.assertEqual(project_sync.FIELD_MAP["Audit Ref"], "Audit Ref")
+        self.assertEqual(project_sync.FIELD_MAP["Last Audit At"], "Last Audit")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Depth"], "Audit Depth")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Scope"], "Audit Scope")
+        self.assertEqual(project_sync.FIELD_MAP["Audit Evidence"], "Audit Evidence")
+        self.assertEqual(project_sync.FIELD_MAP["Last Deep Audit At"], "Last Deep Audit")
+        self.assertEqual(project_sync.SELECT_OPTIONS["Audit Depth"], {"CONTROL", "STANDARD", "DEEP"})
+        self.assertEqual(project_sync.SELECT_OPTIONS["Audit Freshness"], {"CURRENT", "DRIFTED", "UNKNOWN"})
+
+    def test_audit_freshness_uses_explicit_non_default_ref(self):
+        calls = []
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/dev_agent`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`v2/bootstrap`"
+            )
+        }
+        def resolve(repository, ref):
+            calls.append((repository, ref))
+            return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.assertEqual(project_sync.derive_audit_freshness(issue, resolve), "CURRENT")
+        self.assertEqual(calls, [("kinoko34077/dev_agent", "v2/bootstrap")])
+
+    def test_audit_freshness_unknown_without_ref_and_does_not_guess_default(self):
+        calls = []
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`"
+            )
+        }
+        def resolve(repository, ref):
+            calls.append((repository, ref))
+            return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.assertEqual(project_sync.derive_audit_freshness(issue, resolve), "UNKNOWN")
+        self.assertEqual(calls, [])
+
+    def test_audit_freshness_reports_drift(self):
+        issue = {
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`main`"
+            )
+        }
+        self.assertEqual(
+            project_sync.derive_audit_freshness(
+                issue,
+                lambda repository, ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            "DRIFTED",
+        )
+
+    def test_runtime_config_reads_maintenance_audit_token(self):
+        cfg = project_sync.RuntimeConfig.from_env({
+            "GITHUB_REPOSITORY": "kinoko34077/devflow",
+            "PROJECTS_TOKEN": "project",
+            "GITHUB_TOKEN": "repo",
+            "MAINTENANCE_AUDIT_TOKEN": "audit",
+        })
+        self.assertEqual(cfg.maintenance_audit_token, "audit")
+
+    def test_reconcile_can_create_only_missing_audit_project_fields(self):
+        class FakeGraphQL:
+            def __init__(self):
+                self.created = []
+            def get_project_identity(self, owner, number):
+                return {"id": "P", "title": project_sync.PROJECT_TITLE, "public": False}
+            def get_project_fields(self, project_id):
+                return [
+                    {"id": "existing", "name": "Audit SHA", "kind": "text", "options": []},
+                ]
+            def create_project_field(self, project_id, name, kind, options):
+                self.created.append((project_id, name, kind, options))
+        gql = FakeGraphQL()
+        project_sync.ensure_audit_project_fields(gql, project_sync.PROJECT_OWNER, project_sync.PROJECT_NUMBER)
+        created_names = {row[1] for row in gql.created}
+        self.assertEqual(created_names, set(project_sync.AUDIT_PROJECT_FIELD_SPECS))
+        self.assertNotIn("Audit SHA", created_names)
+
+    def test_project_workflow_supplies_read_token_for_freshness(self):
+        path = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("MAINTENANCE_AUDIT_TOKEN", text)
+
+
 if __name__ == "__main__":
     unittest.main()
