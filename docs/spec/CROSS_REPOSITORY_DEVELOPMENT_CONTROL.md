@@ -248,6 +248,8 @@ In GitHub Project this concept is represented by the built-in `Status` field. Do
 
 Long-lived Repository Control Issues normally remain open and return to a repository-level state such as `AUDITED`, `BLOCKED` or `PARKED`; `DONE` is primarily the terminal state of finite Work Orders/operations.
 
+Repository Control Issues have one accepted source-state exception: `WAIT`. It is permitted only on a Repository Control when the repository remains managed/live but currently has no runnable or active repository-local work and the Control's `Next Action` names the condition or event being awaited. `WAIT` is not added to the general Work Status vocabulary for Work Orders/tasks, does not imply `Repository State = PARKED`, and does not change repository lifecycle semantics. Because the GitHub Project built-in Status field has no `WAIT` option, Project synchronization maps a Control source value of `WAIT` to display-only `PARKED`; the source Control remains `WAIT`. This is the accepted #162 / PR #163 compatibility boundary.
+
 Execution Session `Status` is a different state dimension from Work Status. A task/repository may remain `IMPLEMENTING` while one worker session is `WAITING`, `HANDOFF` or `RELEASED`.
 
 ### 5.2 Repository State
