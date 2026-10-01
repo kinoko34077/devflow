@@ -366,9 +366,9 @@ When opening an existing local Issue:
 9. compare Cursor + durable progress + live GitHub state with the Session Record's `Last-Checkpoint` / `Next-Action`;
 10. verify which acceptance conditions have current evidence;
 11. continue from the projected first unfinished / first unverified milestone;
-10. if the predecessor session appears stale/abandoned, apply the 1-hour inactivity rule, post an explicit successor/takeover Session Record, then re-read the owning Issue before mutation;
-11. if another trusted overlapping successor is already present, stop until the collision is explicitly dispositioned;
-12. reconcile stale Issue/Control/session text before declaring completion.
+12. if the predecessor session appears stale/abandoned, apply the 1-hour inactivity rule, post an explicit successor/takeover Session Record, then re-read the owning Issue before mutation;
+13. if another trusted overlapping successor is already present, stop until the collision is explicitly dispositioned;
+14. reconcile stale Issue/Control/session text before declaring completion.
 
 When multiple active Session Records overlap semantically, stop broad mutation until the owning Issue records one explicit disposition: continue one, split scopes, integrate through a distinct integrator session, wait on a dependency, or take over a stale/abandoned predecessor.
 
