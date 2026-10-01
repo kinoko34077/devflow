@@ -11,7 +11,7 @@ A Task Checkpoint Cursor is a compact projection of one owning Issue / Work Orde
 
 > What is the `first_unfinished` recovery-relevant checkpoint now?
 
-The cursor lets a successor locate the current frontier before reconstructing historical checkpoint chronology. It remains subordinate to the owning task, durable progress surface, current PR/check/Review evidence, repository canon and any live execution-coordinator claim.
+The cursor lets a successor locate the current frontier before reconstructing historical checkpoint chronology. It is intentionally the **structural locator**, not the detailed progress log. The owning task's designated durable progress surface supplies the detailed checkpoint history, evidence, findings, decisions and blockers. A successor uses the Cursor to find **where**, then the progress surface to understand **what happened there**. It remains subordinate to the owning task, durable progress surface, current PR/check/Review evidence, repository canon and any live execution-coordinator claim.
 
 The cursor is **not readiness authority**. It is also **not claim, lease, lock, CAS, or fencing authority**. A cursor naming checkpoint `X` means only that `X` is the projected first unfinished recovery unit; existing blocker, dependency, Human, security, Review, CI, publication, credential/session/permission and destructive-operation gates still govern whether `X` may run.
 
@@ -21,7 +21,7 @@ v1 represents exactly one **single canonical recovery frontier** per owning task
 
 For durable multi-step work, a cursor is required when the task or its durable progress ledger can identify one canonical `first_unfinished` checkpoint without losing material parallel state. Initialize or reuse it on the owning Issue / Work Order before entering the next materially distinct recovery unit. If independently progressing units have separate frontiers, split them into separately owned bounded tasks or retain the complete parallel state in the durable progress surface and designate one canonical task-level frontier.
 
-Do not create one cursor per worker. Do not use multiple competing trusted cursor comments on one owning Issue. Do not create a separate progress/restart/minutes Issue merely to host a cursor; the cursor is a trusted comment on the owning task.
+Do not create one cursor per worker. Do not use multiple competing trusted cursor comments on one owning Issue. A dedicated progress Issue / ledger may coexist with the cursor and is often the correct place for detailed progress; the cursor itself remains a trusted comment on the owning task and should reference the designated progress surface/checkpoint in `evidence` when practical.
 
 A missing cursor does not invalidate already accepted work. On an eligible task it is an operational gap: recover the unambiguous frontier from live durable evidence, initialize/reconcile the cursor, then continue. On genuinely parallel/ambiguous work where one frontier would lose material state, use the ordinary durable-progress resume path until one canonical frontier exists.
 
@@ -76,18 +76,20 @@ More than one trusted recognized marker is never silently ordered by comment age
 For a task with an accepted cursor:
 
 1. read normal devflow/repository authority and the owning Issue / Work Order;
-2. identify the durable progress surface;
-3. inspect the owning Issue comments for the unique trusted cursor;
-4. read `first_unfinished` before reconstructing historical checkpoint chronology;
-5. verify only the current volatile evidence, Session overlap, blocker/dependency state, readiness and safety gates needed for that frontier;
+2. inspect the owning Issue comments for the unique trusted cursor;
+3. read `first_unfinished` first to identify the roadmap/current-position frontier;
+4. follow the owning task's durable reference to the designated progress surface and read the detailed progress/evidence for that frontier;
+5. inspect active Session overlap plus only the current volatile head/check/Review/blocker/dependency/readiness/safety evidence needed for that frontier;
 6. resume there when runnable;
-7. if the cursor conflicts with authoritative durable state, warn, re-read and reconcile rather than replaying accepted history by default.
+7. if cursor and progress surface disagree, warn, re-read live evidence and reconcile both layers rather than choosing one silently or replaying accepted history.
+
+The worker performs this discovery itself. A user reminder containing the progress Issue number, cursor sentinel, or current checkpoint is not a prerequisite for correct resume behavior.
 
 Chat, Memory and GitHub Project fields are not resume authority.
 
 ## 6. Initialize
 
-When there is `NO_MARKER` and the owning durable state exposes one unambiguous frontier, initialize revision `1` from that state before the next materially distinct recovery unit.
+When there is `NO_MARKER` and the owning durable state plus its designated progress surface expose one unambiguous frontier, initialize revision `1` from that state before the next materially distinct recovery unit. Include the durable progress surface/current checkpoint reference in `evidence` when practical so the compact locator and detailed progress remain connected.
 
 Initialization must not infer a checkpoint from chat history or checkpoint-name ordering. If a trusted marker already exists, use normal read/compare semantics. If multiple trusted markers exist, return `WARN_DUPLICATE_MARKER` and reconcile instead of initializing another marker.
 
