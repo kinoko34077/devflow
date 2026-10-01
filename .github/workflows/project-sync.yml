@@ -52,6 +52,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          MAINTENANCE_AUDIT_TOKEN: ${{ secrets.MAINTENANCE_AUDIT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           MODE: ${{ inputs.mode }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
