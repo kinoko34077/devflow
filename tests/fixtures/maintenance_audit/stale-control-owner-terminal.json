@@ -8,7 +8,7 @@
     "trusted": true,
     "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "active_owner_ref": "kinoko34077/example#1",
-    "candidate_present": false
+    "candidate_present": true
   },
   "owner": {
     "ref": "kinoko34077/example#1",
