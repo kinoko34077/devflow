@@ -92,6 +92,17 @@ class MaintenanceAuditTests(unittest.TestCase):
         report = ma.classify_repository(fixture("stale-control-owner-terminal"))
         self.assertEqual(report["next_transition"], "WITHDRAW_STALE_CONTROL_CANDIDATE")
 
+    def test_terminal_prose_owner_without_candidate_is_triage_only(self):
+        value = fixture("stale-control-owner-terminal")
+        value["control"]["candidate_present"] = False
+        report = ma.classify_repository(value)
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertIn(
+            "SEMANTIC_PROJECTION_SUSPECTED",
+            report["finding_classes"],
+        )
+        self.assertIsNone(report.get("next_transition"))
+
     def test_search_state_is_diagnostic_only(self):
         report = ma.classify_repository(fixture("search-stale-exact-terminal"))
         self.assertIn("SEARCH_STATE_STALE", report["reason_codes"])
