@@ -449,7 +449,8 @@ query($id:ID!, $after:String) {
             if node.get("__typename") == "ProjectV2SingleSelectField":
                 fields.append({"id": node["id"], "name": node["name"], "kind": "single", "options": node.get("options") or []})
             elif node.get("__typename") == "ProjectV2Field":
-                kind = "text" if node.get("dataType") == "TEXT" else str(node.get("dataType", "")).lower()
+                data_type = str(node.get("dataType", "")).upper()
+                kind = "text" if data_type == "TEXT" else "date" if data_type == "DATE" else data_type.lower()
                 fields.append({"id": node["id"], "name": node["name"], "kind": kind, "options": []})
         return fields
 
@@ -476,6 +477,10 @@ query($id:ID!, $after:String) {
                 name
                 optionId
                 field { ... on ProjectV2SingleSelectField { id name } }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
+                field { ... on ProjectV2Field { id name } }
               }
             }
           }
@@ -508,6 +513,8 @@ query($id:ID!, $after:String) {
                     values[name] = field_value.get("text") or ""
                 elif field_value.get("__typename") == "ProjectV2ItemFieldSingleSelectValue":
                     values[name] = field_value.get("name") or ""
+                elif field_value.get("__typename") == "ProjectV2ItemFieldDateValue":
+                    values[name] = field_value.get("date") or ""
             items.append({
                 "id": node["id"],
                 "content_id": content.get("id"),
@@ -516,6 +523,26 @@ query($id:ID!, $after:String) {
                 "fields": values,
             })
         return items
+
+    def create_project_field(
+        self, project_id: str, name: str, kind: str, options: list[dict[str, str]]
+    ) -> None:
+        data_type = {"text": "TEXT", "date": "DATE", "single": "SINGLE_SELECT"}.get(kind)
+        if data_type is None:
+            raise ConfigError(f"unsupported Project field kind: {kind}")
+        query = """
+mutation($project:ID!, $name:String!, $dataType:ProjectV2CustomFieldType!, $options:[ProjectV2SingleSelectFieldOptionInput!]) {
+  createProjectV2Field(input:{
+    projectId:$project, name:$name, dataType:$dataType, singleSelectOptions:$options
+  }) { projectV2Field { ... on ProjectV2FieldCommon { id name } } }
+}
+"""
+        self.query(query, {
+            "project": project_id,
+            "name": name,
+            "dataType": data_type,
+            "options": options if kind == "single" else None,
+        })
 
     def add_item(self, project_id: str, content_id: str) -> str:
         query = """
@@ -550,6 +577,16 @@ mutation($project:ID!, $item:ID!, $field:ID!, $text:String!) {
 }
 """
         self.query(query, {"project": project_id, "item": item_id, "field": field_id, "text": text})
+
+    def update_date(self, project_id: str, item_id: str, field_id: str, date: str) -> None:
+        query = """
+mutation($project:ID!, $item:ID!, $field:ID!, $date:Date!) {
+  updateProjectV2ItemFieldValue(input:{
+    projectId:$project, itemId:$item, fieldId:$field, value:{date:$date}
+  }) { projectV2Item { id } }
+}
+"""
+        self.query(query, {"project": project_id, "item": item_id, "field": field_id, "date": date})
 
     def delete_item(self, project_id: str, item_id: str) -> None:
         query = """
@@ -598,6 +635,14 @@ class GitHubREST:
 
     def get_issue(self, number: int) -> dict[str, Any]:
         return self._request("GET", f"{self.base}/issues/{number}")
+
+    def get_commit_sha(self, ref: str) -> str:
+        encoded = urllib.parse.quote(ref, safe="")
+        value = self._request("GET", f"{self.base}/commits/{encoded}")
+        sha = value.get("sha") if isinstance(value, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            raise APIError("repository ref did not resolve to an exact commit SHA")
+        return sha
 
     def find_issue_by_title(self, title: str) -> dict[str, Any] | None:
         for issue in self.list_issues(state="all"):
