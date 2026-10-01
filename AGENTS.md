@@ -166,7 +166,7 @@ When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a bro
 - `NEEDS_HUMAN`: ask only about that gate.
 - `WAIT_EXTERNAL`, `NO_ELIGIBLE_WORK` or `NEEDS_EVIDENCE`: report the typed result; never invent a task from prose, Issue age, branches, Project fields or chat history.
 
-Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository pickup is deferred (#198).
+Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository broad pickup is accepted through completed #198/#208; only currently published, fresh, eligible portfolio evidence may participate.
 
 ## 9. Creating a new repository
 
