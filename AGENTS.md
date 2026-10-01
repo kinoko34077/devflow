@@ -31,7 +31,8 @@ The MCP is a read-only access layer to the same live GitHub canon. It does not r
 | Cross-repository coordinated work | devflow Work Order |
 | Repository-specific requirements/specs/current technical detail | owning repository |
 | Repository-specific implementation task/finding | owning repository Issue / Work Order |
-| Durable recovery detail | owning Issue / Work Order or its designated durable progress surface, including a dedicated progress Issue/ledger when used |\n| Compact current-position projection | Task Checkpoint Cursor on the owning Issue / Work Order; roadmap/frontier locator only |
+| Durable recovery detail | owning Issue / Work Order or its designated durable progress surface, including a dedicated progress Issue/ledger when used |
+| Compact current-position projection | Task Checkpoint Cursor on the owning Issue / Work Order; roadmap/frontier locator only |
 | Short-lived manual execution-session checkpoint | worker-owned record on the owning Issue / Work Order |
 | Code diff and verification evidence | owning repository PR / Actions / tests |
 | Display/overview | GitHub Project; never canonical |
@@ -143,12 +144,13 @@ If a merged change is wrong, use a dedicated rollback branch + revert PR. Do not
 A new worker resumes from GitHub evidence, not from the previous chat narrative:
 
 1. Control Issue;
-2. referenced local Issue/Work Order and durable progress surface;
-3. accepted Task Checkpoint Cursor when present, using its `first_unfinished` as the compact projected frontier;
-4. active or latest relevant Execution Session Record(s);
-5. linked branch/PR and current head;
-6. recorded Audit SHA versus current branch/PR head;
-7. current blocker/readiness/safety evidence for the projected first unfinished milestone.
+2. referenced local Issue / Work Order;
+3. accepted Task Checkpoint Cursor when eligible, using its `first_unfinished` as the compact roadmap/current-position projection;
+4. the task's designated durable progress surface, including a dedicated progress Issue/ledger when designated, for detailed progress/evidence around that frontier;
+5. active or latest relevant Execution Session Record(s);
+6. linked branch/PR and current head;
+7. recorded Audit SHA versus current branch/PR head;
+8. current blocker/readiness/safety evidence for the projected first unfinished milestone.
 
 If an eligible cursor is absent, ambiguous, malformed, duplicated, stale, or inconsistent with the owning durable state, use the designated durable progress surface and live evidence to repair/reconcile the cursor before broad continuation; do not infer a position from chat or silently choose among competing markers. If the designated progress surface itself is missing or stale, repair that durable detail layer as well.
 
