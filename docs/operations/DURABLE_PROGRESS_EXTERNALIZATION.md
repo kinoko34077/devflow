@@ -43,14 +43,17 @@ A single-step read-only lookup with no continuation/recovery value is exempt. If
 
 ## 4. Allowed surfaces
 
-Use the narrowest owning surface that survives interruption:
+Use the narrowest owning surface that survives interruption.
 
-- existing owning Issue / Work Order;
-- trusted comment on that Issue / Work Order;
-- dedicated bounded progress Issue/ledger when it improves recovery;
-- an accepted Task Checkpoint Cursor as an **optional compact projection** when that mechanism is available; it **does not replace the durable progress surface**.
+Default durable progress surface:
+- existing owning Issue / Work Order; or
+- a trusted comment on that Issue / Work Order.
 
-Do not create one Issue per checkpoint. Prefer updating one progress surface for one bounded operation unless independent completion, handoff, or acceptance justifies decomposition.
+A dedicated bounded progress Issue/ledger is justified only when the work has an independent recovery/acceptance/handoff boundary that should survive separately, or when no suitable owning Issue / Work Order exists. Record that reason on the durable owner. **Context-window exhaustion, chat/session restart, provider handoff, or a desire for a shorter restart packet alone are not reasons to create another Issue** when the owning surface can already recover the work.
+
+For qualifying multi-step work with one unambiguous canonical recovery frontier, maintain one accepted Task Checkpoint Cursor on the owning Issue / Work Order as the compact `first_unfinished` projection. The cursor remains subordinate to the durable progress surface and **does not replace it**. For genuinely parallel or ambiguous-frontier work where one cursor would lose material state, the cursor may be omitted until one canonical frontier exists.
+
+Do not create one Issue per checkpoint, one Issue per chat/context window, or a separate Issue merely to host a cursor. Prefer updating one owning progress surface for one bounded operation unless independent completion, handoff, or acceptance actually justifies decomposition.
 
 Chat, Memory, provider summaries, and GitHub Project fields are not durable progress authority.
 
@@ -144,7 +147,7 @@ This is fail-to-reconcile, not fail-to-work: ordinary missing progress does not 
 
 A successor starts from the latest explicit durable checkpoint and first unfinished action.
 
-When an accepted Task Checkpoint Cursor exists, use its `first_unfinished` value as the compact resume projection before reconstructing historical checkpoint chronology. Validate that projection against the owning task, current durable progress surface, volatile evidence, active Session overlap, and current readiness/safety gates. Cursor drift means warn/re-read/reconcile; it does not authorize replay or hard rejection by itself.
+For eligible single-frontier multi-step work, establish or repair the Task Checkpoint Cursor before the next materially distinct unit if it is missing, then use its `first_unfinished` value as the compact resume projection before reconstructing historical checkpoint chronology. Validate that projection against the owning task, current durable progress surface, volatile evidence, active Session overlap, and current readiness/safety gates. For ineligible parallel/ambiguous work, use the ordinary durable-progress resume path until one canonical frontier exists. Cursor drift means warn/re-read/reconcile; it does not authorize replay or hard rejection by itself.
 
 Already accepted earlier units are not repeated solely because previous chat/provider state disappeared.
 
