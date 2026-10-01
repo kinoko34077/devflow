@@ -59,7 +59,7 @@ A new Issue is optional for a truly trivial, low-risk, single-PR change when the
 
 Before creating a new Issue, search open Issues and current `Active Work` to avoid duplicates.
 
-When an owning Issue / Work Order already exists, do not create a second Issue whose only purpose is progress storage, chat/context-limit minutes, restart instructions, or hosting a Task Checkpoint Cursor. Keep recoverable progress on the owning surface, keep worker provenance in its Execution Session Record, and keep the single current recovery frontier in the owning task's Cursor when eligible. A separate progress Issue requires an independent bounded objective/recovery/acceptance/handoff responsibility or the absence of a suitable owning surface; context loss alone is not such a responsibility.
+A dedicated progress Issue / ledger may be used alongside an owning Issue / Work Order when it improves durable recovery, long-running execution, auditability or handoff. When used, the owning task must reference that progress surface explicitly enough for a fresh worker to discover it. A successor must follow that reference and read/update the progress Issue proactively; correct operation must not depend on the user mentioning the progress Issue again. For eligible single-frontier work, pair that detailed progress surface with one Task Checkpoint Cursor on the owning Issue: the progress Issue carries detailed progress/evidence, while the Cursor carries the roadmap/current `first_unfinished` position.
 
 ## 3. Information ownership boundary
 
@@ -356,14 +356,16 @@ The parent closes only after every required child acceptance condition and cross
 When opening an existing local Issue:
 
 1. read the related devflow `[REPO]` Control Issue;
-2. read the local Issue body and latest material comments;
-3. inspect active or latest relevant Execution Session Record(s);
-4. inspect linked PR/branch and current SHA;
-5. read only referenced/task-relevant local specs/current state;
-6. inspect current formal Review(s), unresolved review threads/findings and CI/check state when review has started;
-7. compare live GitHub state with the Session Record's `Last-Checkpoint` / `Next-Action`;
-8. verify which acceptance conditions have current evidence;
-9. continue from the first unchecked / unverified milestone;
+2. read the local owning Issue / Work Order;
+3. read its accepted Task Checkpoint Cursor first when eligible to identify the roadmap/current `first_unfinished` frontier;
+4. follow the owning task's reference to its designated durable progress surface (including a dedicated progress Issue/ledger) and read the detailed progress/evidence around that frontier;
+5. inspect active or latest relevant Execution Session Record(s);
+6. inspect linked PR/branch and current SHA;
+7. read only referenced/task-relevant local specs/current state;
+8. inspect current formal Review(s), unresolved review threads/findings and CI/check state when review has started;
+9. compare Cursor + durable progress + live GitHub state with the Session Record's `Last-Checkpoint` / `Next-Action`;
+10. verify which acceptance conditions have current evidence;
+11. continue from the projected first unfinished / first unverified milestone;
 10. if the predecessor session appears stale/abandoned, apply the 1-hour inactivity rule, post an explicit successor/takeover Session Record, then re-read the owning Issue before mutation;
 11. if another trusted overlapping successor is already present, stop until the collision is explicitly dispositioned;
 12. reconcile stale Issue/Control/session text before declaring completion.
