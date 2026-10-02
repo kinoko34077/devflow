@@ -755,6 +755,41 @@ class GitHubREST:
     def get_issue(self, number: int) -> dict[str, Any]:
         return self._request("GET", f"{self.base}/issues/{number}")
 
+    def list_labels(self, per_page: int = 100) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            query = urllib.parse.urlencode({"per_page": per_page, "page": page})
+            batch = self._request("GET", f"{self.base}/labels?{query}")
+            if not isinstance(batch, list):
+                raise APIError("repository labels response was not a list")
+            out.extend(item for item in batch if isinstance(item, dict))
+            if len(batch) < per_page:
+                break
+            page += 1
+        return out
+
+    def create_label(self, name: str, color: str, description: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"{self.base}/labels",
+            {"name": name, "color": color, "description": description},
+        )
+
+    def add_issue_labels(self, issue_number: int, labels: list[str]) -> Any:
+        return self._request(
+            "POST",
+            f"{self.base}/issues/{issue_number}/labels",
+            {"labels": labels},
+        )
+
+    def remove_issue_label(self, issue_number: int, label: str) -> Any:
+        encoded = urllib.parse.quote(label, safe="")
+        return self._request(
+            "DELETE",
+            f"{self.base}/issues/{issue_number}/labels/{encoded}",
+        )
+
     def get_commit_sha(self, ref: str) -> str:
         encoded = urllib.parse.quote(ref, safe="")
         value = self._request("GET", f"{self.base}/commits/{encoded}")
@@ -937,6 +972,7 @@ def _validate_project_options(snapshot: ProjectSnapshot) -> None:
 def process_issues(
     issues: list[dict[str, Any]], snapshot: ProjectSnapshot, gql: Any, mode: str,
     freshness_resolver: Callable[[str, str], str] | None = None,
+    rest: Any | None = None,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -949,6 +985,11 @@ def process_issues(
             if freshness is not None:
                 extra_fields["Audit Freshness"] = freshness
             result = sync_one_issue(issue, snapshot, gql, mode, extra_fields=extra_fields)
+            projection = sync_audit_freshness_label_projection(
+                issue, freshness, rest, mode
+            )
+            result["freshness_projection"] = projection["status"]
+            result["mutations"] = int(result.get("mutations", 0)) + int(projection["mutations"])
             results.append(result)
             mutations += int(result.get("mutations", 0))
             if result.get("membership") == "MATCH":
@@ -961,6 +1002,8 @@ def process_issues(
         if result.get("membership") == "DRIFT":
             membership_drift += 1
         drift_fields += sum(1 for state in result.get("fields", {}).values() if state == "DRIFT")
+        if result.get("freshness_projection") == "DRIFT":
+            drift_fields += 1
     return {
         "results": results,
         "errors": errors,
@@ -1058,6 +1101,8 @@ def run_sync(
 
     gql = gql or GitHubGraphQL(cfg.project_token)
     try:
+        if mode in {"reconcile", "event-sync"} and rest is not None:
+            ensure_audit_freshness_labels(rest)
         if mode == "reconcile":
             ensure_audit_project_fields(gql, cfg.owner, cfg.project_number)
         snapshot = discover_project(gql, cfg.owner, cfg.project_number)
@@ -1089,9 +1134,15 @@ def run_sync(
             if issue is None:
                 raise ConfigError("event-sync requires an issue event payload")
             issues = [issue]
-            summary = process_issues(issues, snapshot, gql, mode="event-sync", freshness_resolver=freshness_resolver)
+            summary = process_issues(
+                issues, snapshot, gql, mode="event-sync",
+                freshness_resolver=freshness_resolver, rest=rest,
+            )
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
-            verify_summary = process_issues(issues, snapshot2, gql, mode="verify", freshness_resolver=freshness_resolver)
+            verify_summary = process_issues(
+                issues, snapshot2, gql, mode="verify",
+                freshness_resolver=freshness_resolver, rest=rest,
+            )
             verify_summary["mutations"] = summary.get("mutations", 0)
             summary = verify_summary
         else:
@@ -1102,7 +1153,10 @@ def run_sync(
             else:
                 all_issues = rest.list_issues(state="all")
                 issues = select_canonical_issues(all_issues, snapshot.items_by_content_id)
-            summary = process_issues(issues, snapshot, gql, mode=mode, freshness_resolver=freshness_resolver)
+            summary = process_issues(
+                issues, snapshot, gql, mode=mode,
+                freshness_resolver=freshness_resolver, rest=rest,
+            )
             if mode == "reconcile" and not summary.get("errors"):
                 snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
                 _validate_project_options(snapshot2)
@@ -1110,7 +1164,10 @@ def run_sync(
                 health_item_status = ensure_health_not_project_item(health_issue2, snapshot2, gql, mode="reconcile")
                 snapshot3 = discover_project(gql, cfg.owner, cfg.project_number)
                 issues2 = select_target_issue(rest, issue_number) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
-                summary = process_issues(issues2, snapshot3, gql, mode="verify", freshness_resolver=freshness_resolver)
+                summary = process_issues(
+                    issues2, snapshot3, gql, mode="verify",
+                    freshness_resolver=freshness_resolver, rest=rest,
+                )
                 health_item_status = ensure_health_not_project_item(rest.find_issue_by_title(HEALTH_TITLE), snapshot3, gql, mode="verify")
                 snapshot = snapshot3
 
