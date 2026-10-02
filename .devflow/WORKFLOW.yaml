@@ -329,6 +329,19 @@ project_display:
     last_deep_audit_at: Last Deep Audit
   derived_field_mapping:
     audit_freshness: Audit Freshness
+  derived_issue_projection:
+    audit_freshness:
+      authority: scripts/project_sync.py::derive_audit_freshness
+      canonical: false
+      machine_owned: true
+      transport: repository_control_label
+      labels:
+        CURRENT: devflow:audit-freshness:current
+        DRIFTED: devflow:audit-freshness:drifted
+        UNKNOWN: devflow:audit-freshness:unknown
+      exactly_one_label_when_audit_sha_present: true
+      control_body_field: false
+      consumer_rederivation_allowed: false
   builtin_repository_is_issue_owner_only: true
   required_views:
     - Repository Overview

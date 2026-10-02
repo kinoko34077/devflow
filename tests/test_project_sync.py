@@ -490,5 +490,229 @@ class AuditProvenanceTests(unittest.TestCase):
         self.assertEqual(text.count("MAINTENANCE_AUDIT_TOKEN"), 4)
 
 
+class AuditFreshnessLabelProjectionTests(unittest.TestCase):
+    def test_projection_label_vocabulary_is_closed_and_machine_owned(self):
+        self.assertEqual(
+            project_sync.AUDIT_FRESHNESS_LABELS,
+            {
+                "CURRENT": "devflow:audit-freshness:current",
+                "DRIFTED": "devflow:audit-freshness:drifted",
+                "UNKNOWN": "devflow:audit-freshness:unknown",
+            },
+        )
+        self.assertEqual(
+            set(project_sync.AUDIT_FRESHNESS_LABEL_SPECS),
+            set(project_sync.AUDIT_FRESHNESS_LABELS.values()),
+        )
+
+    def test_projection_plan_preserves_unrelated_labels_and_repairs_stale_value(self):
+        issue = {
+            "title": "[REPO] demo",
+            "labels": [
+                {"name": "keep-me"},
+                {"name": "devflow:audit-freshness:current"},
+            ],
+        }
+        plan = project_sync.plan_audit_freshness_label_projection(issue, "DRIFTED")
+        self.assertEqual(plan.status, "DRIFT")
+        self.assertEqual(plan.add, ("devflow:audit-freshness:drifted",))
+        self.assertEqual(plan.remove, ("devflow:audit-freshness:current",))
+
+    def test_projection_plan_is_match_only_for_exactly_one_desired_label(self):
+        issue = {
+            "title": "[REPO] demo",
+            "labels": [
+                {"name": "devflow:audit-freshness:current"},
+                {"name": "keep-me"},
+            ],
+        }
+        plan = project_sync.plan_audit_freshness_label_projection(issue, "CURRENT")
+        self.assertEqual(plan.status, "MATCH")
+        self.assertEqual(plan.add, ())
+        self.assertEqual(plan.remove, ())
+
+    def test_projection_plan_flags_missing_and_multiple_machine_labels(self):
+        missing = {"title": "[REPO] demo", "labels": [{"name": "keep-me"}]}
+        multiple = {
+            "title": "[REPO] demo",
+            "labels": [
+                {"name": "devflow:audit-freshness:current"},
+                {"name": "devflow:audit-freshness:unknown"},
+            ],
+        }
+        self.assertEqual(
+            project_sync.plan_audit_freshness_label_projection(missing, "UNKNOWN").status,
+            "DRIFT",
+        )
+        plan = project_sync.plan_audit_freshness_label_projection(multiple, "DRIFTED")
+        self.assertEqual(plan.status, "DRIFT")
+        self.assertEqual(set(plan.remove), {
+            "devflow:audit-freshness:current",
+            "devflow:audit-freshness:unknown",
+        })
+        self.assertEqual(plan.add, ("devflow:audit-freshness:drifted",))
+
+    def test_projection_is_not_applicable_to_non_control_issue(self):
+        issue = {"title": "[WORK ORDER] x", "labels": []}
+        plan = project_sync.plan_audit_freshness_label_projection(issue, "CURRENT")
+        self.assertEqual(plan.status, "NOT_APPLICABLE")
+        self.assertEqual(plan.add, ())
+        self.assertEqual(plan.remove, ())
+
+    def test_verify_projection_is_read_only_and_reports_drift(self):
+        class NoWriteREST:
+            def __getattr__(self, name):
+                raise AssertionError(name)
+        issue = {"number": 59, "title": "[REPO] demo", "labels": []}
+        result = project_sync.sync_audit_freshness_label_projection(
+            issue, "CURRENT", NoWriteREST(), "verify"
+        )
+        self.assertEqual(result["status"], "DRIFT")
+        self.assertEqual(result["mutations"], 0)
+
+    def test_reconcile_projection_removes_only_machine_labels_then_adds_desired(self):
+        class FakeREST:
+            def __init__(self):
+                self.removed = []
+                self.added = []
+            def remove_issue_label(self, issue_number, label):
+                self.removed.append((issue_number, label))
+            def add_issue_labels(self, issue_number, labels):
+                self.added.append((issue_number, tuple(labels)))
+        rest = FakeREST()
+        issue = {
+            "number": 59,
+            "title": "[REPO] demo",
+            "labels": [
+                {"name": "keep-me"},
+                {"name": "devflow:audit-freshness:current"},
+            ],
+        }
+        result = project_sync.sync_audit_freshness_label_projection(
+            issue, "DRIFTED", rest, "reconcile"
+        )
+        self.assertEqual(rest.removed, [(59, "devflow:audit-freshness:current")])
+        self.assertEqual(rest.added, [(59, ("devflow:audit-freshness:drifted",))])
+        self.assertEqual(result["status"], "REPAIRED")
+        self.assertEqual(result["mutations"], 2)
+
+    def test_ensure_projection_labels_creates_only_missing_system_labels(self):
+        class FakeREST:
+            def __init__(self):
+                self.created = []
+            def list_labels(self):
+                return [{"name": "keep-me"}, {"name": "devflow:audit-freshness:current"}]
+            def create_label(self, name, color, description):
+                self.created.append((name, color, description))
+        rest = FakeREST()
+        count = project_sync.ensure_audit_freshness_labels(rest)
+        self.assertEqual(count, 2)
+        self.assertEqual(
+            {row[0] for row in rest.created},
+            {
+                "devflow:audit-freshness:drifted",
+                "devflow:audit-freshness:unknown",
+            },
+        )
+
+    def test_process_counts_projection_drift_without_second_freshness_algorithm(self):
+        issue = {
+            "node_id": "ISSUE",
+            "number": 59,
+            "title": "[REPO] demo",
+            "state": "open",
+            "labels": [],
+            "body": (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Audit SHA\n\n`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n"
+                "## Audit Ref\n\n`main`"
+            ),
+        }
+        fields = {
+            "Managed Repository": project_sync.ProjectField("REPO", "Managed Repository", "text", {}),
+            "Audit SHA": project_sync.ProjectField("SHA", "Audit SHA", "text", {}),
+            "Audit Ref": project_sync.ProjectField("REF", "Audit Ref", "text", {}),
+            "Audit Freshness": project_sync.ProjectField(
+                "FRESH", "Audit Freshness", "single", {"CURRENT": "CUR"}
+            ),
+        }
+        current = {
+            "Managed Repository": "kinoko34077/demo",
+            "Audit SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Audit Ref": "main",
+            "Audit Freshness": "CURRENT",
+        }
+        snap = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, fields,
+            {"ISSUE": project_sync.ProjectItem("I", "ISSUE", 59, "kinoko34077/devflow", current)},
+        )
+        class NoWrite:
+            def __getattr__(self, name):
+                raise AssertionError(name)
+        summary = project_sync.process_issues(
+            [issue],
+            snap,
+            NoWrite(),
+            "verify",
+            freshness_resolver=lambda repository, ref: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            rest=NoWrite(),
+        )
+        self.assertEqual(summary["drift_fields"], 1)
+        self.assertEqual(summary["errors"], [])
+
+
+class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
+    def test_event_sync_post_write_readback_refetches_live_issue(self):
+        live = {
+            "number": 59,
+            "title": "[REPO] demo",
+            "author_association": "OWNER",
+            "labels": [{"name": "devflow:audit-freshness:unknown"}],
+        }
+        class FakeREST:
+            def __init__(self):
+                self.calls = []
+            def get_issue(self, number):
+                self.calls.append(number)
+                return live
+        rest = FakeREST()
+        event_issue = {
+            "number": 59,
+            "title": "[REPO] demo",
+            "author_association": "OWNER",
+            "labels": [{"name": "devflow:audit-freshness:current"}],
+        }
+        observed = project_sync.reread_event_issue(rest, event_issue)
+        self.assertIs(observed, live)
+        self.assertEqual(rest.calls, [59])
+
+    def test_event_sync_post_write_readback_rejects_invalid_identity(self):
+        class FakeREST:
+            def get_issue(self, number):
+                raise AssertionError("must not read invalid event identity")
+        with self.assertRaises(project_sync.ConfigError):
+            project_sync.reread_event_issue(FakeREST(), {"title": "[REPO] demo"})
+
+    def test_health_drift_message_covers_project_and_derived_projection(self):
+        snapshot = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, {}, {}
+        )
+        result, body = project_sync._summary_health(
+            "verify",
+            snapshot,
+            {
+                "errors": [],
+                "membership_drift": 0,
+                "drift_fields": 1,
+                "canonical_issues": 1,
+                "project_items": 1,
+            },
+            "run",
+        )
+        self.assertEqual(result, "FAIL")
+        self.assertIn("Synchronized value drift: 1", body)
+        self.assertNotIn("Project field drift:", body)
+
+
 if __name__ == "__main__":
     unittest.main()
