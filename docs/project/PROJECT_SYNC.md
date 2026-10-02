@@ -44,6 +44,16 @@ Project values are never used to rewrite canonical Issues.
 
 Audit provenance remains canonical in the Repository Control. `Audit Freshness` is derived from exact `Audit SHA` versus the explicit `Audit Ref` head and is never reverse-synced into the Control. `Last Audit`/`Audit Depth` describe the latest accepted audit event, while `Audit SHA`/`Audit Ref` preserve the latest accepted repository-revision audit binding. A CONTROL-only audit may update the former without advancing the latter. If the ref is absent or cannot be resolved safely, freshness is `UNKNOWN`; the synchronizer does not guess the default branch.
 
+The same derivation result is also projected onto each trusted `[REPO]` Control as exactly one machine-owned, non-canonical label:
+
+- `devflow:audit-freshness:current`
+- `devflow:audit-freshness:drifted`
+- `devflow:audit-freshness:unknown`
+
+These labels are a transport/cache for read-only consumers such as Repo Monitor. They are not canonical Control facts and do not add an `## Audit Freshness` body section. Manual label edits never become authority: `verify` reports missing/multiple/wrong freshness labels as drift, while `reconcile` and `event-sync` repair only these three machine-owned labels from the same `derive_audit_freshness()` result used by the Project field. Other Issue labels are preserved.
+
+Repo Monitor and other consumers must consume this projection rather than resolve refs or implement a second freshness algorithm.
+
 `Audit Depth` uses `CONTROL | STANDARD | DEEP`. Project date fields display the calendar date from the canonical UTC audit timestamp while the full timestamp remains in the Control/evidence surface.
 
 Missing Issue sections are not guessed or used to clear existing Project values. Unknown select values fail explicitly.
