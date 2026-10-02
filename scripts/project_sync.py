@@ -76,6 +76,28 @@ AUDIT_PROJECT_FIELD_SPECS = {
     ]},
 }
 
+CONTROL_PREFIX = "[REPO] "
+AUDIT_FRESHNESS_LABELS = {
+    "CURRENT": "devflow:audit-freshness:current",
+    "DRIFTED": "devflow:audit-freshness:drifted",
+    "UNKNOWN": "devflow:audit-freshness:unknown",
+}
+AUDIT_FRESHNESS_LABEL_SPECS = {
+    "devflow:audit-freshness:current": {
+        "color": "2DA44E",
+        "description": "Machine-owned non-canonical Audit Freshness projection: CURRENT",
+    },
+    "devflow:audit-freshness:drifted": {
+        "color": "BF8700",
+        "description": "Machine-owned non-canonical Audit Freshness projection: DRIFTED",
+    },
+    "devflow:audit-freshness:unknown": {
+        "color": "6E7781",
+        "description": "Machine-owned non-canonical Audit Freshness projection: UNKNOWN",
+    },
+}
+
+
 
 class SyncError(RuntimeError):
     pass
@@ -177,6 +199,102 @@ def derive_audit_freshness(
         return "UNKNOWN"
     return "CURRENT" if current.lower() == audit_sha.lower() else "DRIFTED"
 
+
+
+@dataclasses.dataclass(frozen=True)
+class AuditFreshnessLabelPlan:
+    status: str
+    add: tuple[str, ...] = ()
+    remove: tuple[str, ...] = ()
+
+
+def _issue_label_names(issue: dict[str, Any]) -> tuple[str, ...]:
+    names: list[str] = []
+    for value in issue.get("labels") or []:
+        if isinstance(value, str):
+            name = value.strip()
+        elif isinstance(value, dict):
+            name = str(value.get("name") or "").strip()
+        else:
+            name = ""
+        if name:
+            names.append(name)
+    return tuple(names)
+
+
+def _is_repository_control(issue: dict[str, Any]) -> bool:
+    title = str(issue.get("title") or "").strip()
+    return title.startswith(CONTROL_PREFIX) and bool(title[len(CONTROL_PREFIX):].strip())
+
+
+def plan_audit_freshness_label_projection(
+    issue: dict[str, Any],
+    freshness: str | None,
+) -> AuditFreshnessLabelPlan:
+    if not _is_repository_control(issue) or freshness is None:
+        return AuditFreshnessLabelPlan("NOT_APPLICABLE")
+    desired = AUDIT_FRESHNESS_LABELS.get(freshness)
+    if desired is None:
+        raise ConfigError(f"invalid Audit Freshness projection: {freshness!r}")
+    machine_labels = tuple(
+        name for name in _issue_label_names(issue)
+        if name in AUDIT_FRESHNESS_LABEL_SPECS
+    )
+    if len(machine_labels) == 1 and machine_labels[0] == desired:
+        return AuditFreshnessLabelPlan("MATCH")
+    remove = tuple(sorted({name for name in machine_labels if name != desired}))
+    add = () if desired in machine_labels else (desired,)
+    return AuditFreshnessLabelPlan("DRIFT", add=add, remove=remove)
+
+
+def sync_audit_freshness_label_projection(
+    issue: dict[str, Any],
+    freshness: str | None,
+    rest: Any | None,
+    mode: str,
+) -> dict[str, Any]:
+    plan = plan_audit_freshness_label_projection(issue, freshness)
+    if plan.status != "DRIFT" or mode not in {"reconcile", "event-sync"}:
+        return {"status": plan.status, "mutations": 0}
+
+    if rest is None:
+        raise ConfigError("repository token is required for Audit Freshness label projection")
+
+    issue_number = int(issue.get("number") or 0)
+    if issue_number <= 0:
+        raise ConfigError("Repository Control has no valid issue number")
+
+    mutations = 0
+    for label in plan.remove:
+        rest.remove_issue_label(issue_number, label)
+        mutations += 1
+    if plan.add:
+        rest.add_issue_labels(issue_number, list(plan.add))
+        mutations += 1
+
+    # Keep the in-memory event issue coherent for the immediate post-write verify.
+    unrelated = [
+        name for name in _issue_label_names(issue)
+        if name not in AUDIT_FRESHNESS_LABEL_SPECS
+    ]
+    desired = AUDIT_FRESHNESS_LABELS.get(freshness or "")
+    issue["labels"] = [{"name": name} for name in unrelated + ([desired] if desired else [])]
+    return {"status": "REPAIRED", "mutations": mutations}
+
+
+def ensure_audit_freshness_labels(rest: Any) -> int:
+    existing = {
+        str(item.get("name") or "").strip()
+        for item in rest.list_labels()
+        if isinstance(item, dict)
+    }
+    mutations = 0
+    for name, spec in AUDIT_FRESHNESS_LABEL_SPECS.items():
+        if name in existing:
+            continue
+        rest.create_label(name, str(spec["color"]), str(spec["description"]))
+        mutations += 1
+    return mutations
 
 def validate_select_values(fields: dict[str, str]) -> list[str]:
     errors: list[str] = []
