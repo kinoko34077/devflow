@@ -661,5 +661,58 @@ class AuditFreshnessLabelProjectionTests(unittest.TestCase):
         self.assertEqual(summary["errors"], [])
 
 
+class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
+    def test_event_sync_post_write_readback_refetches_live_issue(self):
+        live = {
+            "number": 59,
+            "title": "[REPO] demo",
+            "author_association": "OWNER",
+            "labels": [{"name": "devflow:audit-freshness:unknown"}],
+        }
+        class FakeREST:
+            def __init__(self):
+                self.calls = []
+            def get_issue(self, number):
+                self.calls.append(number)
+                return live
+        rest = FakeREST()
+        event_issue = {
+            "number": 59,
+            "title": "[REPO] demo",
+            "author_association": "OWNER",
+            "labels": [{"name": "devflow:audit-freshness:current"}],
+        }
+        observed = project_sync.reread_event_issue(rest, event_issue)
+        self.assertIs(observed, live)
+        self.assertEqual(rest.calls, [59])
+
+    def test_event_sync_post_write_readback_rejects_invalid_identity(self):
+        class FakeREST:
+            def get_issue(self, number):
+                raise AssertionError("must not read invalid event identity")
+        with self.assertRaises(project_sync.ConfigError):
+            project_sync.reread_event_issue(FakeREST(), {"title": "[REPO] demo"})
+
+    def test_health_drift_message_covers_project_and_derived_projection(self):
+        snapshot = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, {}, {}
+        )
+        result, body = project_sync._summary_health(
+            "verify",
+            snapshot,
+            {
+                "errors": [],
+                "membership_drift": 0,
+                "drift_fields": 1,
+                "canonical_issues": 1,
+                "project_items": 1,
+            },
+            "run",
+        )
+        self.assertEqual(result, "FAIL")
+        self.assertIn("Synchronized value drift: 1", body)
+        self.assertNotIn("Project field drift:", body)
+
+
 if __name__ == "__main__":
     unittest.main()
