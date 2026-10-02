@@ -1029,6 +1029,18 @@ def ensure_health_not_project_item(health_issue: dict[str, Any] | None, snapshot
     return "DRIFT"
 
 
+def reread_event_issue(rest: Any, event_issue: dict[str, Any]) -> dict[str, Any]:
+    issue_number = int(event_issue.get("number") or 0)
+    if issue_number <= 0:
+        raise ConfigError("event-sync post-write readback requires a valid issue number")
+    live = rest.get_issue(issue_number)
+    if not isinstance(live, dict):
+        raise ConfigError("event-sync post-write readback returned no Issue")
+    if is_health_issue(live) or not is_trusted_author(live):
+        raise ConfigError("event-sync post-write readback is not a trusted canonical Issue")
+    return live
+
+
 def load_event_issue(path: str) -> dict[str, Any] | None:
     if not path:
         return None
@@ -1062,7 +1074,7 @@ def _summary_health(mode: str, snapshot: ProjectSnapshot, summary: dict[str, Any
     if summary.get("membership_drift"):
         messages.append(f"Project membership drift: {summary['membership_drift']}")
     if summary.get("drift_fields"):
-        messages.append(f"Project field drift: {summary['drift_fields']}")
+        messages.append(f"Synchronized value drift: {summary['drift_fields']}")
     if health_item_status == "DRIFT":
         messages.append("Sync Health Issue is present in the display Project and should be removed by reconcile.")
     blocking = bool(messages)
@@ -1138,6 +1150,10 @@ def run_sync(
                 issues, snapshot, gql, mode="event-sync",
                 freshness_resolver=freshness_resolver, rest=rest,
             )
+            if rest is None:
+                raise ConfigError("event-sync post-write readback requires repository access")
+            live_issue = reread_event_issue(rest, issue)
+            issues = [live_issue]
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
             verify_summary = process_issues(
                 issues, snapshot2, gql, mode="verify",
