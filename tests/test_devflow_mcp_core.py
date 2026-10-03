@@ -224,6 +224,8 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
                 f"Repository-Control: https://github.com/kinoko34077/devflow/issues/{control_number}"
             ),
             "author_association": "NONE",
+            "user": {"login": "github-actions[bot]"},
+            "performed_via_github_app": {"slug": "github-actions"},
         }
 
     def _provenance(self, *, repository=None, request_ref=None, request_url=None):
@@ -311,6 +313,13 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
             self._service(comments=[provisioning]).get_repository_control(self.repository)
+
+    def test_user_forged_done_comment_is_rejected(self):
+        forged = self._done_comment()
+        forged["user"] = {"login": "kinoko34077"}
+        forged.pop("performed_via_github_app")
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(comments=[forged]).get_repository_control(self.repository)
 
     def test_malformed_control_provenance_is_rejected(self):
         control = {

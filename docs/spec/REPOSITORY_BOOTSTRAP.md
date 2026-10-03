@@ -189,14 +189,16 @@ following are true:
    repository, has a trusted author association, and contains one valid
    `repository-bootstrap.v1` payload for the same target with management and
    Control creation enabled;
-5. the request has a terminal `DONE` bootstrap comment naming the exact target
-   repository and this exact Control URL; and
+5. the request has a terminal `DONE` bootstrap comment emitted by the GitHub
+   Actions bootstrap executor, naming the exact target repository and this
+   exact Control URL; and
 6. the target's `.github/repository-bootstrap.json` parses as
    `repository-bootstrap-provenance.v1` and exactly matches the request and
    target identities.
 
 This rule derives trust from a verifiable request/provisioning/registration
-chain. It does not globally trust `github-actions[bot]` or any other bot. Any
+chain. The executor marker is checked only on the terminal bootstrap comment;
+it does not globally trust `github-actions[bot]` or any other bot. Any
 missing, malformed, mismatched, non-terminal or duplicate chain fails closed.
 The MCP retains legacy-text compatibility so an already-created Control does
 not need to be recreated solely to adopt the stronger machine-readable block.

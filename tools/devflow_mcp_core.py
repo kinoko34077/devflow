@@ -398,6 +398,19 @@ def _comment_fields(body: Any) -> dict[str, str]:
     return fields
 
 
+def _is_bootstrap_executor_comment(comment: Any) -> bool:
+    if not isinstance(comment, dict):
+        return False
+    user = comment.get("user")
+    app = comment.get("performed_via_github_app")
+    return (
+        isinstance(user, dict)
+        and user.get("login") == "github-actions[bot]"
+        and isinstance(app, dict)
+        and app.get("slug") == "github-actions"
+    )
+
+
 class DevflowService:
     def __init__(self, reader: GitHubReader | Any, *, devflow_repository: str = DEVFLOW_REPOSITORY) -> None:
         self.reader = reader
@@ -469,16 +482,16 @@ class DevflowService:
                 return False
 
             comments = self.reader.list_issue_comments(self.devflow_repository, request_number)
-            states: list[str] = []
+            states: list[tuple[str, bool]] = []
             done_comments: list[dict[str, str]] = []
             for comment in comments:
                 fields = _comment_fields(comment.get("body")) if isinstance(comment, dict) else {}
                 state = fields.get("Repository-Bootstrap-State")
                 if state:
-                    states.append(state)
-                if state == "DONE":
+                    states.append((state, _is_bootstrap_executor_comment(comment)))
+                if state == "DONE" and _is_bootstrap_executor_comment(comment):
                     done_comments.append(fields)
-            if not states or states[-1] != "DONE":
+            if not states or states[-1] != ("DONE", True):
                 return False
             expected_repository_url = f"https://github.com/{target_repository}"
             return any(
