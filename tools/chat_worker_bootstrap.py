@@ -628,8 +628,6 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                 reason = "REPOSITORY_NOT_ACTIVE"
             elif control.get("human_gate") is True:
                 reason = "HUMAN_GATE"
-            elif control.get("external_blocker") is True:
-                reason = "EXTERNAL_BLOCKER"
 
         if reason is None:
             if item["role"] not in ROLE_TRACKS:
