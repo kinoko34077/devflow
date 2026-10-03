@@ -1154,13 +1154,18 @@ def _run_url(env: dict[str, str] | os._Environ[str] = os.environ) -> str:
     return f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else "Unavailable"
 
 
-def _health_body_for_missing_token(mode: str, run_url: str) -> str:
+def _health_body_for_missing_token(
+    mode: str,
+    run_url: str,
+    unresolved_failures: dict[str, dict[str, str]] | None = None,
+) -> str:
     return render_health_report(
         result="NOT_CONFIGURED", mode=mode,
         project={"owner": PROJECT_OWNER, "number": PROJECT_NUMBER, "title": PROJECT_TITLE},
         coverage={"canonical_issues": 0, "project_items": 0, "drift_fields": 0, "errors": 1},
         messages=["PROJECTS_TOKEN is not configured; Project access and mutation were not attempted."],
         run_url=run_url, direct_requirement="NONE",
+        unresolved_failures=unresolved_failures,
     )
 
 
@@ -1224,18 +1229,27 @@ def run_sync(
 
     failure_state: dict[str, dict[str, str]] = {}
     previous_health_issue: dict[str, Any] | None = None
-    if rest is not None:
-        previous_health_issue = rest.find_issue_by_title(HEALTH_TITLE)
-        if previous_health_issue is not None:
-            failure_state = parse_health_failure_state(str(previous_health_issue.get("body") or ""))
-
-    if not cfg.project_token:
-        if rest is not None:
-            upsert_health_issue(rest, _health_body_for_missing_token(mode, run_url))
-        return 2
-
-    gql = gql or GitHubGraphQL(cfg.project_token)
     try:
+        if rest is not None:
+            previous_health_issue = rest.find_issue_by_title(HEALTH_TITLE)
+            if previous_health_issue is not None:
+                failure_state = parse_health_failure_state(
+                    str(previous_health_issue.get("body") or "")
+                )
+
+        if not cfg.project_token:
+            if rest is not None:
+                upsert_health_issue(
+                    rest,
+                    _health_body_for_missing_token(
+                        mode,
+                        run_url,
+                        unresolved_failures=failure_state,
+                    ),
+                )
+            return 2
+
+        gql = gql or GitHubGraphQL(cfg.project_token)
         if mode in {"reconcile", "event-sync"} and rest is not None:
             ensure_audit_freshness_labels(rest)
         if mode == "reconcile":
