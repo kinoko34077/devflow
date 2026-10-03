@@ -507,6 +507,15 @@ class DevflowService:
             return True
         return self._is_bootstrap_derived_control_trusted(issue, target_repository)
 
+    def is_repository_control_trusted(
+        self,
+        issue: dict[str, Any],
+        target_repository: str,
+    ) -> bool:
+        """Return the canonical direct-or-derived Repository Control trust result."""
+        normalized = normalize_repository(target_repository)
+        return self._is_accepted_control(issue, normalized)
+
     def list_managed_repositories(self) -> list[str]:
         issues = self.reader.list_issues(self.devflow_repository, state="open")
         repositories: list[str] = []
