@@ -1,7 +1,10 @@
+import base64
+import json
 import unittest
 from urllib.error import HTTPError
 
 from tools import devflow_mcp_core
+from tests.test_repository_bootstrap import issue_body, request_payload
 
 
 class DevflowMCPParsingTests(unittest.TestCase):
@@ -28,20 +31,37 @@ class DevflowMCPParsingTests(unittest.TestCase):
 
 
 class FakeReader:
-    def __init__(self, issues):
+    def __init__(self, issues, *, issues_by_repository=None, files=None, comments=None):
         self.issues = issues
+        self.issues_by_repository = issues_by_repository or {}
+        self.files = files or {}
+        self.comments = comments or {}
         self.calls = []
 
     def list_issues(self, repository, state="open"):
         self.calls.append((repository, state))
-        return list(self.issues)
+        issues = self.issues_by_repository.get(repository, self.issues)
+        if state == "open":
+            return [issue for issue in issues if issue.get("state", "open") == "open"]
+        if state == "closed":
+            return [issue for issue in issues if issue.get("state") == "closed"]
+        return list(issues)
 
     def get_issue(self, repository, issue_number):
         self.calls.append((repository, issue_number))
-        for issue in self.issues:
+        issues = self.issues_by_repository.get(repository, self.issues)
+        for issue in issues:
             if int(issue.get("number", 0)) == issue_number:
                 return issue
         raise AssertionError("issue not found")
+
+    def list_issue_comments(self, repository, issue_number):
+        self.calls.append((repository, "comments", issue_number))
+        return list(self.comments.get((repository, issue_number), []))
+
+    def get_file(self, repository, path):
+        self.calls.append((repository, "file", path))
+        return self.files.get((repository, path))
 
 
 class DevflowMCPServiceTests(unittest.TestCase):
@@ -148,6 +168,208 @@ class DevflowMCPServiceTests(unittest.TestCase):
         impostor = {"number": 902, "title": "[REPO] evil", "body": "", "author_association": "NONE"}
         service = devflow_mcp_core.DevflowService(FakeReader([self.control, impostor]))
         self.assertEqual(service.list_managed_repositories(), ["kinoko34077/devflow"])
+
+
+class BootstrapDerivedControlTrustTests(unittest.TestCase):
+    repository = "kinoko34077/UniverseGenome"
+    request_ref = "kinoko34077/devflow#313"
+    request_url = "https://github.com/kinoko34077/devflow/issues/313"
+    missing = object()
+
+    def _request(self, *, association="OWNER", state="open", name="UniverseGenome"):
+        payload = request_payload()
+        payload["repository"] = {
+            "owner": "kinoko34077",
+            "name": name,
+            "description": "test",
+            "visibility": "private",
+        }
+        return {
+            "number": 313,
+            "title": f"[REPO CREATE] {name}",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "url": "https://api.github.com/repos/kinoko34077/devflow/issues/313",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/313",
+            "state": state,
+            "author_association": association,
+            "body": issue_body(payload),
+        }
+
+    def _control_body(self, *, request_ref=None, request_url=None):
+        return (
+            "## Repository\n\n`kinoko34077/UniverseGenome`\n\n"
+            "## Detailed Current State\n\n"
+            f"Repository was initialized through `{request_ref or self.request_ref}` using `repository-bootstrap.v1`. "
+            "Accepted initial head is `7dfa6133767c6adab8d4bfadcfa366b5deff9249`.\n\n"
+            "## Control Notes\n\n"
+            f"Cross-repository routing summary only. Bootstrap request: {request_url or self.request_url}."
+        )
+
+    def _actual_legacy_control_body(self):
+        return (
+            "## Repository\n\n`kinoko34077/UniverseGenome`\n\n"
+            "## Control Notes\n\n"
+            f"Cross-repository routing summary only. Bootstrap request: {self.request_url}. "
+            "Repository kind: `research`. Detailed technical truth belongs in `kinoko34077/UniverseGenome`."
+        )
+
+    def _done_comment(self, *, repository=None, control_number=314):
+        target = repository or self.repository
+        return {
+            "body": (
+                "Repository-Bootstrap-State: DONE\n"
+                f"Repository: https://github.com/{target}\n"
+                "Initial-Accepted-SHA: `7dfa6133767c6adab8d4bfadcfa366b5deff9249`\n"
+                "Initial-Issue: https://github.com/kinoko34077/UniverseGenome/issues/1\n"
+                f"Repository-Control: https://github.com/kinoko34077/devflow/issues/{control_number}"
+            ),
+            "author_association": "NONE",
+            "user": {"login": "github-actions[bot]"},
+            "performed_via_github_app": {"slug": "github-actions"},
+        }
+
+    def _provenance(self, *, repository=None, request_ref=None, request_url=None):
+        return json.dumps(
+            {
+                "schema": "repository-bootstrap-provenance.v1",
+                "request_ref": request_ref or self.request_ref,
+                "request_url": request_url or self.request_url,
+                "repository": repository or self.repository,
+            },
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
+
+    def _service(self, *, control=None, request=None, target_file=missing, comments=None):
+        control = control or {
+            "number": 314,
+            "title": "[REPO] UniverseGenome",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/314",
+            "state": "open",
+            "author_association": "NONE",
+            "body": self._control_body(),
+        }
+        request = request or self._request()
+        files = {}
+        if target_file is self.missing:
+            files[(self.repository, ".github/repository-bootstrap.json")] = {
+                "content": self._provenance()
+            }
+        elif target_file is not None:
+            files[(self.repository, ".github/repository-bootstrap.json")] = {"content": target_file}
+        reader = FakeReader(
+            [],
+            issues_by_repository={
+                "kinoko34077/devflow": [control, request],
+            },
+            files=files,
+            comments={("kinoko34077/devflow", 313): comments if comments is not None else [self._done_comment()]},
+        )
+        return devflow_mcp_core.DevflowService(reader)
+
+    def test_existing_bootstrap_chain_accepts_legacy_generated_control(self):
+        result = self._service().get_repository_control(self.repository)
+        self.assertEqual(result["issue_number"], 314)
+        self.assertEqual(result["repository"], self.repository)
+
+    def test_existing_bootstrap_chain_accepts_actual_legacy_control_notes_shape(self):
+        control = {
+            "number": 314,
+            "title": "[REPO] UniverseGenome",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/314",
+            "state": "open",
+            "author_association": "NONE",
+            "body": self._actual_legacy_control_body(),
+        }
+        result = self._service(control=control).get_repository_control(self.repository)
+        self.assertEqual(result["issue_number"], 314)
+
+    def test_list_managed_repositories_accepts_verified_bootstrap_control(self):
+        self.assertEqual(
+            devflow_mcp_core.DevflowService(self._service().reader).list_managed_repositories(),
+            [self.repository],
+        )
+
+    def test_arbitrary_bot_control_is_rejected(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(comments=[]).get_repository_control(self.repository)
+
+    def test_untrusted_request_author_is_rejected(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(request=self._request(association="CONTRIBUTOR")).get_repository_control(self.repository)
+
+    def test_request_and_target_provenance_mismatch_is_rejected(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(target_file=self._provenance(repository="kinoko34077/OtherRepo")).get_repository_control(self.repository)
+
+    def test_missing_target_provenance_is_rejected(self):
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(target_file=None).get_repository_control(self.repository)
+
+    def test_non_terminal_request_is_rejected(self):
+        provisioning = {
+            "body": "Repository-Bootstrap-State: PROVISIONING\nRequest: kinoko34077/devflow#313",
+            "author_association": "NONE",
+        }
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(comments=[provisioning]).get_repository_control(self.repository)
+
+    def test_user_forged_done_comment_is_rejected(self):
+        forged = self._done_comment()
+        forged["user"] = {"login": "kinoko34077"}
+        forged.pop("performed_via_github_app")
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(comments=[forged]).get_repository_control(self.repository)
+
+    def test_malformed_control_provenance_is_rejected(self):
+        control = {
+            "number": 314,
+            "title": "[REPO] UniverseGenome",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/314",
+            "state": "open",
+            "author_association": "NONE",
+            "body": self._control_body().replace("repository-bootstrap.v1", "repository-bootstrap.v0"),
+        }
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control"):
+            self._service(control=control).get_repository_control(self.repository)
+
+    def test_duplicate_derived_controls_remain_ambiguous(self):
+        first = {
+            "number": 314,
+            "title": "[REPO] UniverseGenome",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/314",
+            "state": "open",
+            "author_association": "NONE",
+            "body": self._control_body(),
+        }
+        second = {**first, "number": 315, "html_url": "https://github.com/kinoko34077/devflow/issues/315"}
+        reader = FakeReader(
+            [],
+            issues_by_repository={"kinoko34077/devflow": [first, second, self._request()]},
+            files={(self.repository, ".github/repository-bootstrap.json"): {"content": self._provenance()}},
+            comments={
+                ("kinoko34077/devflow", 313): [
+                    self._done_comment(control_number=314),
+                    self._done_comment(control_number=315),
+                ]
+            },
+        )
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "found 2"):
+            devflow_mcp_core.DevflowService(reader).get_repository_control(self.repository)
+
+    def test_reader_can_fetch_comments_and_text_files(self):
+        encoded = base64.b64encode(self._provenance().encode()).decode()
+
+        def transport(url, headers):
+            if "/issues/313/comments?" in url:
+                return [self._done_comment()]
+            if "/contents/.github/repository-bootstrap.json" in url:
+                return {"type": "file", "content": encoded}
+            raise AssertionError(url)
+
+        reader = devflow_mcp_core.GitHubReader(transport=transport)
+        self.assertEqual(reader.list_issue_comments("kinoko34077/devflow", 313)[0]["body"].splitlines()[0], "Repository-Bootstrap-State: DONE")
+        self.assertEqual(reader.get_file(self.repository, ".github/repository-bootstrap.json")["content"], self._provenance())
 
 
 class GitHubReadOnlyClientTests(unittest.TestCase):

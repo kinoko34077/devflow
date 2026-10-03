@@ -145,6 +145,16 @@ class RepositoryBootstrapExecutorTests(unittest.TestCase):
         self.assertIn(result.head_sha, controls[0]["body"])
         self.assertIn("## Audit Ref", controls[0]["body"])
         self.assertIn("`main`", controls[0]["body"])
+        self.assertIn(rb.CONTROL_START_MARKER, controls[0]["body"])
+        self.assertEqual(
+            rb.parse_control_provenance(controls[0]["body"]),
+            {
+                "schema": rb.CONTROL_PROVENANCE_SCHEMA,
+                "request_ref": "kinoko34077/devflow#181",
+                "request_url": "https://github.com/kinoko34077/devflow/issues/181",
+                "repository": "kinoko34077/example-repo",
+            },
+        )
         self.assertEqual(result.repository_url, "https://github.com/kinoko34077/example-repo")
         self.assertEqual(len(result.issue_urls), 1)
         self.assertIsNotNone(result.control_url)

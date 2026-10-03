@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -8,6 +9,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable, Iterable
+
+try:
+    from .repository_bootstrap import (
+        BootstrapError,
+        normalize_request,
+        parse_control_provenance,
+        parse_provenance_document,
+        parse_request_body,
+    )
+except ImportError:  # direct script execution
+    from repository_bootstrap import (
+        BootstrapError,
+        normalize_request,
+        parse_control_provenance,
+        parse_provenance_document,
+        parse_request_body,
+    )
 
 DEFAULT_OWNER = "kinoko34077"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
@@ -129,9 +147,13 @@ class GitHubReader:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
-    def _read(self, url: str) -> Any:
+    def _read(self, url: str, *, allow_404: bool = False) -> Any:
         try:
             return self._transport(url, self._headers())
+        except urllib.error.HTTPError as exc:
+            if allow_404 and exc.code == 404:
+                return None
+            raise _translate_read_error(exc) from None
         except DevflowMCPError:
             raise
         except Exception as exc:
@@ -170,6 +192,43 @@ class GitHubReader:
             raise DevflowMCPError("GitHub issue response was not an object.")
         verify_observed_issue_identity(issue, repository, issue_number)
         return issue
+
+    def list_issue_comments(
+        self, repository: str, issue_number: int, per_page: int = 100
+    ) -> list[dict[str, Any]]:
+        if issue_number < 1:
+            raise DevflowMCPError("Issue number must be >= 1.")
+        comments: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            query = urllib.parse.urlencode({"per_page": per_page, "page": page})
+            url = self._repository_url(repository, f"issues/{issue_number}/comments?{query}")
+            batch = self._read(url)
+            if not isinstance(batch, list):
+                raise DevflowMCPError("GitHub Issue comments response was not a list.")
+            comments.extend(item for item in batch if isinstance(item, dict))
+            if len(batch) < per_page:
+                return comments
+            page += 1
+
+    def get_file(self, repository: str, path: str) -> dict[str, Any] | None:
+        if not isinstance(path, str) or not path.strip():
+            raise DevflowMCPError("Repository file path is required.")
+        encoded_path = urllib.parse.quote(path, safe="/")
+        url = self._repository_url(repository, f"contents/{encoded_path}")
+        result = self._read(url, allow_404=True)
+        if result is None:
+            return None
+        if not isinstance(result, dict) or result.get("type") not in (None, "file"):
+            raise DevflowMCPError(f"GitHub contents response for {path!r} was not a file.")
+        encoded = result.get("content")
+        if not isinstance(encoded, str):
+            raise DevflowMCPError(f"GitHub contents response for {path!r} has no content.")
+        try:
+            content = base64.b64decode(encoded.encode("ascii"), validate=False).decode("utf-8")
+        except (UnicodeError, ValueError) as exc:
+            raise DevflowMCPError(f"GitHub contents response for {path!r} is not UTF-8 text.") from exc
+        return {"content": content, "sha": result.get("sha")}
 
 
 def _exactly_one(items: Iterable[dict[str, Any]], predicate: Callable[[dict[str, Any]], bool], description: str) -> dict[str, Any]:
@@ -313,10 +372,140 @@ def is_trusted_control_author(issue: dict[str, Any]) -> bool:
     return association in TRUSTED_AUTHOR_ASSOCIATIONS
 
 
+def _parse_request_reference(value: Any) -> tuple[str, int] | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([^\s/]+/[^\s#]+)#([1-9][0-9]*)", value.strip())
+    if not match:
+        return None
+    try:
+        return normalize_repository(match.group(1)), int(match.group(2))
+    except DevflowMCPError:
+        return None
+
+
+def _comment_fields(body: Any) -> dict[str, str]:
+    if not isinstance(body, str):
+        return {}
+    fields: dict[str, str] = {}
+    for line in body.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if key:
+            fields[key] = value.strip().strip("`").strip()
+    return fields
+
+
+def _is_bootstrap_executor_comment(comment: Any) -> bool:
+    if not isinstance(comment, dict):
+        return False
+    user = comment.get("user")
+    app = comment.get("performed_via_github_app")
+    return (
+        isinstance(user, dict)
+        and user.get("login") == "github-actions[bot]"
+        and isinstance(app, dict)
+        and app.get("slug") == "github-actions"
+    )
+
+
 class DevflowService:
     def __init__(self, reader: GitHubReader | Any, *, devflow_repository: str = DEVFLOW_REPOSITORY) -> None:
         self.reader = reader
         self.devflow_repository = normalize_repository(devflow_repository)
+        if self.devflow_repository.casefold() != DEVFLOW_REPOSITORY.casefold():
+            raise DevflowMCPError(
+                f"Repository Control trust requires the canonical devflow repository {DEVFLOW_REPOSITORY!r}."
+            )
+
+    def _is_bootstrap_derived_control_trusted(
+        self, issue: dict[str, Any], target_repository: str
+    ) -> bool:
+        """Verify a bot-authored Control through the complete bootstrap chain."""
+        try:
+            if str(issue.get("state") or "open") != "open":
+                return False
+            issue_number = issue.get("number")
+            if isinstance(issue_number, bool) or not isinstance(issue_number, int) or issue_number < 1:
+                return False
+            expected_control_url = f"https://github.com/{self.devflow_repository}/issues/{issue_number}"
+            if issue.get("html_url") != expected_control_url:
+                return False
+
+            control_provenance = parse_control_provenance(str(issue.get("body") or ""))
+            if normalize_repository(control_provenance["repository"]) != target_repository:
+                return False
+            request_identity = _parse_request_reference(control_provenance["request_ref"])
+            if not request_identity:
+                return False
+            request_repository, request_number = request_identity
+            if request_repository.casefold() != self.devflow_repository.casefold():
+                return False
+            parsed_url = _parse_issue_identity_url(control_provenance["request_url"], field="html_url")
+            if parsed_url != (self.devflow_repository, request_number):
+                return False
+            expected_request_url = f"https://github.com/{self.devflow_repository}/issues/{request_number}"
+            if control_provenance["request_url"] != expected_request_url:
+                return False
+
+            request_issue = self.reader.get_issue(self.devflow_repository, request_number)
+            verify_observed_issue_identity(request_issue, self.devflow_repository, request_number)
+            if str(request_issue.get("state") or "") != "open":
+                return False
+            request_title = str(request_issue.get("title") or "")
+            if request_title != f"[REPO CREATE] {target_repository.split('/', 1)[1]}":
+                return False
+            if not is_trusted_control_author(request_issue):
+                return False
+            request = normalize_request(
+                parse_request_body(str(request_issue.get("body") or "")),
+                request_title,
+            )
+            if not request.devflow_managed or not request.create_control:
+                return False
+            if request.repository.full_name.casefold() != target_repository.casefold():
+                return False
+
+            target_file = self.reader.get_file(target_repository, ".github/repository-bootstrap.json")
+            if not isinstance(target_file, dict):
+                return False
+            target_provenance = parse_provenance_document(target_file.get("content"))
+            expected_provenance = {
+                "schema": "repository-bootstrap-provenance.v1",
+                "request_ref": f"{self.devflow_repository}#{request_number}",
+                "request_url": expected_request_url,
+                "repository": target_repository,
+            }
+            if target_provenance != expected_provenance:
+                return False
+
+            comments = self.reader.list_issue_comments(self.devflow_repository, request_number)
+            states: list[tuple[str, bool]] = []
+            done_comments: list[dict[str, str]] = []
+            for comment in comments:
+                fields = _comment_fields(comment.get("body")) if isinstance(comment, dict) else {}
+                state = fields.get("Repository-Bootstrap-State")
+                if state:
+                    states.append((state, _is_bootstrap_executor_comment(comment)))
+                if state == "DONE" and _is_bootstrap_executor_comment(comment):
+                    done_comments.append(fields)
+            if not states or states[-1] != ("DONE", True):
+                return False
+            expected_repository_url = f"https://github.com/{target_repository}"
+            return any(
+                fields.get("Repository") == expected_repository_url
+                and fields.get("Repository-Control") == expected_control_url
+                for fields in done_comments
+            )
+        except (BootstrapError, DevflowMCPError, KeyError, TypeError, ValueError):
+            return False
+
+    def _is_accepted_control(self, issue: dict[str, Any], target_repository: str) -> bool:
+        if is_trusted_control_author(issue):
+            return True
+        return self._is_bootstrap_derived_control_trusted(issue, target_repository)
 
     def list_managed_repositories(self) -> list[str]:
         issues = self.reader.list_issues(self.devflow_repository, state="open")
@@ -325,7 +514,11 @@ class DevflowService:
             title = str(issue.get("title") or "").strip()
             if not title.startswith("[REPO] "):
                 continue
-            if not is_trusted_control_author(issue):
+            try:
+                target = normalize_repository(title.removeprefix("[REPO] ").strip())
+            except DevflowMCPError:
+                continue
+            if not self._is_accepted_control(issue, target):
                 continue
             sections = parse_sections(str(issue.get("body") or ""))
             repository = sections.get("Repository", "").strip()
@@ -344,7 +537,7 @@ class DevflowService:
         title = f"[REPO] {short_name}"
         issues = self.reader.list_issues(self.devflow_repository, state="open")
         titled = [issue for issue in issues if str(issue.get("title") or "").strip() == title]
-        matches = [issue for issue in titled if is_trusted_control_author(issue)]
+        matches = [issue for issue in titled if self._is_accepted_control(issue, normalized)]
         if not matches:
             raise DevflowMCPError(
                 f"No open Repository Control Issue titled {title!r}. "
