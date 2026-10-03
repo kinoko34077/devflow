@@ -1330,13 +1330,17 @@ def run_sync(
             scoped_issue_number = int((event_issue or {}).get("number") or 0) or None
         else:
             scoped_issue_number = issue_number
+        safe_current_message = _redact(
+            "; ".join(current_messages),
+            [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
+        )
         failure_state = update_health_failure_state(
             failure_state,
             mode=mode,
             issue_number=scoped_issue_number,
             failed=bool(current_messages),
             run_url=run_url,
-            message="; ".join(current_messages),
+            message=safe_current_message,
         )
         result, body = _summary_health(
             mode,
