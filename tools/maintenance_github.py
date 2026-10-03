@@ -568,7 +568,10 @@ def _control_is_trusted(
             control,
             repository,
         )
-    except devflow_mcp_core.DevflowMCPError:
+    except (
+        devflow_mcp_core.DevflowMCPError,
+        GitHubReadError,
+    ):
         return False
 
 
