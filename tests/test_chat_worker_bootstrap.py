@@ -194,6 +194,31 @@ class PortfolioV2ContractTests(unittest.TestCase):
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
         self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
 
+    def test_portfolio_does_not_apply_control_external_blocker_to_unblocked_candidate(self):
+        data=self._portfolio_case()
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
+        data["evidence"]["controls"][0]["external_blocker"] = True
+
+        result=cwb.classify(data["request"], data["evidence"])
+
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
+
+    def test_portfolio_still_omits_candidate_level_external_blocker(self):
+        data=self._portfolio_case()
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""], external_blocker=True)
+
+        result=cwb.classify(data["request"], data["evidence"])
+
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
+        self.assertIn(
+            {"task_ref":"kinoko34077/refil-viewer#6","role":"implementer","reason":"EXTERNAL_BLOCKER"},
+            result["omissions"],
+        )
+
     def test_portfolio_duplicate_control_for_candidate_repository_fails_closed(self):
         data=self._portfolio_case()
         duplicate=copy.deepcopy(data["evidence"]["controls"][0])
