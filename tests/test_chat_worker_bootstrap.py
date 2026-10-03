@@ -194,6 +194,33 @@ class PortfolioV2ContractTests(unittest.TestCase):
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
         self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
 
+    def test_portfolio_ignores_control_external_blocker_for_explicit_unblocked_candidate(self):
+        data=self._portfolio_case()
+        control=data["evidence"]["controls"][0]
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        control["external_blocker"] = True
+        candidate.update(role="implementer", action="IMPLEMENT", external_blocker=False)
+        data["evidence"]["controls"] = [control]
+        data["evidence"]["frontier"]["candidates"] = [candidate]
+
+        result=cwb.classify(data["request"], data["evidence"])
+
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual(candidate["task_ref"], result["task_ref"])
+
+    def test_portfolio_candidate_external_blocker_still_waits_external(self):
+        data=self._portfolio_case()
+        control=data["evidence"]["controls"][0]
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        control["external_blocker"] = True
+        candidate.update(role="implementer", action="IMPLEMENT", external_blocker=True)
+        data["evidence"]["controls"] = [control]
+        data["evidence"]["frontier"]["candidates"] = [candidate]
+
+        result=cwb.classify(data["request"], data["evidence"])
+
+        self.assertEqual(("WAIT_EXTERNAL","EXTERNAL_BLOCKER"),(result["disposition"],result["reason_code"]))
+
     def test_portfolio_duplicate_control_for_candidate_repository_fails_closed(self):
         data=self._portfolio_case()
         duplicate=copy.deepcopy(data["evidence"]["controls"][0])
