@@ -398,7 +398,7 @@ def parse_health_failure_state(body: str) -> dict[str, dict[str, str]]:
     if text.find(HEALTH_FAILURE_STATE_MARKER, marker_index + len(HEALTH_FAILURE_STATE_MARKER)) >= 0:
         raise ConfigError("duplicate Project Sync Health failure-state marker")
     tail = text[marker_index + len(HEALTH_FAILURE_STATE_MARKER):]
-    match = re.search(r"(?s)\\n?\\s*```json\\s*\\n(.*?)\\n```", tail)
+    match = re.search(r"(?s)\n?\s*```json\s*\n(.*?)\n```", tail)
     if not match:
         raise ConfigError("malformed Project Sync Health failure-state payload")
     try:
