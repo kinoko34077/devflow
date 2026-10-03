@@ -302,6 +302,30 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
                 )
             ).get_repository_control(self.repository)
 
+    def test_closed_request_without_state_reason_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason=None,
+                )
+            ).get_repository_control(self.repository)
+
+    def test_closed_request_with_unknown_state_reason_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason="mystery",
+                )
+            ).get_repository_control(self.repository)
+
     def test_closed_completed_request_without_terminal_done_is_rejected(self):
         with self.assertRaisesRegex(
             devflow_mcp_core.DevflowMCPError,
