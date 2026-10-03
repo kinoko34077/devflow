@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -7,6 +8,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable
+
+try:
+    from tools import devflow_mcp_core
+except ImportError:  # direct module execution
+    import devflow_mcp_core
 
 
 API_BASE = "https://api.github.com"
@@ -71,7 +77,12 @@ class GitHubReadTransport:
             path_or_url = "/" + path_or_url
         return self.api_base + path_or_url
 
-    def _request(self, path_or_url: str) -> tuple[Any, Any]:
+    def _request(
+        self,
+        path_or_url: str,
+        *,
+        allow_404: bool = False,
+    ) -> tuple[Any, Any]:
         request = urllib.request.Request(
             self._url(path_or_url),
             method="GET",
@@ -91,6 +102,8 @@ class GitHubReadTransport:
                     raise GitHubReadError("GitHub read returned invalid JSON") from exc
                 return payload, response.headers
         except urllib.error.HTTPError as exc:
+            if allow_404 and exc.code == 404:
+                return None, {}
             raise GitHubReadError(
                 f"GitHub read failed with HTTP {exc.code}"
             ) from None
@@ -176,6 +189,64 @@ class GitHubReadTransport:
             raise GitHubReadError("Issue read did not return an object")
         _validate_issue_identity(value, repository, number)
         return value
+
+    def list_issues(
+        self,
+        repository: str,
+        state: str = "open",
+    ) -> list[dict[str, Any]]:
+        encoded_state = urllib.parse.quote(state, safe="")
+        return [
+            dict(item)
+            for item in self.get_paginated(
+                f"/repos/{repository}/issues?state={encoded_state}&per_page=100"
+            )
+            if isinstance(item, dict)
+        ]
+
+    def list_issue_comments(
+        self,
+        repository: str,
+        issue_number: int,
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(item)
+            for item in self.get_paginated(
+                f"/repos/{repository}/issues/{issue_number}/comments?per_page=100"
+            )
+            if isinstance(item, dict)
+        ]
+
+    def get_file(
+        self,
+        repository: str,
+        path: str,
+    ) -> dict[str, Any] | None:
+        encoded_path = urllib.parse.quote(path, safe="/")
+        value, _headers = self._request(
+            f"/repos/{repository}/contents/{encoded_path}",
+            allow_404=True,
+        )
+        if value is None:
+            return None
+        if not isinstance(value, dict) or value.get("type") not in (None, "file"):
+            raise GitHubReadError("repository contents read did not return a file")
+        encoded = value.get("content")
+        if not isinstance(encoded, str):
+            raise GitHubReadError("repository file content is unavailable")
+        try:
+            content = base64.b64decode(
+                encoded.encode("ascii"),
+                validate=False,
+            ).decode("utf-8")
+        except (UnicodeError, ValueError) as exc:
+            raise GitHubReadError(
+                "repository file content is not UTF-8 text"
+            ) from exc
+        return {
+            "content": content,
+            "sha": value.get("sha"),
+        }
 
     def get_pull(self, repository: str, number: int) -> dict[str, Any]:
         value = self.get_json(f"/repos/{repository}/pulls/{number}")
@@ -482,6 +553,25 @@ def _validate_issue_identity(
         raise GitHubReadError("canonical Control title mismatch")
 
 
+def _control_is_trusted(
+    transport: Any,
+    control: dict[str, Any],
+    repository: str,
+) -> bool:
+    association = str(control.get("author_association") or "").upper()
+    if association in TRUSTED_ASSOCIATIONS:
+        return True
+    try:
+        return devflow_mcp_core.DevflowService(
+            transport
+        ).is_repository_control_trusted(
+            control,
+            repository,
+        )
+    except devflow_mcp_core.DevflowMCPError:
+        return False
+
+
 def _unavailable(
     repository: str,
     observed_at: str,
@@ -531,9 +621,10 @@ def collect_repository(
     body = str(control.get("body") or "")
     sections = _sections(body)
     managed = _scalar_section(sections, "Repository")
-    trusted = (
-        str(control.get("author_association") or "").upper()
-        in TRUSTED_ASSOCIATIONS
+    trusted = _control_is_trusted(
+        transport,
+        control,
+        repository,
     )
     next_action = sections.get("Next Action", "")
     control_human_gate = (
