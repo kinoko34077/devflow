@@ -714,5 +714,117 @@ class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
         self.assertNotIn("Project field drift:", body)
 
 
+class HealthFailureMemoryTests(unittest.TestCase):
+    def test_unrelated_event_success_does_not_clear_prior_issue_failure(self):
+        state = {}
+        state = project_sync.update_health_failure_state(
+            state,
+            mode="event-sync",
+            issue_number=180,
+            failed=True,
+            run_url="run-a",
+            message="invalid Work Status",
+        )
+        state = project_sync.update_health_failure_state(
+            state,
+            mode="event-sync",
+            issue_number=181,
+            failed=False,
+            run_url="run-b",
+            message="",
+        )
+        self.assertIn("180", state)
+        self.assertNotIn("181", state)
+
+        snapshot = project_sync.ProjectSnapshot(
+            "P", project_sync.PROJECT_TITLE, False, {}, {}
+        )
+        result, body = project_sync._summary_health(
+            "event-sync",
+            snapshot,
+            {
+                "errors": [],
+                "membership_drift": 0,
+                "drift_fields": 0,
+                "canonical_issues": 1,
+                "project_items": 1,
+            },
+            "run-b",
+            unresolved_failures=state,
+        )
+        self.assertEqual(result, "FAIL")
+        self.assertIn("#180", body)
+        self.assertNotIn("## Result\nPASS", body)
+
+    def test_same_issue_success_clears_prior_issue_failure(self):
+        state = project_sync.update_health_failure_state(
+            {},
+            mode="event-sync",
+            issue_number=180,
+            failed=True,
+            run_url="run-a",
+            message="invalid Work Status",
+        )
+        state = project_sync.update_health_failure_state(
+            state,
+            mode="event-sync",
+            issue_number=180,
+            failed=False,
+            run_url="run-a-fixed",
+            message="",
+        )
+        self.assertEqual(state, {})
+
+    def test_full_verify_pass_clears_scoped_and_global_failure_memory(self):
+        state = project_sync.update_health_failure_state(
+            {},
+            mode="event-sync",
+            issue_number=180,
+            failed=True,
+            run_url="run-a",
+            message="invalid Work Status",
+        )
+        state = project_sync.update_health_failure_state(
+            state,
+            mode="verify",
+            issue_number=None,
+            failed=True,
+            run_url="full-fail",
+            message="global configuration failure",
+        )
+        self.assertIn("180", state)
+        self.assertIn("global", state)
+
+        state = project_sync.update_health_failure_state(
+            state,
+            mode="verify",
+            issue_number=None,
+            failed=False,
+            run_url="full-pass",
+            message="",
+        )
+        self.assertEqual(state, {})
+
+    def test_failure_memory_round_trips_in_health_body(self):
+        state = {
+            "180": {
+                "mode": "event-sync",
+                "run_url": "https://github.com/x/actions/runs/1",
+                "message": "invalid Work Status",
+            }
+        }
+        body = project_sync.render_health_report(
+            result="FAIL",
+            mode="event-sync",
+            project={"owner": "kinoko34077", "number": 1, "title": project_sync.PROJECT_TITLE},
+            coverage={"canonical_issues": 1, "project_items": 0, "drift_fields": 0, "errors": 1},
+            messages=["invalid Work Status"],
+            run_url="https://github.com/x/actions/runs/1",
+            unresolved_failures=state,
+        )
+        self.assertEqual(project_sync.parse_health_failure_state(body), state)
+        self.assertIn("Unresolved Scoped Failures", body)
+
+
 if __name__ == "__main__":
     unittest.main()

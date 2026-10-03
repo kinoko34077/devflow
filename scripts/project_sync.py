@@ -19,6 +19,7 @@ PROJECT_NUMBER = 1
 PROJECT_TITLE = "KiNoTch. Development Control"
 DEFAULT_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
+HEALTH_FAILURE_STATE_MARKER = "<!-- devflow-project-sync-health-state:v1 -->"
 EXCLUDED_REPOSITORIES = {"pc-files", "pc-files2"}
 
 FIELD_MAP = {
@@ -389,10 +390,103 @@ def _redact(text: str, secrets: Iterable[str]) -> str:
     return out
 
 
+def parse_health_failure_state(body: str) -> dict[str, dict[str, str]]:
+    text = body or ""
+    marker_index = text.find(HEALTH_FAILURE_STATE_MARKER)
+    if marker_index < 0:
+        return {}
+    if text.find(HEALTH_FAILURE_STATE_MARKER, marker_index + len(HEALTH_FAILURE_STATE_MARKER)) >= 0:
+        raise ConfigError("duplicate Project Sync Health failure-state marker")
+    tail = text[marker_index + len(HEALTH_FAILURE_STATE_MARKER):]
+    match = re.search(r"(?s)\n?\s*```json\s*\n(.*?)\n```", tail)
+    if not match:
+        raise ConfigError("malformed Project Sync Health failure-state payload")
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ConfigError("invalid Project Sync Health failure-state JSON") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ConfigError("unsupported Project Sync Health failure-state schema")
+    failures = payload.get("failures")
+    if not isinstance(failures, dict):
+        raise ConfigError("Project Sync Health failure-state failures must be an object")
+    normalized: dict[str, dict[str, str]] = {}
+    for key, value in failures.items():
+        key_text = str(key)
+        if key_text != "global" and not key_text.isdigit():
+            raise ConfigError(f"invalid Project Sync Health failure key: {key_text!r}")
+        if not isinstance(value, dict):
+            raise ConfigError(f"invalid Project Sync Health failure record: {key_text!r}")
+        mode = str(value.get("mode") or "")
+        run_url = str(value.get("run_url") or "")
+        message = str(value.get("message") or "")
+        if mode not in {"event-sync", "verify", "reconcile"}:
+            raise ConfigError(f"invalid Project Sync Health failure mode: {mode!r}")
+        normalized[key_text] = {
+            "mode": mode,
+            "run_url": run_url,
+            "message": message,
+        }
+    return normalized
+
+
+def update_health_failure_state(
+    state: dict[str, dict[str, str]],
+    *,
+    mode: str,
+    issue_number: int | None,
+    failed: bool,
+    run_url: str,
+    message: str,
+) -> dict[str, dict[str, str]]:
+    updated = {key: dict(value) for key, value in state.items()}
+    if issue_number is None:
+        if not failed:
+            return {}
+        key = "global"
+    else:
+        key = str(issue_number)
+        if not failed:
+            updated.pop(key, None)
+            return updated
+    normalized_message = " ".join(str(message or "").split()).replace("```", "'''")[:500]
+    updated[key] = {
+        "mode": mode,
+        "run_url": str(run_url or "Unavailable"),
+        "message": normalized_message,
+    }
+    return updated
+
+
+def _health_failure_lines(failures: dict[str, dict[str, str]]) -> list[str]:
+    lines = ["## Unresolved Scoped Failures"]
+    if not failures:
+        lines.append("None")
+    else:
+        def sort_key(key: str) -> tuple[int, int]:
+            return (0, 0) if key == "global" else (1, int(key))
+        for key in sorted(failures, key=sort_key):
+            record = failures[key]
+            target = "global/full-scope verification" if key == "global" else f"Issue #{key}"
+            run_url = record.get("run_url") or "Unavailable"
+            mode = record.get("mode") or "unknown"
+            message = record.get("message") or "failure remains unresolved"
+            lines.append(f"- {target} — {mode} — {message} — {run_url}")
+    payload = json.dumps(
+        {"schema_version": 1, "failures": failures},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    lines.extend(["", HEALTH_FAILURE_STATE_MARKER, "```json", payload, "```"])
+    return lines
+
+
 def render_health_report(
     *, result: str, mode: str, project: dict[str, Any], coverage: dict[str, int],
     messages: list[str], run_url: str, direct_requirement: str = "NONE",
     direct_reason: str = "", secrets: Iterable[str] = (), timestamp: str | None = None,
+    unresolved_failures: dict[str, dict[str, str]] | None = None,
 ) -> str:
     timestamp = timestamp or dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     clean = [_redact(m, secrets) for m in messages] or ["None"]
@@ -414,6 +508,7 @@ def render_health_report(
     lines.extend(["", "## Run", run_url or "Unavailable", "", "## Direct Verification Requirement", direct_requirement])
     if reason:
         lines.append(reason)
+    lines.extend([""] + _health_failure_lines(unresolved_failures or {}))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -1059,17 +1154,22 @@ def _run_url(env: dict[str, str] | os._Environ[str] = os.environ) -> str:
     return f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else "Unavailable"
 
 
-def _health_body_for_missing_token(mode: str, run_url: str) -> str:
+def _health_body_for_missing_token(
+    mode: str,
+    run_url: str,
+    unresolved_failures: dict[str, dict[str, str]] | None = None,
+) -> str:
     return render_health_report(
         result="NOT_CONFIGURED", mode=mode,
         project={"owner": PROJECT_OWNER, "number": PROJECT_NUMBER, "title": PROJECT_TITLE},
         coverage={"canonical_issues": 0, "project_items": 0, "drift_fields": 0, "errors": 1},
         messages=["PROJECTS_TOKEN is not configured; Project access and mutation were not attempted."],
         run_url=run_url, direct_requirement="NONE",
+        unresolved_failures=unresolved_failures,
     )
 
 
-def _summary_health(mode: str, snapshot: ProjectSnapshot, summary: dict[str, Any], run_url: str, health_item_status: str = "MATCH") -> tuple[str, str]:
+def _summary_messages(summary: dict[str, Any], health_item_status: str = "MATCH") -> list[str]:
     messages = list(summary.get("errors") or [])
     if summary.get("membership_drift"):
         messages.append(f"Project membership drift: {summary['membership_drift']}")
@@ -1077,6 +1177,25 @@ def _summary_health(mode: str, snapshot: ProjectSnapshot, summary: dict[str, Any
         messages.append(f"Synchronized value drift: {summary['drift_fields']}")
     if health_item_status == "DRIFT":
         messages.append("Sync Health Issue is present in the display Project and should be removed by reconcile.")
+    return messages
+
+
+def _summary_health(
+    mode: str,
+    snapshot: ProjectSnapshot,
+    summary: dict[str, Any],
+    run_url: str,
+    health_item_status: str = "MATCH",
+    unresolved_failures: dict[str, dict[str, str]] | None = None,
+) -> tuple[str, str]:
+    messages = _summary_messages(summary, health_item_status)
+    failures = unresolved_failures or {}
+    if failures:
+        scoped = ", ".join(
+            "global" if key == "global" else f"#{key}"
+            for key in sorted(failures, key=lambda key: (0, 0) if key == "global" else (1, int(key)))
+        )
+        messages.append(f"Unresolved Project sync failure memory remains: {scoped}")
     blocking = bool(messages)
     result = "FAIL" if blocking else "PASS"
     body = render_health_report(
@@ -1088,7 +1207,9 @@ def _summary_health(mode: str, snapshot: ProjectSnapshot, summary: dict[str, Any
             "drift_fields": int(summary.get("drift_fields", 0)) + int(summary.get("membership_drift", 0)),
             "errors": len(summary.get("errors") or []),
         },
-        messages=messages, run_url=run_url,
+        messages=messages,
+        run_url=run_url,
+        unresolved_failures=failures,
     )
     return result, body
 
@@ -1106,13 +1227,29 @@ def run_sync(
     if rest is None and cfg.github_token:
         rest = GitHubREST(cfg.github_token, cfg.repository)
 
-    if not cfg.project_token:
-        if rest is not None:
-            upsert_health_issue(rest, _health_body_for_missing_token(mode, run_url))
-        return 2
-
-    gql = gql or GitHubGraphQL(cfg.project_token)
+    failure_state: dict[str, dict[str, str]] = {}
+    previous_health_issue: dict[str, Any] | None = None
     try:
+        if rest is not None:
+            previous_health_issue = rest.find_issue_by_title(HEALTH_TITLE)
+            if previous_health_issue is not None:
+                failure_state = parse_health_failure_state(
+                    str(previous_health_issue.get("body") or "")
+                )
+
+        if not cfg.project_token:
+            if rest is not None:
+                upsert_health_issue(
+                    rest,
+                    _health_body_for_missing_token(
+                        mode,
+                        run_url,
+                        unresolved_failures=failure_state,
+                    ),
+                )
+            return 2
+
+        gql = gql or GitHubGraphQL(cfg.project_token)
         if mode in {"reconcile", "event-sync"} and rest is not None:
             ensure_audit_freshness_labels(rest)
         if mode == "reconcile":
@@ -1120,7 +1257,7 @@ def run_sync(
         snapshot = discover_project(gql, cfg.owner, cfg.project_number)
         _validate_project_options(snapshot)
 
-        health_issue = rest.find_issue_by_title(HEALTH_TITLE) if rest is not None else None
+        health_issue = previous_health_issue
         health_item_status = ensure_health_not_project_item(health_issue, snapshot, gql, mode=mode)
 
         freshness_clients: dict[str, GitHubREST] = {}
@@ -1187,18 +1324,61 @@ def run_sync(
                 health_item_status = ensure_health_not_project_item(rest.find_issue_by_title(HEALTH_TITLE), snapshot3, gql, mode="verify")
                 snapshot = snapshot3
 
-        result, body = _summary_health(mode, snapshot, summary, run_url, health_item_status)
+        current_messages = _summary_messages(summary, health_item_status)
+        scoped_issue_number: int | None
+        if mode == "event-sync":
+            scoped_issue_number = int((event_issue or {}).get("number") or 0) or None
+        else:
+            scoped_issue_number = issue_number
+        safe_current_message = _redact(
+            "; ".join(current_messages),
+            [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
+        )
+        failure_state = update_health_failure_state(
+            failure_state,
+            mode=mode,
+            issue_number=scoped_issue_number,
+            failed=bool(current_messages),
+            run_url=run_url,
+            message=safe_current_message,
+        )
+        result, body = _summary_health(
+            mode,
+            snapshot,
+            summary,
+            run_url,
+            health_item_status,
+            unresolved_failures=failure_state,
+        )
         if rest is not None:
             upsert_health_issue(rest, body)
         return 0 if result == "PASS" else 1
     except SyncError as exc:
+        scoped_issue_number = (
+            (int((event_issue or {}).get("number") or 0) or None)
+            if mode == "event-sync"
+            else issue_number
+        )
+        safe_message = _redact(
+            str(exc),
+            [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
+        )
+        failure_state = update_health_failure_state(
+            failure_state,
+            mode=mode,
+            issue_number=scoped_issue_number,
+            failed=True,
+            run_url=run_url,
+            message=safe_message,
+        )
         body = render_health_report(
             result="FAIL", mode=mode,
             project={"owner": cfg.owner, "number": cfg.project_number, "title": PROJECT_TITLE},
             coverage={"canonical_issues": 0, "project_items": 0, "drift_fields": 0, "errors": 1},
-            messages=[str(exc)], run_url=run_url, direct_requirement="CODEX_REQUIRED" if isinstance(exc, ConfigError) else "NONE",
+            messages=[safe_message], run_url=run_url, direct_requirement="CODEX_REQUIRED" if isinstance(exc, ConfigError) else "NONE",
             direct_reason="Project structure/configuration needs direct verification." if isinstance(exc, ConfigError) else "",
             secrets=[cfg.project_token, cfg.github_token, cfg.maintenance_audit_token],
+            unresolved_failures=failure_state,
         )
         if rest is not None:
             try:
