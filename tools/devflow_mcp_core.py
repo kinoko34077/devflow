@@ -398,6 +398,13 @@ def _comment_fields(body: Any) -> dict[str, str]:
     return fields
 
 
+def _is_accepted_bootstrap_request_lifecycle(issue: dict[str, Any]) -> bool:
+    state = str(issue.get("state") or "")
+    if state == "open":
+        return True
+    return state == "closed" and str(issue.get("state_reason") or "") == "completed"
+
+
 def _is_bootstrap_executor_comment(comment: Any) -> bool:
     if not isinstance(comment, dict):
         return False
@@ -452,7 +459,7 @@ class DevflowService:
 
             request_issue = self.reader.get_issue(self.devflow_repository, request_number)
             verify_observed_issue_identity(request_issue, self.devflow_repository, request_number)
-            if str(request_issue.get("state") or "") != "open":
+            if not _is_accepted_bootstrap_request_lifecycle(request_issue):
                 return False
             request_title = str(request_issue.get("title") or "")
             if request_title != f"[REPO CREATE] {target_repository.split('/', 1)[1]}":

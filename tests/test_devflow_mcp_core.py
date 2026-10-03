@@ -176,7 +176,14 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
     request_url = "https://github.com/kinoko34077/devflow/issues/313"
     missing = object()
 
-    def _request(self, *, association="OWNER", state="open", name="UniverseGenome"):
+    def _request(
+        self,
+        *,
+        association="OWNER",
+        state="open",
+        state_reason=None,
+        name="UniverseGenome",
+    ):
         payload = request_payload()
         payload["repository"] = {
             "owner": "kinoko34077",
@@ -191,6 +198,7 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
             "url": "https://api.github.com/repos/kinoko34077/devflow/issues/313",
             "html_url": "https://github.com/kinoko34077/devflow/issues/313",
             "state": state,
+            "state_reason": state_reason,
             "author_association": association,
             "body": issue_body(payload),
         }
@@ -271,6 +279,65 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
         result = self._service().get_repository_control(self.repository)
         self.assertEqual(result["issue_number"], 314)
         self.assertEqual(result["repository"], self.repository)
+
+    def test_completed_closed_bootstrap_request_remains_trusted(self):
+        result = self._service(
+            request=self._request(
+                state="closed",
+                state_reason="completed",
+            )
+        ).get_repository_control(self.repository)
+
+        self.assertEqual(result["issue_number"], 314)
+
+    def test_closed_not_planned_bootstrap_request_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason="not_planned",
+                )
+            ).get_repository_control(self.repository)
+
+    def test_closed_request_without_state_reason_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason=None,
+                )
+            ).get_repository_control(self.repository)
+
+    def test_closed_request_with_unknown_state_reason_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason="mystery",
+                )
+            ).get_repository_control(self.repository)
+
+    def test_closed_completed_request_without_terminal_done_is_rejected(self):
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            self._service(
+                request=self._request(
+                    state="closed",
+                    state_reason="completed",
+                ),
+                comments=[],
+            ).get_repository_control(self.repository)
 
     def test_existing_bootstrap_chain_accepts_actual_legacy_control_notes_shape(self):
         control = {
