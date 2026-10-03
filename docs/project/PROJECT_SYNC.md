@@ -87,16 +87,25 @@ The workflow maintains one Issue with exact title:
 
 `[SYSTEM] GitHub Project Sync Health`
 
-The Health Issue stores the latest verification result rather than append-only history.
+The Health Issue stores the latest verification result rather than append-only history, plus a bounded machine-owned memory of unresolved scoped failures so a later unrelated event cannot mask an earlier failure.
 
 Result values:
 
-- `PASS`: API-verifiable canonical state matches the Project.
+- `PASS`: API-verifiable canonical state matches the Project **and no unresolved failure memory remains**.
 - `DEGRADED`: synchronization works but a non-blocking check is unavailable.
-- `FAIL`: drift/configuration/API error remains.
+- `FAIL`: drift/configuration/API error remains, including a remembered unresolved scoped/global failure.
 - `NOT_CONFIGURED`: `PROJECTS_TOKEN` is not available, so Project verification/mutation was not attempted.
 
-The Health Issue also contains coverage, drift/error counts, Actions run reference, and `Direct Verification Requirement`.
+Failure-memory clearing is deterministic:
+
+- an `event-sync` or targeted manual run that succeeds clears only that exact Issue's remembered failure;
+- success for a different Issue does not clear another Issue's failure and therefore does not turn global Health to `PASS`;
+- a failed full-scope `verify`/`reconcile` records a global failure that ordinary Issue events cannot clear;
+- a successful full-scope `verify`/`reconcile` clears the bounded failure memory because it has re-established the whole API-verifiable synchronization boundary.
+
+The memory is stored only in the machine-owned Sync Health body. It is observability state, not task authority, not a second lifecycle, and never drives Project -> Issue reverse synchronization.
+
+The Health Issue also contains coverage, drift/error counts, Actions run reference, `Direct Verification Requirement`, and the currently unresolved scoped/global failure identities.
 
 The Health Issue is kept closed so the Project Auto-add filter `is:issue is:open` does not normally add it. Event-sync ignores the Health Issue before Project access to prevent recursion. If it is already present in the Project, `reconcile` removes that Project item.
 
@@ -109,7 +118,7 @@ A normal ChatGPT session that cannot directly read the private Project should ch
 3. active Work Order / relevant Repository Control Issue
 4. relevant Actions run/logs when Health is not `PASS`
 
-A `PASS` result means the implemented API-verifiable synchronization checks passed at the recorded run/time. It does not claim that UI-only properties outside API coverage were directly observed.
+A `PASS` result means the implemented API-verifiable synchronization checks passed at the recorded run/time **and the bounded unresolved-failure memory is empty**. An unrelated successful event cannot clear another Issue's remembered failure. `PASS` still does not claim that UI-only properties outside API coverage were directly observed.
 
 ## 6. Direct Project verification
 
