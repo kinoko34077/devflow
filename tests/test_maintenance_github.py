@@ -4,6 +4,8 @@ import unittest
 from urllib.error import HTTPError
 from pathlib import Path
 
+from tests.test_repository_bootstrap import issue_body, request_payload
+
 try:
     from tools import maintenance_github as mg
 except ImportError:
@@ -489,6 +491,196 @@ class MaintenanceGitHubTests(unittest.TestCase):
             report["owner_ref"],
             "kinoko34077/kinotch-repo-monitor#35",
         )
+
+
+
+class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
+    repository = "kinoko34077/BootstrapTrustFixture"
+    request_ref = "kinoko34077/devflow#313"
+    request_url = "https://github.com/kinoko34077/devflow/issues/313"
+
+    def _request(self):
+        payload = request_payload()
+        payload["repository"] = {
+            "owner": "kinoko34077",
+            "name": "BootstrapTrustFixture",
+            "description": "test",
+            "visibility": "private",
+        }
+        return {
+            "number": 313,
+            "title": "[REPO CREATE] BootstrapTrustFixture",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "url": "https://api.github.com/repos/kinoko34077/devflow/issues/313",
+            "html_url": self.request_url,
+            "state": "open",
+            "author_association": "OWNER",
+            "body": issue_body(payload),
+        }
+
+    def _control(self, *, active_work="None."):
+        return {
+            "number": 314,
+            "title": "[REPO] BootstrapTrustFixture",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "url": "https://api.github.com/repos/kinoko34077/devflow/issues/314",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/314",
+            "state": "open",
+            "author_association": "NONE",
+            "updated_at": "2026-10-03T00:00:00Z",
+            "body": (
+                "## Repository\n\n"
+                f"`{self.repository}`\n\n"
+                "## Work Status\n\n`AUDITED`\n\n"
+                "## Repository State\n\n`ACTIVE`\n\n"
+                "## Active Work\n\n"
+                f"{active_work}\n\n"
+                "## Detailed Current State\n\n"
+                f"Repository was initialized through `{self.request_ref}` "
+                "using `repository-bootstrap.v1`. "
+                "Accepted initial head is `" + ("a" * 40) + "`.\n\n"
+                "## Control Notes\n\n"
+                f"Cross-repository routing summary only. Bootstrap request: {self.request_url}. "
+                f"Detailed technical truth belongs in `{self.repository}`.\n"
+            ),
+        }
+
+    def _provenance(self):
+        return json.dumps(
+            {
+                "schema": "repository-bootstrap-provenance.v1",
+                "request_ref": self.request_ref,
+                "request_url": self.request_url,
+                "repository": self.repository,
+            },
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
+
+    def _done_comment(self):
+        return {
+            "body": (
+                "Repository-Bootstrap-State: DONE\n"
+                f"Repository: https://github.com/{self.repository}\n"
+                "Initial-Accepted-SHA: `" + ("a" * 40) + "`\n"
+                "Initial-Issue: https://github.com/kinoko34077/BootstrapTrustFixture/issues/1\n"
+                "Repository-Control: https://github.com/kinoko34077/devflow/issues/314"
+            ),
+            "author_association": "NONE",
+            "user": {"login": "github-actions[bot]"},
+            "performed_via_github_app": {"slug": "github-actions"},
+        }
+
+    def _transport(self, *, active_work="None.", owner=None, comments=None):
+        control = self._control(active_work=active_work)
+        request = self._request()
+        provenance = self._provenance()
+        comments = [self._done_comment()] if comments is None else comments
+        test_case = self
+
+        class Transport:
+            def get_json(inner_self, path):
+                if path.endswith("/repos/kinoko34077/devflow/issues/314"):
+                    return dict(control)
+                if path.endswith("/repos/kinoko34077/devflow/issues/313"):
+                    return dict(request)
+                if owner is not None and path.endswith("/issues/7"):
+                    return dict(owner)
+                raise AssertionError(path)
+
+            def list_issues(inner_self, repository, state="open"):
+                test_case.assertEqual(repository, "kinoko34077/devflow")
+                return [dict(control), dict(request)]
+
+            def get_issue(inner_self, repository, number):
+                if repository == "kinoko34077/devflow" and number == 313:
+                    return dict(request)
+                if repository == "kinoko34077/devflow" and number == 314:
+                    return dict(control)
+                if owner is not None and repository == test_case.repository and number == 7:
+                    return dict(owner)
+                raise AssertionError((repository, number))
+
+            def list_issue_comments(inner_self, repository, number):
+                test_case.assertEqual(
+                    (repository, number),
+                    ("kinoko34077/devflow", 313),
+                )
+                return list(comments)
+
+            def get_file(inner_self, repository, path):
+                test_case.assertEqual(
+                    (repository, path),
+                    (test_case.repository, ".github/repository-bootstrap.json"),
+                )
+                return {"content": provenance}
+
+        return Transport()
+
+    def test_bootstrap_derived_idle_control_is_trusted_by_maintenance_observation(self):
+        observation = mg.collect_repository(
+            self._transport(),
+            self.repository,
+            "kinoko34077/devflow#314",
+            "2026-10-03T00:05:00Z",
+        )
+
+        self.assertEqual(observation["source_status"], "OK")
+        self.assertTrue(observation["control"]["trusted"])
+        self.assertIsNone(observation["owner"]["ref"])
+
+    def test_bootstrap_derived_control_can_continue_to_exact_owner_classification(self):
+        owner = {
+            "number": 7,
+            "state": "open",
+            "repository_url": f"https://api.github.com/repos/{self.repository}",
+            "html_url": f"https://github.com/{self.repository}/issues/7",
+            "author_association": "OWNER",
+            "updated_at": "2026-10-03T00:01:00Z",
+            "body": "## Work Status\n\n`READY_FOR_IMPLEMENTATION`\n",
+        }
+        observation = mg.collect_repository(
+            self._transport(
+                active_work=f"`{self.repository}#7` — primary owner.",
+                owner=owner,
+            ),
+            self.repository,
+            "kinoko34077/devflow#314",
+            "2026-10-03T00:05:00Z",
+        )
+
+        self.assertEqual(observation["source_status"], "OK")
+        self.assertTrue(observation["control"]["trusted"])
+        self.assertEqual(observation["owner"]["ref"], f"{self.repository}#7")
+        self.assertTrue(observation["owner"]["runnable"])
+
+    def test_arbitrary_bot_control_without_terminal_provenance_remains_untrusted(self):
+        observation = mg.collect_repository(
+            self._transport(comments=[]),
+            self.repository,
+            "kinoko34077/devflow#314",
+            "2026-10-03T00:05:00Z",
+        )
+
+        self.assertEqual(observation["source_status"], "AMBIGUOUS")
+        self.assertFalse(observation["control"]["trusted"])
+
+    def test_bootstrap_trust_evidence_read_failure_fails_closed(self):
+        transport = self._transport()
+
+        def broken_comments(repository, number):
+            raise mg.GitHubReadError("bootstrap evidence unavailable")
+
+        transport.list_issue_comments = broken_comments
+        observation = mg.collect_repository(
+            transport,
+            self.repository,
+            "kinoko34077/devflow#314",
+            "2026-10-03T00:05:00Z",
+        )
+
+        self.assertEqual(observation["source_status"], "AMBIGUOUS")
+        self.assertFalse(observation["control"]["trusted"])
 
 
 class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
