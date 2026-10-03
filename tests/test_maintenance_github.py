@@ -665,6 +665,23 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
         self.assertEqual(observation["source_status"], "AMBIGUOUS")
         self.assertFalse(observation["control"]["trusted"])
 
+    def test_bootstrap_trust_evidence_read_failure_fails_closed(self):
+        transport = self._transport()
+
+        def broken_comments(repository, number):
+            raise mg.GitHubReadError("bootstrap evidence unavailable")
+
+        transport.list_issue_comments = broken_comments
+        observation = mg.collect_repository(
+            transport,
+            self.repository,
+            "kinoko34077/devflow#314",
+            "2026-10-03T00:05:00Z",
+        )
+
+        self.assertEqual(observation["source_status"], "AMBIGUOUS")
+        self.assertFalse(observation["control"]["trusted"])
+
 
 class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
     def test_control_exact_issue_identity_is_required(self):
