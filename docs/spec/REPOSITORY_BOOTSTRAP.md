@@ -174,6 +174,33 @@ Retry rules:
 
 Existing user-edited seed files are never silently overwritten during a retry.
 
+### 8.1 Downstream Control trust
+
+The bootstrap-generated `[REPO] <name>` Control is a derived operational
+record, not an independently trusted bot identity. The read-only Devflow MCP
+may accept a non-`OWNER`/`MEMBER`/`COLLABORATOR` Control only when all of the
+following are true:
+
+1. the observed devflow repository is exactly `kinoko34077/devflow`;
+2. the Control title is exactly `[REPO] <name>`, it is open, and it is unique;
+3. the Control contains one valid `repository-bootstrap-control.v1` provenance
+   block, or the canonical legacy generated-Control provenance text;
+4. the referenced open `[REPO CREATE] <name>` request is in the exact devflow
+   repository, has a trusted author association, and contains one valid
+   `repository-bootstrap.v1` payload for the same target with management and
+   Control creation enabled;
+5. the request has a terminal `DONE` bootstrap comment naming the exact target
+   repository and this exact Control URL; and
+6. the target's `.github/repository-bootstrap.json` parses as
+   `repository-bootstrap-provenance.v1` and exactly matches the request and
+   target identities.
+
+This rule derives trust from a verifiable request/provisioning/registration
+chain. It does not globally trust `github-actions[bot]` or any other bot. Any
+missing, malformed, mismatched, non-terminal or duplicate chain fails closed.
+The MCP retains legacy-text compatibility so an already-created Control does
+not need to be recreated solely to adopt the stronger machine-readable block.
+
 ## 9. Execution lifecycle
 
 Conceptual lifecycle:
@@ -254,6 +281,7 @@ Canonical implementation surfaces:
 - `.github/workflows/repository-bootstrap.yml` — event/trust orchestration only;
 - `scripts/repository_bootstrap.py` — event CLI;
 - `tools/repository_bootstrap.py` — contract, validator, idempotent executor, bounded REST adapter;
+- `tools/devflow_mcp_core.py` — read-only Control discovery and derived bootstrap provenance verification;
 - `schemas/repository-bootstrap.v1.schema.json` — documentary schema;
 - `tests/test_repository_bootstrap*.py` — deterministic contract/security/recovery tests;
 - `docs/operations/REPOSITORY_BOOTSTRAP.md` — operator/request instructions.

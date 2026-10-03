@@ -14,6 +14,9 @@ SCHEMA_VERSION = "repository-bootstrap.v1"
 PROVENANCE_SCHEMA = "repository-bootstrap-provenance.v1"
 START_MARKER = "<!-- repository-bootstrap:v1:start -->"
 END_MARKER = "<!-- repository-bootstrap:v1:end -->"
+CONTROL_PROVENANCE_SCHEMA = "repository-bootstrap-control.v1"
+CONTROL_START_MARKER = "<!-- repository-bootstrap-control:v1:start -->"
+CONTROL_END_MARKER = "<!-- repository-bootstrap-control:v1:end -->"
 ALLOWED_OWNER = "kinoko34077"
 EXCLUDED_REPOSITORIES = frozenset({"pc-files", "pc-files2"})
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
@@ -312,6 +315,123 @@ def _provenance(context: BootstrapContext, full_name: str) -> str:
         indent=2,
         sort_keys=True,
     ) + "\n"
+
+
+def parse_provenance_document(content: str) -> dict[str, str]:
+    """Parse the exact provenance document persisted in the target repository."""
+    if not isinstance(content, str):
+        raise BootstrapError("bootstrap provenance must be text")
+    try:
+        decoded = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise BootstrapError("bootstrap provenance is not valid JSON") from exc
+    if not isinstance(decoded, dict):
+        raise BootstrapError("bootstrap provenance must be an object")
+    expected_keys = {"schema", "request_ref", "request_url", "repository"}
+    if set(decoded) != expected_keys:
+        raise BootstrapError("bootstrap provenance has unsupported or missing fields")
+    result: dict[str, str] = {}
+    for key in expected_keys:
+        value = decoded.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise BootstrapError(f"bootstrap provenance field {key!r} must be a non-empty string")
+        result[key] = value
+    if result["schema"] != PROVENANCE_SCHEMA:
+        raise BootstrapError("unsupported bootstrap provenance schema")
+    return result
+
+
+def render_control_provenance(context: BootstrapContext, full_name: str) -> str:
+    payload = {
+        "schema": CONTROL_PROVENANCE_SCHEMA,
+        "request_ref": context.request_ref,
+        "request_url": context.request_url,
+        "repository": full_name,
+    }
+    return (
+        f"{CONTROL_START_MARKER}\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)}\n"
+        f"{CONTROL_END_MARKER}"
+    )
+
+
+def parse_control_provenance(body: str) -> dict[str, str]:
+    """Parse new machine-readable or canonical legacy bootstrap Control provenance."""
+    normalized = (body or "").replace("\r\n", "\n").replace("\r", "\n")
+    marker_count = normalized.count(CONTROL_START_MARKER) + normalized.count(CONTROL_END_MARKER)
+    if marker_count:
+        if (
+            normalized.count(CONTROL_START_MARKER) != 1
+            or normalized.count(CONTROL_END_MARKER) != 1
+        ):
+            raise BootstrapError("Control provenance markers must occur exactly once")
+        start = normalized.index(CONTROL_START_MARKER) + len(CONTROL_START_MARKER)
+        end = normalized.index(CONTROL_END_MARKER)
+        if end <= start:
+            raise BootstrapError("Control provenance markers are out of order")
+        try:
+            decoded = json.loads(normalized[start:end].strip())
+        except json.JSONDecodeError as exc:
+            raise BootstrapError("Control provenance is not valid JSON") from exc
+        if not isinstance(decoded, dict):
+            raise BootstrapError("Control provenance must be an object")
+        expected_keys = {"schema", "request_ref", "request_url", "repository"}
+        if set(decoded) != expected_keys:
+            raise BootstrapError("Control provenance has unsupported or missing fields")
+        result: dict[str, str] = {}
+        for key in expected_keys:
+            value = decoded.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise BootstrapError(f"Control provenance field {key!r} must be a non-empty string")
+            result[key] = value
+        if result["schema"] != CONTROL_PROVENANCE_SCHEMA:
+            raise BootstrapError("unsupported Control provenance schema")
+        return result
+
+    repository_match = re.search(r"(?m)^## Repository\s*\n\s*`([^`]+)`", normalized)
+    state_match = re.search(
+        r"Repository was initialized through `([^`]+)` using `repository-bootstrap\.v1`",
+        normalized,
+    )
+    explicit_state_match = re.search(
+        r"Repository was initialized through `([^`]+)` using `([^`]+)`",
+        normalized,
+    )
+    if explicit_state_match and not state_match:
+        raise BootstrapError("Control uses an unsupported bootstrap schema")
+    request_match = re.search(
+        r"Bootstrap request:\s*(https://github\.com/[^\s]+)",
+        normalized,
+    )
+    if not repository_match or not request_match:
+        raise BootstrapError("Control has no canonical bootstrap provenance")
+    request_url = request_match.group(1).rstrip(".,)")
+    parsed_url = urllib.parse.urlsplit(request_url)
+    path_parts = parsed_url.path.split("/")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc.lower() != "github.com"
+        or parsed_url.query
+        or parsed_url.fragment
+        or len(path_parts) != 5
+        or path_parts[0]
+        or path_parts[3] != "issues"
+        or not path_parts[1]
+        or not path_parts[2]
+        or not path_parts[4].isdigit()
+    ):
+        raise BootstrapError("Control bootstrap request URL is not canonical")
+    request_ref = (
+        state_match.group(1)
+        if state_match
+        else f"{path_parts[1]}/{path_parts[2]}#{path_parts[4]}"
+    )
+    return {
+        "schema": CONTROL_PROVENANCE_SCHEMA,
+        "request_ref": request_ref,
+        "request_url": request_url,
+        "repository": repository_match.group(1),
+    }
 
 
 def _issue_marker(context: BootstrapContext, key: str) -> str:
@@ -635,6 +755,7 @@ class BootstrapExecutor:
                     + "\n\n## Detailed Current State\n\n"
                     f"Repository was initialized through `{context.request_ref}` using `{SCHEMA_VERSION}`. "
                     f"Accepted initial head is `{head_sha}`. No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
+                    f"{render_control_provenance(context, full_name)}\n\n"
                     "## Control Notes\n\n"
                     f"Cross-repository routing summary only. Bootstrap request: {context.request_url}. "
                     f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`."
