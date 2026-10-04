@@ -1,4 +1,5 @@
 import copy
+import json
 import unittest
 
 from tools import maintenance_sync_check
@@ -344,6 +345,86 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
                 REPOSITORY,
                 self._payload(),
                 expected_body_sha256=stale_digest,
+            )
+
+    def test_replacement_migrates_exact_legacy_v1_missing_valid_until(self):
+        human = (
+            "## Repository\n\n`kinoko34077/demo`\n\n"
+            "## Active Work\n\nHuman-owned prose.\n"
+        )
+        legacy = copy.deepcopy(self._payload())
+        legacy.pop("valid_until")
+        legacy = cache.recompute_generation_id(legacy)
+        legacy_block = (
+            cache.CACHE_MARKER_BEGIN
+            + "\n"
+            + json.dumps(legacy, indent=2, sort_keys=True)
+            + "\n"
+            + cache.CACHE_MARKER_END
+        )
+        body = human.rstrip() + "\n\n" + legacy_block
+
+        updated = cache.replace_cached_projection(
+            body,
+            REPOSITORY,
+            self._payload(),
+            expected_body_sha256=maintenance_sync_check.canonical_body_sha256(body),
+        )
+
+        parsed = cache.parse_cached_projection(updated, REPOSITORY)
+        self.assertIsNotNone(parsed)
+        self.assertIn("valid_until", parsed.payload)
+        self.assertTrue(updated.startswith(human.rstrip()))
+        self.assertIn("Human-owned prose.", updated)
+
+    def test_replacement_rejects_corrupt_legacy_v1_generation(self):
+        legacy = copy.deepcopy(self._payload())
+        legacy.pop("valid_until")
+        legacy = cache.recompute_generation_id(legacy)
+        legacy["generation_id"] = "sha256:" + ("0" * 64)
+        body = (
+            "## Repository\n\n`kinoko34077/demo`\n\n"
+            + cache.CACHE_MARKER_BEGIN
+            + "\n"
+            + json.dumps(legacy, indent=2, sort_keys=True)
+            + "\n"
+            + cache.CACHE_MARKER_END
+        )
+
+        with self.assertRaisesRegex(
+            cache.RepositoryProjectionCacheError,
+            "legacy generation_id",
+        ):
+            cache.replace_cached_projection(
+                body,
+                REPOSITORY,
+                self._payload(),
+                expected_body_sha256=maintenance_sync_check.canonical_body_sha256(body),
+            )
+
+    def test_replacement_rejects_legacy_v1_with_additional_missing_field(self):
+        legacy = copy.deepcopy(self._payload())
+        legacy.pop("valid_until")
+        legacy.pop("coverage")
+        legacy = cache.recompute_generation_id(legacy)
+        body = (
+            "## Repository\n\n`kinoko34077/demo`\n\n"
+            + cache.CACHE_MARKER_BEGIN
+            + "\n"
+            + json.dumps(legacy, indent=2, sort_keys=True)
+            + "\n"
+            + cache.CACHE_MARKER_END
+        )
+
+        with self.assertRaisesRegex(
+            cache.RepositoryProjectionCacheError,
+            "legacy repository projection cache missing fields",
+        ):
+            cache.replace_cached_projection(
+                body,
+                REPOSITORY,
+                self._payload(),
+                expected_body_sha256=maintenance_sync_check.canonical_body_sha256(body),
             )
 
     def test_human_text_outside_marker_block_is_preserved(self):
