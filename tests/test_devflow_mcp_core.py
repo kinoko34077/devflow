@@ -1,3 +1,4 @@
+import ast
 import base64
 import json
 import unittest
@@ -351,6 +352,69 @@ class RepositoryProjectionMCPEntrypointTests(unittest.TestCase):
         self.assertIn("def get_portfolio_projection()", source)
         self.assertNotIn("def update_repository_projection(", source)
         self.assertNotIn("def write_repository_projection(", source)
+
+
+class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
+    def test_github_reader_issue_listing_uses_direct_repository_api_not_search(self):
+        seen = []
+
+        def transport(url, headers):
+            seen.append(url)
+            return []
+
+        reader = devflow_mcp_core.GitHubReader(
+            token="",
+            transport=transport,
+        )
+        self.assertEqual(
+            reader.list_issues("kinoko34077/demo", state="open"),
+            [],
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertIn("/repos/kinoko34077/demo/issues?", seen[0])
+        self.assertNotIn("/search/", seen[0])
+
+    def test_mcp_server_exposes_projection_reads_and_no_write_tools(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tools"
+            / "devflow_mcp.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        tools = set()
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if any(
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and isinstance(decorator.func.value, ast.Name)
+                and decorator.func.value.id == "mcp"
+                and decorator.func.attr == "tool"
+                for decorator in node.decorator_list
+            ):
+                tools.add(node.name)
+
+        self.assertIn("get_repository_projection", tools)
+        self.assertIn("get_portfolio_projection", tools)
+        self.assertFalse(
+            any(
+                name.startswith(
+                    (
+                        "create_",
+                        "update_",
+                        "delete_",
+                        "set_",
+                        "merge_",
+                        "publish_",
+                        "claim_",
+                    )
+                )
+                for name in tools
+            ),
+            tools,
+        )
+
 
 
 class BootstrapDerivedControlTrustTests(unittest.TestCase):
