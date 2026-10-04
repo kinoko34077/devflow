@@ -145,7 +145,7 @@ class RepositoryIssueMetadataContractTests(unittest.TestCase):
             repository_projection.parse_issue_metadata(block(invalid))
 
     def test_missing_required_field_fails_closed(self):
-        payload = VALID_TASK.replace('  "external_wait": false\n', "")
+        payload = VALID_TASK.replace(',\n  "external_wait": false', "")
         with self.assertRaisesRegex(
             repository_projection.ProjectionContractError,
             "missing",
