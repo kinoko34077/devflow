@@ -379,7 +379,7 @@ TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
 def is_trusted_author(issue: dict[str, Any]) -> bool:
-    """devflow is public: only owner/member/collaborator Issues may drive Project writes.
+    """Return direct trusted-author status for a devflow Issue.
 
     Missing association data is treated as untrusted (fail closed).
     """
@@ -387,13 +387,39 @@ def is_trusted_author(issue: dict[str, Any]) -> bool:
     return association in TRUSTED_AUTHOR_ASSOCIATIONS
 
 
+ControlTrustVerifier = Callable[[dict[str, Any]], bool]
+
+
+def is_trusted_project_issue(
+    issue: dict[str, Any],
+    control_trust_verifier: ControlTrustVerifier | None = None,
+) -> bool:
+    """Project admission seam.
+
+    This first refactor intentionally preserves the historical direct-author-only
+    behavior. #322 RED coverage will prove the missing derived-Control branch
+    before the shared verifier is connected.
+    """
+    del control_trust_verifier
+    return is_trusted_author(issue)
+
+
 def is_health_issue(issue: dict[str, Any]) -> bool:
     return str(issue.get("title") or "").strip() == HEALTH_TITLE
 
 
-def select_target_issue(rest: Any, issue_number: int) -> list[dict[str, Any]]:
+def select_target_issue(
+    rest: Any,
+    issue_number: int,
+    control_trust_verifier: ControlTrustVerifier | None = None,
+) -> list[dict[str, Any]]:
     issue = rest.get_issue(issue_number)
-    return [] if is_health_issue(issue) or not is_trusted_author(issue) else [issue]
+    return (
+        []
+        if is_health_issue(issue)
+        or not is_trusted_project_issue(issue, control_trust_verifier)
+        else [issue]
+    )
 
 
 def _redact(text: str, secrets: Iterable[str]) -> str:
@@ -995,12 +1021,16 @@ def discover_project(gql: Any, owner: str, number: int) -> ProjectSnapshot:
     return ProjectSnapshot(identity["id"], identity["title"], bool(identity.get("public")), fields, items)
 
 
-def select_canonical_issues(issues: list[dict[str, Any]], tracked_items: dict[str, Any]) -> list[dict[str, Any]]:
+def select_canonical_issues(
+    issues: list[dict[str, Any]],
+    tracked_items: dict[str, Any],
+    control_trust_verifier: ControlTrustVerifier | None = None,
+) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     for issue in issues:
         if is_health_issue(issue):
             continue
-        if not is_trusted_author(issue):
+        if not is_trusted_project_issue(issue, control_trust_verifier):
             continue
         node_id = issue.get("node_id") or issue.get("id")
         state = str(issue.get("state") or "").lower()
@@ -1138,14 +1168,18 @@ def ensure_health_not_project_item(health_issue: dict[str, Any] | None, snapshot
     return "DRIFT"
 
 
-def reread_event_issue(rest: Any, event_issue: dict[str, Any]) -> dict[str, Any]:
+def reread_event_issue(
+    rest: Any,
+    event_issue: dict[str, Any],
+    control_trust_verifier: ControlTrustVerifier | None = None,
+) -> dict[str, Any]:
     issue_number = int(event_issue.get("number") or 0)
     if issue_number <= 0:
         raise ConfigError("event-sync post-write readback requires a valid issue number")
     live = rest.get_issue(issue_number)
     if not isinstance(live, dict):
         raise ConfigError("event-sync post-write readback returned no Issue")
-    if is_health_issue(live) or not is_trusted_author(live):
+    if is_health_issue(live) or not is_trusted_project_issue(live, control_trust_verifier):
         raise ConfigError("event-sync post-write readback is not a trusted canonical Issue")
     return live
 
@@ -1230,10 +1264,13 @@ def _summary_health(
 
 def run_sync(
     mode: str, cfg: RuntimeConfig, *, rest: Any | None = None, gql: Any | None = None,
-    issue_number: int | None = None, event_issue: dict[str, Any] | None = None, run_url: str = "Unavailable",
+    issue_number: int | None = None, event_issue: dict[str, Any] | None = None,
+    run_url: str = "Unavailable",
+    control_trust_verifier: ControlTrustVerifier | None = None,
 ) -> int:
     if mode == "event-sync" and event_issue and (
-        is_health_issue(event_issue) or not is_trusted_author(event_issue)
+        is_health_issue(event_issue)
+        or not is_trusted_project_issue(event_issue, control_trust_verifier)
     ):
         # Untrusted (non owner/member/collaborator) Issues never drive Project writes.
         return 0
@@ -1303,7 +1340,7 @@ def run_sync(
             )
             if rest is None:
                 raise ConfigError("event-sync post-write readback requires repository access")
-            live_issue = reread_event_issue(rest, issue)
+            live_issue = reread_event_issue(rest, issue, control_trust_verifier)
             issues = [live_issue]
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
             verify_summary = process_issues(
@@ -1316,10 +1353,10 @@ def run_sync(
             if rest is None:
                 raise ConfigError("repository token is required for verify/reconcile issue reads")
             if issue_number is not None:
-                issues = select_target_issue(rest, issue_number)
+                issues = select_target_issue(rest, issue_number, control_trust_verifier)
             else:
                 all_issues = rest.list_issues(state="all")
-                issues = select_canonical_issues(all_issues, snapshot.items_by_content_id)
+                issues = select_canonical_issues(all_issues, snapshot.items_by_content_id, control_trust_verifier)
             summary = process_issues(
                 issues, snapshot, gql, mode=mode,
                 freshness_resolver=freshness_resolver, rest=rest,
@@ -1330,7 +1367,7 @@ def run_sync(
                 health_issue2 = rest.find_issue_by_title(HEALTH_TITLE)
                 health_item_status = ensure_health_not_project_item(health_issue2, snapshot2, gql, mode="reconcile")
                 snapshot3 = discover_project(gql, cfg.owner, cfg.project_number)
-                issues2 = select_target_issue(rest, issue_number) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id)
+                issues2 = select_target_issue(rest, issue_number, control_trust_verifier) if issue_number is not None else select_canonical_issues(rest.list_issues(state="all"), snapshot3.items_by_content_id, control_trust_verifier)
                 summary = process_issues(
                     issues2, snapshot3, gql, mode="verify",
                     freshness_resolver=freshness_resolver, rest=rest,
