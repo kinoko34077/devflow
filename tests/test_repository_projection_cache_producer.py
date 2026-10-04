@@ -53,10 +53,18 @@ class FakeReader:
 class FakeService:
     devflow_repository = CONTROL_REPOSITORY
 
-    def __init__(self, issue, *, trusted=True, control_number=CONTROL_NUMBER):
+    def __init__(
+        self,
+        issue,
+        *,
+        trusted=True,
+        control_number=CONTROL_NUMBER,
+        projection_override=None,
+    ):
         self.reader = FakeReader(issue)
         self.trusted = trusted
         self.control_number = control_number
+        self.projection_override = projection_override
 
     def get_repository_control(self, repository):
         self.last_control_repository = repository
@@ -71,7 +79,11 @@ class FakeService:
 
     def get_repository_projection(self, repository):
         self.last_projection_repository = repository
-        return projection()
+        return (
+            self.projection_override
+            if self.projection_override is not None
+            else projection()
+        )
 
 
 class FakeWriter:
@@ -164,6 +176,46 @@ class ProjectionCacheProducerPlanTests(unittest.TestCase):
                 CONTROL_NUMBER,
                 generated_at=GENERATED_AT,
             )
+
+    def test_source_unavailable_cache_remains_fail_closed(self):
+        unavailable = projection()
+        unavailable.update(
+            {
+                "source_status": "UNAVAILABLE",
+                "source_freshness": "UNKNOWN",
+                "source_error": "GitHub read failed",
+                "open_issue_count": 0,
+                "machine_task_count": 0,
+                "legacy_hint_count": 0,
+                "unclassified_count": 0,
+                "invalid_metadata_count": 0,
+                "untrusted_metadata_count": 0,
+                "legacy_hint_type_counts": {},
+            }
+        )
+        service = FakeService(
+            control_issue(),
+            trusted=True,
+            projection_override=unavailable,
+        )
+        plan = producer.prepare_target(
+            service,
+            REPOSITORY,
+            CONTROL_NUMBER,
+            generated_at=GENERATED_AT,
+        )
+        parsed = cache.parse_cached_projection(plan.desired_body, REPOSITORY)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(plan.source_status, "UNAVAILABLE")
+        self.assertEqual(plan.coverage_status, "UNAVAILABLE")
+        self.assertTrue(parsed.payload["coverage"]["ambiguous"])
+        self.assertEqual(
+            parsed.payload["coverage"]["active_work_evidence"],
+            "SOURCE_UNAVAILABLE",
+        )
+        self.assertFalse(
+            parsed.payload["coverage"]["can_replace_manual_active_work"]
+        )
 
 
 class ProjectionCacheProducerApplyTests(unittest.TestCase):
