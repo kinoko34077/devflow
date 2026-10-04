@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 try:
@@ -18,6 +19,8 @@ ACTIONABLE_WORK_STATES = frozenset({
     "READY_FOR_IMPLEMENTATION",
     "IMPLEMENTING",
 })
+SOURCE_STATUSES = frozenset({"OK", "ERROR", "UNKNOWN"})
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 _ALLOWED_KEYS = frozenset({
     "schema_version",
@@ -274,6 +277,44 @@ def classify_issue(issue: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _issue_ref(repository: str, issue_number: int) -> str | None:
+    return f"{repository}#{issue_number}" if issue_number > 0 else None
+
+
+def _latest_ref(
+    repository: str,
+    classified: list[dict[str, Any]],
+    field: str,
+) -> str | None:
+    candidates = [
+        item
+        for item in classified
+        if item.get("state") == "open"
+        and item.get(field)
+        and int(item.get("issue_number") or 0) > 0
+    ]
+    if not candidates:
+        return None
+    latest = max(
+        candidates,
+        key=lambda item: (
+            str(item.get(field) or ""),
+            int(item.get("issue_number") or 0),
+        ),
+    )
+    return _issue_ref(repository, int(latest["issue_number"]))
+
+
+def _empty_counts() -> dict[str, Any]:
+    return {
+        "open_issues": 0,
+        "machine_tasks": 0,
+        "legacy_or_unclassified": 0,
+        "invalid_machine": 0,
+        "by_type": {},
+    }
+
+
 def build_repository_projection(
     repository: str,
     issues: list[dict[str, Any]],
@@ -283,4 +324,118 @@ def build_repository_projection(
     source_error: str | None = None,
 ) -> dict[str, Any]:
     """Build one pure read-only repository projection."""
-    raise NotImplementedError("M1.3 RED seam")
+    if not isinstance(repository, str) or not _REPOSITORY_RE.fullmatch(repository):
+        raise RepositoryProjectionError(
+            f"Invalid repository identity: {repository!r}"
+        )
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        raise RepositoryProjectionError("observed_at is required")
+    if source_status not in SOURCE_STATUSES:
+        raise RepositoryProjectionError(
+            f"Unsupported source_status: {source_status!r}"
+        )
+    if source_status == "OK" and source_error:
+        raise RepositoryProjectionError(
+            "source_error must be empty when source_status is OK"
+        )
+    if source_status != "OK" and not source_error:
+        raise RepositoryProjectionError(
+            "source_error is required when source_status is not OK"
+        )
+
+    base = {
+        "schema_version": 1,
+        "authority": "SHADOW_READ_ONLY",
+        "repository": repository,
+        "observed_at": observed_at,
+        "source_status": source_status,
+        "source_error": source_error,
+    }
+    if source_status != "OK":
+        return {
+            **base,
+            "issues": [],
+            "counts": _empty_counts(),
+            "newest_open_issue_ref": None,
+            "most_recently_active_issue_ref": None,
+            "actionable_refs": [],
+            "blocked_refs": [],
+            "waiting_refs": [],
+            "needs_human_refs": [],
+        }
+
+    classified = [classify_issue(issue) for issue in issues]
+    counts_by_type: dict[str, int] = {}
+    machine_tasks = 0
+    legacy_or_unclassified = 0
+    invalid_machine = 0
+    actionable_refs: list[str] = []
+    blocked_refs: list[str] = []
+    waiting_refs: list[str] = []
+    needs_human_refs: list[str] = []
+
+    for item in classified:
+        source = item["classification_source"]
+        metadata = item.get("metadata")
+        role = item.get("record_role")
+        issue_ref = _issue_ref(
+            repository,
+            int(item.get("issue_number") or 0),
+        )
+        if source == "MACHINE" and role == "TASK":
+            machine_tasks += 1
+            if isinstance(metadata, dict):
+                issue_type = metadata.get("type")
+                if isinstance(issue_type, str):
+                    counts_by_type[issue_type] = (
+                        counts_by_type.get(issue_type, 0) + 1
+                    )
+                if issue_ref and item.get("actionable"):
+                    actionable_refs.append(issue_ref)
+                if issue_ref and (
+                    metadata.get("work_status") == "BLOCKED"
+                    or bool(metadata.get("blocked_by"))
+                ):
+                    blocked_refs.append(issue_ref)
+                if issue_ref and metadata.get("external_wait") is True:
+                    waiting_refs.append(issue_ref)
+                if (
+                    issue_ref
+                    and metadata.get("requires_user_confirmation") is True
+                ):
+                    needs_human_refs.append(issue_ref)
+        elif source in {"LEGACY_HINT", "UNCLASSIFIED"}:
+            legacy_or_unclassified += 1
+        elif source == "INVALID_MACHINE":
+            invalid_machine += 1
+
+    return {
+        **base,
+        "issues": classified,
+        "counts": {
+            "open_issues": sum(
+                1 for item in classified if item.get("state") == "open"
+            ),
+            "machine_tasks": machine_tasks,
+            "legacy_or_unclassified": legacy_or_unclassified,
+            "invalid_machine": invalid_machine,
+            "by_type": {
+                key: counts_by_type[key]
+                for key in sorted(counts_by_type)
+            },
+        },
+        "newest_open_issue_ref": _latest_ref(
+            repository,
+            classified,
+            "created_at",
+        ),
+        "most_recently_active_issue_ref": _latest_ref(
+            repository,
+            classified,
+            "updated_at",
+        ),
+        "actionable_refs": sorted(actionable_refs),
+        "blocked_refs": sorted(blocked_refs),
+        "waiting_refs": sorted(waiting_refs),
+        "needs_human_refs": sorted(needs_human_refs),
+    }
