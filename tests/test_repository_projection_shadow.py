@@ -71,8 +71,17 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
         self.assertEqual(result["machine_task_count"], 1)
         self.assertEqual(result["legacy_or_unclassified_count"], 4)
         self.assertAlmostEqual(result["legacy_or_unclassified_rate"], 0.8)
+        self.assertAlmostEqual(result["machine_metadata_coverage_rate"], 0.2)
         self.assertEqual(result["repositories_with_machine_tasks"], 1)
-        self.assertEqual(result["repositories_with_control_active_work"], 1)
+        self.assertEqual(
+            result["repositories_with_open_issues_without_machine_tasks"],
+            1,
+        )
+        self.assertEqual(
+            result["operator_decision_ambiguous_repository_count"],
+            1,
+        )
+        self.assertEqual(result["repositories_with_control_active_work_text"], 1)
         self.assertEqual(
             result["repositories"][0]["machine_task_refs"],
             ["kinoko34077/alpha#7"],
@@ -116,13 +125,16 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
                 return {
                     "issue_number": 10,
                     "work_status": "AUDITED",
-                    "active_work": "none",
+                    "active_work": "None.",
                 }
 
         service = Service()
         report = shadow.collect_shadow(service)
         self.assertEqual(service.controls, ["kinoko34077/alpha"])
         self.assertEqual(report["repository_count"], 1)
+        self.assertEqual(report["repositories_with_control_active_work_text"], 1)
+        self.assertEqual(report["repositories_with_open_issues_without_machine_tasks"], 0)
+        self.assertEqual(report["operator_decision_ambiguous_repository_count"], 0)
 
     def test_shadow_workflow_is_manual_read_only_and_artifact_only(self):
         path = ROOT / ".github" / "workflows" / "maintenance-audit.yml"
