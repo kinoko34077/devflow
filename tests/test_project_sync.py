@@ -239,6 +239,141 @@ class ClientAndSyncTests(unittest.TestCase):
         selected = project_sync.select_canonical_issues(issues, {"B": object()})
         self.assertEqual([i["number"] for i in selected], [1, 2])
 
+    def test_bootstrap_derived_control_uses_shared_canonical_control_lookup(self):
+        calls = []
+
+        class FakeControlTrust:
+            def get_repository_control(self, repository):
+                calls.append(repository)
+                return {"repository": repository, "issue_number": 7}
+
+        canonical = {
+            "number": 7,
+            "node_id": "BOT-CONTROL",
+            "title": "[REPO] demo",
+            "state": "open",
+            "body": "## Repository\n\nkinoko34077/demo",
+            "author_association": "NONE",
+        }
+        collision = {**canonical, "number": 8, "node_id": "BOT-COLLISION"}
+
+        self.assertTrue(
+            project_sync.is_trusted_sync_issue(
+                canonical,
+                control_trust_service=FakeControlTrust(),
+            )
+        )
+        self.assertFalse(
+            project_sync.is_trusted_sync_issue(
+                collision,
+                control_trust_service=FakeControlTrust(),
+            )
+        )
+        self.assertEqual(calls, ["kinoko34077/demo", "kinoko34077/demo"])
+
+    def test_untrusted_non_control_never_uses_derived_control_trust(self):
+        class MustNotRun:
+            def get_repository_control(self, repository):
+                raise AssertionError("non-Control bot Issue must not use derived Control trust")
+
+        issue = {
+            "number": 8,
+            "title": "[WORK ORDER] spoof",
+            "state": "open",
+            "author_association": "NONE",
+        }
+        self.assertFalse(
+            project_sync.is_trusted_sync_issue(
+                issue,
+                control_trust_service=MustNotRun(),
+            )
+        )
+
+    def test_direct_trusted_non_control_preserves_existing_author_boundary(self):
+        class MustNotRun:
+            def get_repository_control(self, repository):
+                raise AssertionError("direct trusted non-Control must not use Control verifier")
+
+        issue = {
+            "number": 9,
+            "title": "[WORK ORDER] accepted",
+            "state": "open",
+            "author_association": "OWNER",
+        }
+        self.assertTrue(
+            project_sync.is_trusted_sync_issue(
+                issue,
+                control_trust_service=MustNotRun(),
+            )
+        )
+
+    def test_full_selection_can_include_derived_control_without_allowing_bot_work_order(self):
+        class FakeControlTrust:
+            def get_repository_control(self, repository):
+                return {"repository": repository, "issue_number": 7}
+
+        issues = [
+            {
+                "number": 7,
+                "node_id": "BOT-CONTROL",
+                "title": "[REPO] demo",
+                "state": "open",
+                "body": "## Repository\n\nkinoko34077/demo",
+                "author_association": "NONE",
+            },
+            {
+                "number": 8,
+                "node_id": "BOT-WO",
+                "title": "[WORK ORDER] spoof",
+                "state": "open",
+                "body": "",
+                "author_association": "NONE",
+            },
+        ]
+        selected = project_sync.select_canonical_issues(
+            issues,
+            {},
+            control_trust_service=FakeControlTrust(),
+        )
+        self.assertEqual([issue["number"] for issue in selected], [7])
+
+    def test_targeted_and_post_write_reads_accept_only_shared_canonical_control(self):
+        canonical = {
+            "number": 7,
+            "node_id": "BOT-CONTROL",
+            "title": "[REPO] demo",
+            "state": "open",
+            "body": "## Repository\n\nkinoko34077/demo",
+            "author_association": "NONE",
+        }
+
+        class FakeREST:
+            def get_issue(self, number):
+                return dict(canonical)
+
+        class FakeControlTrust:
+            def get_repository_control(self, repository):
+                return {"repository": repository, "issue_number": 7}
+
+        rest = FakeREST()
+        service = FakeControlTrust()
+        self.assertEqual(
+            project_sync.select_target_issue(
+                rest,
+                7,
+                control_trust_service=service,
+            )[0]["number"],
+            7,
+        )
+        self.assertEqual(
+            project_sync.reread_event_issue(
+                rest,
+                canonical,
+                control_trust_service=service,
+            )["number"],
+            7,
+        )
+
     def test_event_sync_ignores_untrusted_issue_without_project_access(self):
         class NoAccess:
             def __getattr__(self, name):
