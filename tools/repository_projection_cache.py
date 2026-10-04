@@ -340,6 +340,15 @@ def _coverage_from_live(
     return coverage, counts
 
 
+def _source_identity_material(live_projection: dict[str, Any]) -> dict[str, Any]:
+    value = copy.deepcopy(live_projection)
+    # Observation time/freshness describe when/how the same source snapshot was
+    # seen. They belong to cache generation/freshness, not source identity.
+    value.pop("observed_at", None)
+    value.pop("source_freshness", None)
+    return value
+
+
 def _generation_material(payload: dict[str, Any]) -> dict[str, Any]:
     value = copy.deepcopy(payload)
     value.pop("generation_id", None)
@@ -387,7 +396,7 @@ def build_cached_projection(
     coverage, counts = _coverage_from_live(live)
     trust = _validate_control_trust(control_trust)
 
-    source_digest = _canonical_digest(live)
+    source_digest = _canonical_digest(_source_identity_material(live))
     payload: dict[str, Any] = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "repository": repository,
