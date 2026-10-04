@@ -272,3 +272,72 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
         "source_status": plan.source_status,
         "coverage_status": plan.coverage_status,
     }
+
+def run_fleet(
+    service: Any,
+    writer: Any,
+    *,
+    generated_at: str,
+    apply: bool,
+) -> dict[str, Any]:
+    """Generate Repository Projection caches serially for managed repositories.
+
+    One repository failure is isolated to that repository. Failed preparation or
+    write never falls through to a cache mutation for that repository.
+    """
+    try:
+        repositories = list(service.list_managed_repositories())
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            f"failed to list managed repositories: {exc}"
+        ) from exc
+
+    results: list[dict[str, Any]] = []
+    success_count = 0
+    failure_count = 0
+
+    for repository in repositories:
+        try:
+            control = service.get_repository_control(repository)
+            control_number = _require_control_issue_number(
+                control.get("issue_number")
+            )
+            plan = prepare_target(
+                service,
+                repository,
+                control_number,
+                generated_at=generated_at,
+            )
+            if apply:
+                item = apply_plan(writer, plan)
+            else:
+                item = {
+                    "status": "PREVIEW",
+                    "repository": plan.repository,
+                    "control_issue_number": plan.control_issue_number,
+                    "generation_id": plan.generation_id,
+                    "source_status": plan.source_status,
+                    "coverage_status": plan.coverage_status,
+                    "changed": plan.changed,
+                    "expected_body_sha256": plan.expected_body_sha256,
+                }
+            results.append(item)
+            success_count += 1
+        except Exception as exc:
+            results.append(
+                {
+                    "status": "FAILED",
+                    "repository": str(repository),
+                    "error": str(exc),
+                }
+            )
+            failure_count += 1
+
+    return {
+        "mode": "FLEET",
+        "repository_count": len(repositories),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "results": results,
+    }
+
