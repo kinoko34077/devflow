@@ -172,6 +172,7 @@ class RepositoryIssueMetadataContractTests(unittest.TestCase):
             ("updated_at", '"2026-10-04T00:00:00Z"'),
             ("author", '"kinoko34077"'),
             ("assignee", '"kinoko34077"'),
+            ("author_association", '"OWNER"'),
         ):
             with self.subTest(key=key):
                 payload = VALID_TASK.replace(
@@ -209,6 +210,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                         "body": "",
                         "created_at": "2026-10-04T00:00:00Z",
                         "updated_at": "2026-10-04T01:00:00Z",
+                        "author_association": "OWNER",
                     }
                 )
                 self.assertEqual(record.source_kind, "LEGACY_HINT")
@@ -247,6 +249,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "body": f"{BEGIN}\n{{not json}}\n{END}",
                 "created_at": "2026-10-04T00:00:00Z",
                 "updated_at": "2026-10-04T01:00:00Z",
+                "author_association": "OWNER",
             }
         )
         self.assertEqual(record.source_kind, "INVALID_METADATA")
@@ -269,6 +272,59 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
         self.assertEqual(record.type, "BUG")
         self.assertTrue(record.is_task)
 
+    def test_only_trusted_author_associations_can_supply_machine_metadata(self):
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            with self.subTest(association=association):
+                record = repository_projection.classify_issue(
+                    {
+                        "number": 12,
+                        "title": "[BUG] trusted metadata",
+                        "state": "open",
+                        "body": block(VALID_TASK),
+                        "created_at": "2026-10-04T00:00:00Z",
+                        "updated_at": "2026-10-04T01:00:00Z",
+                        "author_association": association,
+                    }
+                )
+                self.assertEqual(record.source_kind, "MACHINE")
+                self.assertTrue(record.is_task)
+
+    def test_untrusted_or_missing_author_association_never_becomes_task(self):
+        for association in ("NONE", "CONTRIBUTOR", None):
+            with self.subTest(association=association):
+                issue = {
+                    "number": 13,
+                    "title": "[BUG] untrusted metadata",
+                    "state": "open",
+                    "body": block(VALID_TASK),
+                    "created_at": "2026-10-04T00:00:00Z",
+                    "updated_at": "2026-10-04T01:00:00Z",
+                }
+                if association is not None:
+                    issue["author_association"] = association
+                record = repository_projection.classify_issue(issue)
+                self.assertEqual(record.source_kind, "UNTRUSTED_METADATA")
+                self.assertFalse(record.is_task)
+                self.assertIsNone(record.type)
+                self.assertEqual(record.attention_disposition, "NEEDS_EVIDENCE")
+                self.assertIn("untrusted", record.metadata_error)
+
+    def test_untrusted_explicit_metadata_never_falls_back_to_legacy_hint(self):
+        record = repository_projection.classify_issue(
+            {
+                "number": 14,
+                "title": "[BUG] outsider supplied marker",
+                "state": "open",
+                "body": block(VALID_TASK),
+                "created_at": "2026-10-04T00:00:00Z",
+                "updated_at": "2026-10-04T01:00:00Z",
+                "author_association": "NONE",
+            }
+        )
+        self.assertEqual(record.source_kind, "UNTRUSTED_METADATA")
+        self.assertIsNone(record.type)
+        self.assertFalse(record.is_task)
+
     def test_github_native_identity_and_times_come_from_issue_object(self):
         record = repository_projection.classify_issue(
             {
@@ -279,6 +335,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "created_at": "2026-10-04T02:00:00Z",
                 "updated_at": "2026-10-04T03:00:00Z",
                 "html_url": "https://github.com/o/r/issues/11",
+                "author_association": "OWNER",
             }
         )
         self.assertEqual(record.number, 11)
@@ -300,6 +357,7 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
         created_at="2026-10-04T00:00:00Z",
         updated_at="2026-10-04T00:00:00Z",
         state="open",
+        author_association="OWNER",
     ):
         return {
             "number": number,
@@ -309,6 +367,7 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
             "created_at": created_at,
             "updated_at": updated_at,
             "html_url": f"https://github.com/o/r/issues/{number}",
+            "author_association": author_association,
         }
 
     def _machine(self, **replacements):
@@ -406,6 +465,20 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
         self.assertEqual(projection.legacy_hint_count, 1)
         self.assertEqual(projection.unclassified_count, 1)
         self.assertEqual(projection.invalid_metadata_count, 1)
+
+    def test_projection_counts_untrusted_metadata_without_task_authority(self):
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            [
+                self._issue(26, body=block(VALID_TASK), author_association="NONE"),
+                self._issue(27, body=block(VALID_TASK), author_association="OWNER"),
+            ],
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(projection.open_issue_count, 2)
+        self.assertEqual(projection.machine_task_count, 1)
+        self.assertEqual(projection.untrusted_metadata_count, 1)
+        self.assertEqual([item.number for item in projection.task_records], [27])
 
     def test_projection_source_failure_is_explicit_and_not_fresh(self):
         projection = repository_projection.build_repository_projection(
