@@ -159,8 +159,11 @@ jobs:
               "unclassified_count",
               "invalid_metadata_count",
               "legacy_or_unclassified_rate",
+              "machine_metadata_coverage_rate",
               "repositories_with_machine_tasks",
-              "repositories_with_control_active_work",
+              "repositories_with_open_issues_without_machine_tasks",
+              "operator_decision_ambiguous_repository_count",
+              "repositories_with_control_active_work_text",
           ):
               print(f"- {key}: {report.get(key)}")
           PY
