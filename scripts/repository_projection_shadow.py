@@ -82,8 +82,12 @@ def build_shadow_report(
                 "control_active_work_excerpt": _compact_text(
                     control.get("active_work")
                 ),
-                "control_active_work_present": bool(
+                "control_active_work_text_present": bool(
                     str(control.get("active_work") or "").strip()
+                ),
+                "machine_metadata_coverage_complete": (
+                    int(item.get("open_issue_count", 0))
+                    == _machine_record_count(item)
                 ),
             }
         )
@@ -115,11 +119,26 @@ def build_shadow_report(
         "legacy_or_unclassified_rate": (
             non_machine / open_issue_count if open_issue_count else 0.0
         ),
+        "machine_metadata_coverage_rate": (
+            machine_record_count / open_issue_count if open_issue_count else 1.0
+        ),
         "repositories_with_machine_tasks": sum(
             1 for item in rows if int(item["machine_task_count"]) > 0
         ),
-        "repositories_with_control_active_work": sum(
-            1 for item in rows if item["control_active_work_present"]
+        "repositories_with_open_issues_without_machine_tasks": sum(
+            1
+            for item in rows
+            if int(item["open_issue_count"]) > 0
+            and int(item["machine_task_count"]) == 0
+        ),
+        "operator_decision_ambiguous_repository_count": sum(
+            1
+            for item in rows
+            if int(item["open_issue_count"]) > 0
+            and not bool(item["machine_metadata_coverage_complete"])
+        ),
+        "repositories_with_control_active_work_text": sum(
+            1 for item in rows if item["control_active_work_text_present"]
         ),
         "repositories": rows,
     }
