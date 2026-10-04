@@ -19,7 +19,7 @@ try:
         parse_provenance_document,
         parse_request_body,
     )
-    from . import repository_projection, workflow_contract
+    from . import github_issue_trust, repository_projection, workflow_contract
 except ImportError:  # direct script execution
     from repository_bootstrap import (
         BootstrapError,
@@ -28,6 +28,7 @@ except ImportError:  # direct script execution
         parse_provenance_document,
         parse_request_body,
     )
+    import github_issue_trust
     import repository_projection
     import workflow_contract
 
@@ -365,17 +366,12 @@ def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue
             raise _identity_mismatch(requested, f"repository object {sorted(repository_values)!r}")
 
 
-TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+TRUSTED_AUTHOR_ASSOCIATIONS = github_issue_trust.TRUSTED_AUTHOR_ASSOCIATIONS
 
 
 def is_trusted_control_author(issue: dict[str, Any]) -> bool:
-    """Only repository owners/members/collaborators may author canonical control Issues.
-
-    devflow is public, so anyone can open an issue with a canonical-looking title.
-    Missing association data is treated as untrusted (fail closed).
-    """
-    association = str(issue.get("author_association") or "").strip().upper()
-    return association in TRUSTED_AUTHOR_ASSOCIATIONS
+    """Only directly trusted authors may author canonical Control Issues."""
+    return github_issue_trust.is_trusted_issue_author(issue)
 
 
 def _parse_request_reference(value: Any) -> tuple[str, int] | None:
@@ -646,6 +642,7 @@ class DevflowService:
             "legacy_hint_count": projection.legacy_hint_count,
             "unclassified_count": projection.unclassified_count,
             "invalid_metadata_count": projection.invalid_metadata_count,
+            "untrusted_metadata_count": projection.untrusted_metadata_count,
             "machine_type_counts": dict(projection.machine_type_counts),
             "legacy_hint_type_counts": dict(projection.legacy_hint_type_counts),
             "task_records": [
@@ -756,6 +753,10 @@ class DevflowService:
             ),
             "invalid_metadata_count": sum(
                 projection.invalid_metadata_count
+                for projection in projections
+            ),
+            "untrusted_metadata_count": sum(
+                projection.untrusted_metadata_count
                 for projection in projections
             ),
             "repositories": compact,
