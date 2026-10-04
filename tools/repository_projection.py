@@ -4,7 +4,13 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from tools import development_reconciler, github_issue_trust, marker_json, workflow_contract
+try:
+    from . import development_reconciler, github_issue_trust, marker_json, workflow_contract
+except ImportError:  # direct script / top-level fallback
+    import development_reconciler
+    import github_issue_trust
+    import marker_json
+    import workflow_contract
 
 
 ISSUE_METADATA_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V1_BEGIN -->"
