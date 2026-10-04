@@ -103,5 +103,181 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
         self.assertTrue(result["actionable"])
 
 
+class RepositoryProjectionModelTests(unittest.TestCase):
+    def _task_body(
+        self,
+        *,
+        work_status="READY_FOR_IMPLEMENTATION",
+        scope_ready=True,
+        requires_user_confirmation=False,
+        external_wait=False,
+        issue_type="BUG",
+        blocked_by=None,
+    ):
+        payload = {
+            "schema_version": 1,
+            "record_role": "TASK",
+            "type": issue_type,
+            "work_status": work_status,
+            "scope_ready": scope_ready,
+            "requires_user_confirmation": requires_user_confirmation,
+            "external_wait": external_wait,
+            "blocked_by": blocked_by or [],
+        }
+        import json
+
+        return metadata_block(json.dumps(payload, separators=(",", ":")))
+
+    def test_projection_separates_newest_from_recent_activity(self):
+        issues = [
+            {
+                "number": 1,
+                "title": "Older but recently edited",
+                "state": "open",
+                "body": self._task_body(),
+                "created_at": "2026-10-01T00:00:00Z",
+                "updated_at": "2026-10-04T03:00:00Z",
+                "html_url": "https://github.com/kinoko34077/example/issues/1",
+            },
+            {
+                "number": 2,
+                "title": "Newest created",
+                "state": "open",
+                "body": "[SPEC] legacy reference",
+                "created_at": "2026-10-03T00:00:00Z",
+                "updated_at": "2026-10-03T01:00:00Z",
+                "html_url": "https://github.com/kinoko34077/example/issues/2",
+            },
+        ]
+        result = rp.build_repository_projection(
+            "kinoko34077/example",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(result["newest_open_issue_ref"], "kinoko34077/example#2")
+        self.assertEqual(result["most_recently_active_issue_ref"], "kinoko34077/example#1")
+
+    def test_projection_counts_machine_legacy_and_invalid_separately(self):
+        issues = [
+            {
+                "number": 1,
+                "title": "Machine task",
+                "state": "open",
+                "body": self._task_body(issue_type="BUG"),
+            },
+            {
+                "number": 2,
+                "title": "[WORK ORDER] legacy",
+                "state": "open",
+                "body": "legacy",
+            },
+            {
+                "number": 3,
+                "title": "Unknown legacy",
+                "state": "open",
+                "body": "legacy",
+            },
+            {
+                "number": 4,
+                "title": "Broken machine",
+                "state": "open",
+                "body": metadata_block("{not-json}"),
+            },
+        ]
+        result = rp.build_repository_projection(
+            "kinoko34077/example",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(result["counts"]["open_issues"], 4)
+        self.assertEqual(result["counts"]["machine_tasks"], 1)
+        self.assertEqual(result["counts"]["legacy_or_unclassified"], 2)
+        self.assertEqual(result["counts"]["invalid_machine"], 1)
+        self.assertEqual(result["counts"]["by_type"], {"BUG": 1})
+
+    def test_projection_keeps_actionable_blocked_waiting_and_human_axes_separate(self):
+        issues = [
+            {
+                "number": 1,
+                "title": "ready",
+                "state": "open",
+                "body": self._task_body(),
+            },
+            {
+                "number": 2,
+                "title": "blocked",
+                "state": "open",
+                "body": self._task_body(
+                    work_status="BLOCKED",
+                    blocked_by=["kinoko34077/example#99"],
+                ),
+            },
+            {
+                "number": 3,
+                "title": "external",
+                "state": "open",
+                "body": self._task_body(
+                    work_status="BLOCKED",
+                    external_wait=True,
+                ),
+            },
+            {
+                "number": 4,
+                "title": "human",
+                "state": "open",
+                "body": self._task_body(
+                    requires_user_confirmation=True,
+                ),
+            },
+        ]
+        result = rp.build_repository_projection(
+            "kinoko34077/example",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(result["actionable_refs"], ["kinoko34077/example#1"])
+        self.assertEqual(result["blocked_refs"], [
+            "kinoko34077/example#2",
+            "kinoko34077/example#3",
+        ])
+        self.assertEqual(result["waiting_refs"], ["kinoko34077/example#3"])
+        self.assertEqual(result["needs_human_refs"], ["kinoko34077/example#4"])
+
+    def test_source_failure_projection_is_safe_and_explicit(self):
+        result = rp.build_repository_projection(
+            "kinoko34077/example",
+            [],
+            observed_at="2026-10-04T04:00:00Z",
+            source_status="ERROR",
+            source_error="GitHub unavailable",
+        )
+        self.assertEqual(result["source_status"], "ERROR")
+        self.assertEqual(result["source_error"], "GitHub unavailable")
+        self.assertEqual(result["issues"], [])
+        self.assertEqual(result["actionable_refs"], [])
+        self.assertEqual(result["counts"]["open_issues"], 0)
+
+    def test_invalid_machine_metadata_never_becomes_actionable(self):
+        issues = [
+            {
+                "number": 7,
+                "title": "[WORK ORDER] broken machine block",
+                "state": "open",
+                "body": metadata_block("{not-json}"),
+            },
+        ]
+        result = rp.build_repository_projection(
+            "kinoko34077/example",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(result["actionable_refs"], [])
+        self.assertEqual(result["counts"]["invalid_machine"], 1)
+        self.assertEqual(
+            result["issues"][0]["classification_source"],
+            "INVALID_MACHINE",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
