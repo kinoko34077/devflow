@@ -483,11 +483,13 @@ class MaintenanceSupplyProjectionTests(unittest.TestCase):
         self.assertIn("- publish", workflow)
         self.assertIn("  publish:", workflow)
         self.assertIn("inputs.mode == 'publish'", workflow)
-        publish_job = workflow.split("  publish:", 1)[1]
+        publish_job = workflow.split("\n  publish:\n", 1)[1].split(
+            "\n  projection-cache:\n", 1
+        )[0]
         self.assertIn("issues: read", publish_job)
         self.assertNotIn("issues: write", publish_job)
-        audit_job = workflow.split("  audit:", 1)[1].split(
-            "  publish:", 1
+        audit_job = workflow.split("\n  audit:\n", 1)[1].split(
+            "\n  projection-shadow:\n", 1
         )[0]
         self.assertNotIn("issues: write", audit_job)
         self.assertNotIn("publish-supply", audit_job)
