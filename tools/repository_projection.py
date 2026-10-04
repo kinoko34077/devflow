@@ -310,3 +310,137 @@ def classify_issue(issue: dict[str, Any]) -> IssueRecord:
         work_status=None,
         metadata=None,
     )
+
+
+
+@dataclass(frozen=True)
+class RepositoryProjection:
+    repository: str
+    observed_at: str
+    source_status: str
+    source_freshness: str
+    source_error: str | None
+    open_issue_count: int
+    machine_task_count: int
+    legacy_hint_count: int
+    unclassified_count: int
+    invalid_metadata_count: int
+    machine_type_counts: dict[str, int]
+    legacy_hint_type_counts: dict[str, int]
+    task_records: tuple[IssueRecord, ...]
+    ready_tasks: tuple[IssueRecord, ...]
+    implementing_tasks: tuple[IssueRecord, ...]
+    newest_open_issue: IssueRecord | None
+    recently_active_issue: IssueRecord | None
+    records: tuple[IssueRecord, ...]
+
+
+def _count_types(records: list[IssueRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.type is None:
+            continue
+        counts[record.type] = counts.get(record.type, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _latest_record(
+    records: list[IssueRecord],
+    field: str,
+) -> IssueRecord | None:
+    if not records:
+        return None
+    return max(
+        records,
+        key=lambda item: (getattr(item, field), item.number),
+    )
+
+
+def build_repository_projection(
+    repository: str,
+    issues: list[dict[str, Any]],
+    *,
+    observed_at: str,
+    source_status: str = "AVAILABLE",
+    source_error: str | None = None,
+) -> RepositoryProjection:
+    if not isinstance(repository, str) or "/" not in repository or not repository.strip():
+        raise ProjectionContractError("repository must be owner/repository")
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        raise ProjectionContractError("observed_at must be a non-empty string")
+    if source_status not in {"AVAILABLE", "UNAVAILABLE"}:
+        raise ProjectionContractError(f"invalid source_status: {source_status!r}")
+    if source_error is not None and (
+        not isinstance(source_error, str) or not source_error.strip()
+    ):
+        raise ProjectionContractError("source_error must be a non-empty string or null")
+
+    freshness = "CURRENT" if source_status == "AVAILABLE" else "UNKNOWN"
+    if source_status == "UNAVAILABLE":
+        return RepositoryProjection(
+            repository=repository.strip(),
+            observed_at=observed_at.strip(),
+            source_status=source_status,
+            source_freshness=freshness,
+            source_error=source_error,
+            open_issue_count=0,
+            machine_task_count=0,
+            legacy_hint_count=0,
+            unclassified_count=0,
+            invalid_metadata_count=0,
+            machine_type_counts={},
+            legacy_hint_type_counts={},
+            task_records=(),
+            ready_tasks=(),
+            implementing_tasks=(),
+            newest_open_issue=None,
+            recently_active_issue=None,
+            records=(),
+        )
+
+    records = [classify_issue(issue) for issue in issues]
+    open_records = [record for record in records if record.state == "open"]
+    open_records.sort(key=lambda item: item.number)
+
+    machine_records = [
+        record for record in open_records if record.source_kind == "MACHINE"
+    ]
+    task_records = [
+        record for record in machine_records if record.is_task
+    ]
+    legacy_records = [
+        record for record in open_records if record.source_kind == "LEGACY_HINT"
+    ]
+
+    return RepositoryProjection(
+        repository=repository.strip(),
+        observed_at=observed_at.strip(),
+        source_status=source_status,
+        source_freshness=freshness,
+        source_error=source_error,
+        open_issue_count=len(open_records),
+        machine_task_count=len(task_records),
+        legacy_hint_count=len(legacy_records),
+        unclassified_count=sum(
+            1 for record in open_records if record.source_kind == "UNCLASSIFIED"
+        ),
+        invalid_metadata_count=sum(
+            1 for record in open_records if record.source_kind == "INVALID_METADATA"
+        ),
+        machine_type_counts=_count_types(machine_records),
+        legacy_hint_type_counts=_count_types(legacy_records),
+        task_records=tuple(task_records),
+        ready_tasks=tuple(
+            record
+            for record in task_records
+            if record.work_status == "READY_FOR_IMPLEMENTATION"
+        ),
+        implementing_tasks=tuple(
+            record
+            for record in task_records
+            if record.work_status == "IMPLEMENTING"
+        ),
+        newest_open_issue=_latest_record(open_records, "created_at"),
+        recently_active_issue=_latest_record(open_records, "updated_at"),
+        records=tuple(open_records),
+    )
