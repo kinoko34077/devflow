@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import re
@@ -15,6 +15,7 @@ CACHE_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->"
 CACHE_MARKER_END = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
 CACHE_SCHEMA_VERSION = "repository-projection-cache.v1"
 CONTROL_TRUST_SOURCE = "DEVFLOW_SHARED_CONTROL_VERIFIER"
+CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_TASK_SUMMARIES = 20
 
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -24,6 +25,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "schema_version",
         "repository",
         "generated_at",
+        "valid_until",
         "generation_id",
         "source",
         "coverage",
@@ -128,6 +130,15 @@ def _require_timestamp(value: object, field: str) -> str:
             f"{field} must include an RFC-3339 timezone offset"
         )
     return text
+
+
+def _timestamp_value(value: object, field: str) -> datetime:
+    text = _require_timestamp(value, field)
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
 
 
 def _require_nonnegative_int(value: object, field: str) -> int:
@@ -393,6 +404,15 @@ def build_cached_projection(
         "live_projection.observed_at",
     )
     generated_at = _require_timestamp(generated_at, "generated_at")
+    generated_dt = _timestamp_value(generated_at, "generated_at")
+    observed_dt = _timestamp_value(observed_at, "live_projection.observed_at")
+    if generated_dt < observed_dt:
+        raise RepositoryProjectionCacheError(
+            "generated_at must not precede source observed_at"
+        )
+    valid_until = _format_timestamp(
+        generated_dt + timedelta(seconds=CACHE_VALIDITY_SECONDS)
+    )
     coverage, counts = _coverage_from_live(live)
     trust = _validate_control_trust(control_trust)
 
@@ -401,6 +421,7 @@ def build_cached_projection(
         "schema_version": CACHE_SCHEMA_VERSION,
         "repository": repository,
         "generated_at": generated_at,
+        "valid_until": valid_until,
         "generation_id": "",
         "source": {
             "status": source_status,
@@ -464,7 +485,12 @@ def _validate_cached_payload(
         raise RepositoryProjectionCacheError(
             "repository identity mismatch"
         )
-    _require_timestamp(payload.get("generated_at"), "generated_at")
+    generated_dt = _timestamp_value(payload.get("generated_at"), "generated_at")
+    valid_until_dt = _timestamp_value(payload.get("valid_until"), "valid_until")
+    if valid_until_dt - generated_dt != timedelta(seconds=CACHE_VALIDITY_SECONDS):
+        raise RepositoryProjectionCacheError(
+            "valid_until must equal generated_at plus the canonical cache validity window"
+        )
     generation_id = _require_sha256(
         payload.get("generation_id"),
         "generation_id",
@@ -563,6 +589,40 @@ def _validate_cached_payload(
             "generation_id does not match cached projection payload"
         )
     return payload
+
+
+def effective_cache_freshness(
+    payload: dict[str, Any],
+    *,
+    now: str,
+) -> str:
+    value = _validate_cached_payload(
+        copy.deepcopy(payload),
+        _require_repository(payload.get("repository")),
+    )
+    source = value["source"]
+    trust = value["control_trust"]
+    if source["status"] != "AVAILABLE":
+        return "UNAVAILABLE"
+    if source["freshness"] == "STALE":
+        return "STALE"
+    if source["freshness"] != "CURRENT":
+        return "UNKNOWN"
+    if trust["status"] != "VERIFIED":
+        return "UNTRUSTED"
+    if trust["freshness"] == "STALE":
+        return "STALE"
+    if trust["freshness"] != "CURRENT":
+        return "UNKNOWN"
+
+    now_dt = _timestamp_value(now, "now")
+    generated_dt = _timestamp_value(value["generated_at"], "generated_at")
+    valid_until_dt = _timestamp_value(value["valid_until"], "valid_until")
+    if now_dt < generated_dt:
+        return "UNKNOWN"
+    if now_dt > valid_until_dt:
+        return "STALE"
+    return "CURRENT"
 
 
 def render_cached_projection(payload: dict[str, Any]) -> str:
