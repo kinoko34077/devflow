@@ -9,6 +9,13 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+try:
+    from . import workflow_contract
+except ImportError:  # direct module execution
+    import workflow_contract
+
+WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
+
 
 SCHEMA_VERSION = "repository-bootstrap.v1"
 PROVENANCE_SCHEMA = "repository-bootstrap-provenance.v1"
@@ -18,28 +25,13 @@ CONTROL_PROVENANCE_SCHEMA = "repository-bootstrap-control.v1"
 CONTROL_START_MARKER = "<!-- repository-bootstrap-control:v1:start -->"
 CONTROL_END_MARKER = "<!-- repository-bootstrap-control:v1:end -->"
 ALLOWED_OWNER = "kinoko34077"
-EXCLUDED_REPOSITORIES = frozenset({"pc-files", "pc-files2"})
+EXCLUDED_REPOSITORIES = WORKFLOW_CONTRACT.excluded_repositories
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 VISIBILITIES = frozenset({"private", "public"})
-PRIORITIES = frozenset({"P0", "P1", "P2", "P3"})
-RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
-WORK_STATES = frozenset(
-    {
-        "NEEDS_AUDIT",
-        "AUDITED",
-        "WORK_ORDER_READY",
-        "READY_FOR_IMPLEMENTATION",
-        "IMPLEMENTING",
-        "AWAITING_REVIEW",
-        "BLOCKED",
-        "NEEDS_REAUDIT",
-        "PARKED",
-        "DONE",
-    }
-)
-REPOSITORY_STATES = frozenset(
-    {"ACTIVE", "PARKED", "MAINTENANCE", "DEPRECATED", "CANCELLED"}
-)
+PRIORITIES = WORKFLOW_CONTRACT.priorities
+RISKS = WORKFLOW_CONTRACT.risks
+WORK_STATES = WORKFLOW_CONTRACT.work_states
+REPOSITORY_STATES = WORKFLOW_CONTRACT.repository_states
 TEMPLATES = frozenset({"minimal"})
 REPOSITORY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
