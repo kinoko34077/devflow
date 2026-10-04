@@ -1,6 +1,7 @@
 import base64
 import json
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 
 from tools import devflow_mcp_core, repository_projection
@@ -339,6 +340,17 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(result["repositories"][0]["source_status"], "AVAILABLE")
         self.assertEqual(result["repositories"][1]["source_status"], "UNAVAILABLE")
         self.assertNotIn("records", result["repositories"][0])
+
+
+class RepositoryProjectionMCPEntrypointTests(unittest.TestCase):
+    def test_server_exposes_read_only_projection_tools(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "tools" / "devflow_mcp.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("def get_repository_projection(repository: str)", source)
+        self.assertIn("def get_portfolio_projection()", source)
+        self.assertNotIn("def update_repository_projection(", source)
+        self.assertNotIn("def write_repository_projection(", source)
 
 
 class BootstrapDerivedControlTrustTests(unittest.TestCase):
