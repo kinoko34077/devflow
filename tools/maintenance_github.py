@@ -10,9 +10,12 @@ import urllib.request
 from typing import Any, Callable
 
 try:
-    from tools import devflow_mcp_core
+    from tools import devflow_mcp_core, workflow_contract
 except ImportError:  # direct module execution
     import devflow_mcp_core
+    import workflow_contract
+
+WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
 
 API_BASE = "https://api.github.com"
@@ -623,6 +626,15 @@ def collect_repository(
 
     body = str(control.get("body") or "")
     sections = _sections(body)
+    try:
+        WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
+    except workflow_contract.WorkflowContractError as exc:
+        return _unavailable(
+            repository,
+            observed_at,
+            control_ref,
+            str(exc),
+        )
     managed = _scalar_section(sections, "Repository")
     trusted = _control_is_trusted(
         transport,
