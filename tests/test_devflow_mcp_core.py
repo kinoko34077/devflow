@@ -210,7 +210,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             ),
         }
 
-    def _task_issue(self, number, *, title="[BUG] task"):
+    def _task_issue(self, number, *, title="[BUG] task", author_association="OWNER"):
         payload = """{
   "schema_version": 1,
   "record_role": "TASK",
@@ -233,6 +233,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "created_at": "2026-10-04T01:00:00Z",
             "updated_at": "2026-10-04T02:00:00Z",
             "html_url": f"https://github.com/kinoko34077/demo/issues/{number}",
+            "author_association": author_association,
         }
 
     def test_repository_projection_reads_managed_repository_directly(self):
@@ -279,6 +280,31 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "No open Repository Control",
         ):
             service.get_repository_projection("unmanaged")
+
+    def test_repository_projection_rejects_untrusted_metadata_as_task_authority(self):
+        control = self._control("demo", 70)
+        untrusted = self._task_issue(1, author_association="NONE")
+        reader = FakeReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                "kinoko34077/demo": [untrusted],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+
+        result = service.get_repository_projection("demo")
+
+        self.assertEqual(result["machine_task_count"], 0)
+        self.assertEqual(result["untrusted_metadata_count"], 1)
+        self.assertEqual(result["records"][0]["source_kind"], "UNTRUSTED_METADATA")
+        self.assertEqual(
+            result["records"][0]["attention_disposition"],
+            "NEEDS_EVIDENCE",
+        )
 
     def test_repository_projection_source_failure_is_explicit_not_empty_success(self):
         control = self._control("demo", 70)
