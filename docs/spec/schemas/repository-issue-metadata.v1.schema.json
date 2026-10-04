@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/repository-issue-metadata.v1.schema.json",
+  "title": "Devflow repository Issue metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_role"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_role": {
+      "enum": [
+        "TASK",
+        "TRACKER",
+        "REFERENCE",
+        "SYSTEM"
+      ]
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Canonical values are owned by .devflow/WORKFLOW.yaml and validated at runtime."
+    },
+    "work_status": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Canonical values are owned by .devflow/WORKFLOW.yaml and validated at runtime."
+    },
+    "scope_ready": {
+      "type": "boolean"
+    },
+    "requires_user_confirmation": {
+      "type": "boolean"
+    },
+    "external_wait": {
+      "type": "boolean"
+    },
+    "priority": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Canonical values are owned by .devflow/WORKFLOW.yaml and validated at runtime."
+    },
+    "risk": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Canonical values are owned by .devflow/WORKFLOW.yaml and validated at runtime."
+    },
+    "blocked_by": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "work_order_ref": {
+      "anyOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "implementation_ref": {
+      "anyOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "next_action_tag": {
+      "anyOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "record_role": {"const": "TASK"}
+        },
+        "required": ["record_role"]
+      },
+      "then": {
+        "required": [
+          "type",
+          "work_status",
+          "scope_ready",
+          "requires_user_confirmation",
+          "external_wait"
+        ]
+      }
+    }
+  ]
+}
