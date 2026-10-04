@@ -30,7 +30,11 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
 
     def test_schedule_can_enter_only_read_only_audit_job(self):
         self.assertIn(
-            "if: ${{ github.event_name == 'schedule' || inputs.mode == 'audit' }}",
+            "github.event.schedule == '30 13 * * *'",
+            self.audit,
+        )
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'audit'",
             self.audit,
         )
         self.assertIn(
