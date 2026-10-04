@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from tools import development_reconciler, marker_json, workflow_contract
+from tools import development_reconciler, github_issue_trust, marker_json, workflow_contract
 
 
 ISSUE_METADATA_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V1_BEGIN -->"
@@ -265,8 +265,30 @@ def classify_issue(issue: dict[str, Any]) -> IssueRecord:
         raise ProjectionContractError("Issue html_url must be a non-empty string or null")
     html_url = html_url_value.strip() if isinstance(html_url_value, str) else None
 
+    body = str(issue.get("body") or "")
+    has_metadata_marker = (
+        ISSUE_METADATA_MARKER_BEGIN in body
+        or ISSUE_METADATA_MARKER_END in body
+    )
+    if has_metadata_marker and not github_issue_trust.is_trusted_issue_author(issue):
+        return IssueRecord(
+            number=number,
+            title=title,
+            state=state,
+            created_at=created_at,
+            updated_at=updated_at,
+            html_url=html_url,
+            source_kind="UNTRUSTED_METADATA",
+            record_role=None,
+            type=None,
+            work_status=None,
+            metadata=None,
+            metadata_error="repository Issue metadata author is untrusted",
+            attention_disposition="NEEDS_EVIDENCE",
+        )
+
     try:
-        metadata = parse_issue_metadata(str(issue.get("body") or ""))
+        metadata = parse_issue_metadata(body)
     except ProjectionContractError as exc:
         return IssueRecord(
             number=number,
@@ -344,6 +366,7 @@ class RepositoryProjection:
     legacy_hint_count: int
     unclassified_count: int
     invalid_metadata_count: int
+    untrusted_metadata_count: int
     machine_type_counts: dict[str, int]
     legacy_hint_type_counts: dict[str, int]
     task_records: tuple[IssueRecord, ...]
@@ -407,6 +430,7 @@ def build_repository_projection(
             legacy_hint_count=0,
             unclassified_count=0,
             invalid_metadata_count=0,
+            untrusted_metadata_count=0,
             machine_type_counts={},
             legacy_hint_type_counts={},
             task_records=(),
@@ -445,6 +469,9 @@ def build_repository_projection(
         ),
         invalid_metadata_count=sum(
             1 for record in open_records if record.source_kind == "INVALID_METADATA"
+        ),
+        untrusted_metadata_count=sum(
+            1 for record in open_records if record.source_kind == "UNTRUSTED_METADATA"
         ),
         machine_type_counts=_count_types(machine_records),
         legacy_hint_type_counts=_count_types(legacy_records),
