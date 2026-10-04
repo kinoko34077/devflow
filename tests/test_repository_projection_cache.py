@@ -15,7 +15,27 @@ def live_projection(
     source_status="AVAILABLE",
     source_freshness="CURRENT",
     machine_task_count=0,
+    coverage_complete=False,
 ):
+    records = []
+    if source_status == "AVAILABLE" and coverage_complete:
+        records = [
+            {
+                "issue_number": number,
+                "title": f"record {number}",
+                "state": "open",
+                "created_at": f"2026-10-04T0{number}:00:00Z",
+                "updated_at": f"2026-10-04T0{number}:30:00Z",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE",
+                "record_role": "REFERENCE",
+                "type": "DOCS",
+                "work_status": "AUDITED",
+                "attention_disposition": None,
+                "metadata_error": None,
+            }
+            for number in (1, 2, 3)
+        ]
     return {
         "repository": REPOSITORY,
         "observed_at": OBSERVED_AT,
@@ -24,12 +44,20 @@ def live_projection(
         "source_error": None if source_status == "AVAILABLE" else "read failed",
         "open_issue_count": 3 if source_status == "AVAILABLE" else 0,
         "machine_task_count": machine_task_count,
-        "legacy_hint_count": 1 if source_status == "AVAILABLE" else 0,
-        "unclassified_count": 2 if source_status == "AVAILABLE" else 0,
+        "legacy_hint_count": (
+            0 if coverage_complete or source_status != "AVAILABLE" else 1
+        ),
+        "unclassified_count": (
+            0 if coverage_complete or source_status != "AVAILABLE" else 2
+        ),
         "invalid_metadata_count": 0,
         "untrusted_metadata_count": 0,
         "machine_type_counts": {},
-        "legacy_hint_type_counts": {"BUG": 1} if source_status == "AVAILABLE" else {},
+        "legacy_hint_type_counts": (
+            {}
+            if coverage_complete or source_status != "AVAILABLE"
+            else {"BUG": 1}
+        ),
         "task_records": [],
         "ready_tasks": [],
         "implementing_tasks": [],
@@ -61,7 +89,7 @@ def live_projection(
             "attention_disposition": None,
             "metadata_error": None,
         } if source_status == "AVAILABLE" else None,
-        "records": [],
+        "records": records,
     }
 
 
@@ -79,10 +107,9 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
     def test_build_current_incomplete_cache_keeps_zero_task_ambiguous(self):
         payload = cache.build_cached_projection(
             REPOSITORY,
-            live_projection(machine_task_count=0),
+            live_projection(machine_task_count=0, coverage_complete=False),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(),
-            machine_metadata_complete=False,
         )
 
         self.assertEqual(payload["schema_version"], cache.CACHE_SCHEMA_VERSION)
@@ -98,15 +125,17 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             payload["coverage"]["active_work_evidence"],
             "NO_MACHINE_TASK_EVIDENCE",
         )
-        self.assertFalse(payload["coverage"]["can_assert_no_active_work"])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
 
     def test_complete_coverage_can_distinguish_zero_machine_tasks(self):
         payload = cache.build_cached_projection(
             REPOSITORY,
-            live_projection(machine_task_count=0),
+            live_projection(
+                machine_task_count=0,
+                coverage_complete=True,
+            ),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(),
-            machine_metadata_complete=True,
         )
         self.assertEqual(payload["coverage"]["status"], "COMPLETE")
         self.assertFalse(payload["coverage"]["ambiguous"])
@@ -114,7 +143,7 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             payload["coverage"]["active_work_evidence"],
             "NO_MACHINE_TASKS_UNDER_COMPLETE_COVERAGE",
         )
-        self.assertTrue(payload["coverage"]["can_assert_no_active_work"])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
 
     def test_source_unavailable_is_explicit_and_cannot_assert_no_active_work(self):
         payload = cache.build_cached_projection(
@@ -125,7 +154,6 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             ),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(freshness="UNKNOWN"),
-            machine_metadata_complete=False,
         )
         self.assertEqual(payload["source"]["status"], "UNAVAILABLE")
         self.assertEqual(payload["source"]["freshness"], "UNKNOWN")
@@ -135,7 +163,7 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             payload["coverage"]["active_work_evidence"],
             "SOURCE_UNAVAILABLE",
         )
-        self.assertFalse(payload["coverage"]["can_assert_no_active_work"])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
 
     def test_stale_source_is_explicit_and_fail_closed(self):
         payload = cache.build_cached_projection(
@@ -143,12 +171,11 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             live_projection(source_freshness="STALE"),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(freshness="STALE"),
-            machine_metadata_complete=True,
         )
         self.assertEqual(payload["source"]["freshness"], "STALE")
         self.assertEqual(payload["coverage"]["status"], "STALE")
         self.assertTrue(payload["coverage"]["ambiguous"])
-        self.assertFalse(payload["coverage"]["can_assert_no_active_work"])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
         self.assertEqual(payload["control_trust"]["freshness"], "STALE")
 
     def test_control_trust_transport_is_explicit(self):
@@ -157,7 +184,6 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             live_projection(),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(),
-            machine_metadata_complete=False,
         )
         self.assertEqual(
             payload["control_trust"],
@@ -178,7 +204,6 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
             live_projection(),
             generated_at=GENERATED_AT,
             control_trust=verified_control_trust(),
-            machine_metadata_complete=False,
         )
 
     def test_round_trip_marker_cache(self):
