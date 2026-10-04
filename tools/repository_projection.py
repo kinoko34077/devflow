@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from tools import marker_json, workflow_contract
+from tools import development_reconciler, marker_json, workflow_contract
 
 
 ISSUE_METADATA_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V1_BEGIN -->"
@@ -76,6 +76,7 @@ class IssueRecord:
     work_status: str | None
     metadata: IssueMetadata | None
     metadata_error: str | None = None
+    attention_disposition: str | None = None
 
     @property
     def is_task(self) -> bool:
@@ -83,6 +84,22 @@ class IssueRecord:
 
 
 _LEADING_TAGS = re.compile(r"^((?:\[[^\]\r\n]+\])+)")
+
+
+def _issue_only_attention(metadata: IssueMetadata) -> str | None:
+    if metadata.requires_user_confirmation:
+        disposition = "NEEDS_HUMAN"
+    elif metadata.external_wait:
+        disposition = "WAIT_EXTERNAL"
+    elif not metadata.scope_ready:
+        disposition = "NEEDS_EVIDENCE"
+    else:
+        return None
+    if disposition not in development_reconciler.DISPOSITIONS:
+        raise ProjectionContractError(
+            f"unknown reconciliation disposition: {disposition}"
+        )
+    return disposition
 
 
 def _require_bool(payload: dict[str, Any], field: str) -> bool:
@@ -264,6 +281,7 @@ def classify_issue(issue: dict[str, Any]) -> IssueRecord:
             work_status=None,
             metadata=None,
             metadata_error=str(exc),
+            attention_disposition="NEEDS_EVIDENCE",
         )
 
     if metadata is not None:
@@ -279,6 +297,7 @@ def classify_issue(issue: dict[str, Any]) -> IssueRecord:
             type=metadata.type,
             work_status=metadata.work_status,
             metadata=metadata,
+            attention_disposition=_issue_only_attention(metadata),
         )
 
     legacy_type = _legacy_type_hint(title)
