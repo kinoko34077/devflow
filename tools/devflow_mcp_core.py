@@ -8,6 +8,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 try:
@@ -18,7 +19,7 @@ try:
         parse_provenance_document,
         parse_request_body,
     )
-    from . import workflow_contract
+    from . import repository_projection, workflow_contract
 except ImportError:  # direct script execution
     from repository_bootstrap import (
         BootstrapError,
@@ -27,6 +28,7 @@ except ImportError:  # direct script execution
         parse_provenance_document,
         parse_request_body,
     )
+    import repository_projection
     import workflow_contract
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
@@ -423,9 +425,18 @@ def _is_bootstrap_executor_comment(comment: Any) -> bool:
 
 
 class DevflowService:
-    def __init__(self, reader: GitHubReader | Any, *, devflow_repository: str = DEVFLOW_REPOSITORY) -> None:
+    def __init__(
+        self,
+        reader: GitHubReader | Any,
+        *,
+        devflow_repository: str = DEVFLOW_REPOSITORY,
+        observed_at_factory: Callable[[], str] | None = None,
+    ) -> None:
         self.reader = reader
         self.devflow_repository = normalize_repository(devflow_repository)
+        self._observed_at_factory = observed_at_factory or (
+            lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
         if self.devflow_repository.casefold() != DEVFLOW_REPOSITORY.casefold():
             raise DevflowMCPError(
                 f"Repository Control trust requires the canonical devflow repository {DEVFLOW_REPOSITORY!r}."
@@ -596,6 +607,158 @@ class DevflowService:
             "detailed_current_state": sections.get("Detailed Current State", ""),
             "control_notes": sections.get("Control Notes", ""),
             "sections": sections,
+        }
+
+    @staticmethod
+    def _issue_record_dict(
+        record: repository_projection.IssueRecord,
+    ) -> dict[str, Any]:
+        return {
+            "issue_number": record.number,
+            "title": record.title,
+            "state": record.state,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "url": record.html_url,
+            "source_kind": record.source_kind,
+            "record_role": record.record_role,
+            "type": record.type,
+            "work_status": record.work_status,
+            "attention_disposition": record.attention_disposition,
+            "metadata_error": record.metadata_error,
+        }
+
+    @classmethod
+    def _repository_projection_dict(
+        cls,
+        projection: repository_projection.RepositoryProjection,
+        *,
+        include_records: bool,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "repository": projection.repository,
+            "observed_at": projection.observed_at,
+            "source_status": projection.source_status,
+            "source_freshness": projection.source_freshness,
+            "source_error": projection.source_error,
+            "open_issue_count": projection.open_issue_count,
+            "machine_task_count": projection.machine_task_count,
+            "legacy_hint_count": projection.legacy_hint_count,
+            "unclassified_count": projection.unclassified_count,
+            "invalid_metadata_count": projection.invalid_metadata_count,
+            "machine_type_counts": dict(projection.machine_type_counts),
+            "legacy_hint_type_counts": dict(projection.legacy_hint_type_counts),
+            "task_records": [
+                cls._issue_record_dict(record)
+                for record in projection.task_records
+            ],
+            "ready_tasks": [
+                cls._issue_record_dict(record)
+                for record in projection.ready_tasks
+            ],
+            "implementing_tasks": [
+                cls._issue_record_dict(record)
+                for record in projection.implementing_tasks
+            ],
+            "newest_open_issue": (
+                cls._issue_record_dict(projection.newest_open_issue)
+                if projection.newest_open_issue is not None
+                else None
+            ),
+            "recently_active_issue": (
+                cls._issue_record_dict(projection.recently_active_issue)
+                if projection.recently_active_issue is not None
+                else None
+            ),
+        }
+        if include_records:
+            result["records"] = [
+                cls._issue_record_dict(record)
+                for record in projection.records
+            ]
+        return result
+
+    def _read_repository_projection(
+        self,
+        repository: str,
+        *,
+        observed_at: str,
+    ) -> repository_projection.RepositoryProjection:
+        try:
+            issues = self.reader.list_issues(repository, state="open")
+        except DevflowMCPError as exc:
+            return repository_projection.build_repository_projection(
+                repository,
+                [],
+                observed_at=observed_at,
+                source_status="UNAVAILABLE",
+                source_error=str(exc),
+            )
+        return repository_projection.build_repository_projection(
+            repository,
+            issues,
+            observed_at=observed_at,
+        )
+
+    def get_repository_projection(self, repository: str) -> dict[str, Any]:
+        normalized = normalize_repository(repository)
+        self.get_repository_control(normalized)
+        observed_at = self._observed_at_factory()
+        projection = self._read_repository_projection(
+            normalized,
+            observed_at=observed_at,
+        )
+        return self._repository_projection_dict(
+            projection,
+            include_records=True,
+        )
+
+    def get_portfolio_projection(self) -> dict[str, Any]:
+        observed_at = self._observed_at_factory()
+        repositories = self.list_managed_repositories()
+        projections = [
+            self._read_repository_projection(
+                repository,
+                observed_at=observed_at,
+            )
+            for repository in repositories
+        ]
+        compact = [
+            self._repository_projection_dict(
+                projection,
+                include_records=False,
+            )
+            for projection in projections
+        ]
+        return {
+            "observed_at": observed_at,
+            "repository_count": len(projections),
+            "source_unavailable_count": sum(
+                1
+                for projection in projections
+                if projection.source_status == "UNAVAILABLE"
+            ),
+            "open_issue_count": sum(
+                projection.open_issue_count
+                for projection in projections
+            ),
+            "machine_task_count": sum(
+                projection.machine_task_count
+                for projection in projections
+            ),
+            "legacy_hint_count": sum(
+                projection.legacy_hint_count
+                for projection in projections
+            ),
+            "unclassified_count": sum(
+                projection.unclassified_count
+                for projection in projections
+            ),
+            "invalid_metadata_count": sum(
+                projection.invalid_metadata_count
+                for projection in projections
+            ),
+            "repositories": compact,
         }
 
     def bootstrap_repository(self, repository: str) -> dict[str, Any]:
