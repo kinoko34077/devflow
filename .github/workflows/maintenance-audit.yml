@@ -3,6 +3,7 @@ name: Maintenance audit
 on:
   schedule:
     - cron: '30 13 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -52,7 +53,7 @@ permissions:
 
 jobs:
   audit:
-    if: ${{ github.event_name == 'schedule' || inputs.mode == 'audit' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 13 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit') }}
     runs-on: ubuntu-latest
     concurrency:
       group: maintenance-audit-${{ github.repository }}
@@ -229,7 +230,7 @@ jobs:
           path: maintenance-supply-result.json
 
   projection-cache:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -248,23 +249,41 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           CACHE_REPOSITORY: ${{ inputs.repository }}
           CACHE_CONTROL: ${{ inputs.control }}
+          CACHE_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail
-          for value in "$MAINTENANCE_AUDIT_TOKEN" "$GITHUB_TOKEN" "$CACHE_REPOSITORY" "$CACHE_CONTROL"
+          for value in "$MAINTENANCE_AUDIT_TOKEN" "$GITHUB_TOKEN"
           do
             if [[ -z "$value" ]]; then
-              echo "manual projection-cache mode requires configured read token and repository/control target" >&2
+              echo "projection-cache requires configured read/write tokens" >&2
               exit 2
             fi
           done
-          python scripts/repository_projection_cache.py \
-            --repository "$CACHE_REPOSITORY" \
-            --control "$CACHE_CONTROL" \
-            --read-token-env MAINTENANCE_AUDIT_TOKEN \
-            --write-token-env GITHUB_TOKEN \
-            --apply \
-            --output repository-projection-cache-result.json
+
+          if [[ "$CACHE_EVENT_NAME" == "schedule" ]]; then
+            python scripts/repository_projection_cache.py \
+              --fleet \
+              --read-token-env MAINTENANCE_AUDIT_TOKEN \
+              --write-token-env GITHUB_TOKEN \
+              --apply \
+              --output repository-projection-cache-result.json
+          else
+            for value in "$CACHE_REPOSITORY" "$CACHE_CONTROL"
+            do
+              if [[ -z "$value" ]]; then
+                echo "manual projection-cache mode requires repository/control target" >&2
+                exit 2
+              fi
+            done
+            python scripts/repository_projection_cache.py \
+              --repository "$CACHE_REPOSITORY" \
+              --control "$CACHE_CONTROL" \
+              --read-token-env MAINTENANCE_AUDIT_TOKEN \
+              --write-token-env GITHUB_TOKEN \
+              --apply \
+              --output repository-projection-cache-result.json
+          fi
       - name: Upload projection cache result
         if: always() && hashFiles('repository-projection-cache-result.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
