@@ -7,7 +7,7 @@ from typing import Mapping
 
 
 DEFAULT_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".devflow" / "WORKFLOW.yaml"
-_KEY_RE = re.compile(r"^([A-Za-z0-9_]+):(?:\\s*(.*))?$")
+_KEY_RE = re.compile(r"^([A-Za-z0-9_]+):(?:\s*(.*))?$")
 
 
 class WorkflowContractError(ValueError):
