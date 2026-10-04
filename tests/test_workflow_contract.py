@@ -89,6 +89,28 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn('PRIORITIES = frozenset({"P0", "P1", "P2", "P3"})', bootstrap_source)
         self.assertNotIn('RISKS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})', bootstrap_source)
 
+    def test_repository_bootstrap_visibility_choice_is_published(self):
+        workflow = (ROOT / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
+        agent_entry = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        operations = (ROOT / "docs" / "operations" / "REPOSITORY_BOOTSTRAP.md").read_text(
+            encoding="utf-8"
+        )
+        spec = (ROOT / "docs" / "spec" / "REPOSITORY_BOOTSTRAP.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("visibility_selection:", workflow)
+        self.assertIn("- private", workflow)
+        self.assertIn("- public", workflow)
+        self.assertIn("interactive_unspecified_action: ask_user_before_request", workflow)
+        self.assertIn("noninteractive_or_delegated_unspecified_fallback: private", workflow)
+        self.assertIn("infer_public_from_prose: forbidden", workflow)
+
+        for document in (agent_entry, operations, spec):
+            self.assertIn("private", document)
+            self.assertIn("public", document)
+            self.assertIn("ask", document.lower())
+
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
         spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(
             encoding="utf-8"
