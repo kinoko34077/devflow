@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from tools import devflow_mcp_core
@@ -30,6 +31,36 @@ def _require_control_issue_number(value: object) -> int:
             "Control issue number must be a positive integer"
         )
     return value
+
+
+def _generation_not_before_observation(
+    generated_at: str,
+    observed_at: object,
+) -> str:
+    if not isinstance(generated_at, str) or not generated_at.strip():
+        raise RepositoryProjectionCacheProducerError(
+            "generated_at must be an RFC-3339 timestamp"
+        )
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        raise RepositoryProjectionCacheProducerError(
+            "live projection observed_at is unavailable"
+        )
+    try:
+        generated = datetime.fromisoformat(
+            generated_at.strip().replace("Z", "+00:00")
+        )
+        observed = datetime.fromisoformat(
+            observed_at.strip().replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "projection timestamps must be RFC-3339"
+        ) from exc
+    if generated.tzinfo is None or observed.tzinfo is None:
+        raise RepositoryProjectionCacheProducerError(
+            "projection timestamps must include timezone offsets"
+        )
+    return observed_at.strip() if observed > generated else generated_at.strip()
 
 
 def prepare_target(
@@ -103,6 +134,10 @@ def prepare_target(
         )
 
     observed_at = live_projection.get("observed_at")
+    effective_generated_at = _generation_not_before_observation(
+        generated_at,
+        observed_at,
+    )
     control_trust = {
         "status": "VERIFIED",
         "freshness": "CURRENT",
@@ -114,7 +149,7 @@ def prepare_target(
         payload = repository_projection_cache.build_cached_projection(
             repository,
             live_projection,
-            generated_at=generated_at,
+            generated_at=effective_generated_at,
             control_trust=control_trust,
         )
     except repository_projection_cache.RepositoryProjectionCacheError as exc:
