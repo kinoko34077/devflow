@@ -93,6 +93,57 @@ class RepositoryIssueMetadataContractTests(unittest.TestCase):
         ):
             repository_projection.parse_issue_metadata(block(payload))
 
+    def test_invalid_type_fails_closed_against_workflow_contract(self):
+        payload = VALID_TASK.replace('"type": "BUG"', '"type": "UNKNOWN_TYPE"')
+        with self.assertRaisesRegex(
+            repository_projection.ProjectionContractError,
+            "type",
+        ):
+            repository_projection.parse_issue_metadata(block(payload))
+
+    def test_invalid_work_status_fails_closed_against_workflow_contract(self):
+        payload = VALID_TASK.replace(
+            '"work_status": "READY_FOR_IMPLEMENTATION"',
+            '"work_status": "IN_PROGRESS"',
+        )
+        with self.assertRaisesRegex(
+            repository_projection.ProjectionContractError,
+            "work_status",
+        ):
+            repository_projection.parse_issue_metadata(block(payload))
+
+    def test_required_boolean_fields_are_strict_booleans(self):
+        for field in ("scope_ready", "requires_user_confirmation", "external_wait"):
+            with self.subTest(field=field):
+                payload = VALID_TASK.replace(
+                    f'"{field}": false',
+                    f'"{field}": 0',
+                ).replace(
+                    f'"{field}": true',
+                    f'"{field}": 1',
+                )
+                with self.assertRaisesRegex(
+                    repository_projection.ProjectionContractError,
+                    field,
+                ):
+                    repository_projection.parse_issue_metadata(block(payload))
+
+    def test_optional_priority_and_risk_use_shared_workflow_vocabulary(self):
+        payload = VALID_TASK.replace(
+            '  "external_wait": false',
+            '  "external_wait": false,\n  "priority": "P1",\n  "risk": "HIGH"',
+        )
+        metadata = repository_projection.parse_issue_metadata(block(payload))
+        self.assertEqual(metadata.priority, "P1")
+        self.assertEqual(metadata.risk, "HIGH")
+
+        invalid = payload.replace('"priority": "P1"', '"priority": "P9"')
+        with self.assertRaisesRegex(
+            repository_projection.ProjectionContractError,
+            "priority",
+        ):
+            repository_projection.parse_issue_metadata(block(invalid))
+
     def test_missing_required_field_fails_closed(self):
         payload = VALID_TASK.replace('  "external_wait": false\n', "")
         with self.assertRaisesRegex(
