@@ -47,6 +47,7 @@ jobs:
           tools/repository_bootstrap.py
           tools/workflow_contract.py
           tools/marker_json.py
+          tools/github_issue_trust.py
           tools/repository_projection.py
           tools/task_checkpoint_cursor.py
           tools/maintenance_audit.py
