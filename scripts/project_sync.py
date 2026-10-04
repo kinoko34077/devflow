@@ -1315,7 +1315,7 @@ def run_sync(
             control_trust_service=control_trust_service,
         )
     ):
-        # Untrusted (non owner/member/collaborator) Issues never drive Project writes.
+        # Only direct trusted-author Issues or canonical verified Repository Controls may drive Project writes.
         return 0
 
     if rest is None and cfg.github_token:
