@@ -294,13 +294,13 @@ The Project displays this concept through custom single-select `Work Type` becau
 
 ## 6. Audit and finding rules
 
-Audit levels:
+Audit depth values are machine-contract values owned by `.devflow/WORKFLOW.yaml`:
 
-- `QUICK`: narrow known change / low uncertainty;
-- `STANDARD`: normal new work, onboarding, or materially stale state;
-- `FULL`: broad/unknown-impact audit only when explicitly requested or concretely justified.
+- `CONTROL`: cross-repository/control/state consistency only; it does not claim repository-local code/spec completeness.
+- `STANDARD`: repository-local relevant canon/code/tests reviewed to ordinary task/audit acceptance depth.
+- `DEEP`: deliberately broad repository-local audit covering architecture/spec/code/tests/security/hygiene/recovery surfaces appropriate to the repository.
 
-FULL audits are not periodic by default.
+Depth is an evidence classification, not a quality score. A later `CONTROL` audit may advance control-plane audit timing without silently upgrading the repository revision to a repository-local audit claim. `DEEP` audits are not periodic by default.
 
 Every meaningful audit records a concrete SHA or an explicit reason a SHA does not exist.
 
