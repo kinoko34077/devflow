@@ -186,7 +186,7 @@ Then the deterministic GitHub-side bootstrap path owns provisioning and produces
 
 Control when the repository is managed.
 
-Do not put an LLM inside the bootstrap executor. Do not ask the user to repeat fields already fixed by the current context. Use only the safe defaults defined by the canonical specification. Public visibility, licence intent, exclusions and other explicit user choices must be preserved rather than guessed or replaced.
+Do not put an LLM inside the bootstrap executor. Do not ask the user to repeat fields already fixed by the current context. Repository visibility is a first-class bootstrap choice: preserve an explicit `public` or `private` choice from the current context; when visibility is not established and the agent can interact with the user, ask only for that `public / private` choice before emitting the Bootstrap Request rather than silently collapsing it to `private`. Do not infer `public` merely from prose such as “OSS” or “open-source”. If interaction is unavailable, or the user explicitly delegates the choice without establishing publication intent, the structured request may use the canonical safe fallback `private`. Licence intent, exclusions and other explicit user choices must likewise be preserved rather than guessed or replaced.
 
 Credential/App/Actions-secret/permission setup for repository creation remains a Human confirmation boundary. If the approved bootstrap credential is absent, record/report that blocker instead of bypassing it.
 

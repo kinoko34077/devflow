@@ -14,16 +14,24 @@ Do not use it merely because a discussion could hypothetically become a reposito
 
 The agent extracts the already-established responsibility, repository name, description, initial canonical material and useful initial Issue decomposition. It must not ask the user to repeat information already fixed by the current conversation/sources.
 
-## 2. Safe defaults
+## 2. Visibility choice and safe defaults
 
-Only these v1 defaults are automatic:
+Repository visibility is user-selectable: `private` and `public` are both supported by `repository-bootstrap.v1`.
 
-- `visibility`: `private` when not explicitly established;
+Before creating the Bootstrap Request:
+
+- if the current context explicitly establishes `private` or `public`, preserve that choice;
+- if visibility is not established and the agent can interact with the user, ask for the `private / public` choice before emitting the request;
+- do not infer `public` merely from prose such as “OSS” or “open-source”;
+- if interaction is unavailable, or the user explicitly delegates the choice without establishing publication intent, use the safe `private` fallback.
+
+The deterministic executor still applies `private` when the structured request itself omits `repository.visibility`. This is a recovery/safety fallback, not a reason for an interactive agent to hide the choice.
+
+Other v1 defaults remain:
+
 - template: `minimal`;
 - devflow-managed: true unless the repository is canonically excluded;
 - `license`: null/omitted.
-
-Public visibility must be explicit in the structured request. Words in prose such as “OSS” do not make the executor infer `public`.
 
 V1 does not generate licence text. A non-null licence request is unsupported until a later contract defines exact licence material/attribution inputs. Do not guess a licence.
 
