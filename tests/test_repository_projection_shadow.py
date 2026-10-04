@@ -125,12 +125,13 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
         self.assertEqual(report["repository_count"], 1)
 
     def test_shadow_workflow_is_manual_read_only_and_artifact_only(self):
-        path = ROOT / ".github" / "workflows" / "repository-projection-shadow.yml"
-        self.assertTrue(path.exists(), "central fleet shadow workflow must exist")
+        path = ROOT / ".github" / "workflows" / "maintenance-audit.yml"
+        self.assertTrue(path.exists(), "central maintenance workflow must exist")
         source = path.read_text(encoding="utf-8")
 
         self.assertIn("workflow_dispatch:", source)
-        self.assertNotIn("schedule:", source)
+        self.assertIn("- projection-shadow", source)
+        self.assertIn("projection-shadow:", source)
         self.assertIn("contents: read", source)
         self.assertIn("issues: read", source)
         self.assertNotIn("contents: write", source)
