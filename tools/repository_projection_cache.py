@@ -655,6 +655,78 @@ def parse_cached_projection(
     return CachedRepositoryProjection(payload=copy.deepcopy(validated))
 
 
+def _validate_existing_cache_for_replacement(
+    body: str,
+    repository: str,
+) -> None:
+    try:
+        payload = marker_json.parse_json_object_block(
+            body,
+            CACHE_MARKER_BEGIN,
+            CACHE_MARKER_END,
+            label="repository projection cache",
+        )
+    except marker_json.MarkerJSONError as exc:
+        raise RepositoryProjectionCacheError(str(exc)) from exc
+    if payload is None:
+        return
+
+    keys = set(payload)
+    missing = _TOP_LEVEL_FIELDS - keys
+    unknown = keys - _TOP_LEVEL_FIELDS
+    if not missing:
+        _validate_cached_payload(payload, repository)
+        return
+
+    # Narrow self-migration for the live M2 pilot format that was written
+    # before valid_until became a required producer-owned freshness fence.
+    # No other incomplete/unknown v1 shape is accepted.
+    if payload.get("schema_version") != CACHE_SCHEMA_VERSION:
+        raise RepositoryProjectionCacheError(
+            f"unsupported schema_version: {payload.get('schema_version')!r}"
+        )
+    if unknown:
+        raise RepositoryProjectionCacheError(
+            "legacy repository projection cache has unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
+    if missing != {"valid_until"}:
+        raise RepositoryProjectionCacheError(
+            "legacy repository projection cache missing fields: "
+            + ", ".join(sorted(missing))
+        )
+
+    recorded_repository = _require_repository(
+        payload.get("repository"),
+        "cache repository",
+    )
+    if recorded_repository != repository:
+        raise RepositoryProjectionCacheError("repository identity mismatch")
+
+    generation_id = _require_sha256(
+        payload.get("generation_id"),
+        "legacy generation_id",
+    )
+    expected_legacy_generation_id = _canonical_digest(
+        _generation_material(payload)
+    )
+    if generation_id != expected_legacy_generation_id:
+        raise RepositoryProjectionCacheError(
+            "legacy generation_id does not match cached projection payload"
+        )
+
+    migrated = copy.deepcopy(payload)
+    generated_dt = _timestamp_value(
+        migrated.get("generated_at"),
+        "generated_at",
+    )
+    migrated["valid_until"] = _format_timestamp(
+        generated_dt + timedelta(seconds=CACHE_VALIDITY_SECONDS)
+    )
+    migrated = recompute_generation_id(migrated)
+    _validate_cached_payload(migrated, repository)
+
+
 def replace_cached_projection(
     body: str,
     repository: str,
@@ -690,8 +762,10 @@ def replace_cached_projection(
         prefix = body.rstrip()
         return prefix + ("\n\n" if prefix else "") + block
 
-    # Existing machine state must itself be parseable before replacement.
-    parse_cached_projection(body, repository)
+    # Existing machine state must itself be valid. The only migration
+    # exception is the exact early-M2 v1 shape missing producer-owned
+    # valid_until; replacement still uses the normal body-SHA fence.
+    _validate_existing_cache_for_replacement(body, repository)
     begin, end = bounds
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
