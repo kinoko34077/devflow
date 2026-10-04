@@ -72,6 +72,16 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )
         self.assertIn("issues: write", self.projection_cache)
         self.assertNotIn("MAINTENANCE_SUPPLY_TOKEN", self.projection_cache)
+
+    def test_manual_projection_cache_without_target_reuses_same_central_fleet_job(self):
+        self.assertIn(
+            '-z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL"',
+            self.projection_cache,
+        )
+        self.assertIn(
+            'requires both repository and control, or neither for fleet mode',
+            self.projection_cache,
+        )
     def test_failure_evidence_remains_typed_and_uploaded(self):
         self.assertIn(
             "if: always() && hashFiles('maintenance-audit-report.json') != ''",
