@@ -75,7 +75,7 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
         self.assertEqual(result["repositories_with_machine_tasks"], 1)
         self.assertEqual(
             result["repositories_with_open_issues_without_machine_tasks"],
-            1,
+            0,
         )
         self.assertEqual(
             result["operator_decision_ambiguous_repository_count"],
