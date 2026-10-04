@@ -292,6 +292,26 @@ final acceptance / major milestone
 
 Avoid self-evident or low-information checks that are already guaranteed by a stronger current check and would not expose a distinct defect class. Do not add tests merely to increase test count or satisfy a checklist.
 
+##### Independent evidence axes
+
+Do not treat semantic importance as a proxy for change size, test breadth, ceremony, or recovery difficulty. Classify the change on independent axes before selecting evidence and gates:
+
+| Axis | Primary question | Primarily controls |
+| --- | --- | --- |
+| Semantic / authority criticality | How harmful would a wrong interpretation or contract be? | review depth, reviewer expertise/escalation |
+| Concrete change surface | What files, code paths, schemas or prose actually changed? | diff scope, implementation ceremony |
+| Reversibility / recovery cost | How safely can accepted state be restored? | approval and rollback rigor |
+| Observable failure modes / evidence modality | What evidence can actually falsify plausible defects introduced by this change? | test/check selection |
+| Propagation / blast radius | What consumers, repositories, runtimes or durable state are affected automatically? | integration/cross-repository breadth |
+
+`review depth`, `test breadth`, and `process/ceremony depth` are separate decisions. High authority significance may justify deep semantic review or a different reviewer while still requiring little or no executable regression when runtime tests cannot observe the changed contract. Conversely, a small runtime diff needs executable regression when its failure mode is behavioral.
+
+For every nontrivial verification step or gate, identify the plausible defect class it can detect for the current changed surface. If no such defect class exists, omit that step unless an external repository rule explicitly requires it. Existing security, credential, permission, deployment/release/publication, destructive, migration, protected-Gate and other hard-to-reverse safeguards remain stronger and are not reduced by this proportionality rule.
+
+Example — a one-paragraph source-of-truth policy change may be semantically critical while physically tiny and trivially reversible. Appropriate evidence can be exact diff inspection, comparison with the task-relevant authority documents, cross-reference/structure checks when applicable, and deep semantic/Formal Review (including a different reviewer when the authority rule requires it). A full runtime suite is not added solely because the policy is important unless code consumes the changed document or another concrete runtime defect is observable through that suite.
+
+Execution-path proportionality follows the same principle: use the most direct competent execution surface for the remaining work. When local repository execution genuinely belongs to Codex or another native development surface, leave a durable handoff rather than repeatedly emulating that environment through RDC. RDC remains a bounded fallback when the native/GitHub path cannot perform a necessary operation; repeated tool friction is a reason to reselect the path, not evidence that more ceremony is required.
+
 The review dimensions below are dimensions to consider, not six mandatory exhaustive audits. Mark an irrelevant dimension `N/A`. A review is too shallow when it skips a plausible affected boundary; it is too broad when it repeatedly checks unrelated already-proven behavior without an impact reason.
 
 #### Review dimensions
