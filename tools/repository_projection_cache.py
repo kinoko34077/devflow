@@ -46,3 +46,13 @@ def build_cached_projection(
 ) -> dict[str, Any]:
     del repository, live_projection, generated_at, control_trust, machine_metadata_complete
     raise RepositoryProjectionCacheError("repository projection cache builder not implemented")
+
+
+def render_cached_projection(payload: dict[str, Any]) -> str:
+    del payload
+    raise RepositoryProjectionCacheError("repository projection cache renderer not implemented")
+
+
+def recompute_generation_id(payload: dict[str, Any]) -> dict[str, Any]:
+    del payload
+    raise RepositoryProjectionCacheError("repository projection cache generation identity not implemented")
