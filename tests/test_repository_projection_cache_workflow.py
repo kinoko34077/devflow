@@ -20,13 +20,14 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
     def test_manual_mode_is_declared(self):
         self.assertIn("- projection-cache", self.text)
 
-    def test_cache_job_is_manual_only_and_not_scheduled(self):
+    def test_cache_job_supports_manual_target_and_central_schedule(self):
         job = self._cache_job()
         self.assertIn(
-            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache' }}",
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache'",
             job,
         )
-        self.assertNotIn("github.event_name == 'schedule'", job)
+        self.assertIn("github.event_name == 'schedule'", job)
+        self.assertIn("github.event.schedule == '0 14 * * *'", job)
 
     def test_cache_job_has_bounded_issue_write_permission(self):
         job = self._cache_job()
@@ -36,7 +37,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull-requests: write", job)
         self.assertNotIn("actions: write", job)
 
-    def test_cache_job_requires_existing_target_and_applies_central_script(self):
+    def test_cache_job_uses_targeted_manual_or_fleet_scheduled_central_script(self):
         job = self._cache_job()
         self.assertIn("CACHE_REPOSITORY:", job)
         self.assertIn("CACHE_CONTROL:", job)
@@ -45,6 +46,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/repository_projection_cache.py", job)
         self.assertIn("--repository", job)
         self.assertIn("--control", job)
+        self.assertIn("--fleet", job)
         self.assertIn("--apply", job)
 
     def test_cache_job_is_non_cancelling_and_central(self):
