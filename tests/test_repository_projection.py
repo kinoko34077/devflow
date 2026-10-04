@@ -266,6 +266,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "body": block(VALID_TASK),
                 "created_at": "2026-10-04T00:00:00Z",
                 "updated_at": "2026-10-04T01:00:00Z",
+                "author_association": "OWNER",
             }
         )
         self.assertEqual(record.source_kind, "MACHINE")
