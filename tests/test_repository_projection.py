@@ -422,5 +422,93 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
         self.assertEqual(projection.task_records, ())
 
 
+    def test_issue_only_attention_exposes_only_hard_gates(self):
+        cases = [
+            (
+                VALID_TASK.replace(
+                    '"requires_user_confirmation": false',
+                    '"requires_user_confirmation": true',
+                ),
+                "NEEDS_HUMAN",
+            ),
+            (
+                VALID_TASK.replace(
+                    '"external_wait": false',
+                    '"external_wait": true',
+                ),
+                "WAIT_EXTERNAL",
+            ),
+            (
+                VALID_TASK.replace(
+                    '"scope_ready": true',
+                    '"scope_ready": false',
+                ),
+                "NEEDS_EVIDENCE",
+            ),
+            (
+                VALID_TASK,
+                None,
+            ),
+            (
+                VALID_TASK.replace(
+                    '"work_status": "READY_FOR_IMPLEMENTATION"',
+                    '"work_status": "AWAITING_REVIEW"',
+                ),
+                None,
+            ),
+        ]
+        for payload, expected in cases:
+            with self.subTest(expected=expected):
+                record = repository_projection.classify_issue(
+                    self._issue(30, body=block(payload))
+                )
+                self.assertEqual(record.attention_disposition, expected)
+
+    def test_invalid_explicit_metadata_is_needs_evidence(self):
+        record = repository_projection.classify_issue(
+            self._issue(31, body=f"{BEGIN}\n{{bad}}\n{END}")
+        )
+        self.assertEqual(record.source_kind, "INVALID_METADATA")
+        self.assertEqual(record.attention_disposition, "NEEDS_EVIDENCE")
+
+    def test_legacy_and_unclassified_have_no_reconciliation_disposition(self):
+        legacy = repository_projection.classify_issue(
+            self._issue(32, title="[BUG] legacy", body="")
+        )
+        unclassified = repository_projection.classify_issue(
+            self._issue(33, title="ordinary issue", body="")
+        )
+        self.assertIsNone(legacy.attention_disposition)
+        self.assertIsNone(unclassified.attention_disposition)
+
+    def test_issue_only_projection_never_invents_advance_review_or_recovery(self):
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            [
+                self._issue(34, body=block(VALID_TASK)),
+                self._issue(
+                    35,
+                    body=block(
+                        VALID_TASK.replace(
+                            '"work_status": "READY_FOR_IMPLEMENTATION"',
+                            '"work_status": "AWAITING_REVIEW"',
+                        )
+                    ),
+                ),
+            ],
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        dispositions = {
+            item.attention_disposition
+            for item in projection.records
+            if item.attention_disposition is not None
+        }
+        self.assertTrue(
+            dispositions.isdisjoint(
+                {"AUTO_ADVANCE", "NEEDS_REVIEWER", "NEEDS_RECOVERY"}
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
