@@ -412,6 +412,14 @@ repository_bootstrap:
     devflow_managed_unless_excluded: true
     license: null
     force_repository_base: false
+  visibility_selection:
+    allowed:
+      - private
+      - public
+    explicit_context_choice: preserve
+    interactive_unspecified_action: ask_user_before_request
+    noninteractive_or_delegated_unspecified_fallback: private
+    infer_public_from_prose: forbidden
   trusted_author_associations:
     - OWNER
     - MEMBER
