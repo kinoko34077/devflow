@@ -102,15 +102,24 @@ The request Issue contains exactly one machine-readable block:
 
 The documentary JSON Schema is `schemas/repository-bootstrap.v1.schema.json`. Runtime validation in `tools/repository_bootstrap.py` is authoritative for execution.
 
-## 4. Safe defaults
+## 4. Visibility choice and safe defaults
 
-V1 applies only defaults that do not invent semantic/project policy:
+Repository visibility is a first-class agent/user choice with two supported values: `private` and `public`.
 
-- missing `repository.visibility` -> `private`;
+Agent-facing selection occurs before deterministic execution:
+
+- an explicit `private` or `public` choice in current context MUST be preserved;
+- when visibility is not established and an agent can interact with the user, it MUST ask for the `private / public` choice before emitting the Bootstrap Request;
+- public visibility MUST NOT be inferred from words such as “OSS”, “public”, or “open-source” appearing elsewhere in prose;
+- if interaction is unavailable, or the user explicitly delegates the choice without establishing publication intent, the agent may use the safe `private` fallback.
+
+The executor remains deterministic and fail-safe. If a structured request reaches it without `repository.visibility`, normalization still defaults to `private`.
+
+Other V1 defaults that do not invent semantic/project policy are:
+
 - missing `bootstrap.template` -> `minimal`;
 - missing `bootstrap.devflow_managed` -> `true`, except canonical excluded repositories;
 - missing `initial_content.license` -> null;
-- public visibility is never inferred from words such as “OSS”, “public”, or “open-source” appearing elsewhere in prose;
 - Repository Base adoption is never implied by `minimal`;
 - no release, deployment, publication, repository deletion, shared-history rewrite, credential change or permission expansion is part of bootstrap.
 
@@ -267,12 +276,13 @@ The agent should:
 
 1. confirm relevant live devflow canon when managed state matters;
 2. determine one repository responsibility/name/description/kind from the current context;
-3. preserve explicit user choices such as public/private, licence intent and exclusions;
-4. use safe defaults only where this specification defines them;
-5. create one `[REPO CREATE] <repository-name>` Issue carrying `repository-bootstrap.v1`;
-6. allow the deterministic bootstrap workflow to create/initialize/register the repository;
-7. report resulting repository, initial owner Issue(s) and Repository Control;
-8. continue detailed work from the new repository's own canon.
+3. preserve explicit user choices such as visibility, licence intent and exclusions;
+4. resolve repository visibility before emitting the request: preserve an established `private`/`public` choice; otherwise ask the user when interaction is available; if interaction is unavailable or the user delegates the choice without publication intent, use the safe `private` fallback;
+5. use other safe defaults only where this specification defines them;
+6. create one `[REPO CREATE] <repository-name>` Issue carrying `repository-bootstrap.v1`;
+7. allow the deterministic bootstrap workflow to create/initialize/register the repository;
+8. report resulting repository, initial owner Issue(s) and Repository Control;
+9. continue detailed work from the new repository's own canon.
 
 If bootstrap is blocked only because the approved credential is absent, report the Human Gate rather than bypassing it with an unrelated credential path.
 
