@@ -359,6 +359,7 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
         )
         changed_payload = copy.deepcopy(self._payload())
         changed_payload["generated_at"] = "2026-10-04T05:51:00Z"
+        changed_payload["valid_until"] = "2026-10-05T05:51:00Z"
         changed_payload = cache.recompute_generation_id(changed_payload)
         second = cache.replace_cached_projection(
             first,
