@@ -192,5 +192,102 @@ class RepositoryIssueMetadataContractTests(unittest.TestCase):
         )
 
 
+class RepositoryIssueClassificationTests(unittest.TestCase):
+    def test_legacy_canonical_type_prefix_is_hint_not_task(self):
+        for title, expected_type in (
+            ("[BUG] broken", "BUG"),
+            ("[P1][BUG] urgent broken", "BUG"),
+            ("[SPEC] define contract", "SPEC"),
+            ("[DOCS] update docs", "DOCS"),
+        ):
+            with self.subTest(title=title):
+                record = repository_projection.classify_issue(
+                    {
+                        "number": 7,
+                        "title": title,
+                        "state": "open",
+                        "body": "",
+                        "created_at": "2026-10-04T00:00:00Z",
+                        "updated_at": "2026-10-04T01:00:00Z",
+                    }
+                )
+                self.assertEqual(record.source_kind, "LEGACY_HINT")
+                self.assertEqual(record.type, expected_type)
+                self.assertFalse(record.is_task)
+                self.assertIsNone(record.metadata_error)
+
+    def test_noncanonical_legacy_prefix_remains_unclassified(self):
+        for title in (
+            "[REMEDIATION/P1] repair",
+            "[HUMAN GATE] device check",
+            "[WORK ORDER] task",
+            "ordinary issue",
+        ):
+            with self.subTest(title=title):
+                record = repository_projection.classify_issue(
+                    {
+                        "number": 8,
+                        "title": title,
+                        "state": "open",
+                        "body": "",
+                        "created_at": "2026-10-04T00:00:00Z",
+                        "updated_at": "2026-10-04T01:00:00Z",
+                    }
+                )
+                self.assertEqual(record.source_kind, "UNCLASSIFIED")
+                self.assertIsNone(record.type)
+                self.assertFalse(record.is_task)
+
+    def test_malformed_metadata_does_not_fall_back_to_title_hint(self):
+        record = repository_projection.classify_issue(
+            {
+                "number": 9,
+                "title": "[BUG] malformed explicit metadata",
+                "state": "open",
+                "body": f"{BEGIN}\n{{not json}}\n{END}",
+                "created_at": "2026-10-04T00:00:00Z",
+                "updated_at": "2026-10-04T01:00:00Z",
+            }
+        )
+        self.assertEqual(record.source_kind, "INVALID_METADATA")
+        self.assertIsNone(record.type)
+        self.assertFalse(record.is_task)
+        self.assertIn("malformed", record.metadata_error)
+
+    def test_machine_metadata_is_only_task_authority(self):
+        record = repository_projection.classify_issue(
+            {
+                "number": 10,
+                "title": "[BUG] explicit metadata",
+                "state": "open",
+                "body": block(VALID_TASK),
+                "created_at": "2026-10-04T00:00:00Z",
+                "updated_at": "2026-10-04T01:00:00Z",
+            }
+        )
+        self.assertEqual(record.source_kind, "MACHINE")
+        self.assertEqual(record.type, "BUG")
+        self.assertTrue(record.is_task)
+
+    def test_github_native_identity_and_times_come_from_issue_object(self):
+        record = repository_projection.classify_issue(
+            {
+                "number": 11,
+                "title": "[BUG] native fields",
+                "state": "open",
+                "body": block(VALID_TASK),
+                "created_at": "2026-10-04T02:00:00Z",
+                "updated_at": "2026-10-04T03:00:00Z",
+                "html_url": "https://github.com/o/r/issues/11",
+            }
+        )
+        self.assertEqual(record.number, 11)
+        self.assertEqual(record.title, "[BUG] native fields")
+        self.assertEqual(record.state, "open")
+        self.assertEqual(record.created_at, "2026-10-04T02:00:00Z")
+        self.assertEqual(record.updated_at, "2026-10-04T03:00:00Z")
+        self.assertEqual(record.html_url, "https://github.com/o/r/issues/11")
+
+
 if __name__ == "__main__":
     unittest.main()
