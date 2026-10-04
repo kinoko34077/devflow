@@ -375,6 +375,101 @@ class ClientAndSyncTests(unittest.TestCase):
             7,
         )
 
+    def test_project_trust_seam_accepts_valid_bootstrap_derived_control(self):
+        calls = []
+        issue = {
+            "number": 222,
+            "node_id": "DERIVED",
+            "title": "[REPO] repository-bootstrap-e2e-20260929",
+            "state": "open",
+            "body": "",
+            "author_association": "NONE",
+        }
+
+        def verify(candidate):
+            calls.append(candidate["number"])
+            return True
+
+        self.assertTrue(project_sync.is_trusted_project_issue(issue, verify))
+        self.assertEqual(calls, [222])
+
+    def test_select_target_issue_accepts_valid_bootstrap_derived_control(self):
+        issue = {
+            "number": 230,
+            "node_id": "DERIVED",
+            "title": "[REPO] memory-palace-explorer",
+            "state": "open",
+            "body": "",
+            "author_association": "NONE",
+        }
+
+        class FakeREST:
+            def get_issue(self, number):
+                self.assert_number = number
+                return issue
+
+        selected = project_sync.select_target_issue(
+            FakeREST(),
+            230,
+            lambda candidate: candidate["number"] == 230,
+        )
+        self.assertEqual(selected, [issue])
+
+    def test_reread_event_issue_accepts_valid_bootstrap_derived_control(self):
+        live = {
+            "number": 314,
+            "node_id": "DERIVED",
+            "title": "[REPO] UniverseGenome",
+            "state": "open",
+            "body": "",
+            "author_association": "NONE",
+        }
+
+        class FakeREST:
+            def get_issue(self, number):
+                self.assert_number = number
+                return live
+
+        observed = project_sync.reread_event_issue(
+            FakeREST(),
+            {"number": 314},
+            lambda candidate: candidate["number"] == 314,
+        )
+        self.assertIs(observed, live)
+
+    def test_project_trust_seam_keeps_untrusted_non_control_issue_fail_closed(self):
+        issue = {
+            "number": 999,
+            "title": "[WORK ORDER] spoof",
+            "state": "open",
+            "body": "",
+            "author_association": "NONE",
+        }
+
+        def must_not_delegate(_candidate):
+            raise AssertionError("non-Control untrusted Issue must not use derived Control trust")
+
+        self.assertFalse(project_sync.is_trusted_project_issue(issue, must_not_delegate))
+
+    def test_select_target_issue_keeps_rejected_derived_control_fail_closed(self):
+        issue = {
+            "number": 301,
+            "node_id": "DERIVED",
+            "title": "[REPO] gesture-ime",
+            "state": "open",
+            "body": "",
+            "author_association": "NONE",
+        }
+
+        class FakeREST:
+            def get_issue(self, number):
+                return issue
+
+        self.assertEqual(
+            project_sync.select_target_issue(FakeREST(), 301, lambda _candidate: False),
+            [],
+        )
+
     def test_event_sync_ignores_untrusted_issue_without_project_access(self):
         class NoAccess:
             def __getattr__(self, name):
