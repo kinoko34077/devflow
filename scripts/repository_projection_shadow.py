@@ -69,6 +69,7 @@ def build_shadow_report(
                 "legacy_hint_count": item.get("legacy_hint_count", 0),
                 "unclassified_count": item.get("unclassified_count", 0),
                 "invalid_metadata_count": item.get("invalid_metadata_count", 0),
+                "untrusted_metadata_count": item.get("untrusted_metadata_count", 0),
                 "machine_type_counts": item.get("machine_type_counts") or {},
                 "legacy_hint_type_counts": item.get("legacy_hint_type_counts") or {},
                 "machine_task_refs": [
@@ -97,7 +98,9 @@ def build_shadow_report(
     legacy = int(portfolio.get("legacy_hint_count") or 0)
     unclassified = int(portfolio.get("unclassified_count") or 0)
     invalid = int(portfolio.get("invalid_metadata_count") or 0)
-    non_machine = legacy + unclassified + invalid
+    untrusted = int(portfolio.get("untrusted_metadata_count") or 0)
+    legacy_or_unclassified = legacy + unclassified
+    non_machine = legacy_or_unclassified + invalid + untrusted
     machine_record_count = sum(
         int(item["machine_record_count"]) for item in rows
     )
@@ -115,10 +118,12 @@ def build_shadow_report(
         "legacy_hint_count": legacy,
         "unclassified_count": unclassified,
         "invalid_metadata_count": invalid,
-        "legacy_or_unclassified_count": non_machine,
+        "untrusted_metadata_count": untrusted,
+        "legacy_or_unclassified_count": legacy_or_unclassified,
         "legacy_or_unclassified_rate": (
-            non_machine / open_issue_count if open_issue_count else 0.0
+            legacy_or_unclassified / open_issue_count if open_issue_count else 0.0
         ),
+        "non_machine_metadata_count": non_machine,
         "machine_metadata_coverage_rate": (
             machine_record_count / open_issue_count if open_issue_count else 1.0
         ),
@@ -211,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                     "legacy_hint_count",
                     "unclassified_count",
                     "invalid_metadata_count",
+                    "untrusted_metadata_count",
                     "legacy_or_unclassified_rate",
                 )
             },
