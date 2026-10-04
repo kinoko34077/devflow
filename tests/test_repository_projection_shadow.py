@@ -17,18 +17,20 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
             "machine_task_count": 1,
             "legacy_hint_count": 2,
             "unclassified_count": 1,
-            "invalid_metadata_count": 1,
+            "invalid_metadata_count": 0,
+            "untrusted_metadata_count": 1,
             "repositories": [
                 {
                     "repository": "kinoko34077/alpha",
                     "source_status": "AVAILABLE",
                     "source_freshness": "CURRENT",
                     "source_error": None,
-                    "open_issue_count": 4,
+                    "open_issue_count": 5,
                     "machine_task_count": 1,
                     "legacy_hint_count": 2,
                     "unclassified_count": 1,
                     "invalid_metadata_count": 0,
+                    "untrusted_metadata_count": 1,
                     "machine_type_counts": {"BUG": 1},
                     "legacy_hint_type_counts": {"SPEC": 2},
                     "task_records": [{"issue_number": 7}],
@@ -42,7 +44,8 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
                     "machine_task_count": 0,
                     "legacy_hint_count": 0,
                     "unclassified_count": 0,
-                    "invalid_metadata_count": 1,
+                    "invalid_metadata_count": 0,
+                    "untrusted_metadata_count": 0,
                     "machine_type_counts": {},
                     "legacy_hint_type_counts": {},
                     "task_records": [],
@@ -69,8 +72,10 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
         self.assertEqual(result["source_unavailable_count"], 1)
         self.assertEqual(result["machine_record_count"], 1)
         self.assertEqual(result["machine_task_count"], 1)
-        self.assertEqual(result["legacy_or_unclassified_count"], 4)
-        self.assertAlmostEqual(result["legacy_or_unclassified_rate"], 0.8)
+        self.assertEqual(result["legacy_or_unclassified_count"], 3)
+        self.assertAlmostEqual(result["legacy_or_unclassified_rate"], 0.6)
+        self.assertEqual(result["untrusted_metadata_count"], 1)
+        self.assertEqual(result["non_machine_metadata_count"], 4)
         self.assertAlmostEqual(result["machine_metadata_coverage_rate"], 0.2)
         self.assertEqual(result["repositories_with_machine_tasks"], 1)
         self.assertEqual(
@@ -102,6 +107,7 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
                     "legacy_hint_count": 0,
                     "unclassified_count": 0,
                     "invalid_metadata_count": 0,
+                    "untrusted_metadata_count": 0,
                     "repositories": [
                         {
                             "repository": "kinoko34077/alpha",
@@ -113,6 +119,7 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
                             "legacy_hint_count": 0,
                             "unclassified_count": 0,
                             "invalid_metadata_count": 0,
+                            "untrusted_metadata_count": 0,
                             "machine_type_counts": {},
                             "legacy_hint_type_counts": {},
                             "task_records": [],
