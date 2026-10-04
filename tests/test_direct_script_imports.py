@@ -26,13 +26,13 @@ class DirectScriptImportRegressionTests(unittest.TestCase):
     def test_devflow_mcp_core_top_level_fallback_imports_repository_projection(self):
         code = (
             "import sys; "
-            "sys.path.insert(0, 'tools'); "
+            "sys.path.insert(0, '../tools'); "
             "import devflow_mcp_core; "
             "print(devflow_mcp_core.DEFAULT_OWNER)"
         )
         result = subprocess.run(
             [sys.executable, "-c", code],
-            cwd=ROOT,
+            cwd=ROOT / "scripts",
             capture_output=True,
             text=True,
             check=False,
