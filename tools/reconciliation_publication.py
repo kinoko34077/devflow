@@ -6,6 +6,8 @@ import re
 from datetime import datetime
 from typing import Any, Iterable
 
+from tools import marker_json
+
 
 SCHEMA_VERSION = "development-reconciliation-work.v1"
 SOURCE_CONTRACT_VERSION = "development-reconciliation.v1"
@@ -258,15 +260,6 @@ def reconcile_publications(
     return {"active": active, "superseded_ids": superseded}
 
 
-def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"projection contains duplicate JSON key: {key}")
-        result[key] = value
-    return result
-
-
 def _validate_projection_publication(
     publication: object,
     repository: str,
@@ -329,17 +322,15 @@ def _validate_projection_publication(
 
 
 def _projection_bounds(body: str) -> tuple[int, int] | None:
-    begin_count = body.count(PROJECTION_MARKER_BEGIN)
-    end_count = body.count(PROJECTION_MARKER_END)
-    if begin_count == 0 and end_count == 0:
-        return None
-    if begin_count != 1 or end_count != 1:
-        raise ValueError("publication projection must contain exactly one marker pair")
-    begin = body.find(PROJECTION_MARKER_BEGIN)
-    end = body.find(PROJECTION_MARKER_END)
-    if end < begin + len(PROJECTION_MARKER_BEGIN):
-        raise ValueError("publication projection markers are malformed")
-    return begin, end
+    try:
+        return marker_json.marker_bounds(
+            body,
+            PROJECTION_MARKER_BEGIN,
+            PROJECTION_MARKER_END,
+            label="publication projection",
+        )
+    except marker_json.MarkerJSONError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def render_publication_projection(
@@ -368,19 +359,17 @@ def parse_publication_projection(
     repository: str,
 ) -> list[dict[str, Any]]:
     repository = _require_repository(repository)
-    bounds = _projection_bounds(body)
-    if bounds is None:
-        return []
-    begin, end = bounds
-    raw = body[begin + len(PROJECTION_MARKER_BEGIN) : end].strip()
-    if not raw:
-        raise ValueError("publication projection JSON is empty")
     try:
-        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
-    except json.JSONDecodeError as exc:
-        raise ValueError("publication projection JSON is malformed") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("publication projection must be an object")
+        payload = marker_json.parse_json_object_block(
+            body,
+            PROJECTION_MARKER_BEGIN,
+            PROJECTION_MARKER_END,
+            label="publication projection",
+        )
+    except marker_json.MarkerJSONError as exc:
+        raise ValueError(str(exc)) from exc
+    if payload is None:
+        return []
     if set(payload) != {"schema_version", "repository", "publications"}:
         raise ValueError("publication projection has unknown or missing fields")
     if payload.get("schema_version") != SCHEMA_VERSION:

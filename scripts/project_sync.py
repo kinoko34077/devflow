@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 try:
-    from tools import devflow_mcp_core, workflow_contract
+    from tools import devflow_mcp_core, github_issue_trust, workflow_contract
 except ImportError:  # direct script execution
     _TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
     if str(_TOOLS_DIR) not in sys.path:
         sys.path.insert(0, str(_TOOLS_DIR))
     import devflow_mcp_core
+    import github_issue_trust
     import workflow_contract
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
@@ -376,16 +377,12 @@ def should_add_missing_item(present: bool, mode: str) -> bool:
     return (not present) and mode in {"reconcile", "event-sync"}
 
 
-TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+TRUSTED_AUTHOR_ASSOCIATIONS = github_issue_trust.TRUSTED_AUTHOR_ASSOCIATIONS
 
 
 def is_trusted_author(issue: dict[str, Any]) -> bool:
-    """Return direct trusted-author status for a devflow Issue.
-
-    Missing association data is treated as untrusted (fail closed).
-    """
-    association = str(issue.get("author_association") or "").strip().upper()
-    return association in TRUSTED_AUTHOR_ASSOCIATIONS
+    """Return direct trusted-author status for a devflow Issue."""
+    return github_issue_trust.is_trusted_issue_author(issue)
 
 
 def _repository_from_control(issue: dict[str, Any]) -> str | None:
