@@ -3,7 +3,7 @@ import json
 import unittest
 from urllib.error import HTTPError
 
-from tools import devflow_mcp_core
+from tools import devflow_mcp_core, repository_projection
 from tests.test_repository_bootstrap import issue_body, request_payload
 
 
@@ -188,6 +188,157 @@ class DevflowMCPServiceTests(unittest.TestCase):
         impostor = {"number": 902, "title": "[REPO] evil", "body": "", "author_association": "NONE"}
         service = devflow_mcp_core.DevflowService(FakeReader([self.control, impostor]))
         self.assertEqual(service.list_managed_repositories(), ["kinoko34077/devflow"])
+
+
+class RepositoryProjectionMCPTests(unittest.TestCase):
+    def _control(self, name, number):
+        return {
+            "number": number,
+            "title": f"[REPO] {name}",
+            "html_url": f"https://github.com/kinoko34077/devflow/issues/{number}",
+            "state": "open",
+            "author_association": "OWNER",
+            "body": (
+                f"## Repository\n\n`kinoko34077/{name}`\n\n"
+                "## Work Status\n\n`AUDITED`\n\n"
+                "## Repository State\n\n`ACTIVE`\n\n"
+                "## Priority\n\n`P2`\n\n"
+                "## Risk\n\n`LOW`\n\n"
+                "## Type\n\n`AUDIT`\n"
+            ),
+        }
+
+    def _task_issue(self, number, *, title="[BUG] task"):
+        payload = """{
+  "schema_version": 1,
+  "record_role": "TASK",
+  "type": "BUG",
+  "work_status": "READY_FOR_IMPLEMENTATION",
+  "scope_ready": true,
+  "requires_user_confirmation": false,
+  "external_wait": false
+}"""
+        body = (
+            f"{repository_projection.ISSUE_METADATA_MARKER_BEGIN}\n"
+            f"{payload}\n"
+            f"{repository_projection.ISSUE_METADATA_MARKER_END}"
+        )
+        return {
+            "number": number,
+            "title": title,
+            "state": "open",
+            "body": body,
+            "created_at": "2026-10-04T01:00:00Z",
+            "updated_at": "2026-10-04T02:00:00Z",
+            "html_url": f"https://github.com/kinoko34077/demo/issues/{number}",
+        }
+
+    def test_repository_projection_reads_managed_repository_directly(self):
+        control = self._control("demo", 70)
+        issue = self._task_issue(1)
+        reader = FakeReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                "kinoko34077/demo": [issue],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+
+        result = service.get_repository_projection("demo")
+
+        self.assertEqual(result["repository"], "kinoko34077/demo")
+        self.assertEqual(result["observed_at"], "2026-10-04T04:00:00Z")
+        self.assertEqual(result["source_status"], "AVAILABLE")
+        self.assertEqual(result["source_freshness"], "CURRENT")
+        self.assertEqual(result["open_issue_count"], 1)
+        self.assertEqual(result["machine_task_count"], 1)
+        self.assertEqual(result["task_records"][0]["issue_number"], 1)
+        self.assertNotIn("body", result["records"][0])
+        self.assertIn(("kinoko34077/demo", "open"), reader.calls)
+
+    def test_repository_projection_requires_managed_control(self):
+        reader = FakeReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [],
+                "kinoko34077/unmanaged": [self._task_issue(1)],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "No open Repository Control",
+        ):
+            service.get_repository_projection("unmanaged")
+
+    def test_repository_projection_source_failure_is_explicit_not_empty_success(self):
+        control = self._control("demo", 70)
+
+        class FailingReader(FakeReader):
+            def list_issues(self, repository, state="open"):
+                if repository == "kinoko34077/demo":
+                    raise devflow_mcp_core.DevflowMCPError("GitHub read failed")
+                return super().list_issues(repository, state=state)
+
+        reader = FailingReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+        result = service.get_repository_projection("demo")
+        self.assertEqual(result["source_status"], "UNAVAILABLE")
+        self.assertEqual(result["source_freshness"], "UNKNOWN")
+        self.assertEqual(result["source_error"], "GitHub read failed")
+        self.assertEqual(result["open_issue_count"], 0)
+
+    def test_portfolio_projection_isolates_repository_read_failures(self):
+        controls = [self._control("alpha", 70), self._control("beta", 71)]
+
+        class PartiallyFailingReader(FakeReader):
+            def list_issues(self, repository, state="open"):
+                if repository == "kinoko34077/beta":
+                    raise devflow_mcp_core.DevflowMCPError("beta unavailable")
+                return super().list_issues(repository, state=state)
+
+        alpha_issue = self._task_issue(1)
+        alpha_issue["html_url"] = "https://github.com/kinoko34077/alpha/issues/1"
+        reader = PartiallyFailingReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: controls,
+                "kinoko34077/alpha": [alpha_issue],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+
+        result = service.get_portfolio_projection()
+
+        self.assertEqual(
+            [item["repository"] for item in result["repositories"]],
+            ["kinoko34077/alpha", "kinoko34077/beta"],
+        )
+        self.assertEqual(result["repository_count"], 2)
+        self.assertEqual(result["source_unavailable_count"], 1)
+        self.assertEqual(result["open_issue_count"], 1)
+        self.assertEqual(result["machine_task_count"], 1)
+        self.assertEqual(result["repositories"][0]["source_status"], "AVAILABLE")
+        self.assertEqual(result["repositories"][1]["source_status"], "UNAVAILABLE")
+        self.assertNotIn("records", result["repositories"][0])
 
 
 class BootstrapDerivedControlTrustTests(unittest.TestCase):
