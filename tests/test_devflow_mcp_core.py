@@ -141,6 +141,26 @@ class DevflowMCPServiceTests(unittest.TestCase):
             service.get_repository_control("devflow")
 
 
+    def test_repository_control_rejects_invalid_work_status_from_shared_contract(self):
+        invalid = {
+            **self.control,
+            "body": self.control["body"].replace("`AUDITED`", "`IN_PROGRESS`", 1),
+        }
+        service = devflow_mcp_core.DevflowService(FakeReader([invalid]))
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "invalid Work Status"):
+            service.get_repository_control("devflow")
+
+    def test_repository_control_rejects_invalid_audit_depth_from_shared_contract(self):
+        invalid = {
+            **self.control,
+            "body": self.control["body"]
+            + "\n## Audit Depth\n\n`TARGETED`\n",
+        }
+        service = devflow_mcp_core.DevflowService(FakeReader([invalid]))
+        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "invalid Audit Depth"):
+            service.get_repository_control("devflow")
+
+
     def test_repository_control_ignores_untrusted_impostor_issue(self):
         impostor = {
             **self.control,

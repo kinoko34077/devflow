@@ -14,13 +14,23 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+try:
+    from tools import workflow_contract
+except ImportError:  # direct script execution
+    _TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+    if str(_TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(_TOOLS_DIR))
+    import workflow_contract
+
+WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
+
 PROJECT_OWNER = "kinoko34077"
 PROJECT_NUMBER = 1
 PROJECT_TITLE = "KiNoTch. Development Control"
 DEFAULT_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 HEALTH_FAILURE_STATE_MARKER = "<!-- devflow-project-sync-health-state:v1 -->"
-EXCLUDED_REPOSITORIES = {"pc-files", "pc-files2"}
+EXCLUDED_REPOSITORIES = set(WORKFLOW_CONTRACT.excluded_repositories)
 
 FIELD_MAP = {
     "Work Status": "Status",
@@ -41,19 +51,18 @@ FIELD_MAP = {
 # WAIT is the accepted Repository Control-only source-state exception from devflow#162.
 # It is not a general Work Status. Map it only at the Project display boundary:
 # the source Control remains WAIT while the existing Project Status option is PARKED.
-PROJECT_STATUS_ALIASES = {"WAIT": "PARKED"}
+PROJECT_STATUS_ALIASES = {
+    WORKFLOW_CONTRACT.control_wait_state: WORKFLOW_CONTRACT.control_wait_project_status
+}
 
 SELECT_OPTIONS = {
-    "Status": {
-        "NEEDS_AUDIT", "AUDITED", "WORK_ORDER_READY", "READY_FOR_IMPLEMENTATION",
-        "IMPLEMENTING", "AWAITING_REVIEW", "BLOCKED", "NEEDS_REAUDIT", "PARKED", "DONE",
-    },
-    "Repository State": {"ACTIVE", "PARKED", "MAINTENANCE", "DEPRECATED", "CANCELLED"},
-    "Priority": {"P0", "P1", "P2", "P3"},
-    "Risk": {"LOW", "MEDIUM", "HIGH", "CRITICAL"},
-    "Work Type": {"FEATURE", "BUG", "SPEC", "AUDIT", "REFACTOR", "MAINTENANCE", "RESEARCH", "INFRA", "DOCS"},
-    "Audit Depth": {"CONTROL", "STANDARD", "DEEP"},
-    "Audit Freshness": {"CURRENT", "DRIFTED", "UNKNOWN"},
+    "Status": set(WORKFLOW_CONTRACT.work_states),
+    "Repository State": set(WORKFLOW_CONTRACT.repository_states),
+    "Priority": set(WORKFLOW_CONTRACT.priorities),
+    "Risk": set(WORKFLOW_CONTRACT.risks),
+    "Work Type": set(WORKFLOW_CONTRACT.types),
+    "Audit Depth": set(WORKFLOW_CONTRACT.audit_depths),
+    "Audit Freshness": set(WORKFLOW_CONTRACT.audit_freshness_values),
 }
 TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA", "Audit Ref", "Audit Scope", "Audit Evidence"}
 DATE_FIELDS = {"Last Audit", "Last Deep Audit"}
@@ -160,6 +169,11 @@ def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
         str(issue.get("body") or ""),
         reject_duplicates=set(FIELD_MAP),
     )
+    if _is_repository_control(issue):
+        try:
+            WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
+        except workflow_contract.WorkflowContractError as exc:
+            raise ConfigError(str(exc)) from exc
     desired: dict[str, str] = {}
     for section, field in FIELD_MAP.items():
         value = sections.get(section, "").strip()

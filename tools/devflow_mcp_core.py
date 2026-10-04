@@ -18,6 +18,7 @@ try:
         parse_provenance_document,
         parse_request_body,
     )
+    from . import workflow_contract
 except ImportError:  # direct script execution
     from repository_bootstrap import (
         BootstrapError,
@@ -26,6 +27,9 @@ except ImportError:  # direct script execution
         parse_provenance_document,
         parse_request_body,
     )
+    import workflow_contract
+
+WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
 DEFAULT_OWNER = "kinoko34077"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
@@ -537,6 +541,10 @@ class DevflowService:
             if not self._is_accepted_control(issue, target):
                 continue
             sections = parse_sections(str(issue.get("body") or ""))
+            try:
+                WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
+            except workflow_contract.WorkflowContractError as exc:
+                raise DevflowMCPError(str(exc)) from exc
             repository = sections.get("Repository", "").strip()
             if repository:
                 try:
@@ -563,6 +571,10 @@ class DevflowService:
             raise DevflowMCPError(f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.")
         issue = matches[0]
         sections = parse_sections(str(issue.get("body") or ""), reject_duplicates=True)
+        try:
+            WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
+        except workflow_contract.WorkflowContractError as exc:
+            raise DevflowMCPError(str(exc)) from exc
         recorded_repository = sections.get("Repository", "").strip()
         if recorded_repository and normalize_repository(recorded_repository) != normalized:
             raise DevflowMCPError(

@@ -684,6 +684,40 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
 
 
 class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
+    def test_invalid_control_work_status_fails_closed_before_owner_classification(self):
+        repository = "kinoko34077/example"
+        control = {
+            "number": 16,
+            "title": "[REPO] example",
+            "state": "open",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/16",
+            "author_association": "OWNER",
+            "updated_at": "2026-10-04T00:00:00Z",
+            "body": (
+                "## Repository\n\n`kinoko34077/example`\n\n"
+                "## Work Status\n\n`IN_PROGRESS`\n\n"
+                "## Repository State\n\n`ACTIVE`\n\n"
+                "## Priority\n\n`P2`\n\n"
+                "## Risk\n\n`LOW`\n\n"
+                "## Type\n\n`FEATURE`\n\n"
+                "## Active Work\n\nNone.\n"
+            ),
+        }
+
+        class Transport:
+            def get_json(self, path):
+                return dict(control)
+
+        observation = mg.collect_repository(
+            Transport(),
+            repository,
+            "kinoko34077/devflow#16",
+            "2026-10-04T00:05:00Z",
+        )
+        self.assertEqual(observation["source_status"], "UNAVAILABLE")
+        self.assertIn("invalid Work Status", observation["source_error"])
+
     def test_control_exact_issue_identity_is_required(self):
         class Transport:
             def __init__(self, issue):
