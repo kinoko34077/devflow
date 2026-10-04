@@ -4,6 +4,7 @@ import unittest
 from urllib.error import HTTPError
 
 from tools import devflow_mcp_core
+from tools import repository_projection
 from tests.test_repository_bootstrap import issue_body, request_payload
 
 
@@ -618,6 +619,125 @@ class ObservedIssueIdentityTests(unittest.TestCase):
         self.assertIn("redirected", message)
         self.assertNotIn("leak", message)
         self.assertNotIn("secret", message)
+
+
+class RepositoryProjectionServiceTests(unittest.TestCase):
+    repository = "kinoko34077/example"
+
+    def _control(self):
+        return {
+            "number": 77,
+            "title": "[REPO] example",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/77",
+            "state": "open",
+            "author_association": "OWNER",
+            "body": (
+                "## Repository\n\n`kinoko34077/example`\n\n"
+                "## Work Status\n\n`AUDITED`\n\n"
+                "## Repository State\n\n`ACTIVE`\n\n"
+                "## Priority\n\n`P2`\n\n"
+                "## Risk\n\n`LOW`\n\n"
+                "## Type\n\n`INFRA`\n\n"
+                "## Audit SHA\n\n`abc123`\n"
+            ),
+        }
+
+    def _task(self, number=1):
+        body = (
+            repository_projection.ISSUE_METADATA_BEGIN
+            + "\n"
+            + '{"schema_version":1,"record_role":"TASK","type":"BUG",'
+            + '"work_status":"READY_FOR_IMPLEMENTATION","scope_ready":true,'
+            + '"requires_user_confirmation":false,"external_wait":false}'
+            + "\n"
+            + repository_projection.ISSUE_METADATA_END
+        )
+        return {
+            "number": number,
+            "title": "Fix projection",
+            "state": "open",
+            "body": body,
+            "created_at": "2026-10-01T00:00:00Z",
+            "updated_at": "2026-10-02T00:00:00Z",
+            "html_url": f"https://github.com/{self.repository}/issues/{number}",
+        }
+
+    def _service(self, local_issues):
+        control = self._control()
+        reader = FakeReader(
+            [control],
+            issues_by_repository={
+                "kinoko34077/devflow": [control],
+                self.repository: local_issues,
+            },
+        )
+        return devflow_mcp_core.DevflowService(reader), reader
+
+    def test_get_repository_projection_returns_live_shadow_model(self):
+        service, reader = self._service([self._task()])
+        result = service.get_repository_projection(self.repository)
+        self.assertEqual(result["authority"], "SHADOW_READ_ONLY")
+        self.assertEqual(result["repository"], self.repository)
+        self.assertEqual(result["source_status"], "OK")
+        self.assertEqual(result["counts"]["machine_tasks"], 1)
+        self.assertEqual(
+            result["actionable_refs"],
+            ["kinoko34077/example#1"],
+        )
+        self.assertIn((self.repository, "open"), reader.calls)
+
+    def test_get_repository_projection_source_failure_is_explicit_and_safe(self):
+        control = self._control()
+
+        class Reader(FakeReader):
+            def list_issues(inner_self, repository, state="open"):
+                if repository == self.repository:
+                    raise devflow_mcp_core.DevflowMCPError("GitHub unavailable")
+                return super().list_issues(repository, state)
+
+        reader = Reader(
+            [control],
+            issues_by_repository={"kinoko34077/devflow": [control]},
+        )
+        service = devflow_mcp_core.DevflowService(reader)
+        result = service.get_repository_projection(self.repository)
+        self.assertEqual(result["source_status"], "ERROR")
+        self.assertIn("GitHub unavailable", result["source_error"])
+        self.assertEqual(result["actionable_refs"], [])
+        self.assertEqual(result["issues"], [])
+
+    def test_portfolio_projection_aggregates_managed_repositories_read_only(self):
+        second = "kinoko34077/second"
+        control1 = self._control()
+        control2 = {
+            **self._control(),
+            "number": 78,
+            "title": "[REPO] second",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/78",
+            "body": self._control()["body"].replace(
+                "kinoko34077/example",
+                second,
+            ),
+        }
+        reader = FakeReader(
+            [control1, control2],
+            issues_by_repository={
+                "kinoko34077/devflow": [control1, control2],
+                self.repository: [self._task(1)],
+                second: [],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(reader)
+        result = service.get_portfolio_projection()
+        self.assertEqual(result["authority"], "SHADOW_READ_ONLY")
+        self.assertEqual(result["summary"]["repositories"], 2)
+        self.assertEqual(result["summary"]["source_ok"], 2)
+        self.assertEqual(result["summary"]["machine_tasks"], 1)
+        self.assertEqual(
+            [item["repository"] for item in result["repositories"]],
+            [self.repository, second],
+        )
+
 
 
 class SyncHealthTrustTests(unittest.TestCase):
