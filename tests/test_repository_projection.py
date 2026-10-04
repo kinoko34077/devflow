@@ -289,5 +289,138 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
         self.assertEqual(record.html_url, "https://github.com/o/r/issues/11")
 
 
+
+class RepositoryProjectionCoreTests(unittest.TestCase):
+    def _issue(
+        self,
+        number,
+        *,
+        title="[BUG] issue",
+        body="",
+        created_at="2026-10-04T00:00:00Z",
+        updated_at="2026-10-04T00:00:00Z",
+        state="open",
+    ):
+        return {
+            "number": number,
+            "title": title,
+            "state": state,
+            "body": body,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "html_url": f"https://github.com/o/r/issues/{number}",
+        }
+
+    def _machine(self, **replacements):
+        payload = VALID_TASK
+        for old, new in replacements.items():
+            payload = payload.replace(old, new)
+        return block(payload)
+
+    def test_projection_supports_zero_to_many_machine_tasks(self):
+        empty = repository_projection.build_repository_projection(
+            "o/r",
+            [],
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(empty.open_issue_count, 0)
+        self.assertEqual(empty.machine_task_count, 0)
+        self.assertEqual(empty.task_records, ())
+
+        issues = [
+            self._issue(1, body=block(VALID_TASK)),
+            self._issue(
+                2,
+                body=block(
+                    VALID_TASK.replace(
+                        '"work_status": "READY_FOR_IMPLEMENTATION"',
+                        '"work_status": "IMPLEMENTING"',
+                    )
+                ),
+            ),
+            self._issue(
+                3,
+                title="[SPEC] tracker",
+                body=block(VALID_TASK.replace('"TASK"', '"TRACKER"')),
+            ),
+            self._issue(4, title="[BUG] legacy", body=""),
+        ]
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(projection.open_issue_count, 4)
+        self.assertEqual(projection.machine_task_count, 2)
+        self.assertEqual([item.number for item in projection.task_records], [1, 2])
+        self.assertEqual([item.number for item in projection.ready_tasks], [1])
+        self.assertEqual([item.number for item in projection.implementing_tasks], [2])
+
+    def test_newest_open_and_recently_active_are_distinct(self):
+        issues = [
+            self._issue(
+                10,
+                created_at="2026-10-04T03:00:00Z",
+                updated_at="2026-10-04T03:10:00Z",
+            ),
+            self._issue(
+                11,
+                created_at="2026-10-04T02:00:00Z",
+                updated_at="2026-10-04T03:30:00Z",
+            ),
+        ]
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(projection.newest_open_issue.number, 10)
+        self.assertEqual(projection.recently_active_issue.number, 11)
+
+    def test_projection_separates_machine_type_counts_from_legacy_hints(self):
+        issues = [
+            self._issue(20, body=block(VALID_TASK)),
+            self._issue(
+                21,
+                title="[SPEC] machine tracker",
+                body=block(
+                    VALID_TASK.replace('"TASK"', '"TRACKER"').replace(
+                        '"type": "BUG"',
+                        '"type": "SPEC"',
+                    )
+                ),
+            ),
+            self._issue(22, title="[BUG] legacy", body=""),
+            self._issue(23, title="ordinary issue", body=""),
+            self._issue(24, title="[BUG] bad explicit", body=f"{BEGIN}\n{{bad}}\n{END}"),
+            self._issue(25, title="[BUG] closed", body="", state="closed"),
+        ]
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            issues,
+            observed_at="2026-10-04T04:00:00Z",
+        )
+        self.assertEqual(projection.open_issue_count, 5)
+        self.assertEqual(projection.machine_type_counts, {"BUG": 1, "SPEC": 1})
+        self.assertEqual(projection.legacy_hint_type_counts, {"BUG": 1})
+        self.assertEqual(projection.legacy_hint_count, 1)
+        self.assertEqual(projection.unclassified_count, 1)
+        self.assertEqual(projection.invalid_metadata_count, 1)
+
+    def test_projection_source_failure_is_explicit_and_not_fresh(self):
+        projection = repository_projection.build_repository_projection(
+            "o/r",
+            [],
+            observed_at="2026-10-04T04:00:00Z",
+            source_status="UNAVAILABLE",
+            source_error="GitHub read failed",
+        )
+        self.assertEqual(projection.source_status, "UNAVAILABLE")
+        self.assertEqual(projection.source_freshness, "UNKNOWN")
+        self.assertEqual(projection.source_error, "GitHub read failed")
+        self.assertEqual(projection.open_issue_count, 0)
+        self.assertEqual(projection.task_records, ())
+
+
 if __name__ == "__main__":
     unittest.main()
