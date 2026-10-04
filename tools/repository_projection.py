@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from tools import marker_json, workflow_contract
@@ -59,6 +60,29 @@ class IssueMetadata:
     @property
     def is_task(self) -> bool:
         return self.record_role == "TASK"
+
+
+@dataclass(frozen=True)
+class IssueRecord:
+    number: int
+    title: str
+    state: str
+    created_at: str
+    updated_at: str
+    html_url: str | None
+    source_kind: str
+    record_role: str | None
+    type: str | None
+    work_status: str | None
+    metadata: IssueMetadata | None
+    metadata_error: str | None = None
+
+    @property
+    def is_task(self) -> bool:
+        return self.metadata is not None and self.metadata.is_task
+
+
+_LEADING_TAGS = re.compile(r"^((?:\[[^\]\r\n]+\])+)")
 
 
 def _require_bool(payload: dict[str, Any], field: str) -> bool:
@@ -185,3 +209,104 @@ def parse_issue_metadata(body: str) -> IssueMetadata | None:
     if payload is None:
         return None
     return _validate_payload(payload)
+
+
+def _issue_number(issue: dict[str, Any]) -> int:
+    value = issue.get("number")
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ProjectionContractError("Issue number must be a positive integer")
+    return value
+
+
+def _issue_text(issue: dict[str, Any], field: str) -> str:
+    value = issue.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ProjectionContractError(f"Issue {field} must be a non-empty string")
+    return value.strip()
+
+
+def _legacy_type_hint(title: str) -> str | None:
+    match = _LEADING_TAGS.match(title.strip())
+    if match is None:
+        return None
+    for tag in re.findall(r"\[([^\]]+)\]", match.group(1)):
+        if tag in _CONTRACT.types:
+            return tag
+    return None
+
+
+def classify_issue(issue: dict[str, Any]) -> IssueRecord:
+    number = _issue_number(issue)
+    title = _issue_text(issue, "title")
+    state = _issue_text(issue, "state").lower()
+    created_at = _issue_text(issue, "created_at")
+    updated_at = _issue_text(issue, "updated_at")
+    html_url_value = issue.get("html_url")
+    if html_url_value is not None and (
+        not isinstance(html_url_value, str) or not html_url_value.strip()
+    ):
+        raise ProjectionContractError("Issue html_url must be a non-empty string or null")
+    html_url = html_url_value.strip() if isinstance(html_url_value, str) else None
+
+    try:
+        metadata = parse_issue_metadata(str(issue.get("body") or ""))
+    except ProjectionContractError as exc:
+        return IssueRecord(
+            number=number,
+            title=title,
+            state=state,
+            created_at=created_at,
+            updated_at=updated_at,
+            html_url=html_url,
+            source_kind="INVALID_METADATA",
+            record_role=None,
+            type=None,
+            work_status=None,
+            metadata=None,
+            metadata_error=str(exc),
+        )
+
+    if metadata is not None:
+        return IssueRecord(
+            number=number,
+            title=title,
+            state=state,
+            created_at=created_at,
+            updated_at=updated_at,
+            html_url=html_url,
+            source_kind="MACHINE",
+            record_role=metadata.record_role,
+            type=metadata.type,
+            work_status=metadata.work_status,
+            metadata=metadata,
+        )
+
+    legacy_type = _legacy_type_hint(title)
+    if legacy_type is not None:
+        return IssueRecord(
+            number=number,
+            title=title,
+            state=state,
+            created_at=created_at,
+            updated_at=updated_at,
+            html_url=html_url,
+            source_kind="LEGACY_HINT",
+            record_role=None,
+            type=legacy_type,
+            work_status=None,
+            metadata=None,
+        )
+
+    return IssueRecord(
+        number=number,
+        title=title,
+        state=state,
+        created_at=created_at,
+        updated_at=updated_at,
+        html_url=html_url,
+        source_kind="UNCLASSIFIED",
+        record_role=None,
+        type=None,
+        work_status=None,
+        metadata=None,
+    )
