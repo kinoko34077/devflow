@@ -258,6 +258,114 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
             producer.apply_plan(writer, plan)
 
 
+class FakeFleetService:
+    devflow_repository = CONTROL_REPOSITORY
+
+    def __init__(self):
+        self.repositories = ["kinoko34077/demo", "kinoko34077/broken"]
+        self.reader = self
+        self.issues = {
+            7: {
+                "number": 7,
+                "title": "[REPO] demo",
+                "state": "open",
+                "body": CONTROL_BODY,
+                "author_association": "OWNER",
+            },
+            8: {
+                "number": 8,
+                "title": "[REPO] broken",
+                "state": "open",
+                "body": "## Repository\n\nkinoko34077/broken\n",
+                "author_association": "OWNER",
+            },
+        }
+
+    def list_managed_repositories(self):
+        return list(self.repositories)
+
+    def get_repository_control(self, repository):
+        return {
+            "repository": repository,
+            "issue_number": 7 if repository.endswith("/demo") else 8,
+        }
+
+    def get_issue(self, repository, number):
+        if repository != CONTROL_REPOSITORY:
+            raise AssertionError(repository)
+        return dict(self.issues[number])
+
+    def is_repository_control_trusted(self, issue, repository):
+        return True
+
+    def get_repository_projection(self, repository):
+        if repository.endswith("/broken"):
+            raise RuntimeError("simulated source read failure")
+        return projection()
+
+
+class FakeFleetWriter:
+    def __init__(self, issues):
+        self.bodies = {number: str(issue["body"]) for number, issue in issues.items()}
+        self.update_calls = []
+
+    def get_issue(self, repository, number):
+        return {
+            "number": number,
+            "title": f"[REPO] {number}",
+            "state": "open",
+            "body": self.bodies[number],
+        }
+
+    def update_issue_body(self, repository, number, body):
+        self.update_calls.append((repository, number, body))
+        self.bodies[number] = body
+        return True
+
+
+class ProjectionCacheFleetProducerTests(unittest.TestCase):
+    def test_fleet_continues_after_one_repository_failure_without_writing_failed_repo(self):
+        service = FakeFleetService()
+        writer = FakeFleetWriter(service.issues)
+
+        result = producer.run_fleet(
+            service,
+            writer,
+            generated_at=GENERATED_AT,
+            apply=True,
+        )
+
+        self.assertEqual(result["repository_count"], 2)
+        self.assertEqual(result["success_count"], 1)
+        self.assertEqual(result["failure_count"], 1)
+        self.assertEqual(
+            [item["repository"] for item in result["results"]],
+            ["kinoko34077/demo", "kinoko34077/broken"],
+        )
+        self.assertEqual(result["results"][0]["status"], "UPDATED")
+        self.assertEqual(result["results"][1]["status"], "FAILED")
+        self.assertIn("source read failure", result["results"][1]["error"])
+        self.assertEqual([call[1] for call in writer.update_calls], [7])
+        self.assertEqual(writer.bodies[8], service.issues[8]["body"])
+
+    def test_fleet_preview_performs_no_writes(self):
+        service = FakeFleetService()
+        service.repositories = ["kinoko34077/demo"]
+        writer = FakeFleetWriter(service.issues)
+
+        result = producer.run_fleet(
+            service,
+            writer,
+            generated_at=GENERATED_AT,
+            apply=False,
+        )
+
+        self.assertEqual(result["success_count"], 1)
+        self.assertEqual(result["failure_count"], 0)
+        self.assertEqual(result["results"][0]["status"], "PREVIEW")
+        self.assertEqual(writer.update_calls, [])
+
+
 class ProjectionCacheScriptTests(unittest.TestCase):
     def test_direct_script_help_is_import_safe(self):
         root = Path(__file__).resolve().parents[1]
@@ -272,6 +380,7 @@ class ProjectionCacheScriptTests(unittest.TestCase):
         self.assertIn("--repository", result.stdout)
         self.assertIn("--control", result.stdout)
         self.assertIn("--apply", result.stdout)
+        self.assertIn("--fleet", result.stdout)
 
 
 if __name__ == "__main__":
