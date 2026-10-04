@@ -114,6 +114,8 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
 
         self.assertEqual(payload["schema_version"], cache.CACHE_SCHEMA_VERSION)
         self.assertEqual(payload["repository"], REPOSITORY)
+        self.assertEqual(payload["generated_at"], GENERATED_AT)
+        self.assertEqual(payload["valid_until"], "2026-10-05T05:50:00Z")
         self.assertEqual(payload["source"]["status"], "AVAILABLE")
         self.assertEqual(payload["source"]["freshness"], "CURRENT")
         self.assertRegex(payload["source"]["digest"], r"^sha256:[0-9a-f]{64}$")
@@ -194,6 +196,46 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
                 "observed_at": OBSERVED_AT,
                 "detail": None,
             },
+        )
+
+    def test_cache_validity_window_is_producer_owned_and_fail_closed_after_expiry(self):
+        payload = cache.build_cached_projection(
+            REPOSITORY,
+            live_projection(),
+            generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(
+            cache.effective_cache_freshness(
+                payload,
+                now="2026-10-05T05:49:59Z",
+            ),
+            "CURRENT",
+        )
+        self.assertEqual(
+            cache.effective_cache_freshness(
+                payload,
+                now="2026-10-05T05:50:01Z",
+            ),
+            "STALE",
+        )
+
+    def test_source_unavailable_is_never_effectively_current(self):
+        payload = cache.build_cached_projection(
+            REPOSITORY,
+            live_projection(
+                source_status="UNAVAILABLE",
+                source_freshness="UNKNOWN",
+            ),
+            generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(
+            cache.effective_cache_freshness(
+                payload,
+                now="2026-10-04T06:00:00Z",
+            ),
+            "UNAVAILABLE",
         )
 
     def test_source_digest_is_stable_across_observation_time_but_generation_changes(self):
