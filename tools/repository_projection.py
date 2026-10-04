@@ -272,3 +272,15 @@ def classify_issue(issue: dict[str, Any]) -> dict[str, Any]:
         "metadata": None,
         "diagnostics": [],
     }
+
+
+def build_repository_projection(
+    repository: str,
+    issues: list[dict[str, Any]],
+    *,
+    observed_at: str,
+    source_status: str = "OK",
+    source_error: str | None = None,
+) -> dict[str, Any]:
+    """Build one pure read-only repository projection."""
+    raise NotImplementedError("M1.3 RED seam")
