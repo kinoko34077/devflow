@@ -261,21 +261,14 @@ jobs:
             fi
           done
 
-          if [[ "$CACHE_EVENT_NAME" == "schedule" ]]; then
+          if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
             python scripts/repository_projection_cache.py \
               --fleet \
               --read-token-env MAINTENANCE_AUDIT_TOKEN \
               --write-token-env GITHUB_TOKEN \
               --apply \
               --output repository-projection-cache-result.json
-          else
-            for value in "$CACHE_REPOSITORY" "$CACHE_CONTROL"
-            do
-              if [[ -z "$value" ]]; then
-                echo "manual projection-cache mode requires repository/control target" >&2
-                exit 2
-              fi
-            done
+          elif [[ -n "$CACHE_REPOSITORY" && -n "$CACHE_CONTROL" ]]; then
             python scripts/repository_projection_cache.py \
               --repository "$CACHE_REPOSITORY" \
               --control "$CACHE_CONTROL" \
@@ -283,6 +276,9 @@ jobs:
               --write-token-env GITHUB_TOKEN \
               --apply \
               --output repository-projection-cache-result.json
+          else
+            echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
+            exit 2
           fi
       - name: Upload projection cache result
         if: always() && hashFiles('repository-projection-cache-result.json') != ''
