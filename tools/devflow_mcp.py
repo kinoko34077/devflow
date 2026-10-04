@@ -62,6 +62,18 @@ def list_managed_repositories() -> list[str]:
 
 
 @mcp.tool()
+def get_repository_projection(repository: str) -> dict[str, Any]:
+    """Return the live read-only repository-local Issue projection for one managed repository."""
+    return _service().get_repository_projection(repository)
+
+
+@mcp.tool()
+def get_portfolio_projection() -> dict[str, Any]:
+    """Return a read-only summary projection across all currently managed repositories."""
+    return _service().get_portfolio_projection()
+
+
+@mcp.tool()
 def get_issue(repository: str, issue_number: int) -> dict[str, Any]:
     """Read one GitHub Issue from a repository. Private repositories require a read-capable token."""
     return _service().get_issue(repository, issue_number)
