@@ -196,6 +196,30 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             },
         )
 
+    def test_source_digest_is_stable_across_observation_time_but_generation_changes(self):
+        first_live = live_projection()
+        second_live = copy.deepcopy(first_live)
+        second_live["observed_at"] = "2026-10-04T05:59:00Z"
+        second_live["source_freshness"] = "STALE"
+
+        first = cache.build_cached_projection(
+            REPOSITORY,
+            first_live,
+            generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        second = cache.build_cached_projection(
+            REPOSITORY,
+            second_live,
+            generated_at="2026-10-04T06:00:00Z",
+            control_trust={
+                **verified_control_trust(freshness="STALE"),
+                "observed_at": "2026-10-04T05:59:00Z",
+            },
+        )
+        self.assertEqual(first["source"]["digest"], second["source"]["digest"])
+        self.assertNotEqual(first["generation_id"], second["generation_id"])
+
 
 class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
     def _payload(self):
