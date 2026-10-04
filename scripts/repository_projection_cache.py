@@ -89,8 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a bounded Repository Projection cache for one managed repository."
     )
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--control", required=True, type=int)
+    parser.add_argument("--repository")
+    parser.add_argument("--control", type=int)
+    parser.add_argument("--fleet", action="store_true")
     parser.add_argument("--read-token-env", default="MAINTENANCE_AUDIT_TOKEN")
     parser.add_argument("--write-token-env", default="GITHUB_TOKEN")
     parser.add_argument("--output", default="repository-projection-cache-result.json")
@@ -102,30 +103,51 @@ def main(argv: list[str] | None = None) -> int:
         service = devflow_mcp_core.DevflowService(
             devflow_mcp_core.GitHubReader(token=read_token)
         )
-        plan = producer.prepare_target(
-            service,
-            args.repository,
-            args.control,
-            generated_at=_utc_now(),
-        )
-
+        generated_at = _utc_now()
+        writer = None
         if args.apply:
             write_token = _token(args.write_token_env)
-            result = producer.apply_plan(
-                _IssueWriter(write_token),
-                plan,
+            writer = _IssueWriter(write_token)
+
+        if args.fleet:
+            if args.repository is not None or args.control is not None:
+                raise producer.RepositoryProjectionCacheProducerError(
+                    "--fleet cannot be combined with --repository/--control"
+                )
+            result = producer.run_fleet(
+                service,
+                writer,
+                generated_at=generated_at,
+                apply=args.apply,
             )
         else:
-            result = {
-                "status": "PREVIEW",
-                "repository": plan.repository,
-                "control_issue_number": plan.control_issue_number,
-                "generation_id": plan.generation_id,
-                "source_status": plan.source_status,
-                "coverage_status": plan.coverage_status,
-                "changed": plan.changed,
-                "expected_body_sha256": plan.expected_body_sha256,
-            }
+            if not args.repository or args.control is None:
+                raise producer.RepositoryProjectionCacheProducerError(
+                    "targeted mode requires --repository and --control"
+                )
+            plan = producer.prepare_target(
+                service,
+                args.repository,
+                args.control,
+                generated_at=generated_at,
+            )
+
+            if args.apply:
+                result = producer.apply_plan(
+                    writer,
+                    plan,
+                )
+            else:
+                result = {
+                    "status": "PREVIEW",
+                    "repository": plan.repository,
+                    "control_issue_number": plan.control_issue_number,
+                    "generation_id": plan.generation_id,
+                    "source_status": plan.source_status,
+                    "coverage_status": plan.coverage_status,
+                    "changed": plan.changed,
+                    "expected_body_sha256": plan.expected_body_sha256,
+                }
 
         _write_result(result, args.output)
         print(json.dumps(result, sort_keys=True))
