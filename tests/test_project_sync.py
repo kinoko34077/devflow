@@ -14,6 +14,44 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(sections["Priority"], "P1")
         self.assertNotIn("Not Priority", sections)
 
+    def test_repository_projection_cache_is_excluded_from_last_canonical_section(self):
+        marker = project_sync.REPOSITORY_PROJECTION_CACHE_MARKER_BEGIN
+        end = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
+        payload = (
+            "\n\n" + marker + "\n"
+            "{" + '"schema_version":"repository-projection-cache.v1",' + '"generation_id":"sha256:test"' + "}\n"
+            + end
+        )
+        cases = [
+            (
+                "## Next Action\n\n[WAIT] No active work." + payload,
+                "Next Action",
+                "[WAIT] No active work.",
+            ),
+            (
+                "## Audit Evidence\n\nrun 123 SUCCESS" + payload,
+                "Audit Evidence",
+                "run 123 SUCCESS",
+            ),
+        ]
+        for body, section, expected in cases:
+            with self.subTest(section=section):
+                sections = project_sync.parse_sections(body)
+                self.assertEqual(sections[section], expected)
+                self.assertNotIn("generation_id", sections[section])
+
+    def test_projection_cache_does_not_leak_into_project_text_fields(self):
+        body = (
+            "## Repository\n\nkinoko34077/demo\n\n"
+            "## Next Action\n\n[WAIT] bounded\n\n"
+            + project_sync.REPOSITORY_PROJECTION_CACHE_MARKER_BEGIN
+            + "\n{\"schema_version\":\"repository-projection-cache.v1\"}\n"
+            "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
+        )
+        fields = project_sync.desired_project_fields({"state": "open", "body": body})
+        self.assertEqual(fields["Managed Repository"], "kinoko34077/demo")
+        self.assertEqual(fields["Next Action"], "[WAIT] bounded")
+
     def test_desired_fields_closed_overrides_status(self):
         issue = {"state": "closed", "body": "## Work Status\n\nIMPLEMENTING\n\n## Type\n\nINFRA\n\n## Repository\n\n`kinoko34077/demo`"}
         fields = project_sync.desired_project_fields(issue)
