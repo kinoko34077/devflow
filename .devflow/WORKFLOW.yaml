@@ -278,6 +278,49 @@ handoff:
   devflow_summary_conflict_with_local_canon: reconcile_devflow_from_verified_local_canon
   ambiguous_local_canon_conflict: resolve_before_implementation
 
+chat_rollover_archive:
+  schema_version: 1
+  operations_doc: docs/operations/CHAT_ROLLOVER_ARCHIVE.md
+  canonical_shorthand: "ガイドライン読んで引き継ぎ"
+  trigger_match: explicit_semantic_equivalent_allowed
+  operation_role: close_or_handoff_current_chat_not_new_work_pickup
+  current_state_authority: false
+  live_canon_must_be_reconciled_first: true
+  canonical_new_issue_prefixes:
+    minutes: "[MINUTES]"
+    handoff: "[HANDOFF]"
+  separate_minutes_and_handoff_issues: true
+  historical_combined_record_titles_remain_valid: true
+  routing:
+    single_repository: one_pair_in_target_repository
+    multi_repository: one_pair_per_substantive_repository_owner
+    cross_repository_control_plane: devflow_pair_for_cross_repository_owned_material
+    incidental_repository_mentions_create_pair: false
+    no_valid_owner_action: report_placement_ambiguity_do_not_invent_repository
+  conversation_scope:
+    minutes: all_accessible_substantive_repository_relevant_current_chat_content
+    inaccessible_or_truncated_content: disclose_gap_do_not_fabricate
+    live_github_evidence_may_reconstruct_current_state_not_lost_chat_wording: true
+  duplicate_handling:
+    search_open_and_closed_archival_records: true
+    update_existing_pair_when_unambiguous: true
+    create_missing_mate_when_single_side_unambiguous: true
+    ambiguous_identity_action: create_new_pair_do_not_merge_unrelated_records
+  required_pair_linkage:
+    reciprocal_issue_links: true
+    shared_archive_pair_id: true
+    conversation_title_at_start_when_available: true
+    execution_session_id_when_available: true
+  before_finalization:
+    reconcile_owning_issue_or_work_order: true
+    reconcile_designated_durable_progress_surface: true
+    reconcile_task_checkpoint_cursor_when_eligible: true
+    reconcile_execution_session: true
+    reconcile_current_state_only_if_accepted_repository_state_changed: true
+    reconcile_repository_control_only_if_cross_repository_summary_changed: true
+  archive_issue_default_lifecycle: close_completed_after_finalization
+  unfinished_work_owner: owning_issue_or_work_order_not_archival_handoff
+
 task_checkpoint_cursor:
   status: required_when_eligible_single_frontier
   schema_version: 1
