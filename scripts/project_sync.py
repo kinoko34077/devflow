@@ -140,6 +140,12 @@ def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> d
     sections: dict[str, list[str]] = {}
     current: str | None = None
     for line in lines:
+        # Machine-owned DEVFLOW blocks are transport/state surfaces, never
+        # continuation text for the preceding canonical Markdown section.
+        # Reset section capture at BEGIN; a later ## heading resumes normally.
+        if re.match(r"^<!--\s*DEVFLOW_[A-Z0-9_]+_BEGIN\s*-->\s*$", line):
+            current = None
+            continue
         m = re.match(r"^## ([^#].*?)\s*$", line)
         if m:
             current = m.group(1).strip()
