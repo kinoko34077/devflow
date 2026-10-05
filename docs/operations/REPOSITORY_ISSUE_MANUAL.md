@@ -78,6 +78,8 @@ Keep each fact in the surface that owns it. Link or summarize elsewhere instead 
 | devflow Repository Control | cross-repository summary/index: Audit SHA, Work Status, Active Work, Next Action, entry points, readiness | repository-local implementation detail or full finding history |
 | devflow cross-repository Work Order | shared objective/order/constraints/final acceptance for coordinated work | local implementation specification for each repository |
 | GitHub Project | derived display / overview | authority or reverse source of truth |
+| Chat archival minutes Issue (`[MINUTES]`) | comprehensive accessible substantive chronology, user corrections, decisions, superseded paths and work history for one chat/repository portion | current-state authority, active task owner, replacement for repository canon |
+| Chat archival handoff Issue (`[HANDOFF]`) | chat-boundary resume index linking live owners/evidence and exact first unfinished action | replacement for owning Issue/Work Order, progress/Cursor/Session, Current State, PR/Review/CI |
 | Chat | exploration, clarification, transient analysis | durable source of truth |
 
 Use this decision test:
@@ -90,6 +92,8 @@ Use this decision test:
 6. **What proves review of one exact SHA?** -> formal Review.
 7. **Why was a durable architecture/design choice made?** -> ADR when that rationale has lasting value.
 8. **Does the fact need visibility elsewhere?** -> reference/link or compact summary; do not duplicate the full canonical content.
+9. **Does the user explicitly close/roll over the current chat and need its substantive history preserved?** -> repository-scoped `[MINUTES]` archival record under `CHAT_ROLLOVER_ARCHIVE.md`.
+10. **Does the successor need a compact chat-boundary resume index?** -> paired `[HANDOFF]` archival record, while the actual task state remains on its owning durable surfaces.
 
 `CURRENT_STATE` is not a second Issue tracker. Accepted repository-level capability, current integration boundary, supported environment and durable active limitation belong there. Fine-grained task progress such as `3/5 items implemented`, `reviewer waiting`, a temporary branch name, or a one-off test failure belongs in Issue/PR/Actions.
 
