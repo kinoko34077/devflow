@@ -272,10 +272,12 @@ def build_human_portfolio(
             raise ValueError("duplicate repository projection")
         by_repository[projection.repository] = projection
 
-    unknown_publication_repositories = set(publication_map) - set(by_repository)
-    if unknown_publication_repositories:
+    unknown_input_repositories = (
+        set(publication_map) | set(digest_map) | set(trust_map)
+    ) - set(by_repository)
+    if unknown_input_repositories:
         raise ValueError(
-            "reconciliation publications reference repositories without projections"
+            "Human Portfolio inputs reference repositories without projections"
         )
 
     return tuple(
