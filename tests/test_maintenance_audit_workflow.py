@@ -13,7 +13,10 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         cls.audit = cls.text.split("\n  audit:\n", 1)[1].split(
             "\n  publish:\n", 1
         )[0]
-        cls.publish = cls.text.split("\n  publish:\n", 1)[1]
+        cls.publish = cls.text.split("\n  publish:\n", 1)[1].split(
+            "\n  projection-cache:\n", 1
+        )[0]
+        cls.projection_cache = cls.text.split("\n  projection-cache:\n", 1)[1]
 
     def test_daily_schedule_is_exact_and_non_cancelling(self):
         self.assertIn("schedule:", self.text)
@@ -27,7 +30,11 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
 
     def test_schedule_can_enter_only_read_only_audit_job(self):
         self.assertIn(
-            "if: ${{ github.event_name == 'schedule' || inputs.mode == 'audit' }}",
+            "github.event.schedule == '30 13 * * *'",
+            self.audit,
+        )
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'audit'",
             self.audit,
         )
         self.assertIn(
@@ -39,6 +46,42 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("MAINTENANCE_SYNC_TOKEN:", self.audit)
         self.assertNotIn("--apply", self.audit)
 
+    def test_projection_cache_has_distinct_central_schedule_and_non_cancelling_concurrency(self):
+        self.assertIn("- cron: '0 14 * * *'", self.text)
+        self.assertIn(
+            "github.event.schedule == '30 13 * * *'",
+            self.audit,
+        )
+        self.assertIn(
+            "github.event.schedule == '0 14 * * *'",
+            self.projection_cache,
+        )
+        self.assertIn(
+            "group: repository-projection-cache-${{ github.repository }}",
+            self.projection_cache,
+        )
+        self.assertIn("cancel-in-progress: false", self.projection_cache)
+        self.assertNotIn("schedule:", self.publish)
+
+    def test_scheduled_projection_cache_uses_fleet_mode_without_target_inputs(self):
+        self.assertIn("--fleet", self.projection_cache)
+        self.assertIn("github.event_name == 'schedule'", self.projection_cache)
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache'",
+            self.projection_cache,
+        )
+        self.assertIn("issues: write", self.projection_cache)
+        self.assertNotIn("MAINTENANCE_SUPPLY_TOKEN", self.projection_cache)
+
+    def test_manual_projection_cache_without_target_reuses_same_central_fleet_job(self):
+        self.assertIn(
+            '-z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL"',
+            self.projection_cache,
+        )
+        self.assertIn(
+            'requires both repository and control, or neither for fleet mode',
+            self.projection_cache,
+        )
     def test_failure_evidence_remains_typed_and_uploaded(self):
         self.assertIn(
             "if: always() && hashFiles('maintenance-audit-report.json') != ''",

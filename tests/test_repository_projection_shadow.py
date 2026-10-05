@@ -151,14 +151,17 @@ class RepositoryProjectionShadowReportTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", source)
         self.assertIn("- projection-shadow", source)
         self.assertIn("projection-shadow:", source)
+        shadow_job = source.split("\n  projection-shadow:\n", 1)[1].split(
+            "\n  publish:\n", 1
+        )[0]
         self.assertIn("contents: read", source)
         self.assertIn("issues: read", source)
-        self.assertNotIn("contents: write", source)
-        self.assertNotIn("issues: write", source)
-        self.assertNotIn("pull-requests: write", source)
-        self.assertIn("MAINTENANCE_AUDIT_TOKEN", source)
-        self.assertIn("repository_projection_shadow.py", source)
-        self.assertIn("actions/upload-artifact@", source)
+        self.assertNotIn("contents: write", shadow_job)
+        self.assertNotIn("issues: write", shadow_job)
+        self.assertNotIn("pull-requests: write", shadow_job)
+        self.assertIn("MAINTENANCE_AUDIT_TOKEN", shadow_job)
+        self.assertIn("repository_projection_shadow.py", shadow_job)
+        self.assertIn("actions/upload-artifact@", shadow_job)
 
 
 if __name__ == "__main__":
