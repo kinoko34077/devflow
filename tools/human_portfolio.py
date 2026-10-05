@@ -31,6 +31,8 @@ class HumanPortfolioEntry:
     observed_at: str
     work_status: str | None = None
     publication_id: str | None = None
+    evidence_freshness: str = "UNKNOWN"
+    evidence_trust: str = "UNKNOWN"
 
     def __post_init__(self) -> None:
         if self.disposition not in ALL_DISPOSITIONS:
@@ -41,6 +43,10 @@ class HumanPortfolioEntry:
             raise ValueError("role must not be empty")
         if self.source_kind not in {"REPOSITORY_PROJECTION", "RECONCILIATION"}:
             raise ValueError("unsupported Human Portfolio source_kind")
+        if self.evidence_freshness not in {"CURRENT", "STALE", "UNKNOWN"}:
+            raise ValueError("unsupported Human Portfolio evidence_freshness")
+        if self.evidence_trust not in {"VERIFIED", "UNTRUSTED", "UNKNOWN"}:
+            raise ValueError("unsupported Human Portfolio evidence_trust")
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,12 @@ def _projection_entries(
                     source_kind="REPOSITORY_PROJECTION",
                     observed_at=projection.observed_at,
                     work_status=record.work_status,
+                    evidence_freshness=projection.source_freshness,
+                    evidence_trust=(
+                        "UNTRUSTED"
+                        if record.source_kind == "UNTRUSTED_METADATA"
+                        else "VERIFIED"
+                    ),
                 )
             )
             continue
@@ -99,6 +111,8 @@ def _projection_entries(
                 source_kind="REPOSITORY_PROJECTION",
                 observed_at=projection.observed_at,
                 work_status=record.work_status,
+                evidence_freshness=projection.source_freshness,
+                evidence_trust="VERIFIED",
             )
         )
     return entries
@@ -123,7 +137,13 @@ def _validated_publications(
 def _reconciliation_entries(
     repository: str,
     publications: Iterable[dict[str, Any]],
+    *,
+    current_task_body_sha256: dict[str, str],
+    source_trust: str,
 ) -> list[HumanPortfolioEntry]:
+    if source_trust not in {"VERIFIED", "UNTRUSTED", "UNKNOWN"}:
+        raise ValueError("unsupported reconciliation source trust")
+
     entries: list[HumanPortfolioEntry] = []
     seen_task_roles: set[tuple[str, str]] = set()
     for publication in _validated_publications(repository, publications):
@@ -136,9 +156,25 @@ def _reconciliation_entries(
             )
         seen_task_roles.add(key)
 
-        disposition = str(publication["disposition"])
-        if disposition not in RECONCILIATION_DISPOSITIONS:
+        desired_disposition = str(publication["disposition"])
+        if desired_disposition not in RECONCILIATION_DISPOSITIONS:
             raise ValueError("unsupported reconciliation disposition")
+
+        current_digest = current_task_body_sha256.get(task_ref)
+        recorded_digest = str(publication["task_body_sha256"])
+        if source_trust != "VERIFIED":
+            disposition = "NEEDS_EVIDENCE"
+            freshness = "UNKNOWN"
+        elif current_digest is None:
+            disposition = "NEEDS_EVIDENCE"
+            freshness = "UNKNOWN"
+        elif current_digest != recorded_digest:
+            disposition = "NEEDS_EVIDENCE"
+            freshness = "STALE"
+        else:
+            disposition = desired_disposition
+            freshness = "CURRENT"
+
         entries.append(
             HumanPortfolioEntry(
                 repository=repository,
@@ -149,6 +185,8 @@ def _reconciliation_entries(
                 source_kind="RECONCILIATION",
                 observed_at=str(publication["observed_at"]),
                 publication_id=str(publication["publication_id"]),
+                evidence_freshness=freshness,
+                evidence_trust=source_trust,
             )
         )
     return entries
@@ -158,6 +196,8 @@ def build_repository_human_portfolio(
     projection: repository_projection.RepositoryProjection,
     *,
     reconciliation_publications: Iterable[dict[str, Any]] = (),
+    reconciliation_task_body_sha256: dict[str, str] | None = None,
+    reconciliation_source_trust: str = "UNKNOWN",
 ) -> HumanPortfolioRead:
     """Build one read-only operator queue from already-validated authorities.
 
@@ -188,6 +228,8 @@ def build_repository_human_portfolio(
         _reconciliation_entries(
             projection.repository,
             reconciliation_publications,
+            current_task_body_sha256=reconciliation_task_body_sha256 or {},
+            source_trust=reconciliation_source_trust,
         )
     )
     entries.sort(
@@ -216,10 +258,14 @@ def build_human_portfolio(
     reconciliation_publications: dict[
         str, Iterable[dict[str, Any]]
     ] | None = None,
+    reconciliation_task_body_sha256: dict[str, dict[str, str]] | None = None,
+    reconciliation_source_trust: dict[str, str] | None = None,
 ) -> tuple[HumanPortfolioRead, ...]:
     """Build deterministic multi-repository Human Portfolio reads."""
 
     publication_map = reconciliation_publications or {}
+    digest_map = reconciliation_task_body_sha256 or {}
+    trust_map = reconciliation_source_trust or {}
     by_repository: dict[str, repository_projection.RepositoryProjection] = {}
     for projection in projections:
         if projection.repository in by_repository:
@@ -236,6 +282,8 @@ def build_human_portfolio(
         build_repository_human_portfolio(
             by_repository[repository],
             reconciliation_publications=publication_map.get(repository, ()),
+            reconciliation_task_body_sha256=digest_map.get(repository, {}),
+            reconciliation_source_trust=trust_map.get(repository, "UNKNOWN"),
         )
         for repository in sorted(by_repository)
     )
