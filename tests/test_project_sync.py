@@ -21,6 +21,37 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(fields["Work Type"], "INFRA")
         self.assertEqual(fields["Managed Repository"], "kinoko34077/demo")
 
+    def test_machine_marker_block_does_not_bleed_into_preceding_project_field(self):
+        body = (
+            "## Repository\n\n`kinoko34077/demo`\n\n"
+            "## Next Action\n\n`[WAIT] No active work.`\n\n"
+            "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->\n"
+            "{\n"
+            '  "repository": "kinoko34077/demo",\n'
+            '  "schema_version": "repository-projection-cache.v1"\n'
+            "}\n"
+            "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
+        )
+        fields = project_sync.desired_project_fields({"state": "open", "body": body})
+        self.assertEqual(fields["Next Action"], "[WAIT] No active work.")
+        self.assertNotIn("schema_version", fields["Next Action"])
+
+    def test_machine_marker_boundary_preserves_later_canonical_sections(self):
+        body = (
+            "## Audit Evidence\n\n`run 123 SUCCESS`\n\n"
+            "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->\n"
+            "{}\n"
+            "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->\n\n"
+            "## Next Action\n\n`[WAIT] Resume only on a concrete finding.`"
+        )
+        fields = project_sync.desired_project_fields({"state": "open", "body": body})
+        self.assertEqual(fields["Audit Evidence"], "run 123 SUCCESS")
+        self.assertEqual(
+            fields["Next Action"],
+            "[WAIT] Resume only on a concrete finding.",
+        )
+
+
     def test_wait_control_maps_to_existing_project_status_alias(self):
         issue = {
             "state": "open",
