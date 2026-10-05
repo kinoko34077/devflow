@@ -110,6 +110,11 @@ class HumanPortfolioReadModelTests(unittest.TestCase):
         result = human_portfolio.build_repository_human_portfolio(
             projection,
             reconciliation_publications=[reviewer, recovery],
+            reconciliation_task_body_sha256={
+                "owner/repo#7": "sha256:" + "c" * 64,
+                "owner/repo#8": "sha256:" + "d" * 64,
+            },
+            reconciliation_source_trust="VERIFIED",
         )
 
         self.assertTrue(result.complete)
@@ -171,11 +176,62 @@ class HumanPortfolioReadModelTests(unittest.TestCase):
         result = human_portfolio.build_repository_human_portfolio(
             projection,
             reconciliation_publications=[reviewer],
+            reconciliation_task_body_sha256={
+                "owner/repo#7": "sha256:" + "c" * 64,
+            },
+            reconciliation_source_trust="VERIFIED",
         )
 
         self.assertFalse(result.complete)
         self.assertEqual("UNAVAILABLE", result.source_status)
         self.assertEqual((), result.entries)
+
+    def test_reconciliation_demand_without_current_digest_becomes_needs_evidence(self):
+        projection = _projection()
+        reviewer = _reviewer_publication(7)
+
+        result = human_portfolio.build_repository_human_portfolio(
+            projection,
+            reconciliation_publications=[reviewer],
+            reconciliation_source_trust="VERIFIED",
+        )
+
+        self.assertEqual(1, len(result.entries))
+        self.assertEqual("NEEDS_EVIDENCE", result.entries[0].disposition)
+        self.assertEqual("UNKNOWN", result.entries[0].evidence_freshness)
+        self.assertEqual("VERIFIED", result.entries[0].evidence_trust)
+
+    def test_stale_reconciliation_task_digest_is_not_promoted(self):
+        projection = _projection()
+        reviewer = _reviewer_publication(7)
+
+        result = human_portfolio.build_repository_human_portfolio(
+            projection,
+            reconciliation_publications=[reviewer],
+            reconciliation_task_body_sha256={
+                "owner/repo#7": "sha256:" + "e" * 64,
+            },
+            reconciliation_source_trust="VERIFIED",
+        )
+
+        self.assertEqual("NEEDS_EVIDENCE", result.entries[0].disposition)
+        self.assertEqual("STALE", result.entries[0].evidence_freshness)
+
+    def test_unverified_reconciliation_source_is_not_promoted(self):
+        projection = _projection()
+        reviewer = _reviewer_publication(7)
+
+        result = human_portfolio.build_repository_human_portfolio(
+            projection,
+            reconciliation_publications=[reviewer],
+            reconciliation_task_body_sha256={
+                "owner/repo#7": "sha256:" + "c" * 64,
+            },
+            reconciliation_source_trust="UNKNOWN",
+        )
+
+        self.assertEqual("NEEDS_EVIDENCE", result.entries[0].disposition)
+        self.assertEqual("UNKNOWN", result.entries[0].evidence_trust)
 
     def test_duplicate_reconciliation_task_role_fails_closed(self):
         projection = _projection()
@@ -186,6 +242,10 @@ class HumanPortfolioReadModelTests(unittest.TestCase):
             human_portfolio.build_repository_human_portfolio(
                 projection,
                 reconciliation_publications=[first, second],
+                reconciliation_task_body_sha256={
+                    "owner/repo#7": "sha256:" + "c" * 64,
+                },
+                reconciliation_source_trust="VERIFIED",
             )
 
     def test_multi_repository_output_is_deterministic_and_requires_projection(self):
