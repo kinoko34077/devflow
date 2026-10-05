@@ -168,6 +168,14 @@ When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a bro
 
 Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository broad pickup is accepted through completed #198/#208; only currently published, fresh, eligible portfolio evidence may participate.
 
+## 8.2 Chat rollover archive / handoff shorthand
+
+When the user explicitly says **「ガイドライン読んで引き継ぎ」** or gives a clear semantic equivalent asking to read the live guidelines and archive/handoff the current chat, do not ask them to restate the long procedure. Run the canonical procedure in `docs/operations/CHAT_ROLLOVER_ARCHIVE.md`.
+
+This operation is not broad work pickup. It closes or hands off the current chat. Re-read live repository authority first, reconcile the actual owning task/progress/session/cursor surfaces, then create or update the repository-scoped archival pair using the existing canonical title prefixes **`[MINUTES]`** and **`[HANDOFF]`**. Historical combined record titles remain valid but are not the default for new rollover archives.
+
+The minutes preserve the accessible substantive chat history; the handoff is a resume index pointing to live current-state authority. Neither archival Issue replaces the owning Issue / Work Order, Current State, specification, PR/Review/CI evidence, Task Checkpoint Cursor or designated durable progress surface. If part of the chat is inaccessible/truncated, record that gap rather than inventing it.
+
 ## 9. Creating a new repository
 
 When the user explicitly asks to create a new repository from the current conversation/source context, use Repository Bootstrap rather than manually reproducing repository creation, seed commit, initial Issue creation and devflow onboarding as separate ad-hoc operations.
@@ -207,3 +215,4 @@ Read before creating a request:
 - Machine-readable workflow: `.devflow/WORKFLOW.yaml`
 - Project synchronization: `docs/project/PROJECT_SYNC.md`
 - Chat worker broad-instruction pickup: `docs/operations/CHAT_WORKER_INTEGRATION.md`
+- Chat rollover archive / handoff: `docs/operations/CHAT_ROLLOVER_ARCHIVE.md`
