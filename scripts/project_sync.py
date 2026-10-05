@@ -89,6 +89,7 @@ AUDIT_PROJECT_FIELD_SPECS = {
 }
 
 CONTROL_PREFIX = "[REPO] "
+REPOSITORY_PROJECTION_CACHE_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->"
 AUDIT_FRESHNESS_LABELS = {
     "CURRENT": "devflow:audit-freshness:current",
     "DRIFTED": "devflow:audit-freshness:drifted",
@@ -140,6 +141,10 @@ def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> d
     sections: dict[str, list[str]] = {}
     current: str | None = None
     for line in lines:
+        # Repository Projection is a machine-owned transport block, not part of
+        # the preceding canonical Control section or the Project projection.
+        if line.strip() == REPOSITORY_PROJECTION_CACHE_MARKER_BEGIN:
+            break
         m = re.match(r"^## ([^#].*?)\s*$", line)
         if m:
             current = m.group(1).strip()
