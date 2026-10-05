@@ -522,6 +522,8 @@ Before leaving unfinished work, make sure the durable records reveal:
 
 Do not rely on “continue from the previous chat” as the handoff mechanism.
 
+When the user explicitly closes/rolls over the current chat with the shorthand **「ガイドライン読んで引き継ぎ」** or a clear semantic equivalent, run `docs/operations/CHAT_ROLLOVER_ARCHIVE.md` after reconciling the normal durable handoff surfaces above. That procedure adds a historical `[MINUTES]` record and a current-boundary `[HANDOFF]` resume index; it does **not** replace the owning Issue / Work Order, progress surface, Cursor, Session Record, Current State, PR/Review/CI evidence, or live devflow Control.
+
 Resume after timeout/interruption in this order:
 
 ```text
