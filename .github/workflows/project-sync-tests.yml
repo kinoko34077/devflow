@@ -59,3 +59,4 @@ jobs:
           tools/maintenance_sync_check.py
           tools/maintenance_supply.py
           tools/maintenance_catalog.py
+          tools/maintenance_selector.py
