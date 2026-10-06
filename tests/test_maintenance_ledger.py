@@ -10,9 +10,9 @@ def ledger_body(status="AUDITED", block=""):
     return (
         "# Maintenance Audit Ledger\n\n"
         "## Repository\n\n"
-        f"\`{REPO}\`\n\n"
+        f"`{REPO}`\n\n"
         "## Work Status\n\n"
-        f"\`{status}\`\n"
+        f"`{status}`\n"
         + ("\n" + block if block else "")
     )
 
