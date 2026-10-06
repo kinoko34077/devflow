@@ -4,6 +4,18 @@ This is the required entry point for GPT/agent work that uses KiNoTch. cross-rep
 
 Do not use chat history, GitHub Project fields, or an old summary as the source of truth when the current GitHub state is available.
 
+## 0. Non-negotiable execution invariants
+
+Read and apply these before any non-trivial managed-repository work. They are execution rules, not optional reminders.
+
+1. **Recovery before throughput.** For qualifying GitHub-backed work, establish or reuse the owning durable progress surface before substantive continuation. Keep the Task Checkpoint Cursor when eligible, and externalize each completed materially distinct unit before starting the next one.
+2. **Authority before implementation.** Read the live Repository Control, owning Issue / Work Order, and the task-relevant canonical specification / Current State / accepted plan / handoff or source material they reference before mutation. Do not reconstruct the task from chat. Historical proposals remain context unless current authority explicitly promotes them.
+3. **Native/direct path first.** Inspect and prefer repository- and GitHub-native scripts, Actions, tests, MCP/API/CLI surfaces and direct supported workflows before inventing bridges, local emulation, repeated manual relay or auxiliary tooling. Use the shortest competent path that still satisfies safety and durability rules.
+4. **Global replan at every material boundary.** After checkpointing a materially distinct unit, when switching tool/execution paths, and before extra verification or surrounding reconciliation, return to the original user objective, current acceptance state and live evidence. Explicitly choose among `CONTINUE / CHANGE_PATH / SPLIT / HOLD / STOP`. Start another unit only when it maps directly to an unmet acceptance condition, a concrete defect/safety boundary, or an explicit user request. If acceptance is satisfied, perform only the minimum required reconciliation and stop.
+5. **RDC / alternate environments are last-resort gap fillers.** Use Remote Desktop Commander, remote shells/desktops or equivalent only for the exact operation that cannot reasonably be completed through the normal/native path. Keep that use bounded, do not move surrounding work into the alternate environment, and return to the normal path after the gap is closed. Repeated tool friction is a replan trigger, not a reason to keep forcing the same route.
+
+Detailed durability and decision procedures live in `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md` and `docs/operations/AGENT_OPERATING_MANUAL.md`. The owning repository remains the detailed technical authority.
+
 ## 1. Start from the target repository name
 
 Given `kinoko34077/<repo>`:

@@ -108,7 +108,7 @@ This convention deliberately mirrors execution-coordinator lifecycle concepts bu
 
 Before mutation:
 
-1. read the owning task, current branch/PR/head and active/recent Session Records;
+1. read the owning task, its task-relevant canonical specifications / accepted plan / handoff or source references, current branch/PR/head and active/recent Session Records;
 2. compare the intended semantic scope with other apparently active sessions;
 3. if overlap exists, choose an explicit disposition before continuing: continue one, split scopes, integrate, wait, or take over a stale/abandoned predecessor;
 4. create or resume the worker-owned record with `Execution-Session-ID`, worker/model, `Conversation-Title-At-Start`, role, scope, excludes, verified base SHA, branch/PR if known, latest checkpoint, next action and blocker;
@@ -189,6 +189,29 @@ If two active sessions overlap semantically, stop broad mutation until one dispo
 - `TAKEOVER`: predecessor is stale/abandoned and a successor session explicitly assumes scope.
 
 This convention makes overlap visible and recoverable; execution-coordinator remains the future/runtime authority for atomic claim/lease/fencing behavior.
+
+#### Global replan / termination gate
+
+Every materially distinct checkpoint is also a decision boundary, not only a logging boundary.
+
+After the current unit has been checkpointed, and also when the execution/tool path changes or before starting additional verification or surrounding reconciliation, re-evaluate from the broadest relevant view:
+
+1. **Original objective** — what result did the user actually request?
+2. **Acceptance state** — which acceptance conditions are already satisfied, and which remain unmet?
+3. **Unresolved correctness / safety gap** — what concrete failure or safety boundary remains if work stops now?
+4. **Candidate dispositions** — explicitly consider `CONTINUE`, `CHANGE_PATH`, `SPLIT`, `HOLD`, and `STOP`.
+5. **Shortest competent path** — choose the least additional surface/tooling that can close the remaining gap while preserving safety, durability and repository rules.
+6. **Marginal evidence / value** — identify what new accepted state or falsifiable evidence the proposed next unit adds.
+
+A new unit is justified only when it maps directly to at least one of:
+
+- an unmet acceptance condition;
+- a concrete defect or safety boundary;
+- an explicit user request.
+
+Mere relatedness, available tooling, hygiene, possible cleanup, or “it would be nice to reconcile more” is not sufficient. When the requested objective and acceptance are already satisfied, perform only the minimum directly affected-surface reconciliation required for correctness, then stop.
+
+Repeated friction or failure in a tool/execution route is itself a replan trigger. Re-select a more direct competent path or leave a durable handoff rather than expanding ceremony to force the failing route.
 
 #### Provenance boundary
 

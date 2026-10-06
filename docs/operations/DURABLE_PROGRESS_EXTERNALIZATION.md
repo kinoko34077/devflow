@@ -85,11 +85,12 @@ Before crossing into the next materially distinct recovery unit:
 2. externalize its accepted/result state to the durable progress surface;
 3. set the first unfinished next action;
 4. reconcile the directly affected durable surfaces when the accepted transition would otherwise leave them stale, contradictory, or misleading;
-5. only then begin the next unit.
+5. run the global replan / termination gate against the original objective, current acceptance and live evidence; explicitly choose `CONTINUE / CHANGE_PATH / SPLIT / HOLD / STOP`;
+6. only then begin the next unit when continued work is justified by an unmet acceptance condition, a concrete defect/safety boundary, or an explicit user request.
 
 Do not use "write progress at the end", "clean it up later", or "write progress when replying in chat" as the normal schedule.
 
-Checkpoint externalization and affected-surface reconciliation precede the next material unit.
+Checkpoint externalization and affected-surface reconciliation precede the decision to enter the next material unit. A checkpoint is also a decision boundary: if acceptance is already satisfied, complete only the minimum required reconciliation and stop rather than continuing into merely related work.
 
 ## 7. Affected-surface reconciliation before exit
 
