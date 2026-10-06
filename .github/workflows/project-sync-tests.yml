@@ -21,6 +21,9 @@ on:
       - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
       - 'docs/spec/REPOSITORY_BOOTSTRAP.md'
+      - 'docs/spec/maintenance/**'
+      - 'docs/spec/schemas/maintenance-catalog.v1.schema.json'
+      - '.devflow/maintenance.yaml'
       - 'requirements-mcp.txt'
 
 permissions:
@@ -55,3 +58,4 @@ jobs:
           tools/maintenance_triage.py
           tools/maintenance_sync_check.py
           tools/maintenance_supply.py
+          tools/maintenance_catalog.py
