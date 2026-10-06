@@ -116,21 +116,27 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict[str, object
     return result
 
 
+def _parse_json_yaml_text(text: str, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text, object_pairs_hook=_reject_duplicate_pairs)
+    except MaintenanceCatalogError:
+        raise
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise MaintenanceCatalogError(
+            f"{label} must use the JSON-compatible YAML 1.2 subset"
+        ) from exc
+    if not isinstance(value, dict):
+        raise MaintenanceCatalogError(f"{label} must be an object")
+    return value
+
+
 def _load_json_yaml(path: Path | str, label: str) -> dict[str, Any]:
     source = Path(path)
     try:
         text = source.read_text(encoding="utf-8")
     except OSError as exc:
         raise MaintenanceCatalogError(f"cannot read {label}: {source}") from exc
-    try:
-        value = json.loads(text, object_pairs_hook=_reject_duplicate_pairs)
-    except MaintenanceCatalogError:
-        raise
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise MaintenanceCatalogError(f"{label} must use the JSON-compatible YAML 1.2 subset") from exc
-    if not isinstance(value, dict):
-        raise MaintenanceCatalogError(f"{label} must be an object")
-    return value
+    return _parse_json_yaml_text(text, label)
 
 
 def _closed_object(value: object, label: str, allowed: set[str], required: set[str]) -> dict[str, Any]:
@@ -224,8 +230,8 @@ def _unique(values: tuple[object, ...], key, label: str) -> None:
         seen.add(identity)
 
 
-def load_common_baseline(path: Path | str) -> CommonBaseline:
-    data = _load_json_yaml(path, "maintenance common baseline")
+def parse_common_baseline_text(text: str) -> CommonBaseline:
+    data = _parse_json_yaml_text(text, "maintenance common baseline")
     allowed = {
         "schema_version", "catalog_schema_version", "lenses", "risk_policy",
         "freshness_classes", "selector_weights", "common_slots",
@@ -297,6 +303,17 @@ def load_common_baseline(path: Path | str) -> CommonBaseline:
     )
 
 
+def load_common_baseline(path: Path | str) -> CommonBaseline:
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MaintenanceCatalogError(
+            f"cannot read maintenance common baseline: {source}"
+        ) from exc
+    return parse_common_baseline_text(text)
+
+
 def _common_override(value: object, label: str, known_slot_ids: set[str]) -> CommonSlotOverride:
     allowed = {
         "slot_id", "lifecycle", "cadence_class", "minimum_depth",
@@ -332,8 +349,11 @@ def _common_override(value: object, label: str, known_slot_ids: set[str]) -> Com
     )
 
 
-def load_repository_catalog(path: Path | str, baseline: CommonBaseline) -> RepositoryCatalog:
-    data = _load_json_yaml(path, "maintenance catalog")
+def parse_repository_catalog_text(
+    text: str,
+    baseline: CommonBaseline,
+) -> RepositoryCatalog:
+    data = _parse_json_yaml_text(text, "maintenance catalog")
     allowed = {
         "schema_version", "repository", "baseline", "rollout", "risk_profile",
         "scope_risk_overrides", "repository_lenses", "common_slot_overrides",
@@ -428,6 +448,20 @@ def load_repository_catalog(path: Path | str, baseline: CommonBaseline) -> Repos
     if not any(slot.lens == "security" and slot.lifecycle == "ACTIVE" for slot in resolved):
         raise MaintenanceCatalogError("Security coverage may not be removed from a repository")
     return catalog
+
+
+def load_repository_catalog(
+    path: Path | str,
+    baseline: CommonBaseline,
+) -> RepositoryCatalog:
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MaintenanceCatalogError(
+            f"cannot read maintenance catalog: {source}"
+        ) from exc
+    return parse_repository_catalog_text(text, baseline)
 
 
 def _resolved_risk(catalog: RepositoryCatalog, scope: Scope) -> str:
