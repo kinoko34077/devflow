@@ -4,17 +4,21 @@ This document defines the canonical end-of-chat archival and handoff procedure f
 
 It exists so the user does not have to restate a long instruction every time a chat approaches saturation or is intentionally rolled over.
 
-## 1. Trigger
+## 1. User command and standing authority
 
-The canonical shorthand is:
+The preferred exact user command is:
 
-> ガイドライン読んで引き継ぎ
+> **kinoko34077/devflow#361を読んで、このチャット全体を議事録化し、後続チャット用資料を作成**
 
-Treat an explicit semantic equivalent as the same request when it clearly asks the worker to read the live development guidelines and hand off/archive the **current chat**.
+Read the Issue named by the command, **`kinoko34077/devflow#361`**, first. It is the stable standing operational entry point for this procedure.
 
-Do not ask the user to repeat the longer procedure when the intent is unambiguous.
+The action direction is explicit: the current worker creates the records, the current chat is the source, and the successor chat is the future consumer. The command means **create the records; do not take over or resume successor work**.
 
-This trigger is different from broad work pickup. It does not select new work. It closes or hands off the current chat's work in a recoverable form.
+A semantic equivalent may invoke the same procedure only when that direction is explicit. The former phrase **「ガイドライン読んで引き継ぎ」** is legacy/ambiguous and is not the recommended trigger.
+
+Do not ask the user to repeat the longer procedure when the exact issue-addressed command or an equally explicit equivalent is present.
+
+This operation is different from broad work pickup. It does not select new work. It records and closes the current chat boundary in a recoverable form.
 
 ## 2. Authority boundary
 

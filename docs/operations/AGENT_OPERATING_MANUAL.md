@@ -522,7 +522,7 @@ Before leaving unfinished work, make sure the durable records reveal:
 
 Do not rely on “continue from the previous chat” as the handoff mechanism.
 
-When the user explicitly closes/rolls over the current chat with the shorthand **「ガイドライン読んで引き継ぎ」** or a clear semantic equivalent, run `docs/operations/CHAT_ROLLOVER_ARCHIVE.md` after reconciling the normal durable handoff surfaces above. That procedure adds a historical `[MINUTES]` record and a current-boundary `[HANDOFF]` resume index; it does **not** replace the owning Issue / Work Order, progress surface, Cursor, Session Record, Current State, PR/Review/CI evidence, or live devflow Control.
+When the user explicitly invokes **「kinoko34077/devflow#361を読んで、このチャット全体を議事録化し、後続チャット用資料を作成」**, read standing authority `kinoko34077/devflow#361` first and then run `docs/operations/CHAT_ROLLOVER_ARCHIVE.md` after reconciling the normal durable handoff surfaces above. The current worker creates records for a successor chat; this is not a takeover/resume instruction. A semantic equivalent is acceptable only when that direction is explicit. The older phrase **「ガイドライン読んで引き継ぎ」** is legacy/ambiguous and not canonical. The procedure adds a historical `[MINUTES]` record and a current-boundary `[HANDOFF]` resume index; it does **not** replace the owning Issue / Work Order, progress surface, Cursor, Session Record, Current State, PR/Review/CI evidence, or live devflow Control.
 
 Resume after timeout/interruption in this order:
 
