@@ -38,6 +38,7 @@ from tools.maintenance_github import (  # noqa: E402
     DEVFLOW_REPOSITORY,
     GitHubReadError,
     GitHubReadTransport,
+    collect_maintenance_selection,
     collect_portfolio,
     collect_repository,
     discover_controls,
@@ -176,6 +177,21 @@ def _portfolio(args: argparse.Namespace) -> int:
         ]
     _write(payload, args.output)
     return 0
+
+
+def _select_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = GitHubReadTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    result = collect_maintenance_selection(
+        transport,
+        args.repository,
+        f"{DEVFLOW_REPOSITORY}#{args.control}",
+        observed_at,
+    )
+    _write(result, args.output)
+    return 0
+
 
 
 def _split_issue_ref(value: str) -> tuple[str, int]:
@@ -897,6 +913,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     portfolio.add_argument("--output")
     portfolio.set_defaults(func=_portfolio)
+
+    select_maintenance = sub.add_parser("select-maintenance")
+    select_maintenance.add_argument("--repository", required=True)
+    select_maintenance.add_argument("--control", required=True, type=int)
+    select_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_AUDIT_TOKEN",
+    )
+    select_maintenance.add_argument("--observed-at")
+    select_maintenance.add_argument("--output")
+    select_maintenance.set_defaults(func=_select_maintenance)
 
     sync_check = sub.add_parser("sync-check")
     sync_check.add_argument("--repository", required=True)
