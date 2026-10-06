@@ -168,11 +168,19 @@ When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a bro
 
 Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository broad pickup is accepted through completed #198/#208; only currently published, fresh, eligible portfolio evidence may participate.
 
-## 8.2 Chat rollover archive / handoff shorthand
+## 8.2 Chat rollover record command
 
-When the user explicitly says **「ガイドライン読んで引き継ぎ」** or gives a clear semantic equivalent asking to read the live guidelines and archive/handoff the current chat, do not ask them to restate the long procedure. Run the canonical procedure in `docs/operations/CHAT_ROLLOVER_ARCHIVE.md`.
+The preferred exact user command is:
 
-This operation is not broad work pickup. It closes or hands off the current chat. Re-read live repository authority first, reconcile the actual owning task/progress/session/cursor surfaces, then create or update the repository-scoped archival pair using the existing canonical title prefixes **`[MINUTES]`** and **`[HANDOFF]`**. Historical combined record titles remain valid but are not the default for new rollover archives.
+> **「kinoko34077/devflow#361を読んで、このチャット全体を議事録化し、後続チャット用資料を作成」**
+
+When this command is received, first read the standing command authority **`kinoko34077/devflow#361`**, then run the canonical procedure in `docs/operations/CHAT_ROLLOVER_ARCHIVE.md`. Do not ask the user to restate the longer procedure.
+
+The actor/action direction is intentional: the **current worker creates records from the current chat for a successor chat**. This is not broad work pickup and is **not** an instruction for the current worker to take over or resume successor work.
+
+A clear semantic equivalent may invoke the same operation only when it explicitly asks to record/archive the current chat and create successor-use material. The older phrase **「ガイドライン読んで引き継ぎ」** is legacy/ambiguous and must not be recommended as the canonical trigger.
+
+Re-read live repository authority first, reconcile the actual owning task/progress/session/cursor surfaces, then create or update the repository-scoped archival pair using the existing canonical title prefixes **`[MINUTES]`** and **`[HANDOFF]`**. Historical combined record titles remain valid but are not the default for new rollover archives.
 
 The minutes preserve the accessible substantive chat history; the handoff is a resume index pointing to live current-state authority. Neither archival Issue replaces the owning Issue / Work Order, Current State, specification, PR/Review/CI evidence, Task Checkpoint Cursor or designated durable progress surface. If part of the chat is inaccessible/truncated, record that gap rather than inventing it.
 
