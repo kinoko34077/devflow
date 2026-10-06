@@ -1,6 +1,6 @@
 # Standing Maintenance Catalog + Idle Fallback Audit Supply — Design
 
-Status: DRAFT / USER REVIEW REQUIRED
+Status: USER APPROVED 2026-10-07 / IMPLEMENTATION PLAN REVIEW REQUIRED
 Owning Issue: devflow#363
 Scope: cross-repository maintenance supply, recurring audit rotation, durable audit progress, finding escalation, and broad-work fallback
 Implementation authority: not released by this document
@@ -647,11 +647,13 @@ Detailed evidence belongs in the Ledger/Audit Issue/PR/Actions.
 
 ## 37. Review gate
 
-Before implementation planning begins:
-1. this design is reviewed by the user;
-2. contradictions with live devflow authority are repaired;
-3. canonical implementation targets are named;
-4. #209 publication extension and execution-coordinator interaction are represented in the future plan;
-5. rollout remains PILOT until evidence supports broader adoption.
+User design approval was recorded on 2026-10-07.
 
-Implementation must not begin from this draft before that review gate.
+Implementation planning may proceed, but implementation itself still requires:
+1. the implementation plan to remain consistent with live devflow authority;
+2. canonical implementation targets to be named;
+3. #209 publication extension and execution-coordinator interaction to be represented in the plan;
+4. rollout to remain PILOT until evidence supports broader adoption;
+5. the implementation plan to pass its user/execution-method review gate.
+
+Design approval does not itself release implementation.
