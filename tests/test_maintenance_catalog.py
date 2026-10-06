@@ -123,6 +123,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
             "rollout": "PILOT",
             "risk_profile": "HIGH",
             "scope_risk_overrides": [],
+            "repository_lenses": [],
             "common_slot_overrides": [],
             "repository_slots": [],
         }
@@ -205,6 +206,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
             "scope": {"kind": "component", "selector": "parser"},
             "lens": "correctness",
             "coverage_key": "repo.parser",
+            "cadence_class": "GENERAL",
             "minimum_depth": "STANDARD",
             "external_freshness_class": "NORMAL",
             "description": "Parser correctness",
@@ -224,6 +226,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
             "scope": {"kind": "component", "selector": "parser"},
             "lens": "correctness",
             "coverage_key": "repo.parser",
+            "cadence_class": "GENERAL",
             "minimum_depth": "STANDARD",
             "external_freshness_class": "NORMAL",
             "description": "Parser correctness",
@@ -252,6 +255,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
             "scope": {"kind": "component", "selector": "old"},
             "lens": "correctness",
             "coverage_key": "repo.retired",
+            "cadence_class": "GENERAL",
             "minimum_depth": "STANDARD",
             "external_freshness_class": "NORMAL",
             "description": "Old audit",
@@ -298,6 +302,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
             "scope": {"kind": "planet", "selector": "mars"},
             "lens": "correctness",
             "coverage_key": "repo.bad",
+            "cadence_class": "GENERAL",
             "minimum_depth": "STANDARD",
             "external_freshness_class": "NORMAL",
             "description": "Bad scope",
@@ -305,6 +310,31 @@ class MaintenanceCatalogTests(unittest.TestCase):
         self._write_json(self.catalog_path, data)
         with self.assertRaisesRegex(mc.MaintenanceCatalogError, "scope"):
             mc.load_repository_catalog(self.catalog_path, baseline)
+
+        for field, value in (
+            ("lifecycle", "PAUSED"),
+            ("minimum_depth", "FULL"),
+            ("external_freshness_class", "INSTANT"),
+        ):
+            with self.subTest(slot_field=field):
+                data = self._catalog()
+                slot = {
+                    "slot_id": "repo.enum",
+                    "title": "Enum",
+                    "lifecycle": "ACTIVE",
+                    "scope": {"kind": "component", "selector": "enum"},
+                    "lens": "correctness",
+                    "coverage_key": "repo.enum",
+                    "cadence_class": "GENERAL",
+                    "minimum_depth": "STANDARD",
+                    "external_freshness_class": "NORMAL",
+                    "description": "Enum audit",
+                }
+                slot[field] = value
+                data["repository_slots"] = [slot]
+                self._write_json(self.catalog_path, data)
+                with self.assertRaises(mc.MaintenanceCatalogError):
+                    mc.load_repository_catalog(self.catalog_path, baseline)
 
     def test_catalog_digest_is_stable_across_object_key_order(self):
         baseline, catalog = self._load()
@@ -314,6 +344,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
         reordered = {
             "repository_slots": data["repository_slots"],
             "scope_risk_overrides": data["scope_risk_overrides"],
+            "repository_lenses": data["repository_lenses"],
             "risk_profile": data["risk_profile"],
             "rollout": data["rollout"],
             "baseline": data["baseline"],
