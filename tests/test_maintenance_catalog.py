@@ -94,6 +94,7 @@ class MaintenanceCatalogTests(unittest.TestCase):
                     "scope": {"kind": "repository", "selector": "."},
                     "lens": lens["id"],
                     "coverage_key": f"common.{lens['id']}",
+                    "cadence_class": "SECURITY" if lens["id"] == "security" else "GENERAL",
                     "minimum_depth": "STANDARD",
                     "external_freshness_class": "NORMAL",
                     "description": f"Common {lens['title']} audit",
