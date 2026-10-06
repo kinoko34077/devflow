@@ -13,6 +13,7 @@ on:
         default: audit
         options:
           - audit
+          - maintenance-select
           - projection-shadow
           - publish
           - projection-cache
@@ -177,6 +178,50 @@ jobs:
         with:
           name: repository-projection-shadow
           path: repository-projection-shadow.json
+
+  maintenance-select:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-select' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: maintenance-select-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Select predefined maintenance read-only
+        env:
+          MAINTENANCE_AUDIT_TOKEN: ${{ secrets.MAINTENANCE_AUDIT_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SELECT_REPOSITORY: ${{ inputs.repository }}
+          SELECT_CONTROL: ${{ inputs.control }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$SELECT_REPOSITORY" || -z "$SELECT_CONTROL" ]]; then
+            echo "maintenance-select requires repository and control" >&2
+            exit 2
+          fi
+          TOKEN_ENV=MAINTENANCE_AUDIT_TOKEN
+          if [[ "$SELECT_REPOSITORY" == "kinoko34077/devflow" ]]; then
+            TOKEN_ENV=GITHUB_TOKEN
+          elif [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
+            echo "cross-repository maintenance selection requires MAINTENANCE_AUDIT_TOKEN" >&2
+            exit 2
+          fi
+          python scripts/maintenance_audit.py select-maintenance \
+            --repository "$SELECT_REPOSITORY" \
+            --control "$SELECT_CONTROL" \
+            --token-env "$TOKEN_ENV" \
+            --output maintenance-selection.json
+      - name: Upload maintenance selection
+        if: always() && hashFiles('maintenance-selection.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: maintenance-selection
+          path: maintenance-selection.json
+
 
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' }}
