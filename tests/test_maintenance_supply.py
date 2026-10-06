@@ -1373,5 +1373,236 @@ class MaintenanceSupplyDocumentationTests(unittest.TestCase):
         )
 
 
+def catalog_selection(**selected_overrides):
+    selected = {
+        "run_id": "audit:o/r:common.correctness:1",
+        "slot_id": "common.correctness",
+        "generation": 1,
+        "lens": "correctness",
+        "depth": "STANDARD",
+        "coverage_key": "common.correctness",
+        "scope": {"kind": "repository", "selector": "."},
+        "fingerprint": "sha256:" + "d" * 64,
+        "score": 55,
+        "score_breakdown": [
+            {"name": "never_run", "value": 40},
+            {"name": "unexecuted_lens", "value": 15},
+        ],
+    }
+    selected.update(selected_overrides)
+    return {
+        "schema_version": "maintenance-selection.v1",
+        "repository": "o/r",
+        "control_ref": "kinoko34077/devflow#1",
+        "ledger_ref": "o/r#7",
+        "status": "SELECTED",
+        "reason_code": "MAINTENANCE_SELECTED",
+        "catalog_digest": "sha256:" + "e" * 64,
+        "code_sha": "f" * 40,
+        "selected": selected,
+    }
+
+
+def catalog_ledger(**overrides):
+    value = {
+        "task_ref": "o/r#7",
+        "repository": "o/r",
+        "body_sha256": BODY_SHA,
+        "state": "OPEN",
+        "work_status": "READY_FOR_IMPLEMENTATION",
+        "trusted": True,
+        "is_pull_request": False,
+        "entry_ref": "https://github.com/o/r/issues/7",
+        "active_run": {
+            "repository": "o/r",
+            "run_id": "audit:o/r:common.correctness:1",
+            "slot_id": "common.correctness",
+            "generation": 1,
+            "catalog_digest": "sha256:" + "e" * 64,
+            "fingerprint": "sha256:" + "d" * 64,
+            "depth": "STANDARD",
+            "coverage_key": "common.correctness",
+            "publisher_attempt_id": "attempt-p5",
+        },
+    }
+    value.update(overrides)
+    return value
+
+
+class CatalogMaintenanceSupplyTests(unittest.TestCase):
+    def test_catalog_ledger_builds_existing_protocol_candidate(self):
+        supply = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        self.assertIsNotNone(supply)
+        self.assertEqual("maintenance-catalog-supply.v1", supply["schema_version"])
+        self.assertEqual("o/r#7", supply["admission"]["task"])
+        self.assertEqual(BODY_SHA, supply["admission"]["task_body_sha256"])
+        self.assertEqual("READY_FOR_IMPLEMENTATION", supply["admission"]["task_work_status"])
+        self.assertEqual(
+            [{"role": "implementer", "next_action_tag": "IMPLEMENT"}],
+            supply["admission"]["roles"],
+        )
+        self.assertEqual("audit", supply["portfolio"]["work_class"])
+        self.assertEqual(BODY_SHA, supply["portfolio"]["task_body_sha256"])
+        self.assertEqual("attempt-p5", supply["publisher_execution_attempt_id"])
+        self.assertEqual(
+            ["component:o/r:maintenance"],
+            supply["admission"]["conflict_keys"],
+        )
+
+    def test_catalog_candidate_fingerprint_matches_existing_protocol(self):
+        import hashlib
+        import json
+        supply = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        admission = supply["admission"]
+        expected = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {
+                    "task": admission["task"],
+                    "role": "implementer",
+                    "entry_ref": admission["entry_ref"],
+                    "conflict_keys": admission["conflict_keys"],
+                    "scope_ready": True,
+                    "blocked": False,
+                    "requires_user_confirmation": False,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(expected, supply["candidate_fingerprint"])
+
+    def test_catalog_supply_requires_exact_active_run_and_ledger_identity(self):
+        cases = (
+            catalog_ledger(task_ref="o/r#8"),
+            catalog_ledger(state="CLOSED"),
+            catalog_ledger(work_status="AUDITED"),
+            catalog_ledger(trusted=False),
+            catalog_ledger(is_pull_request=True),
+            catalog_ledger(active_run=dict(catalog_ledger()["active_run"], run_id="audit:o/r:common.correctness:2")),
+            catalog_ledger(active_run=dict(catalog_ledger()["active_run"], catalog_digest="sha256:" + "0" * 64)),
+            catalog_ledger(active_run=dict(catalog_ledger()["active_run"], fingerprint="sha256:" + "0" * 64)),
+        )
+        for ledger in cases:
+            with self.subTest(ledger=ledger):
+                self.assertIsNone(
+                    ms.build_catalog_maintenance_candidate(
+                        catalog_selection(),
+                        ledger,
+                        control(),
+                    )
+                )
+
+    def test_catalog_supply_respects_stronger_control_gates(self):
+        for field in ("human_gate", "external_wait"):
+            with self.subTest(field=field):
+                self.assertIsNone(
+                    ms.build_catalog_maintenance_candidate(
+                        catalog_selection(),
+                        catalog_ledger(),
+                        control(**{field: True}),
+                    )
+                )
+
+    def test_catalog_projection_explicitly_adds_new_ledger_candidate(self):
+        supply = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        body, changed = ms.reconcile_catalog_maintenance_projection_body(
+            empty_control_body(),
+            supply,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertIn('"task": "o/r#7"', body)
+        self.assertIn('"work_class": "audit"', body)
+
+        same, changed = ms.reconcile_catalog_maintenance_projection_body(
+            body,
+            supply,
+            task_ref="o/r#7",
+        )
+        self.assertFalse(changed)
+        self.assertEqual(body, same)
+
+    def test_catalog_new_generation_replaces_same_ledger_task(self):
+        first = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        body, _ = ms.reconcile_catalog_maintenance_projection_body(
+            empty_control_body(),
+            first,
+            task_ref="o/r#7",
+        )
+        second_selection = catalog_selection(
+            run_id="audit:o/r:common.correctness:2",
+            generation=2,
+            fingerprint="sha256:" + "9" * 64,
+        )
+        second_ledger = catalog_ledger(
+            body_sha256=OTHER_SHA,
+            active_run=dict(
+                catalog_ledger()["active_run"],
+                run_id="audit:o/r:common.correctness:2",
+                generation=2,
+                fingerprint="sha256:" + "9" * 64,
+            ),
+        )
+        second = ms.build_catalog_maintenance_candidate(
+            second_selection,
+            second_ledger,
+            control(),
+        )
+        body2, changed = ms.reconcile_catalog_maintenance_projection_body(
+            body,
+            second,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertEqual(1, body2.count('"task": "o/r#7"'))
+        self.assertIn(OTHER_SHA, body2)
+        self.assertNotIn(BODY_SHA, body2)
+
+    def test_catalog_projection_withdraws_only_ledger_task(self):
+        supply = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        body, _ = ms.reconcile_catalog_maintenance_projection_body(
+            empty_control_body(),
+            supply,
+            task_ref="o/r#7",
+        )
+        withdrawn, changed = ms.reconcile_catalog_maintenance_projection_body(
+            body,
+            None,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertNotIn('"task": "o/r#7"', withdrawn)
+
+    def test_catalog_publisher_attempt_preserves_3c_fence(self):
+        supply = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(publisher_execution_attempt_id="attempt-p5"),
+        )
+        self.assertTrue(ms.published_by_attempt(supply, "attempt-p5"))
+        self.assertFalse(ms.published_by_attempt(supply, "attempt-b"))
+
+
 if __name__ == "__main__":
     unittest.main()
