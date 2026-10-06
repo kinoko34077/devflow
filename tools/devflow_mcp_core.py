@@ -19,8 +19,21 @@ try:
         parse_provenance_document,
         parse_request_body,
     )
-    from . import github_issue_trust, repository_projection, workflow_contract
+    from . import (
+        github_issue_trust,
+        human_portfolio,
+        maintenance_sync_check,
+        reconciliation_publication,
+        repository_projection,
+        workflow_contract,
+    )
 except ImportError:  # direct script execution
+    import sys
+
+    _repository_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _repository_root not in sys.path:
+        sys.path.insert(0, _repository_root)
+
     from repository_bootstrap import (
         BootstrapError,
         normalize_request,
@@ -29,6 +42,9 @@ except ImportError:  # direct script execution
         parse_request_body,
     )
     import github_issue_trust
+    import human_portfolio
+    import maintenance_sync_check
+    import reconciliation_publication
     import repository_projection
     import workflow_contract
 
@@ -39,6 +55,7 @@ DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 API_BASE = "https://api.github.com"
 USER_AGENT = "kinotch-devflow-mcp"
+HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
 
 
 class DevflowMCPError(RuntimeError):
@@ -709,6 +726,128 @@ class DevflowService:
             projection,
             include_records=True,
         )
+
+    @staticmethod
+    def _human_portfolio_entry_dict(
+        entry: human_portfolio.HumanPortfolioEntry,
+    ) -> dict[str, Any]:
+        return {
+            "repository": entry.repository,
+            "task_ref": entry.task_ref,
+            "entry_ref": entry.entry_ref,
+            "disposition": entry.disposition,
+            "role": entry.role,
+            "source_kind": entry.source_kind,
+            "observed_at": entry.observed_at,
+            "work_status": entry.work_status,
+            "publication_id": entry.publication_id,
+            "evidence_freshness": entry.evidence_freshness,
+            "evidence_trust": entry.evidence_trust,
+        }
+
+    def get_human_portfolio(self, repository: str) -> dict[str, Any]:
+        """Return one live read-only Human Portfolio queue for a managed repository."""
+
+        normalized = normalize_repository(repository)
+        control = self.get_repository_control(normalized)
+        observed_at = self._observed_at_factory()
+        projection = self._read_repository_projection(
+            normalized,
+            observed_at=observed_at,
+        )
+
+        control_issue = self.reader.get_issue(
+            self.devflow_repository,
+            control["issue_number"],
+        )
+        if (
+            str(control_issue.get("title") or "").strip()
+            != f"[REPO] {normalized.split('/', 1)[1]}"
+            or not self._is_accepted_control(control_issue, normalized)
+        ):
+            raise DevflowMCPError(
+                "Repository Control identity/trust changed during Human Portfolio read."
+            )
+
+        control_body = str(control_issue.get("body") or "")
+        publication_status = "AVAILABLE"
+        publication_error: str | None = None
+        publications: list[dict[str, Any]] = []
+        try:
+            publications = reconciliation_publication.parse_publication_projection(
+                control_body,
+                normalized,
+            )
+        except ValueError as exc:
+            publication_status = "INVALID"
+            publication_error = str(exc)
+
+        task_digests: dict[str, str] = {}
+        task_errors: list[dict[str, str]] = []
+        if publication_status == "AVAILABLE":
+            for publication in publications:
+                task_ref = str(publication["task_ref"])
+                _, raw_number = task_ref.rsplit("#", 1)
+                task_number = int(raw_number)
+                try:
+                    task_issue = self.reader.get_issue(normalized, task_number)
+                except DevflowMCPError as exc:
+                    task_errors.append(
+                        {"task_ref": task_ref, "error": str(exc)}
+                    )
+                    continue
+                if str(task_issue.get("state") or "").casefold() != "open":
+                    task_errors.append(
+                        {
+                            "task_ref": task_ref,
+                            "error": "owning task is not open",
+                        }
+                    )
+                    continue
+                task_digests[task_ref] = (
+                    maintenance_sync_check.canonical_body_sha256(
+                        str(task_issue.get("body") or "")
+                    )
+                )
+
+        source_trust = (
+            "VERIFIED" if publication_status == "AVAILABLE" else "UNKNOWN"
+        )
+        portfolio = human_portfolio.build_repository_human_portfolio(
+            projection,
+            reconciliation_publications=(
+                publications if publication_status == "AVAILABLE" else ()
+            ),
+            reconciliation_task_body_sha256=task_digests,
+            reconciliation_source_trust=source_trust,
+        )
+        return {
+            "schema_version": HUMAN_PORTFOLIO_READ_SCHEMA_VERSION,
+            "repository": normalized,
+            "observed_at": observed_at,
+            "complete": (
+                portfolio.complete
+                and publication_status == "AVAILABLE"
+                and not task_errors
+            ),
+            "repository_source": {
+                "status": portfolio.source_status,
+                "freshness": portfolio.source_freshness,
+                "error": portfolio.source_error,
+            },
+            "reconciliation_source": {
+                "status": publication_status,
+                "trust": source_trust,
+                "control_issue_number": control["issue_number"],
+                "control_url": control["url"],
+                "error": publication_error,
+                "task_errors": task_errors,
+            },
+            "entries": [
+                self._human_portfolio_entry_dict(entry)
+                for entry in portfolio.entries
+            ],
+        }
 
     def get_portfolio_projection(self) -> dict[str, Any]:
         observed_at = self._observed_at_factory()

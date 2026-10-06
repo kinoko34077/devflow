@@ -74,6 +74,12 @@ def get_portfolio_projection() -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_human_portfolio(repository: str) -> dict[str, Any]:
+    """Return the live read-only Human Portfolio queue for one managed repository."""
+    return _service().get_human_portfolio(repository)
+
+
+@mcp.tool()
 def get_issue(repository: str, issue_number: int) -> dict[str, Any]:
     """Read one GitHub Issue from a repository. Private repositories require a read-capable token."""
     return _service().get_issue(repository, issue_number)
