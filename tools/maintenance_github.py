@@ -7,13 +7,53 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable
+from dataclasses import asdict
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping
 
 try:
     from tools import devflow_mcp_core, workflow_contract
+    from tools.maintenance_catalog import (
+        MaintenanceCatalogError,
+        canonical_catalog_digest,
+        parse_common_baseline_text,
+        parse_repository_catalog_text,
+        resolve_catalog,
+    )
+    from tools.maintenance_ledger import (
+        MaintenanceLedgerError,
+        RunRecord,
+        next_generation,
+        parse_run_comment,
+    )
+    from tools.maintenance_selector import (
+        RunEvidence,
+        SelectionContext,
+        canonical_fingerprint,
+        select_maintenance,
+    )
 except ImportError:  # direct module execution
     import devflow_mcp_core
     import workflow_contract
+    from maintenance_catalog import (
+        MaintenanceCatalogError,
+        canonical_catalog_digest,
+        parse_common_baseline_text,
+        parse_repository_catalog_text,
+        resolve_catalog,
+    )
+    from maintenance_ledger import (
+        MaintenanceLedgerError,
+        RunRecord,
+        next_generation,
+        parse_run_comment,
+    )
+    from maintenance_selector import (
+        RunEvidence,
+        SelectionContext,
+        canonical_fingerprint,
+        select_maintenance,
+    )
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
@@ -224,10 +264,16 @@ class GitHubReadTransport:
         self,
         repository: str,
         path: str,
+        ref: str | None = None,
     ) -> dict[str, Any] | None:
         encoded_path = urllib.parse.quote(path, safe="/")
+        suffix = (
+            "?ref=" + urllib.parse.quote(ref, safe="")
+            if ref is not None
+            else ""
+        )
         value, _headers = self._request(
-            f"/repos/{repository}/contents/{encoded_path}",
+            f"/repos/{repository}/contents/{encoded_path}{suffix}",
             allow_404=True,
         )
         if value is None:
@@ -250,6 +296,14 @@ class GitHubReadTransport:
             "content": content,
             "sha": value.get("sha"),
         }
+
+    def get_repository_file(
+        self,
+        repository: str,
+        path: str,
+        ref: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.get_file(repository, path, ref=ref)
 
     def get_pull(self, repository: str, number: int) -> dict[str, Any]:
         value = self.get_json(f"/repos/{repository}/pulls/{number}")
@@ -849,3 +903,377 @@ def discover_controls(
             str(item["control_ref"]),
         ),
     )
+
+
+MAINTENANCE_BASELINE_PATH = "docs/spec/maintenance/common-baseline.v1.yaml"
+MAINTENANCE_CATALOG_PATH = ".devflow/maintenance.yaml"
+MAINTENANCE_LEDGER_TITLE = "[MAINTENANCE] Audit Ledger"
+MAINTENANCE_SELECTION_SCHEMA = "maintenance-selection.v1"
+
+
+def _default_head(transport: Any, repository: str) -> str:
+    branch = transport.get_default_branch(repository)
+    commit = branch.get("commit") if isinstance(branch, dict) else None
+    head = commit.get("sha") if isinstance(commit, dict) else None
+    if not isinstance(head, str) or len(head) != 40:
+        raise GitHubReadError("default-branch head SHA is unavailable")
+    return head
+
+
+def _catalog_bundle(
+    transport: Any,
+    repository: str,
+) -> tuple[object, object, tuple[object, ...], str, str, dict[str, Any], dict[str, Any]]:
+    target_head = _default_head(transport, repository)
+    baseline_head = _default_head(transport, DEVFLOW_REPOSITORY)
+
+    baseline_file = transport.get_repository_file(
+        DEVFLOW_REPOSITORY,
+        MAINTENANCE_BASELINE_PATH,
+        ref=baseline_head,
+    )
+    if not isinstance(baseline_file, dict):
+        raise GitHubReadError("maintenance common baseline is unavailable")
+
+    catalog_file = transport.get_repository_file(
+        repository,
+        MAINTENANCE_CATALOG_PATH,
+        ref=target_head,
+    )
+    if catalog_file is None:
+        raise FileNotFoundError(MAINTENANCE_CATALOG_PATH)
+    if not isinstance(catalog_file, dict):
+        raise GitHubReadError("maintenance catalog read is malformed")
+
+    baseline_text = baseline_file.get("content")
+    catalog_text = catalog_file.get("content")
+    if not isinstance(baseline_text, str) or not isinstance(catalog_text, str):
+        raise GitHubReadError("maintenance catalog content is unavailable")
+
+    baseline = parse_common_baseline_text(baseline_text)
+    catalog = parse_repository_catalog_text(catalog_text, baseline)
+    if catalog.repository != repository:
+        raise MaintenanceCatalogError(
+            "maintenance catalog repository identity mismatch"
+        )
+    slots = resolve_catalog(baseline, catalog)
+    digest = canonical_catalog_digest(baseline, catalog)
+    return (
+        baseline,
+        catalog,
+        slots,
+        digest,
+        target_head,
+        dict(baseline_file),
+        dict(catalog_file),
+    )
+
+
+def collect_maintenance_catalog(
+    transport: Any,
+    repository: str,
+    control_ref: str,
+) -> dict[str, object]:
+    try:
+        baseline, catalog, slots, digest, head, baseline_file, catalog_file = _catalog_bundle(
+            transport,
+            repository,
+        )
+    except FileNotFoundError:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "status": "NO_CATALOG",
+            "reason_code": "CATALOG_NOT_FOUND",
+        }
+    except (MaintenanceCatalogError, GitHubReadError, ValueError) as exc:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CATALOG_INVALID",
+            "detail": str(exc),
+        }
+
+    return {
+        "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+        "repository": repository,
+        "control_ref": control_ref,
+        "status": "OK",
+        "reason_code": "CATALOG_READY",
+        "code_sha": head,
+        "catalog_digest": digest,
+        "rollout": catalog.rollout,
+        "risk_profile": catalog.risk_profile,
+        "slot_count": len(slots),
+        "baseline_file_sha": baseline_file.get("sha"),
+        "catalog_file_sha": catalog_file.get("sha"),
+        "evidence_refs": [
+            f"{DEVFLOW_REPOSITORY}:{MAINTENANCE_BASELINE_PATH}@{baseline_file.get('sha')}",
+            f"{repository}:{MAINTENANCE_CATALOG_PATH}@{catalog_file.get('sha')}",
+            control_ref,
+        ],
+    }
+
+
+def _trusted_issue(issue: Mapping[str, object]) -> bool:
+    return str(issue.get("author_association") or "").upper() in TRUSTED_ASSOCIATIONS
+
+
+def find_maintenance_ledger(
+    transport: Any,
+    repository: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    matches = [
+        dict(item)
+        for item in transport.list_issues(repository, state="open")
+        if isinstance(item, dict)
+        and "pull_request" not in item
+        and item.get("title") == MAINTENANCE_LEDGER_TITLE
+        and _trusted_issue(item)
+    ]
+    if not matches:
+        return None, "LEDGER_NOT_FOUND"
+    if len(matches) != 1:
+        return None, "LEDGER_DUPLICATE"
+    issue = matches[0]
+    number = issue.get("number")
+    if not isinstance(number, int):
+        return None, "LEDGER_INVALID"
+    return issue, None
+
+
+def collect_maintenance_history(
+    transport: Any,
+    repository: str,
+    ledger_issue: int,
+) -> tuple[RunRecord, ...]:
+    records: list[RunRecord] = []
+    for comment in transport.list_issue_comments(repository, ledger_issue):
+        if not isinstance(comment, dict):
+            continue
+        body = comment.get("body")
+        if not isinstance(body, str):
+            continue
+        if str(comment.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
+            continue
+        try:
+            record = parse_run_comment(body)
+        except MaintenanceLedgerError as exc:
+            raise GitHubReadError(
+                f"trusted maintenance Ledger comment is malformed: {exc}"
+            ) from exc
+        if record is None:
+            continue
+        if record.repository != repository:
+            raise GitHubReadError(
+                "maintenance Ledger run repository identity mismatch"
+            )
+        records.append(record)
+    records.sort(key=lambda item: (item.completed_at, item.run_id))
+    return tuple(records)
+
+
+def build_maintenance_fingerprint(
+    code_sha: str,
+    catalog_digest: str,
+    external_state: Mapping[str, object] | None = None,
+) -> str:
+    return canonical_fingerprint(
+        {
+            "code_sha": code_sha,
+            "catalog_digest": catalog_digest,
+            "external_state": dict(external_state or {}),
+        }
+    )
+
+
+def _parse_observed_at(value: str) -> datetime:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise GitHubReadError("maintenance observed_at must be RFC3339 UTC")
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise GitHubReadError(
+            "maintenance observed_at must be RFC3339 UTC"
+        ) from exc
+
+
+def collect_maintenance_selection(
+    transport: Any,
+    repository: str,
+    control_ref: str,
+    observed_at: str,
+    *,
+    external_state: Mapping[str, object] | None = None,
+    previous_repository: str | None = None,
+) -> dict[str, object]:
+    public = collect_maintenance_catalog(
+        transport,
+        repository,
+        control_ref,
+    )
+    if public.get("status") != "OK":
+        return public
+
+    try:
+        baseline, catalog, slots, digest, head, _baseline_file, _catalog_file = _catalog_bundle(
+            transport,
+            repository,
+        )
+    except (MaintenanceCatalogError, GitHubReadError, FileNotFoundError, ValueError) as exc:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CATALOG_DRIFT",
+            "detail": str(exc),
+        }
+
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        repository,
+    )
+    if ledger_error is not None:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": ledger_error,
+        }
+    assert ledger is not None
+    number = ledger["number"]
+    try:
+        history = collect_maintenance_history(
+            transport,
+            repository,
+            number,
+        )
+    except GitHubReadError as exc:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "LEDGER_INVALID",
+            "detail": str(exc),
+        }
+
+    if catalog.rollout == "DISABLED":
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "ledger_ref": f"{repository}#{number}",
+            "status": "NO_ELIGIBLE_WORK",
+            "reason_code": "MAINTENANCE_DISABLED",
+        }
+
+    current_fingerprint = build_maintenance_fingerprint(
+        head,
+        digest,
+        external_state,
+    )
+    current_fingerprints = {
+        f"{slot.repository}::{slot.slot_id}": current_fingerprint
+        for slot in slots
+    }
+    slot_by_id = {slot.slot_id: slot for slot in slots}
+    selector_history: list[RunEvidence] = []
+    for record in history:
+        slot = slot_by_id.get(record.slot_id)
+        if slot is None:
+            continue
+        selector_history.append(
+            RunEvidence(
+                repository=record.repository,
+                slot_id=record.slot_id,
+                lens=record.lens,
+                coverage_key=slot.coverage_key,
+                scope_kind=slot.scope.kind,
+                scope_selector=slot.scope.selector,
+                depth=record.depth,
+                fingerprint=record.fingerprint,
+                completed_at=_parse_observed_at(record.completed_at),
+                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+            )
+        )
+
+    context = SelectionContext(
+        observed_at=_parse_observed_at(observed_at),
+        target_repository=repository,
+        previous_repository=previous_repository,
+        eligible_repositories=frozenset({repository}),
+        current_fingerprints=current_fingerprints,
+        relevant_changes=frozenset(),
+        security_events=frozenset(),
+        finding_reaudits=frozenset(),
+        external_stale=frozenset(),
+        incomplete_evidence=frozenset(
+            f"{item.repository}::{item.slot_id}"
+            for item in selector_history
+            if not item.evidence_complete
+        ),
+        recovery_needed=frozenset(),
+        explicit_user_requests=frozenset(),
+        justified_deep=frozenset(),
+        blocked_slots=frozenset(),
+        risk_policy=baseline.risk_policy,
+        selector_weights=baseline.selector_weights,
+    )
+    selected = select_maintenance(
+        tuple(slots),
+        context,
+        tuple(selector_history),
+    )
+    ledger_ref = f"{repository}#{number}"
+    if selected is None:
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            "ledger_ref": ledger_ref,
+            "catalog_digest": digest,
+            "code_sha": head,
+            "status": "NO_ELIGIBLE_WORK",
+            "reason_code": "MAINTENANCE_EXHAUSTED",
+        }
+
+    generation = next_generation(
+        history,
+        repository,
+        selected.slot.slot_id,
+    )
+    run_id = (
+        f"audit:{repository}:{selected.slot.slot_id}:{generation}"
+    )
+    return {
+        "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "status": "SELECTED",
+        "reason_code": "MAINTENANCE_SELECTED",
+        "catalog_digest": digest,
+        "code_sha": head,
+        "selected": {
+            "run_id": run_id,
+            "slot_id": selected.slot.slot_id,
+            "generation": generation,
+            "lens": selected.slot.lens,
+            "depth": selected.depth,
+            "coverage_key": selected.slot.coverage_key,
+            "scope": asdict(selected.slot.scope),
+            "fingerprint": selected.fingerprint,
+            "score": selected.score,
+            "score_breakdown": [
+                {"name": name, "value": value}
+                for name, value in selected.score_breakdown.components
+            ],
+        },
+        "evidence_refs": public.get("evidence_refs", []) + [ledger_ref],
+    }
