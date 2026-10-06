@@ -1,0 +1,288 @@
+{
+  "schema_version": "maintenance-common-baseline.v1",
+  "catalog_schema_version": "maintenance-catalog.v1",
+  "lenses": [
+    {
+      "id": "correctness",
+      "title": "Correctness"
+    },
+    {
+      "id": "edge-cases",
+      "title": "Edge Cases"
+    },
+    {
+      "id": "reliability-recovery",
+      "title": "Reliability / Recovery"
+    },
+    {
+      "id": "security",
+      "title": "Security"
+    },
+    {
+      "id": "state-integrity-concurrency",
+      "title": "State Integrity / Concurrency"
+    },
+    {
+      "id": "spec-implementation-drift",
+      "title": "Spec / Implementation Drift"
+    },
+    {
+      "id": "test-quality",
+      "title": "Test Quality"
+    },
+    {
+      "id": "resource-management",
+      "title": "Resource Management"
+    },
+    {
+      "id": "dependency-external-assumptions",
+      "title": "Dependency / External Assumptions"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling"
+    },
+    {
+      "id": "observability",
+      "title": "Observability"
+    },
+    {
+      "id": "lifecycle-consistency",
+      "title": "Lifecycle / Issue / PR / Session consistency"
+    }
+  ],
+  "risk_policy": {
+    "LOW": {
+      "general_standard_days": 90,
+      "security_standard_days": 90,
+      "deep_target_days": 180,
+      "cooldown_hours": 168
+    },
+    "MEDIUM": {
+      "general_standard_days": 60,
+      "security_standard_days": 45,
+      "deep_target_days": 120,
+      "cooldown_hours": 72
+    },
+    "HIGH": {
+      "general_standard_days": 30,
+      "security_standard_days": 21,
+      "deep_target_days": 60,
+      "cooldown_hours": 24
+    },
+    "CRITICAL": {
+      "general_standard_days": 14,
+      "security_standard_days": 7,
+      "deep_target_days": 30,
+      "cooldown_hours": 6
+    }
+  },
+  "freshness_classes": {
+    "FAST": {
+      "days": 1
+    },
+    "NORMAL": {
+      "days": 7
+    },
+    "SLOW": {
+      "days": 30
+    }
+  },
+  "selector_weights": {
+    "never_run": 40,
+    "overdue": 20,
+    "overdue_2x_bonus": 10,
+    "unexecuted_lens": 15,
+    "deeper_coverage": 15,
+    "source_change": 25,
+    "high_risk": 15,
+    "critical_risk": 25,
+    "finding_reaudit": 20,
+    "security_event": 30,
+    "external_stale": 20,
+    "same_repository_penalty": -10,
+    "recent_similar_penalty": -20
+  },
+  "common_slots": [
+    {
+      "slot_id": "common.correctness",
+      "title": "Correctness",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "correctness",
+      "coverage_key": "common.correctness",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Correctness audit"
+    },
+    {
+      "slot_id": "common.edge-cases",
+      "title": "Edge Cases",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "edge-cases",
+      "coverage_key": "common.edge-cases",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Edge Cases audit"
+    },
+    {
+      "slot_id": "common.reliability-recovery",
+      "title": "Reliability / Recovery",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "reliability-recovery",
+      "coverage_key": "common.reliability-recovery",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Reliability / Recovery audit"
+    },
+    {
+      "slot_id": "common.security",
+      "title": "Security",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "security",
+      "coverage_key": "common.security",
+      "cadence_class": "SECURITY",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Security audit"
+    },
+    {
+      "slot_id": "common.state-integrity-concurrency",
+      "title": "State Integrity / Concurrency",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "state-integrity-concurrency",
+      "coverage_key": "common.state-integrity-concurrency",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common State Integrity / Concurrency audit"
+    },
+    {
+      "slot_id": "common.spec-implementation-drift",
+      "title": "Spec / Implementation Drift",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "spec-implementation-drift",
+      "coverage_key": "common.spec-implementation-drift",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Spec / Implementation Drift audit"
+    },
+    {
+      "slot_id": "common.test-quality",
+      "title": "Test Quality",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "test-quality",
+      "coverage_key": "common.test-quality",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Test Quality audit"
+    },
+    {
+      "slot_id": "common.resource-management",
+      "title": "Resource Management",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "resource-management",
+      "coverage_key": "common.resource-management",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Resource Management audit"
+    },
+    {
+      "slot_id": "common.dependency-external-assumptions",
+      "title": "Dependency / External Assumptions",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "dependency-external-assumptions",
+      "coverage_key": "common.dependency-external-assumptions",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Dependency / External Assumptions audit"
+    },
+    {
+      "slot_id": "common.error-handling",
+      "title": "Error Handling",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "error-handling",
+      "coverage_key": "common.error-handling",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Error Handling audit"
+    },
+    {
+      "slot_id": "common.observability",
+      "title": "Observability",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "observability",
+      "coverage_key": "common.observability",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Observability audit"
+    },
+    {
+      "slot_id": "common.lifecycle-consistency",
+      "title": "Lifecycle / Issue / PR / Session consistency",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "lifecycle-consistency",
+      "coverage_key": "common.lifecycle-consistency",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Common Lifecycle / Issue / PR / Session consistency audit"
+    }
+  ]
+}
