@@ -16,10 +16,6 @@ _RESULTS = frozenset(
     {"CLEAN", "FINDINGS", "RECONCILED", "BLOCKED", "SUPERSEDED", "NEEDS_REAUDIT"}
 )
 _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATUS_RE = re.compile(
-    r"(?m)^## Work Status[ \\t]*\\n(?:[ \\t]*\\n)*[ \\t]*([^\\n]+?)[ \\t]*$"
-)
-
 
 class MaintenanceLedgerError(ValueError):
     pass
@@ -121,22 +117,44 @@ def _canonical(value: object) -> str:
     )
 
 
-def ledger_work_status(body: str) -> str | None:
-    match = _STATUS_RE.search(body)
-    if match is None:
+def _work_status_line(body: str) -> tuple[list[str], int] | None:
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    matches = [index for index, line in enumerate(lines) if line.strip() == "## Work Status"]
+    if not matches:
         return None
-    value = match.group(1).strip()
+    if len(matches) != 1:
+        raise MaintenanceLedgerError("Ledger Work Status heading is ambiguous")
+
+    index = matches[0] + 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index >= len(lines) or lines[index].lstrip().startswith("## "):
+        raise MaintenanceLedgerError("Ledger Work Status has no scalar value")
+    return lines, index
+
+
+def ledger_work_status(body: str) -> str | None:
+    located = _work_status_line(body)
+    if located is None:
+        return None
+    lines, index = located
+    value = lines[index].strip()
     if len(value) >= 2 and value[0] == value[-1] == "`":
         value = value[1:-1].strip()
     return value or None
 
 
 def _replace_work_status(body: str, status: str) -> str:
-    match = _STATUS_RE.search(body)
-    if match is None:
+    located = _work_status_line(body)
+    if located is None:
         raise MaintenanceLedgerError("Ledger is missing Work Status")
-    start, end = match.span(1)
-    return body[:start] + f"`{status}`" + body[end:]
+    lines, index = located
+    lines[index] = f"`{status}`"
+    newline = "\r\n" if "\r\n" in body else "\n"
+    rebuilt = newline.join(lines)
+    if body.endswith(("\n", "\r")) and not rebuilt.endswith(newline):
+        rebuilt += newline
+    return rebuilt
 
 
 def _active_to_payload(active: ActiveRun) -> dict[str, object]:
