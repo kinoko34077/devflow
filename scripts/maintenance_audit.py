@@ -30,8 +30,10 @@ from tools.maintenance_sync_check import (  # noqa: E402
 )
 from tools.maintenance_supply import (  # noqa: E402
     MaintenanceSupplyError,
+    build_catalog_maintenance_candidate,
     build_existing_owner_candidate,
     extract_existing_admission,
+    reconcile_catalog_maintenance_projection_body,
     reconcile_control_projection_body,
 )
 from tools.maintenance_github import (  # noqa: E402
@@ -39,10 +41,19 @@ from tools.maintenance_github import (  # noqa: E402
     GitHubReadError,
     GitHubReadTransport,
     collect_maintenance_selection,
+    find_maintenance_ledger,
     collect_portfolio,
     collect_repository,
     discover_controls,
 )
+from tools.maintenance_ledger import (  # noqa: E402
+    ActiveRun,
+    extract_active_run,
+    ledger_work_status,
+    replace_active,
+    replace_active_run,
+)
+
 
 PORTFOLIO_SCHEMA = "maintenance-audit-portfolio.v1"
 ERROR_SCHEMA = "maintenance-audit-error.v1"
@@ -390,6 +401,49 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             "security_gate": False,
         }
 
+    def update_issue_body(
+        self,
+        repository: str,
+        number: int,
+        expected_body_sha256: str,
+        body: str,
+    ) -> bool:
+        live = self.get_issue(repository, number)
+        live_body = str(live.get("body") or "")
+        if canonical_body_sha256(live_body) != expected_body_sha256:
+            return False
+
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(f"/repos/{repository}/issues/{number}"),
+            data=payload,
+            method="PATCH",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-write",
+            },
+        )
+        try:
+            with self._opener(request, timeout=self._timeout) as response:
+                raw = response.read()
+                if raw:
+                    value = json.loads(raw.decode("utf-8"))
+                    if not isinstance(value, dict):
+                        return False
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub bounded Issue update failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError as exc:
+            reason = str(exc.reason).replace(self._token, "[REDACTED]")
+            raise GitHubReadError(
+                f"GitHub bounded Issue update failed: {reason}"
+            ) from None
+        return True
+
     def update_control_body(
         self,
         repository: str,
@@ -398,49 +452,12 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         body: str,
     ) -> bool:
         control_repo, number = _split_issue_ref(control_ref)
-        live = self.get_issue(control_repo, number)
-        live_body = str(live.get("body") or "")
-        if canonical_body_sha256(live_body) != expected_body_sha256:
-            return False
-
-        payload = json.dumps({"body": body}).encode("utf-8")
-        request = urllib.request.Request(
-            self._url(
-                f"/repos/{control_repo}/issues/{number}"
-            ),
-            data=payload,
-            method="PATCH",
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "kinotch-devflow-maintenance-sync-check",
-            },
+        return self.update_issue_body(
+            control_repo,
+            number,
+            expected_body_sha256,
+            body,
         )
-        try:
-            with self._opener(
-                request,
-                timeout=self._timeout,
-            ) as response:
-                raw = response.read()
-                if raw:
-                    value = json.loads(raw.decode("utf-8"))
-                    if not isinstance(value, dict):
-                        return False
-        except urllib.error.HTTPError as exc:
-            raise GitHubReadError(
-                f"GitHub bounded Control update failed with HTTP {exc.code}"
-            ) from None
-        except urllib.error.URLError as exc:
-            reason = str(exc.reason).replace(
-                self._token,
-                "[REDACTED]",
-            )
-            raise GitHubReadError(
-                f"GitHub bounded Control update failed: {reason}"
-            ) from None
-        return True
 
     def post_supply_transition(self, body: str) -> bool:
         if not isinstance(body, str) or not body.strip():
