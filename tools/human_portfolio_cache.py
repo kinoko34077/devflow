@@ -22,13 +22,14 @@ MAX_TASK_ERRORS = 100
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TASK_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
 _ENTRY_REF = re.compile(
-    r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(?:issues|pull)/[1-9][0-9]*$"
+    r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$"
 )
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
         "repository",
+        "observed_at",
         "generated_at",
         "valid_until",
         "generation_id",
@@ -335,13 +336,23 @@ def _validate_entry(value: object, repository: str) -> dict[str, Any]:
             "human portfolio entry task_ref must belong to cached repository"
         )
     entry_ref = entry.get("entry_ref")
-    if entry_ref is not None and (
-        not isinstance(entry_ref, str)
-        or _ENTRY_REF.fullmatch(entry_ref) is None
-    ):
-        raise HumanPortfolioCacheError(
-            "human portfolio entry entry_ref must be a canonical GitHub Issue/PR URL or null"
+    if entry_ref is not None:
+        if not isinstance(entry_ref, str):
+            raise HumanPortfolioCacheError(
+                "human portfolio entry entry_ref must be a canonical GitHub Issue URL or null"
+            )
+        entry_match = _ENTRY_REF.fullmatch(entry_ref)
+        if entry_match is None:
+            raise HumanPortfolioCacheError(
+                "human portfolio entry entry_ref must be a canonical GitHub Issue URL or null"
+            )
+        entry_task_ref = (
+            f"{entry_match.group(1)}/{entry_match.group(2)}#{entry_match.group(3)}"
         )
+        if entry_task_ref != task_ref:
+            raise HumanPortfolioCacheError(
+                "human portfolio entry entry_ref must identify the exact owning task"
+            )
     disposition = entry.get("disposition")
     if disposition not in _DISPOSITIONS:
         raise HumanPortfolioCacheError(
@@ -374,6 +385,14 @@ def _validate_entry(value: object, repository: str) -> dict[str, Any]:
     if source_kind == "RECONCILIATION" and publication_id is None:
         raise HumanPortfolioCacheError(
             "reconciliation entry requires publication_id"
+        )
+    if (
+        source_kind == "RECONCILIATION"
+        and publication_id is not None
+        and _SHA256.fullmatch(publication_id) is None
+    ):
+        raise HumanPortfolioCacheError(
+            "reconciliation publication_id must be a canonical sha256 identity"
         )
     if source_kind == "REPOSITORY_PROJECTION" and publication_id is not None:
         raise HumanPortfolioCacheError(
@@ -415,10 +434,18 @@ def _validate_cached_payload(
     )
     if recorded_repository != repository:
         raise HumanPortfolioCacheError("repository identity mismatch")
+    observed_dt = _timestamp_value(
+        payload.get("observed_at"),
+        "observed_at",
+    )
     generated_dt = _timestamp_value(
         payload.get("generated_at"),
         "generated_at",
     )
+    if generated_dt < observed_dt:
+        raise HumanPortfolioCacheError(
+            "generated_at must not precede observed_at"
+        )
     valid_until_dt = _timestamp_value(
         payload.get("valid_until"),
         "valid_until",
@@ -444,6 +471,10 @@ def _validate_cached_payload(
     validated = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "repository": repository,
+        "observed_at": _require_timestamp(
+            payload.get("observed_at"),
+            "observed_at",
+        ),
         "generated_at": _require_timestamp(
             payload.get("generated_at"),
             "generated_at",
@@ -517,6 +548,7 @@ def build_cached_human_portfolio(
     payload = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "repository": repository,
+        "observed_at": observed_at,
         "generated_at": generated_at,
         "valid_until": _format_timestamp(
             generated_dt + timedelta(seconds=CACHE_VALIDITY_SECONDS)
