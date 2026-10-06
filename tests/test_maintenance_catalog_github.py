@@ -1,6 +1,8 @@
 import base64
 import json
 import unittest
+from dataclasses import replace
+from pathlib import Path
 
 from tools import maintenance_github as mg
 
@@ -58,8 +60,18 @@ class FakeTransport:
 
 class CatalogCollectionTests(unittest.TestCase):
     def setUp(self):
-        self.baseline = json.dumps(mg.default_test_baseline())
-        self.catalog = json.dumps(mg.default_test_catalog(REPO))
+        self.baseline = Path("docs/spec/maintenance/common-baseline.v1.yaml").read_text(encoding="utf-8")
+        self.catalog = json.dumps({
+            "schema_version": "maintenance-catalog.v1",
+            "repository": REPO,
+            "baseline": "maintenance-common-baseline.v1",
+            "rollout": "PILOT",
+            "risk_profile": "HIGH",
+            "scope_risk_overrides": [],
+            "repository_lenses": [],
+            "common_slot_overrides": [],
+            "repository_slots": [],
+        })
 
     def test_transport_repository_file_supports_exact_ref(self):
         seen = []
@@ -144,7 +156,7 @@ class CatalogCollectionTests(unittest.TestCase):
             next_eligibility_reason=None,
             evidence_refs=(),
         )
-        untrusted = mg.replace_run_record(
+        untrusted = replace(
             trusted,
             generation=2,
             run_id=f"audit:{REPO}:common.correctness:2",
