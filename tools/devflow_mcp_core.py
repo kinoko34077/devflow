@@ -770,6 +770,17 @@ class DevflowService:
             )
 
         control_body = str(control_issue.get("body") or "")
+        latest_sections = parse_sections(control_body, reject_duplicates=True)
+        try:
+            WORKFLOW_CONTRACT.validate_repository_control_sections(latest_sections)
+        except workflow_contract.WorkflowContractError as exc:
+            raise DevflowMCPError(str(exc)) from exc
+        latest_repository = latest_sections.get("Repository", "").strip()
+        if latest_repository and normalize_repository(latest_repository) != normalized:
+            raise DevflowMCPError(
+                "Repository Control repository changed during Human Portfolio read."
+            )
+
         publication_status = "AVAILABLE"
         publication_error: str | None = None
         publications: list[dict[str, Any]] = []
@@ -804,10 +815,33 @@ class DevflowService:
                         }
                     )
                     continue
-                task_digests[task_ref] = (
-                    maintenance_sync_check.canonical_body_sha256(
-                        str(task_issue.get("body") or "")
+                if "pull_request" in task_issue:
+                    task_errors.append(
+                        {
+                            "task_ref": task_ref,
+                            "error": "owning task is a pull request, not an Issue",
+                        }
                     )
+                    continue
+                if not github_issue_trust.is_trusted_issue_author(task_issue):
+                    task_errors.append(
+                        {
+                            "task_ref": task_ref,
+                            "error": "owning task author is untrusted",
+                        }
+                    )
+                    continue
+                task_body = str(task_issue.get("body") or "")
+                if not task_body.strip():
+                    task_errors.append(
+                        {
+                            "task_ref": task_ref,
+                            "error": "owning task body is empty",
+                        }
+                    )
+                    continue
+                task_digests[task_ref] = (
+                    maintenance_sync_check.canonical_body_sha256(task_body)
                 )
 
         source_trust = (

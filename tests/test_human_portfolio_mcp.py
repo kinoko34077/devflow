@@ -156,6 +156,69 @@ class HumanPortfolioMCPTests(unittest.TestCase):
         self.assertEqual("NEEDS_EVIDENCE", entry["disposition"])
         self.assertEqual("UNKNOWN", entry["evidence_freshness"])
 
+    def test_untrusted_or_empty_owning_task_is_not_promoted(self):
+        original = self._task()
+        publication = self._publication(original)
+        cases = (
+            ({**original, "author_association": "NONE"}, "owning task author is untrusted"),
+            ({**original, "body": "   \n"}, "owning task body is empty"),
+        )
+        for task, expected_error in cases:
+            with self.subTest(expected_error=expected_error):
+                result = self._service(
+                    self._control(publication),
+                    task,
+                ).get_human_portfolio("demo")
+
+                self.assertFalse(result["complete"])
+                self.assertEqual(
+                    expected_error,
+                    result["reconciliation_source"]["task_errors"][0]["error"],
+                )
+                entry = self._reconciliation_entry(result)
+                self.assertEqual("NEEDS_EVIDENCE", entry["disposition"])
+                self.assertEqual("UNKNOWN", entry["evidence_freshness"])
+
+    def test_second_control_read_revalidates_current_section_contract(self):
+        task = self._task()
+        publication = self._publication(task)
+        control = self._control(publication)
+
+        class DriftingReader(FakeReader):
+            def get_issue(self, repository, issue_number):
+                issue = super().get_issue(repository, issue_number)
+                if repository == devflow_mcp_core.DEVFLOW_REPOSITORY:
+                    return {
+                        **issue,
+                        "body": (
+                            issue["body"]
+                            + "\n\n## Work Status\n\n"
+                            + chr(96)
+                            + "BLOCKED"
+                            + chr(96)
+                            + "\n"
+                        ),
+                    }
+                return issue
+
+        reader = DriftingReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                REPOSITORY: [task],
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: OBSERVED_AT,
+        )
+
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "Duplicate section.*Work Status",
+        ):
+            service.get_human_portfolio("demo")
+
     def test_malformed_control_publication_fails_closed_without_reviewer_demand(self):
         task = self._task()
         result = self._service(
