@@ -389,7 +389,7 @@ def parse_run_comment(body: str) -> RunRecord | None:
         raise MaintenanceLedgerError("run comment sentinel is ambiguous")
     pattern = re.compile(
         re.escape(RUN_COMMENT_SENTINEL)
-        + r"\s*# Maintenance Audit Run\s*\`\`\`json\s*(\{.*\})\s*\`\`\`\s*\Z",
+        + r"\s*# Maintenance Audit Run\s*```json\s*(\{.*\})\s*```\s*\Z",
         re.DOTALL,
     )
     match = pattern.fullmatch(body.strip())
