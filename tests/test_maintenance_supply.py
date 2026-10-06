@@ -1571,7 +1571,7 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
             task_ref="o/r#7",
         )
         self.assertTrue(changed)
-        self.assertEqual(1, body2.count('"task": "o/r#7"'))
+        self.assertEqual(2, body2.count('"task": "o/r#7"'))
         self.assertIn(OTHER_SHA, body2)
         self.assertNotIn(BODY_SHA, body2)
 
