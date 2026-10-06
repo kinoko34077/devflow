@@ -279,11 +279,15 @@ handoff:
   ambiguous_local_canon_conflict: resolve_before_implementation
 
 chat_rollover_archive:
-  schema_version: 1
+  schema_version: 2
+  standing_policy_issue: "kinoko34077/devflow#361"
   operations_doc: docs/operations/CHAT_ROLLOVER_ARCHIVE.md
-  canonical_shorthand: "ガイドライン読んで引き継ぎ"
-  trigger_match: explicit_semantic_equivalent_allowed
-  operation_role: close_or_handoff_current_chat_not_new_work_pickup
+  canonical_command: "kinoko34077/devflow#361を読んで、このチャット全体を議事録化し、後続チャット用資料を作成"
+  canonical_command_requires_issue_lookup_first: true
+  legacy_shorthand: "ガイドライン読んで引き継ぎ"
+  legacy_shorthand_status: ambiguous_not_preferred
+  trigger_match: exact_command_preferred_semantic_equivalent_allowed_when_action_direction_is_explicit
+  operation_role: current_worker_records_current_chat_and_creates_successor_material_not_resume_or_takeover
   current_state_authority: false
   live_canon_must_be_reconciled_first: true
   canonical_new_issue_prefixes:
