@@ -852,6 +852,437 @@ def _publish_supply(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _selection_from_active_run(
+    repository: str,
+    control_ref: str,
+    ledger_ref: str,
+    active: ActiveRun,
+) -> dict[str, object]:
+    return {
+        "schema_version": "maintenance-selection.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "status": "SELECTED",
+        "reason_code": "ACTIVE_MAINTENANCE_RUN",
+        "catalog_digest": active.catalog_digest,
+        "code_sha": None,
+        "selected": {
+            "run_id": active.run_id,
+            "slot_id": active.slot_id,
+            "generation": active.generation,
+            "lens": "",
+            "depth": active.depth,
+            "coverage_key": active.coverage_key,
+            "scope": {},
+            "fingerprint": active.fingerprint,
+            "score": sum(value for _name, value in active.score_breakdown),
+            "score_breakdown": [
+                {"name": name, "value": value}
+                for name, value in active.score_breakdown
+            ],
+        },
+    }
+
+
+def _active_run_from_selection(
+    selection: dict[str, object],
+    attempt_id: str,
+    observed_at: str,
+) -> ActiveRun:
+    selected = selection.get("selected")
+    if not isinstance(selected, dict):
+        raise MaintenanceSupplyError(
+            "maintenance selection is missing selected slot"
+        )
+    breakdown = selected.get("score_breakdown")
+    if not isinstance(breakdown, list):
+        raise MaintenanceSupplyError(
+            "maintenance selection score breakdown is missing"
+        )
+    components: list[tuple[str, int]] = []
+    for item in breakdown:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "value"}
+            or not isinstance(item.get("name"), str)
+            or not isinstance(item.get("value"), int)
+            or isinstance(item.get("value"), bool)
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance selection score breakdown is malformed"
+            )
+        components.append((item["name"], item["value"]))
+
+    generation = selected.get("generation")
+    if not isinstance(generation, int) or isinstance(generation, bool):
+        raise MaintenanceSupplyError(
+            "maintenance selection generation is invalid"
+        )
+    return ActiveRun(
+        repository=str(selection.get("repository") or ""),
+        run_id=str(selected.get("run_id") or ""),
+        slot_id=str(selected.get("slot_id") or ""),
+        generation=generation,
+        catalog_digest=str(selection.get("catalog_digest") or ""),
+        fingerprint=str(selected.get("fingerprint") or ""),
+        depth=str(selected.get("depth") or ""),
+        coverage_key=str(selected.get("coverage_key") or ""),
+        selected_at=observed_at,
+        publisher_attempt_id=attempt_id,
+        score_breakdown=tuple(components),
+    )
+
+
+def _catalog_ledger_snapshot(
+    issue: dict[str, object],
+    repository: str,
+    ledger_ref: str,
+    body: str,
+    active: ActiveRun,
+) -> dict[str, object]:
+    association = str(issue.get("author_association") or "").upper()
+    return {
+        "task_ref": ledger_ref,
+        "repository": repository,
+        "body_sha256": canonical_body_sha256(body),
+        "state": str(issue.get("state") or "UNKNOWN").upper(),
+        "work_status": ledger_work_status(body),
+        "trusted": association in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "is_pull_request": "pull_request" in issue,
+        "entry_ref": (
+            "https://github.com/"
+            + ledger_ref.rsplit("#", 1)[0]
+            + "/issues/"
+            + ledger_ref.rsplit("#", 1)[1]
+        ),
+        "active_run": asdict(active),
+    }
+
+
+def execute_catalog_maintenance_publication(
+    transport: _SyncCheckGitHubTransport,
+    selection: dict[str, object],
+    *,
+    attempt_id: str,
+    observed_at: str,
+    apply: bool,
+) -> dict[str, object]:
+    repository = selection.get("repository")
+    control_ref = selection.get("control_ref")
+    ledger_ref = selection.get("ledger_ref")
+    if not all(
+        isinstance(value, str) and value
+        for value in (repository, control_ref, ledger_ref)
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance selection identities are incomplete"
+        )
+    ledger_repo, ledger_number = _split_issue_ref(ledger_ref)
+    if ledger_repo != repository:
+        raise MaintenanceSupplyError(
+            "maintenance Ledger does not belong to selected repository"
+        )
+
+    issue = transport.get_issue(ledger_repo, ledger_number)
+    association = str(issue.get("author_association") or "").upper()
+    if (
+        str(issue.get("state") or "").lower() != "open"
+        or issue.get("title") != "[MAINTENANCE] Audit Ledger"
+        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or "pull_request" in issue
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance Ledger is not the trusted open canonical Ledger"
+        )
+    ledger_body = str(issue.get("body") or "")
+    if not ledger_body.strip():
+        raise MaintenanceSupplyError("maintenance Ledger body is empty")
+
+    desired_active = _active_run_from_selection(
+        selection,
+        attempt_id,
+        observed_at,
+    )
+    current_active = extract_active_run(ledger_body, repository)
+    if current_active is not None:
+        stable_fields = (
+            "repository",
+            "run_id",
+            "slot_id",
+            "generation",
+            "catalog_digest",
+            "fingerprint",
+            "depth",
+            "coverage_key",
+        )
+        if any(
+            getattr(current_active, field) != getattr(desired_active, field)
+            for field in stable_fields
+        ):
+            raise MaintenanceSupplyError(
+                "a different maintenance run is already active"
+            )
+        desired_active = replace_active(
+            current_active,
+            publisher_attempt_id=attempt_id,
+        )
+
+    edited_ledger, ledger_changed = replace_active_run(
+        ledger_body,
+        desired_active,
+    )
+    effective_ledger_body = edited_ledger
+    if apply and ledger_changed:
+        if not transport.update_issue_body(
+            ledger_repo,
+            ledger_number,
+            canonical_body_sha256(ledger_body),
+            edited_ledger,
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance Ledger changed before active-run publication"
+            )
+        confirmed = transport.get_issue(
+            ledger_repo,
+            ledger_number,
+        )
+        confirmed_body = str(confirmed.get("body") or "")
+        if confirmed_body != edited_ledger:
+            raise MaintenanceSupplyError(
+                "post-write maintenance Ledger differs from intended active run"
+            )
+        issue = confirmed
+        effective_ledger_body = confirmed_body
+
+    control_snapshot, control_body, _existing_admission = (
+        _control_supply_snapshot(
+            transport,
+            repository,
+            control_ref,
+            owner_ref=ledger_ref,
+            observed_at=observed_at,
+            attempt_id=attempt_id,
+        )
+    )
+    control_snapshot.pop("expected_owner_body_sha256", None)
+    ledger_snapshot = _catalog_ledger_snapshot(
+        issue,
+        repository,
+        ledger_ref,
+        effective_ledger_body,
+        desired_active,
+    )
+    desired = build_catalog_maintenance_candidate(
+        selection,
+        ledger_snapshot,
+        control_snapshot,
+    )
+    if desired is None:
+        raise MaintenanceSupplyError(
+            "active maintenance Ledger is not publishable"
+        )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            control_body,
+            desired,
+            task_ref=ledger_ref,
+        )
+    )
+
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-catalog-publication.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "run_id": desired_active.run_id,
+        "publication_id": desired["publication_id"],
+        "ledger_changed": ledger_changed,
+        "control_changed": control_changed,
+        "applied": False,
+        "transition_recorded": False,
+    }
+    if not apply:
+        return payload
+
+    if control_changed:
+        if not transport.update_control_body(
+            repository,
+            control_ref,
+            canonical_body_sha256(control_body),
+            edited_control,
+        ):
+            raise MaintenanceSupplyError(
+                "Control changed before catalog maintenance publication"
+            )
+        observed = transport.get_control(repository, control_ref)
+        if observed.get("body") != edited_control:
+            raise MaintenanceSupplyError(
+                "post-write Control differs from catalog maintenance publication"
+            )
+
+    payload["applied"] = True
+    transition = (
+        "## Standing maintenance supply transition\n\n"
+        f"- repository: `{repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        f"- run: `{desired_active.run_id}`\n"
+        f"- action: `published`\n"
+        f"- publication: `{desired['publication_id']}`\n"
+    )
+    if control_changed:
+        recorded = transport.post_supply_transition(transition)
+        payload["transition_recorded"] = recorded
+        if not recorded:
+            payload["reporting_error"] = (
+                "Control publication succeeded but #209 transition recording failed"
+            )
+    else:
+        payload["transition_recorded"] = True
+    return payload
+
+
+def _publish_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-catalog-publication.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+            "applied": False,
+        }
+        _write(payload, args.output)
+        return 0
+
+    ledger_ref = f"{args.repository}#{ledger['number']}"
+    exact = transport.get_issue(
+        args.repository,
+        int(ledger["number"]),
+    )
+    ledger_body = str(exact.get("body") or "")
+    active = extract_active_run(ledger_body, args.repository)
+    if active is not None:
+        selection = _selection_from_active_run(
+            args.repository,
+            control_ref,
+            ledger_ref,
+            active,
+        )
+    else:
+        selection = collect_maintenance_selection(
+            transport,
+            args.repository,
+            control_ref,
+            observed_at,
+        )
+        if selection.get("status") != "SELECTED":
+            _write(selection, args.output)
+            return 0
+
+    payload = execute_catalog_maintenance_publication(
+        transport,
+        selection,
+        attempt_id=args.attempt_id,
+        observed_at=observed_at,
+        apply=args.apply,
+    )
+    _write(payload, args.output)
+    return 2 if payload.get("reporting_error") else 0
+
+
+def _withdraw_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-catalog-publication.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+            "applied": False,
+        }
+        _write(payload, args.output)
+        return 0
+
+    ledger_ref = f"{args.repository}#{ledger['number']}"
+    _snapshot, control_body, _admission = _control_supply_snapshot(
+        transport,
+        args.repository,
+        control_ref,
+        owner_ref=ledger_ref,
+        observed_at=observed_at,
+        attempt_id=args.attempt_id,
+    )
+    edited, changed = reconcile_catalog_maintenance_projection_body(
+        control_body,
+        None,
+        task_ref=ledger_ref,
+    )
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-catalog-publication.v1",
+        "repository": args.repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "action": "withdrawn",
+        "changed": changed,
+        "applied": False,
+        "transition_recorded": False,
+    }
+    if not changed or not args.apply:
+        _write(payload, args.output)
+        return 0
+    if not transport.update_control_body(
+        args.repository,
+        control_ref,
+        canonical_body_sha256(control_body),
+        edited,
+    ):
+        raise MaintenanceSupplyError(
+            "Control changed before maintenance withdrawal"
+        )
+    observed = transport.get_control(
+        args.repository,
+        control_ref,
+    )
+    if observed.get("body") != edited:
+        raise MaintenanceSupplyError(
+            "post-write Control differs from maintenance withdrawal"
+        )
+    payload["applied"] = True
+    transition = (
+        "## Standing maintenance supply transition\n\n"
+        f"- repository: `{args.repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        "- action: `withdrawn`\n"
+    )
+    recorded = transport.post_supply_transition(transition)
+    payload["transition_recorded"] = recorded
+    if not recorded:
+        payload["reporting_error"] = (
+            "Control withdrawal succeeded but #209 transition recording failed"
+        )
+    _write(payload, args.output)
+    return 2 if payload.get("reporting_error") else 0
+
+
 def _summarize(args: argparse.Namespace) -> int:
     value = json.loads(
         Path(args.input).read_text(encoding="utf-8")
@@ -994,6 +1425,32 @@ def _parser() -> argparse.ArgumentParser:
         help="apply bounded existing-owner supply publication/withdrawal",
     )
     publish.set_defaults(func=_publish_supply)
+
+    publish_maintenance = sub.add_parser("publish-maintenance")
+    publish_maintenance.add_argument("--repository", required=True)
+    publish_maintenance.add_argument("--control", required=True, type=int)
+    publish_maintenance.add_argument("--attempt-id", required=True)
+    publish_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    publish_maintenance.add_argument("--observed-at")
+    publish_maintenance.add_argument("--output")
+    publish_maintenance.add_argument("--apply", action="store_true")
+    publish_maintenance.set_defaults(func=_publish_maintenance)
+
+    withdraw_maintenance = sub.add_parser("withdraw-maintenance")
+    withdraw_maintenance.add_argument("--repository", required=True)
+    withdraw_maintenance.add_argument("--control", required=True, type=int)
+    withdraw_maintenance.add_argument("--attempt-id", required=True)
+    withdraw_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    withdraw_maintenance.add_argument("--observed-at")
+    withdraw_maintenance.add_argument("--output")
+    withdraw_maintenance.add_argument("--apply", action="store_true")
+    withdraw_maintenance.set_defaults(func=_withdraw_maintenance)
 
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--input", required=True)
