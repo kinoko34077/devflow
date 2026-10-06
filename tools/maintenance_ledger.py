@@ -17,7 +17,7 @@ _RESULTS = frozenset(
 )
 _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _STATUS_RE = re.compile(
-    r"(?ms)^## Work Status\s*\n+\s*([^\n]+?)\s*(?=\n## |\Z)"
+    r"(?m)^## Work Status[ \\t]*\\n(?:[ \\t]*\\n)*[ \\t]*([^\\n]+?)[ \\t]*$"
 )
 
 
