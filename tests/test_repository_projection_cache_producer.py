@@ -3,6 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 
+from tools import human_portfolio_cache
 from tools import maintenance_sync_check
 from tools import repository_projection_cache as cache
 from tools import repository_projection_cache_producer as producer
@@ -40,6 +41,32 @@ def projection():
     }
 
 
+def human_read():
+    return {
+        "schema_version": "human-portfolio-read.v1",
+        "repository": REPOSITORY,
+        "observed_at": OBSERVED_AT,
+        "complete": True,
+        "repository_source": {
+            "status": "AVAILABLE",
+            "freshness": "CURRENT",
+            "error": None,
+        },
+        "reconciliation_source": {
+            "status": "AVAILABLE",
+            "trust": "VERIFIED",
+            "control_issue_number": CONTROL_NUMBER,
+            "control_url": (
+                "https://github.com/kinoko34077/devflow/issues/"
+                + str(CONTROL_NUMBER)
+            ),
+            "error": None,
+            "task_errors": [],
+        },
+        "entries": [],
+    }
+
+
 class FakeReader:
     def __init__(self, issue):
         self.issue = dict(issue)
@@ -60,11 +87,15 @@ class FakeService:
         trusted=True,
         control_number=CONTROL_NUMBER,
         projection_override=None,
+        human_override=None,
+        human_error=None,
     ):
         self.reader = FakeReader(issue)
         self.trusted = trusted
         self.control_number = control_number
         self.projection_override = projection_override
+        self.human_override = human_override
+        self.human_error = human_error
 
     def get_repository_control(self, repository):
         self.last_control_repository = repository
@@ -83,6 +114,16 @@ class FakeService:
             self.projection_override
             if self.projection_override is not None
             else projection()
+        )
+
+    def get_human_portfolio(self, repository):
+        self.last_human_repository = repository
+        if self.human_error is not None:
+            raise RuntimeError(self.human_error)
+        return (
+            self.human_override
+            if self.human_override is not None
+            else human_read()
         )
 
 
@@ -134,7 +175,14 @@ class ProjectionCacheProducerPlanTests(unittest.TestCase):
         )
         self.assertTrue(plan.changed)
         self.assertIn(cache.CACHE_MARKER_BEGIN, plan.desired_body)
+        self.assertIn(
+            human_portfolio_cache.CACHE_MARKER_BEGIN,
+            plan.desired_body,
+        )
+        self.assertTrue(plan.human_portfolio_complete)
+        self.assertTrue(plan.human_portfolio_generation_id.startswith("sha256:"))
         self.assertEqual(service.last_trust, (CONTROL_NUMBER, REPOSITORY))
+        self.assertEqual(service.last_human_repository, REPOSITORY)
 
     def test_bootstrap_derived_control_is_accepted_only_via_shared_verifier(self):
         service = FakeService(control_issue(association="NONE"), trusted=True)
@@ -169,6 +217,23 @@ class ProjectionCacheProducerPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(
             producer.RepositoryProjectionCacheProducerError,
             "Control issue number",
+        ):
+            producer.prepare_target(
+                service,
+                REPOSITORY,
+                CONTROL_NUMBER,
+                generated_at=GENERATED_AT,
+            )
+
+    def test_human_portfolio_read_failure_aborts_atomic_plan(self):
+        service = FakeService(
+            control_issue(),
+            trusted=True,
+            human_error="simulated Human Portfolio read failure",
+        )
+        with self.assertRaisesRegex(
+            producer.RepositoryProjectionCacheProducerError,
+            "Human Portfolio",
         ):
             producer.prepare_target(
                 service,
@@ -247,6 +312,15 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
         self.assertIn("Human text.", writer.body)
         parsed = cache.parse_cached_projection(writer.body, REPOSITORY)
         self.assertEqual(parsed.payload["generation_id"], plan.generation_id)
+        human_parsed = human_portfolio_cache.parse_cached_human_portfolio(
+            writer.body,
+            REPOSITORY,
+        )
+        self.assertIsNotNone(human_parsed)
+        self.assertEqual(
+            human_parsed.payload["generation_id"],
+            plan.human_portfolio_generation_id,
+        )
 
     def test_postwrite_mismatch_fails_closed(self):
         plan = self._plan()
@@ -302,6 +376,9 @@ class FakeFleetService:
         if repository.endswith("/broken"):
             raise RuntimeError("simulated source read failure")
         return projection()
+
+    def get_human_portfolio(self, repository):
+        return human_read()
 
 
 class FakeFleetWriter:

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from tools import devflow_mcp_core
+from tools import human_portfolio_cache
 from tools import maintenance_sync_check
 from tools import repository_projection_cache
 
@@ -20,6 +21,8 @@ class CacheWritePlan:
     expected_body_sha256: str
     desired_body: str
     generation_id: str
+    human_portfolio_generation_id: str
+    human_portfolio_complete: bool
     changed: bool
     source_status: str
     coverage_status: str
@@ -155,6 +158,25 @@ def prepare_target(
     except repository_projection_cache.RepositoryProjectionCacheError as exc:
         raise RepositoryProjectionCacheProducerError(str(exc)) from exc
 
+    try:
+        live_human_portfolio = service.get_human_portfolio(repository)
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            f"failed to read live Human Portfolio: {exc}"
+        ) from exc
+    if not isinstance(live_human_portfolio, dict):
+        raise RepositoryProjectionCacheProducerError(
+            "live Human Portfolio was not an object"
+        )
+    try:
+        human_payload = human_portfolio_cache.build_cached_human_portfolio(
+            repository,
+            live_human_portfolio,
+            generated_at=generated_at,
+        )
+    except human_portfolio_cache.HumanPortfolioCacheError as exc:
+        raise RepositoryProjectionCacheProducerError(str(exc)) from exc
+
     expected_body_sha256 = maintenance_sync_check.canonical_body_sha256(body)
     try:
         desired_body = repository_projection_cache.replace_cached_projection(
@@ -163,7 +185,15 @@ def prepare_target(
             payload,
             expected_body_sha256=expected_body_sha256,
         )
-    except repository_projection_cache.RepositoryProjectionCacheError as exc:
+        desired_body = human_portfolio_cache.replace_cached_human_portfolio(
+            desired_body,
+            repository,
+            human_payload,
+        )
+    except (
+        repository_projection_cache.RepositoryProjectionCacheError,
+        human_portfolio_cache.HumanPortfolioCacheError,
+    ) as exc:
         raise RepositoryProjectionCacheProducerError(str(exc)) from exc
 
     return CacheWritePlan(
@@ -172,6 +202,8 @@ def prepare_target(
         expected_body_sha256=expected_body_sha256,
         desired_body=desired_body,
         generation_id=str(payload["generation_id"]),
+        human_portfolio_generation_id=str(human_payload["generation_id"]),
+        human_portfolio_complete=bool(human_payload["complete"]),
         changed=desired_body != body,
         source_status=str(payload["source"]["status"]),
         coverage_status=str(payload["coverage"]["status"]),
@@ -214,6 +246,8 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
             "repository": repository,
             "control_issue_number": plan.control_issue_number,
             "generation_id": plan.generation_id,
+            "human_portfolio_generation_id": plan.human_portfolio_generation_id,
+            "human_portfolio_complete": plan.human_portfolio_complete,
             "source_status": plan.source_status,
             "coverage_status": plan.coverage_status,
         }
@@ -264,11 +298,31 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
             "post-write cache generation identity mismatch"
         )
 
+    try:
+        human_cached = human_portfolio_cache.parse_cached_human_portfolio(
+            plan.desired_body,
+            repository,
+        )
+    except human_portfolio_cache.HumanPortfolioCacheError as exc:
+        raise RepositoryProjectionCacheProducerError(
+            f"post-write Human Portfolio cache readback failed: {exc}"
+        ) from exc
+    if (
+        human_cached is None
+        or human_cached.payload.get("generation_id")
+        != plan.human_portfolio_generation_id
+    ):
+        raise RepositoryProjectionCacheProducerError(
+            "post-write Human Portfolio cache generation identity mismatch"
+        )
+
     return {
         "status": "UPDATED",
         "repository": repository,
         "control_issue_number": plan.control_issue_number,
         "generation_id": plan.generation_id,
+        "human_portfolio_generation_id": plan.human_portfolio_generation_id,
+        "human_portfolio_complete": plan.human_portfolio_complete,
         "source_status": plan.source_status,
         "coverage_status": plan.coverage_status,
     }
@@ -316,6 +370,8 @@ def run_fleet(
                     "repository": plan.repository,
                     "control_issue_number": plan.control_issue_number,
                     "generation_id": plan.generation_id,
+                    "human_portfolio_generation_id": plan.human_portfolio_generation_id,
+                    "human_portfolio_complete": plan.human_portfolio_complete,
                     "source_status": plan.source_status,
                     "coverage_status": plan.coverage_status,
                     "changed": plan.changed,

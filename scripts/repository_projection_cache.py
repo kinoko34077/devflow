@@ -143,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
                     "repository": plan.repository,
                     "control_issue_number": plan.control_issue_number,
                     "generation_id": plan.generation_id,
+                    "human_portfolio_generation_id": plan.human_portfolio_generation_id,
+                    "human_portfolio_complete": plan.human_portfolio_complete,
                     "source_status": plan.source_status,
                     "coverage_status": plan.coverage_status,
                     "changed": plan.changed,
