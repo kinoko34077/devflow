@@ -27,12 +27,23 @@ def issue(number, title, *, association="OWNER", body="", state="open"):
 
 
 class FakeTransport:
-    def __init__(self, *, baseline, catalog, issues, comments=None):
+    def __init__(
+        self,
+        *,
+        baseline,
+        catalog,
+        issues,
+        comments=None,
+        control_state="ACTIVE",
+        control_association="OWNER",
+    ):
         self.baseline = baseline
         self.catalog = catalog
         self.issues = issues
         self.comments = comments or {}
         self.file_reads = []
+        self.control_state = control_state
+        self.control_association = control_association
 
     def get_default_branch(self, repository):
         return {"name": "main", "commit": {"sha": HEAD}}
@@ -44,6 +55,21 @@ class FakeTransport:
         if repository == REPO and path == CATALOG_PATH:
             return self.catalog
         raise AssertionError((repository, path, ref))
+
+    def get_issue(self, repository, number):
+        if (repository, number) != ("kinoko34077/devflow", 99):
+            raise AssertionError((repository, number))
+        return {
+            "number": 99,
+            "title": "[REPO] example",
+            "state": "open",
+            "body": (
+                "## Repository\n\n`kinoko34077/example`\n\n"
+                "## Repository State\n\n"
+                f"`{self.control_state}`\n"
+            ),
+            "author_association": self.control_association,
+        }
 
     def list_issues(self, repository, state="open"):
         self.assert_repo(repository)
@@ -176,6 +202,42 @@ class CatalogCollectionTests(unittest.TestCase):
         history = mg.collect_maintenance_history(transport, REPO, 7)
         self.assertEqual((trusted,), history)
 
+    def test_inactive_repository_is_not_selectable(self):
+        transport = FakeTransport(
+            baseline=self.baseline,
+            catalog={"content": self.catalog, "sha": "d" * 40},
+            issues=[issue(7, "[MAINTENANCE] Audit Ledger")],
+            control_state="PARKED",
+        )
+        result = mg.collect_maintenance_selection(
+            transport,
+            REPO,
+            CONTROL,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(("NO_ELIGIBLE_WORK", "REPOSITORY_NOT_ACTIVE"), (
+            result["status"],
+            result["reason_code"],
+        ))
+
+    def test_untrusted_control_fails_selection_closed(self):
+        transport = FakeTransport(
+            baseline=self.baseline,
+            catalog={"content": self.catalog, "sha": "d" * 40},
+            issues=[issue(7, "[MAINTENANCE] Audit Ledger")],
+            control_association="NONE",
+        )
+        result = mg.collect_maintenance_selection(
+            transport,
+            REPO,
+            CONTROL,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(("NEEDS_EVIDENCE", "CONTROL_INVALID"), (
+            result["status"],
+            result["reason_code"],
+        ))
+
     def test_external_observation_changes_fingerprint_without_code_change(self):
         first = mg.build_maintenance_fingerprint(
             HEAD,
@@ -191,12 +253,22 @@ class CatalogCollectionTests(unittest.TestCase):
 
 
 class MultiRepoTransport:
-    def __init__(self, *, baseline, catalogs, issues, comments=None, heads=None):
+    def __init__(
+        self,
+        *,
+        baseline,
+        catalogs,
+        issues,
+        comments=None,
+        heads=None,
+        control_states=None,
+    ):
         self.baseline = baseline
         self.catalogs = catalogs
         self.issues = issues
         self.comments = comments or {}
         self.heads = heads or {}
+        self.control_states = control_states or {}
 
     def get_default_branch(self, repository):
         default = {
@@ -215,6 +287,22 @@ class MultiRepoTransport:
         if path == CATALOG_PATH:
             return self.catalogs.get(repository)
         raise AssertionError((repository, path, ref))
+
+    def get_issue(self, repository, number):
+        if repository != "kinoko34077/devflow" or number not in {10, 11}:
+            raise AssertionError((repository, number))
+        managed = "kinoko34077/a" if number == 10 else "kinoko34077/b"
+        return {
+            "number": number,
+            "title": f"[REPO] {managed.rsplit('/', 1)[-1]}",
+            "state": "open",
+            "body": (
+                f"## Repository\n\n`{managed}`\n\n"
+                "## Repository State\n\n"
+                f"`{self.control_states.get(managed, 'ACTIVE')}`\n"
+            ),
+            "author_association": "OWNER",
+        }
 
     def list_issues(self, repository, state="open"):
         return list(self.issues.get(repository, []))
@@ -262,7 +350,14 @@ class PortfolioMaintenanceCollectionTests(unittest.TestCase):
             {"repository": "kinoko34077/b", "control_ref": "kinoko34077/devflow#11"},
         ]
 
-    def transport(self, *, catalogs=None, issues=None, comments=None):
+    def transport(
+        self,
+        *,
+        catalogs=None,
+        issues=None,
+        comments=None,
+        control_states=None,
+    ):
         return MultiRepoTransport(
             baseline=self.baseline,
             catalogs=catalogs or {
@@ -274,6 +369,7 @@ class PortfolioMaintenanceCollectionTests(unittest.TestCase):
                 "kinoko34077/b": [portfolio_issue("kinoko34077/b")],
             },
             comments=comments,
+            control_states=control_states,
         )
 
     def test_portfolio_selection_scores_all_participating_repositories_together(self):
@@ -329,6 +425,17 @@ class PortfolioMaintenanceCollectionTests(unittest.TestCase):
             result["reason_code"],
         ))
         self.assertEqual("kinoko34077/b", result["repository"])
+
+    def test_inactive_repository_is_filtered_before_global_scoring(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(control_states={
+                "kinoko34077/b": "PARKED",
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", result["status"])
+        self.assertEqual("kinoko34077/a", result["repository"])
 
     def test_disabled_catalog_is_not_eligible(self):
         result = mg.collect_maintenance_portfolio_selection(
