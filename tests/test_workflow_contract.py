@@ -111,6 +111,16 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("public", document)
             self.assertIn("ask", document.lower())
 
+    def test_standing_maintenance_policy_is_published_without_extending_work_states(self):
+        workflow = (ROOT / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
+        contract = self._contract_module().load_workflow_contract()
+
+        self.assertIn("standing_maintenance:", workflow)
+        self.assertIn("bootstrap_v1_classifier_unchanged: true", workflow)
+        self.assertIn("repository_scope_auto_widen: forbidden", workflow)
+        self.assertIn("publication_requires_new_execution_attempt: true", workflow)
+        self.assertNotIn("MAINTENANCE_WORK", contract.work_states)
+
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
         spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(
             encoding="utf-8"
