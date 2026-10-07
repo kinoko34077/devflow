@@ -41,6 +41,7 @@ from tools.maintenance_github import (  # noqa: E402
     GitHubReadError,
     GitHubReadTransport,
     collect_maintenance_selection,
+    collect_maintenance_history,
     find_maintenance_ledger,
     collect_portfolio,
     collect_repository,
@@ -48,8 +49,10 @@ from tools.maintenance_github import (  # noqa: E402
 )
 from tools.maintenance_ledger import (  # noqa: E402
     ActiveRun,
+    complete_run,
     extract_active_run,
     ledger_work_status,
+    render_run_comment,
     replace_active,
     replace_active_run,
 )
@@ -458,6 +461,53 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             expected_body_sha256,
             body,
         )
+
+    def post_issue_comment(
+        self,
+        repository: str,
+        number: int,
+        body: str,
+    ) -> bool:
+        if not isinstance(body, str) or not body.strip():
+            raise MaintenanceSupplyError(
+                "Issue comment body must be non-empty"
+            )
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(
+                f"/repos/{repository}/issues/{number}/comments"
+            ),
+            data=payload,
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-run",
+            },
+        )
+        try:
+            with self._opener(
+                request,
+                timeout=self._timeout,
+            ) as response:
+                raw = response.read()
+                if not raw:
+                    return False
+                try:
+                    value = json.loads(raw.decode("utf-8"))
+                except (UnicodeError, json.JSONDecodeError):
+                    return False
+                return isinstance(value, dict)
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub Issue comment failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError:
+            raise GitHubReadError(
+                "GitHub Issue comment transport failed"
+            ) from None
 
     def post_supply_transition(self, body: str) -> bool:
         if not isinstance(body, str) or not body.strip():
@@ -1305,6 +1355,271 @@ def _withdraw_maintenance(args: argparse.Namespace) -> int:
     return 2 if payload.get("reporting_error") else 0
 
 
+def execute_maintenance_completion(
+    transport: _SyncCheckGitHubTransport,
+    *,
+    repository: str,
+    control_ref: str,
+    ledger_ref: str,
+    run_id: str,
+    result: dict[str, object],
+    attempt_id: str,
+    apply: bool,
+) -> dict[str, object]:
+    ledger_repo, ledger_number = _split_issue_ref(ledger_ref)
+    if ledger_repo != repository:
+        raise MaintenanceSupplyError(
+            "maintenance completion Ledger does not belong to repository"
+        )
+
+    issue = transport.get_issue(ledger_repo, ledger_number)
+    association = str(issue.get("author_association") or "").upper()
+    if (
+        str(issue.get("state") or "").lower() != "open"
+        or issue.get("title") != "[MAINTENANCE] Audit Ledger"
+        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or "pull_request" in issue
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance completion requires the trusted open Ledger"
+        )
+    ledger_body = str(issue.get("body") or "")
+    active = extract_active_run(ledger_body, repository)
+
+    history = collect_maintenance_history(
+        transport,
+        repository,
+        ledger_number,
+    )
+    existing = next(
+        (record for record in history if record.run_id == run_id),
+        None,
+    )
+
+    if active is None:
+        if existing is not None:
+            return {
+                "schema_version": "maintenance-completion.v1",
+                "repository": repository,
+                "control_ref": control_ref,
+                "ledger_ref": ledger_ref,
+                "run_id": run_id,
+                "applied": False,
+                "already_completed": True,
+                "reconciliation_required": False,
+                "reason_code": "ALREADY_COMPLETED",
+                "transition_recorded": True,
+            }
+        raise MaintenanceSupplyError(
+            "run_id does not identify an active or completed maintenance run"
+        )
+    if active.run_id != run_id:
+        raise MaintenanceSupplyError(
+            "run_id does not match the active maintenance run"
+        )
+
+    record = existing if existing is not None else complete_run(
+        active,
+        result,
+    )
+    if record.run_id != active.run_id:
+        raise MaintenanceSupplyError(
+            "completion record does not match active run_id"
+        )
+
+    cleared_body, ledger_changed = replace_active_run(
+        ledger_body,
+        None,
+    )
+    _snapshot, control_body, _admission = _control_supply_snapshot(
+        transport,
+        repository,
+        control_ref,
+        owner_ref=ledger_ref,
+        observed_at=record.completed_at,
+        attempt_id=attempt_id,
+    )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            control_body,
+            None,
+            task_ref=ledger_ref,
+        )
+    )
+
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-completion.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "run_id": run_id,
+        "result": record.result,
+        "ledger_changed": ledger_changed,
+        "control_changed": control_changed,
+        "applied": False,
+        "already_completed": existing is not None,
+        "reconciliation_required": False,
+        "reason_code": None,
+        "transition_recorded": False,
+    }
+    if not apply:
+        return payload
+
+    if existing is None:
+        if not transport.post_issue_comment(
+            ledger_repo,
+            ledger_number,
+            render_run_comment(record),
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance completion comment was not confirmed"
+            )
+        payload["applied"] = True
+    else:
+        payload["applied"] = True
+
+    # Completion evidence is durable once the trusted run comment exists.
+    # From this point onward, any body/projection failure is a typed
+    # reconciliation requirement rather than grounds to erase history.
+    live_ledger = transport.get_issue(
+        ledger_repo,
+        ledger_number,
+    )
+    live_ledger_body = str(live_ledger.get("body") or "")
+    if ledger_changed:
+        if not transport.update_issue_body(
+            ledger_repo,
+            ledger_number,
+            canonical_body_sha256(live_ledger_body),
+            cleared_body,
+        ):
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "LEDGER_CLEAR_FAILED_AFTER_COMPLETION"
+            )
+            return payload
+        confirmed_ledger = transport.get_issue(
+            ledger_repo,
+            ledger_number,
+        )
+        if str(confirmed_ledger.get("body") or "") != cleared_body:
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "LEDGER_CLEAR_DRIFT_AFTER_COMPLETION"
+            )
+            return payload
+
+    # Re-read Control after durable Ledger completion so withdrawal is
+    # fenced against the latest exact body, not the earlier planning read.
+    _snapshot, fresh_control_body, _admission = (
+        _control_supply_snapshot(
+            transport,
+            repository,
+            control_ref,
+            owner_ref=ledger_ref,
+            observed_at=record.completed_at,
+            attempt_id=attempt_id,
+        )
+    )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            fresh_control_body,
+            None,
+            task_ref=ledger_ref,
+        )
+    )
+    payload["control_changed"] = control_changed
+    if control_changed:
+        if not transport.update_control_body(
+            repository,
+            control_ref,
+            canonical_body_sha256(fresh_control_body),
+            edited_control,
+        ):
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "CONTROL_WITHDRAWAL_FAILED_AFTER_COMPLETION"
+            )
+            return payload
+        observed_control = transport.get_control(
+            repository,
+            control_ref,
+        )
+        if observed_control.get("body") != edited_control:
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "CONTROL_WITHDRAWAL_DRIFT_AFTER_COMPLETION"
+            )
+            return payload
+
+    transition = (
+        "## Standing maintenance run completion\n\n"
+        f"- repository: `{repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        f"- run: `{run_id}`\n"
+        f"- result: `{record.result}`\n"
+        "- action: `completed-and-withdrawn`\n"
+    )
+    if control_changed:
+        recorded = transport.post_supply_transition(transition)
+        payload["transition_recorded"] = recorded
+        if not recorded:
+            payload["reporting_error"] = (
+                "maintenance completion applied but #209 transition recording failed"
+            )
+    else:
+        payload["transition_recorded"] = True
+    return payload
+
+
+def _complete_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    completed_at = args.completed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-completion.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "run_id": args.run_id,
+            "applied": False,
+            "reconciliation_required": False,
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+        }
+        _write(payload, args.output)
+        return 0
+
+    result = {
+        "lens": args.lens,
+        "result": args.result,
+        "findings_summary": args.findings_summary,
+        "completed_at": completed_at,
+        "next_eligibility_reason": args.next_eligibility_reason,
+        "evidence_refs": tuple(args.evidence_ref or ()),
+    }
+    payload = execute_maintenance_completion(
+        transport,
+        repository=args.repository,
+        control_ref=control_ref,
+        ledger_ref=f"{args.repository}#{ledger['number']}",
+        run_id=args.run_id,
+        result=result,
+        attempt_id=args.attempt_id,
+        apply=args.apply,
+    )
+    _write(payload, args.output)
+    return 2 if (
+        payload.get("reconciliation_required")
+        or payload.get("reporting_error")
+    ) else 0
+
+
 def _summarize(args: argparse.Namespace) -> int:
     value = json.loads(
         Path(args.input).read_text(encoding="utf-8")
@@ -1473,6 +1788,43 @@ def _parser() -> argparse.ArgumentParser:
     withdraw_maintenance.add_argument("--output")
     withdraw_maintenance.add_argument("--apply", action="store_true")
     withdraw_maintenance.set_defaults(func=_withdraw_maintenance)
+
+    complete_maintenance = sub.add_parser("complete-maintenance")
+    complete_maintenance.add_argument("--repository", required=True)
+    complete_maintenance.add_argument("--control", required=True, type=int)
+    complete_maintenance.add_argument("--run-id", required=True)
+    complete_maintenance.add_argument("--lens", required=True)
+    complete_maintenance.add_argument(
+        "--result",
+        required=True,
+        choices=(
+            "CLEAN",
+            "FINDINGS",
+            "RECONCILED",
+            "BLOCKED",
+            "SUPERSEDED",
+            "NEEDS_REAUDIT",
+        ),
+    )
+    complete_maintenance.add_argument(
+        "--findings-summary",
+        default="",
+    )
+    complete_maintenance.add_argument("--completed-at")
+    complete_maintenance.add_argument("--next-eligibility-reason")
+    complete_maintenance.add_argument(
+        "--evidence-ref",
+        action="append",
+        default=[],
+    )
+    complete_maintenance.add_argument("--attempt-id", required=True)
+    complete_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    complete_maintenance.add_argument("--output")
+    complete_maintenance.add_argument("--apply", action="store_true")
+    complete_maintenance.set_defaults(func=_complete_maintenance)
 
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--input", required=True)
