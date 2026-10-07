@@ -92,6 +92,22 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("issues: write", select_job)
         self.assertNotIn("MAINTENANCE_SUPPLY_TOKEN", select_job)
 
+    def test_manual_portfolio_maintenance_select_is_read_only(self):
+        self.assertIn("- maintenance-select-portfolio", self.text)
+        self.assertIn("inputs.mode == 'maintenance-select-portfolio'", self.text)
+        select_job = self.text.split("\n  maintenance-select:\n", 1)[1].split(
+            "\n  publish:\n",
+            1,
+        )[0]
+        self.assertIn(
+            "python scripts/maintenance_audit.py select-maintenance-portfolio",
+            select_job,
+        )
+        self.assertIn("maintenance-selection.json", select_job)
+        self.assertNotIn("--apply", select_job)
+        self.assertNotIn("issues: write", select_job)
+        self.assertNotIn("MAINTENANCE_SUPPLY_TOKEN", select_job)
+
     def test_manual_catalog_publish_and_withdraw_modes_are_explicit_and_not_scheduled(self):
         self.assertIn("- maintenance-publish", self.text)
         self.assertIn("- maintenance-withdraw", self.text)
