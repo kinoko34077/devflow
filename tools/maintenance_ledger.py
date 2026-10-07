@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 
 ACTIVE_RUN_BEGIN = "<!-- DEVFLOW_MAINTENANCE_ACTIVE_RUN_V1_BEGIN -->"
@@ -34,6 +34,14 @@ class ActiveRun:
     selected_at: str
     publisher_attempt_id: str
     score_breakdown: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class ResumeAssessment:
+    disposition: str
+    reason_code: str
+    run_id: str
+    replay_completed_checks: bool = False
 
 
 @dataclass(frozen=True)
@@ -431,3 +439,133 @@ def next_generation(
         if item.repository == repository and item.slot_id == slot_id
     ]
     return (max(values) + 1) if values else 1
+
+
+
+def complete_run(
+    active: ActiveRun,
+    result: Mapping[str, object],
+) -> RunRecord:
+    if not isinstance(result, Mapping):
+        raise MaintenanceLedgerError("completion result must be an object")
+    required = {
+        "lens",
+        "result",
+        "findings_summary",
+        "completed_at",
+        "next_eligibility_reason",
+        "evidence_refs",
+    }
+    unknown = sorted(set(result) - required)
+    missing = sorted(required - set(result))
+    if unknown:
+        raise MaintenanceLedgerError(
+            f"completion result has unknown field(s): {', '.join(unknown)}"
+        )
+    if missing:
+        raise MaintenanceLedgerError(
+            f"completion result missing field(s): {', '.join(missing)}"
+        )
+    refs = result["evidence_refs"]
+    if not isinstance(refs, (list, tuple)):
+        raise MaintenanceLedgerError(
+            "completion result.evidence_refs must be an array"
+        )
+    payload = {
+        "repository": active.repository,
+        "run_id": active.run_id,
+        "slot_id": active.slot_id,
+        "generation": active.generation,
+        "lens": result["lens"],
+        "depth": active.depth,
+        "fingerprint": active.fingerprint,
+        "result": result["result"],
+        "findings_summary": result["findings_summary"],
+        "completed_at": result["completed_at"],
+        "next_eligibility_reason": result["next_eligibility_reason"],
+        "evidence_refs": list(refs),
+    }
+    return _parse_record_payload(payload)
+
+
+def assess_run_continuation(
+    active: ActiveRun,
+    *,
+    mutation_required: bool = False,
+    blocker: bool = False,
+    handoff_required: bool = False,
+    independent_acceptance: bool = False,
+    durable_finding: bool = False,
+) -> str:
+    for field, value in (
+        ("mutation_required", mutation_required),
+        ("blocker", blocker),
+        ("handoff_required", handoff_required),
+        ("independent_acceptance", independent_acceptance),
+        ("durable_finding", durable_finding),
+    ):
+        if type(value) is not bool:
+            raise MaintenanceLedgerError(f"{field} must be boolean")
+    if (
+        active.depth == "DEEP"
+        or mutation_required
+        or blocker
+        or handoff_required
+        or independent_acceptance
+        or durable_finding
+    ):
+        return "PROMOTE_REQUIRED"
+    return "CONTINUE"
+
+
+def assess_active_run_for_resume(
+    active: ActiveRun,
+    *,
+    current_fingerprint: str | None,
+    current_catalog_digest: str | None,
+    volatile_evidence_complete: bool,
+) -> ResumeAssessment:
+    if type(volatile_evidence_complete) is not bool:
+        raise MaintenanceLedgerError(
+            "volatile_evidence_complete must be boolean"
+        )
+    if (
+        not volatile_evidence_complete
+        or current_fingerprint is None
+        or current_catalog_digest is None
+    ):
+        return ResumeAssessment(
+            disposition="NEEDS_EVIDENCE",
+            reason_code="VOLATILE_EVIDENCE_INCOMPLETE",
+            run_id=active.run_id,
+            replay_completed_checks=False,
+        )
+
+    fingerprint = _sha(
+        current_fingerprint,
+        "current_fingerprint",
+    )
+    catalog_digest = _sha(
+        current_catalog_digest,
+        "current_catalog_digest",
+    )
+    if catalog_digest != active.catalog_digest:
+        return ResumeAssessment(
+            disposition="SUPERSEDE",
+            reason_code="CATALOG_DRIFT",
+            run_id=active.run_id,
+            replay_completed_checks=False,
+        )
+    if fingerprint != active.fingerprint:
+        return ResumeAssessment(
+            disposition="SUPERSEDE",
+            reason_code="FINGERPRINT_DRIFT",
+            run_id=active.run_id,
+            replay_completed_checks=False,
+        )
+    return ResumeAssessment(
+        disposition="RESUME",
+        reason_code="EVIDENCE_STILL_CURRENT",
+        run_id=active.run_id,
+        replay_completed_checks=False,
+    )
