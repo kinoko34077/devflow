@@ -1102,6 +1102,8 @@ def execute_catalog_maintenance_publication(
         "control_changed": control_changed,
         "applied": False,
         "transition_recorded": False,
+        "reconciliation_required": False,
+        "reason_code": None,
     }
     if not apply:
         return payload
@@ -1123,6 +1125,23 @@ def execute_catalog_maintenance_publication(
             )
 
     payload["applied"] = True
+
+    # Re-read the exact Ledger after Control publication. The candidate is
+    # digest-bound to the Ledger body used above, so any concurrent Ledger
+    # mutation after the first readback makes the just-published projection
+    # stale and requires reconciliation rather than silent success.
+    final_ledger = transport.get_issue(
+        ledger_repo,
+        ledger_number,
+    )
+    final_ledger_body = str(final_ledger.get("body") or "")
+    if final_ledger_body != effective_ledger_body:
+        payload["reconciliation_required"] = True
+        payload["reason_code"] = (
+            "LEDGER_DRIFT_AFTER_CONTROL_PUBLICATION"
+        )
+        return payload
+
     transition = (
         "## Standing maintenance supply transition\n\n"
         f"- repository: `{repository}`\n"
@@ -1198,7 +1217,10 @@ def _publish_maintenance(args: argparse.Namespace) -> int:
         apply=args.apply,
     )
     _write(payload, args.output)
-    return 2 if payload.get("reporting_error") else 0
+    return 2 if (
+        payload.get("reporting_error")
+        or payload.get("reconciliation_required")
+    ) else 0
 
 
 def _withdraw_maintenance(args: argparse.Namespace) -> int:
