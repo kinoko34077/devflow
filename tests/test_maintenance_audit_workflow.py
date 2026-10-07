@@ -92,6 +92,22 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("issues: write", select_job)
         self.assertNotIn("MAINTENANCE_SUPPLY_TOKEN", select_job)
 
+    def test_manual_catalog_publish_and_withdraw_modes_are_explicit_and_not_scheduled(self):
+        self.assertIn("- maintenance-publish", self.text)
+        self.assertIn("- maintenance-withdraw", self.text)
+        self.assertIn("inputs.mode == 'maintenance-publish'", self.text)
+        self.assertIn("inputs.mode == 'maintenance-withdraw'", self.text)
+        job = self.text.split("\n  catalog-maintenance-publish:\n", 1)[1].split(
+            "\n  projection-cache:\n",
+            1,
+        )[0]
+        self.assertIn("MAINTENANCE_SUPPLY_TOKEN", job)
+        self.assertIn("publish-maintenance", job)
+        self.assertIn("withdraw-maintenance", job)
+        self.assertIn("--apply", job)
+        self.assertNotIn("schedule:", job)
+        self.assertNotIn("issues: write", job)
+
     def test_failure_evidence_remains_typed_and_uploaded(self):
         self.assertIn(
             "if: always() && hashFiles('maintenance-audit-report.json') != ''",
