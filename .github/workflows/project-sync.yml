@@ -23,7 +23,11 @@ permissions:
   issues: write
 
 concurrency:
-  group: project-sync-${{ github.event.issue.number || 'manual' }}
+  # Project fields and Sync Health are shared mutable surfaces across all Issues.
+  # Serialize every event/manual mutator so scoped failure memory and Project
+  # updates cannot race across different Issue numbers.
+  group: project-sync
+  queue: max
   cancel-in-progress: false
 
 jobs:

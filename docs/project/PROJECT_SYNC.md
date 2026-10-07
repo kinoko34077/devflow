@@ -89,6 +89,10 @@ The workflow maintains one Issue with exact title:
 
 The Health Issue stores the latest verification result rather than append-only history, plus a bounded machine-owned memory of unresolved scoped failures so a later unrelated event cannot mask an earlier failure.
 
+Project item fields and this Health failure-memory record are shared mutable surfaces. The Project Sync workflow therefore serializes all Issue-event and manual sync mutators through one repository-wide concurrency group with `queue: max` and `cancel-in-progress: false`; different Issue numbers must not update these shared surfaces concurrently, and normal bursts queue instead of replacing an older pending run.
+
+GitHub's bounded concurrency queue may hold up to 100 pending runs. If Actions reports a Project Sync run canceled because that queue capacity was exceeded, event coverage is no longer assumed complete: run a full manual `reconcile` followed by full `verify` before treating Sync Health `PASS` as re-established.
+
 Result values:
 
 - `PASS`: API-verifiable canonical state matches the Project **and no unresolved failure memory remains**.
