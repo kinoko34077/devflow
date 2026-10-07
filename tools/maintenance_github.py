@@ -969,6 +969,68 @@ def _catalog_bundle(
     )
 
 
+def collect_maintenance_control(
+    transport: Any,
+    repository: str,
+    control_ref: str,
+) -> dict[str, object]:
+    try:
+        control_repository, number = _split_ref(control_ref)
+    except GitHubReadError as exc:
+        return {
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CONTROL_INVALID",
+            "detail": str(exc),
+        }
+    if control_repository != DEVFLOW_REPOSITORY:
+        return {
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CONTROL_INVALID",
+            "detail": "maintenance Control must be owned by devflow",
+        }
+
+    try:
+        issue = transport.get_issue(control_repository, number)
+    except (GitHubReadError, ValueError) as exc:
+        return {
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CONTROL_INVALID",
+            "detail": str(exc),
+        }
+
+    association = str(issue.get("author_association") or "").upper()
+    expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
+    body = str(issue.get("body") or "")
+    sections = _sections(body)
+    if (
+        str(issue.get("state") or "").lower() != "open"
+        or "pull_request" in issue
+        or association not in TRUSTED_ASSOCIATIONS
+        or issue.get("title") != expected_title
+        or _scalar_section(sections, "Repository") != repository
+    ):
+        return {
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": "CONTROL_INVALID",
+        }
+
+    repository_state = _scalar_section(
+        sections,
+        "Repository State",
+    )
+    if repository_state != "ACTIVE":
+        return {
+            "status": "NO_ELIGIBLE_WORK",
+            "reason_code": "REPOSITORY_NOT_ACTIVE",
+            "repository_state": repository_state,
+        }
+    return {
+        "status": "OK",
+        "reason_code": "CONTROL_ACTIVE",
+        "repository_state": repository_state,
+    }
+
+
 def collect_maintenance_catalog(
     transport: Any,
     repository: str,
@@ -1110,6 +1172,19 @@ def collect_maintenance_selection(
     external_state: Mapping[str, object] | None = None,
     previous_repository: str | None = None,
 ) -> dict[str, object]:
+    control = collect_maintenance_control(
+        transport,
+        repository,
+        control_ref,
+    )
+    if control.get("status") != "OK":
+        return {
+            "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+            "repository": repository,
+            "control_ref": control_ref,
+            **control,
+        }
+
     public = collect_maintenance_catalog(
         transport,
         repository,
@@ -1317,6 +1392,21 @@ def collect_maintenance_portfolio_selection(
                 "reason_code": "CONTROL_AMBIGUOUS",
             }
         control_ref = refs[0]
+        control = collect_maintenance_control(
+            transport,
+            repository,
+            control_ref,
+        )
+        if control.get("status") == "NO_ELIGIBLE_WORK":
+            continue
+        if control.get("status") != "OK":
+            return {
+                "schema_version": MAINTENANCE_SELECTION_SCHEMA,
+                "selection_scope": "PORTFOLIO",
+                "repository": repository,
+                "control_ref": control_ref,
+                **control,
+            }
 
         try:
             baseline, catalog, slots, digest, head, baseline_file, catalog_file = _catalog_bundle(
