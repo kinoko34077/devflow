@@ -14,6 +14,7 @@ on:
         options:
           - audit
           - maintenance-select
+          - maintenance-select-portfolio
           - maintenance-publish
           - maintenance-withdraw
           - projection-shadow
@@ -182,7 +183,7 @@ jobs:
           path: repository-projection-shadow.json
 
   maintenance-select:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-select' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-select' || inputs.mode == 'maintenance-select-portfolio') }}
     runs-on: ubuntu-latest
     concurrency:
       group: maintenance-select-${{ github.repository }}
@@ -198,25 +199,36 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SELECT_REPOSITORY: ${{ inputs.repository }}
           SELECT_CONTROL: ${{ inputs.control }}
+          SELECT_MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$SELECT_REPOSITORY" || -z "$SELECT_CONTROL" ]]; then
-            echo "maintenance-select requires repository and control" >&2
-            exit 2
+          if [[ "$SELECT_MODE" == "maintenance-select-portfolio" ]]; then
+            if [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
+              echo "portfolio maintenance selection requires MAINTENANCE_AUDIT_TOKEN" >&2
+              exit 2
+            fi
+            python scripts/maintenance_audit.py select-maintenance-portfolio \
+              --token-env MAINTENANCE_AUDIT_TOKEN \
+              --output maintenance-selection.json
+          else
+            if [[ -z "$SELECT_REPOSITORY" || -z "$SELECT_CONTROL" ]]; then
+              echo "maintenance-select requires repository and control" >&2
+              exit 2
+            fi
+            TOKEN_ENV=MAINTENANCE_AUDIT_TOKEN
+            if [[ "$SELECT_REPOSITORY" == "kinoko34077/devflow" ]]; then
+              TOKEN_ENV=GITHUB_TOKEN
+            elif [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
+              echo "cross-repository maintenance selection requires MAINTENANCE_AUDIT_TOKEN" >&2
+              exit 2
+            fi
+            python scripts/maintenance_audit.py select-maintenance \
+              --repository "$SELECT_REPOSITORY" \
+              --control "$SELECT_CONTROL" \
+              --token-env "$TOKEN_ENV" \
+              --output maintenance-selection.json
           fi
-          TOKEN_ENV=MAINTENANCE_AUDIT_TOKEN
-          if [[ "$SELECT_REPOSITORY" == "kinoko34077/devflow" ]]; then
-            TOKEN_ENV=GITHUB_TOKEN
-          elif [[ -z "$MAINTENANCE_AUDIT_TOKEN" ]]; then
-            echo "cross-repository maintenance selection requires MAINTENANCE_AUDIT_TOKEN" >&2
-            exit 2
-          fi
-          python scripts/maintenance_audit.py select-maintenance \
-            --repository "$SELECT_REPOSITORY" \
-            --control "$SELECT_CONTROL" \
-            --token-env "$TOKEN_ENV" \
-            --output maintenance-selection.json
       - name: Upload maintenance selection
         if: always() && hashFiles('maintenance-selection.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
