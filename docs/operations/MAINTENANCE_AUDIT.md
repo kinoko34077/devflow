@@ -94,6 +94,20 @@ Decision 3C applies to Catalog-backed supply exactly as it does to other publica
 
 A final true `NO_ELIGIBLE_WORK` requires **maintenance exhaustion**: no due/overdue predefined slot, useful unexecuted Lens/Depth, eligible alternate repository within scope, portfolio slot where applicable, or security/external-freshness reason is expected to produce materially new evidence.
 
+### PILOT rollback and re-enable
+
+The rollout gate is reversible and belongs to maintenance eligibility, not to the normal bootstrap classifier.
+
+For a participating repository:
+
+1. changing Catalog `rollout` from `PILOT` to `DISABLED` makes standing maintenance ineligible as `NO_ELIGIBLE_WORK / MAINTENANCE_DISABLED`;
+2. any published maintenance candidate is withdrawn through the accepted bounded withdrawal/completion path;
+3. the Catalog definition and trusted Ledger/run history are retained rather than deleted or rewritten;
+4. normal runnable/recovery bootstrap semantics remain unchanged because maintenance is an outer fallback after the existing bootstrap result;
+5. restoring `rollout: PILOT` reuses the retained history and permits a fresh read-only selection under the same deterministic selector rules.
+
+Task 11 controlled regression `test_rollout_disable_reenable_preserves_history_and_restores_selection` exercises the DISABLED -> PILOT round trip against the accepted collector/selector implementation. Existing supply-withdrawal and chat-fallback contract tests independently verify that rollback removes only the maintenance Ledger candidate and does not add a maintenance-specific bootstrap disposition.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
