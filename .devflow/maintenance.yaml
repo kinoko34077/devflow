@@ -1,0 +1,110 @@
+{
+  "schema_version": "maintenance-catalog.v1",
+  "repository": "kinoko34077/devflow",
+  "baseline": "maintenance-common-baseline.v1",
+  "rollout": "PILOT",
+  "risk_profile": "HIGH",
+  "scope_risk_overrides": [
+    {
+      "scope": {
+        "kind": "workflow",
+        "selector": ".github/workflows"
+      },
+      "risk": "CRITICAL"
+    }
+  ],
+  "repository_lenses": [],
+  "common_slot_overrides": [],
+  "repository_slots": [
+    {
+      "slot_id": "control.consistency",
+      "title": "Repository Control consistency",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "component",
+        "selector": "repository-control"
+      },
+      "lens": "lifecycle-consistency",
+      "coverage_key": "devflow.control.consistency",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Check Repository Control summaries, canonical entry points, owner references, and accepted current state for cross-repository consistency."
+    },
+    {
+      "slot_id": "session.staleness",
+      "title": "Execution Session staleness and recovery",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "component",
+        "selector": "execution-sessions"
+      },
+      "lens": "lifecycle-consistency",
+      "coverage_key": "devflow.session.staleness",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "FAST",
+      "description": "Check trusted Execution Session records, stale-session rules, checkpoints, and recoverable ownership without taking over live work."
+    },
+    {
+      "slot_id": "supply.claim-consistency",
+      "title": "Supply and claim consistency",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "runtime_boundary",
+        "selector": "supply-to-execution-coordinator-claim"
+      },
+      "lens": "state-integrity-concurrency",
+      "coverage_key": "devflow.supply.claim-consistency",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "FAST",
+      "description": "Check candidate publication, 3C fencing, claimability, lease/generation evidence, and cross-repository supply/claim consistency."
+    },
+    {
+      "slot_id": "spec.current-state-drift",
+      "title": "Specification and Current State drift",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "repository",
+        "selector": "."
+      },
+      "lens": "spec-implementation-drift",
+      "coverage_key": "devflow.spec.current-state-drift",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Check accepted specifications, Current State, operational documentation, and live implementation for material authority drift."
+    },
+    {
+      "slot_id": "security.workflow-permissions",
+      "title": "Workflow permission and security boundary",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "workflow",
+        "selector": ".github/workflows"
+      },
+      "lens": "security",
+      "coverage_key": "devflow.security.workflow-permissions",
+      "cadence_class": "SECURITY",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "FAST",
+      "description": "Check GitHub Actions permissions, write boundaries, token usage, Human/security gates, and fail-closed behavior."
+    },
+    {
+      "slot_id": "dependency.actions-pins",
+      "title": "GitHub Actions and workflow dependency pins",
+      "lifecycle": "ACTIVE",
+      "scope": {
+        "kind": "workflow",
+        "selector": ".github/workflows"
+      },
+      "lens": "dependency-external-assumptions",
+      "coverage_key": "devflow.dependency.actions-pins",
+      "cadence_class": "GENERAL",
+      "minimum_depth": "STANDARD",
+      "external_freshness_class": "NORMAL",
+      "description": "Check action pinning and workflow dependencies against current external assumptions and accepted supply-chain policy."
+    }
+  ]
+}

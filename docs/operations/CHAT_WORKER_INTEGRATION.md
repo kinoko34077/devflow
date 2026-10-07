@@ -61,6 +61,35 @@ Section 1 below remains the local fallback.
    (the session file advances the attempt id automatically)
 ```
 
+## 1.1 Standing-maintenance fallback after ordinary no-work
+
+This is an outer operational loop around bootstrap-v1, not a new bootstrap disposition.
+
+For a generic broad-work request:
+
+```text
+recoverable work
+-> normal runnable work
+-> predefined maintenance
+-> alternate/deeper maintenance
+-> portfolio maintenance
+-> true NO_ELIGIBLE_WORK
+```
+
+Run the ordinary pickup first. If it returns `CLAIM_AND_WORK`, `REVIEW_WORK`, `RECOVERY_WORK`, `NEEDS_HUMAN`, `WAIT_EXTERNAL`, or `NEEDS_EVIDENCE`, follow that result and do not enter maintenance fallback. Only ordinary `NO_ELIGIBLE_WORK` may continue into the accepted standing-maintenance selector.
+
+A **repository-scoped** instruction remains repository-scoped and **must not** silently widen to portfolio scope. If that repository has no useful maintenance, end with the scoped result unless the user explicitly asked for global/portfolio work.
+
+When maintenance selection needs publication, preserve 3C:
+
+1. attempt A selects and publishes/relaxes the exact Ledger-backed candidate;
+2. attempt A stops after publication and is ineligible with `PUBLISHED_BY_THIS_ATTEMPT`;
+3. attempt B starts with a new `execution_attempt_id`;
+4. attempt B runs the ordinary bootstrap path again;
+5. only after serialized claim + acknowledge may attempt B execute the exact active Ledger run.
+
+A final true `NO_ELIGIBLE_WORK` is valid only after **maintenance exhaustion**: no materially useful eligible predefined slot remains in the applicable scope.
+
 Rules that bind every provider:
 
 - Do not ask the user to pick an Issue when the classifier returned a work disposition.

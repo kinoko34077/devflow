@@ -30,18 +30,34 @@ from tools.maintenance_sync_check import (  # noqa: E402
 )
 from tools.maintenance_supply import (  # noqa: E402
     MaintenanceSupplyError,
+    build_catalog_maintenance_candidate,
     build_existing_owner_candidate,
     extract_existing_admission,
+    reconcile_catalog_maintenance_projection_body,
     reconcile_control_projection_body,
 )
 from tools.maintenance_github import (  # noqa: E402
     DEVFLOW_REPOSITORY,
     GitHubReadError,
     GitHubReadTransport,
+    collect_maintenance_selection,
+    collect_maintenance_portfolio_selection,
+    collect_maintenance_history,
+    find_maintenance_ledger,
     collect_portfolio,
     collect_repository,
     discover_controls,
 )
+from tools.maintenance_ledger import (  # noqa: E402
+    ActiveRun,
+    complete_run,
+    extract_active_run,
+    ledger_work_status,
+    render_run_comment,
+    replace_active,
+    replace_active_run,
+)
+
 
 PORTFOLIO_SCHEMA = "maintenance-audit-portfolio.v1"
 ERROR_SCHEMA = "maintenance-audit-error.v1"
@@ -176,6 +192,36 @@ def _portfolio(args: argparse.Namespace) -> int:
         ]
     _write(payload, args.output)
     return 0
+
+
+def _select_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = GitHubReadTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    result = collect_maintenance_selection(
+        transport,
+        args.repository,
+        f"{DEVFLOW_REPOSITORY}#{args.control}",
+        observed_at,
+    )
+    _write(result, args.output)
+    return 0
+
+
+def _select_maintenance_portfolio(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = GitHubReadTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    controls = discover_controls(transport)
+    result = collect_maintenance_portfolio_selection(
+        transport,
+        controls,
+        observed_at,
+        previous_repository=args.previous_repository,
+    )
+    _write(result, args.output)
+    return 0
+
 
 
 def _split_issue_ref(value: str) -> tuple[str, int]:
@@ -374,6 +420,49 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             "security_gate": False,
         }
 
+    def update_issue_body(
+        self,
+        repository: str,
+        number: int,
+        expected_body_sha256: str,
+        body: str,
+    ) -> bool:
+        live = self.get_issue(repository, number)
+        live_body = str(live.get("body") or "")
+        if canonical_body_sha256(live_body) != expected_body_sha256:
+            return False
+
+        payload = json.dumps({"body": body}).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(f"/repos/{repository}/issues/{number}"),
+            data=payload,
+            method="PATCH",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "kinotch-devflow-maintenance-write",
+            },
+        )
+        try:
+            with self._opener(request, timeout=self._timeout) as response:
+                raw = response.read()
+                if raw:
+                    value = json.loads(raw.decode("utf-8"))
+                    if not isinstance(value, dict):
+                        return False
+        except urllib.error.HTTPError as exc:
+            raise GitHubReadError(
+                f"GitHub bounded Issue update failed with HTTP {exc.code}"
+            ) from None
+        except urllib.error.URLError as exc:
+            reason = str(exc.reason).replace(self._token, "[REDACTED]")
+            raise GitHubReadError(
+                f"GitHub bounded Issue update failed: {reason}"
+            ) from None
+        return True
+
     def update_control_body(
         self,
         repository: str,
@@ -382,24 +471,36 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         body: str,
     ) -> bool:
         control_repo, number = _split_issue_ref(control_ref)
-        live = self.get_issue(control_repo, number)
-        live_body = str(live.get("body") or "")
-        if canonical_body_sha256(live_body) != expected_body_sha256:
-            return False
+        return self.update_issue_body(
+            control_repo,
+            number,
+            expected_body_sha256,
+            body,
+        )
 
+    def post_issue_comment(
+        self,
+        repository: str,
+        number: int,
+        body: str,
+    ) -> bool:
+        if not isinstance(body, str) or not body.strip():
+            raise MaintenanceSupplyError(
+                "Issue comment body must be non-empty"
+            )
         payload = json.dumps({"body": body}).encode("utf-8")
         request = urllib.request.Request(
             self._url(
-                f"/repos/{control_repo}/issues/{number}"
+                f"/repos/{repository}/issues/{number}/comments"
             ),
             data=payload,
-            method="PATCH",
+            method="POST",
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {self._token}",
                 "Content-Type": "application/json",
                 "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "kinotch-devflow-maintenance-sync-check",
+                "User-Agent": "kinotch-devflow-maintenance-run",
             },
         )
         try:
@@ -408,23 +509,21 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
                 timeout=self._timeout,
             ) as response:
                 raw = response.read()
-                if raw:
+                if not raw:
+                    return False
+                try:
                     value = json.loads(raw.decode("utf-8"))
-                    if not isinstance(value, dict):
-                        return False
+                except (UnicodeError, json.JSONDecodeError):
+                    return False
+                return isinstance(value, dict)
         except urllib.error.HTTPError as exc:
             raise GitHubReadError(
-                f"GitHub bounded Control update failed with HTTP {exc.code}"
+                f"GitHub Issue comment failed with HTTP {exc.code}"
             ) from None
-        except urllib.error.URLError as exc:
-            reason = str(exc.reason).replace(
-                self._token,
-                "[REDACTED]",
-            )
+        except urllib.error.URLError:
             raise GitHubReadError(
-                f"GitHub bounded Control update failed: {reason}"
+                "GitHub Issue comment transport failed"
             ) from None
-        return True
 
     def post_supply_transition(self, body: str) -> bool:
         if not isinstance(body, str) or not body.strip():
@@ -819,6 +918,724 @@ def _publish_supply(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _selection_from_active_run(
+    repository: str,
+    control_ref: str,
+    ledger_ref: str,
+    active: ActiveRun,
+) -> dict[str, object]:
+    return {
+        "schema_version": "maintenance-selection.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "status": "SELECTED",
+        "reason_code": "ACTIVE_MAINTENANCE_RUN",
+        "catalog_digest": active.catalog_digest,
+        "code_sha": None,
+        "selected": {
+            "run_id": active.run_id,
+            "slot_id": active.slot_id,
+            "generation": active.generation,
+            "lens": "",
+            "depth": active.depth,
+            "coverage_key": active.coverage_key,
+            "scope": {},
+            "fingerprint": active.fingerprint,
+            "score": sum(value for _name, value in active.score_breakdown),
+            "score_breakdown": [
+                {"name": name, "value": value}
+                for name, value in active.score_breakdown
+            ],
+        },
+    }
+
+
+def _active_run_from_selection(
+    selection: dict[str, object],
+    attempt_id: str,
+    observed_at: str,
+) -> ActiveRun:
+    selected = selection.get("selected")
+    if not isinstance(selected, dict):
+        raise MaintenanceSupplyError(
+            "maintenance selection is missing selected slot"
+        )
+    breakdown = selected.get("score_breakdown")
+    if not isinstance(breakdown, list):
+        raise MaintenanceSupplyError(
+            "maintenance selection score breakdown is missing"
+        )
+    components: list[tuple[str, int]] = []
+    for item in breakdown:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "value"}
+            or not isinstance(item.get("name"), str)
+            or not isinstance(item.get("value"), int)
+            or isinstance(item.get("value"), bool)
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance selection score breakdown is malformed"
+            )
+        components.append((item["name"], item["value"]))
+
+    generation = selected.get("generation")
+    if not isinstance(generation, int) or isinstance(generation, bool):
+        raise MaintenanceSupplyError(
+            "maintenance selection generation is invalid"
+        )
+    return ActiveRun(
+        repository=str(selection.get("repository") or ""),
+        run_id=str(selected.get("run_id") or ""),
+        slot_id=str(selected.get("slot_id") or ""),
+        generation=generation,
+        catalog_digest=str(selection.get("catalog_digest") or ""),
+        fingerprint=str(selected.get("fingerprint") or ""),
+        depth=str(selected.get("depth") or ""),
+        coverage_key=str(selected.get("coverage_key") or ""),
+        selected_at=observed_at,
+        publisher_attempt_id=attempt_id,
+        score_breakdown=tuple(components),
+    )
+
+
+def _catalog_ledger_snapshot(
+    issue: dict[str, object],
+    repository: str,
+    ledger_ref: str,
+    body: str,
+    active: ActiveRun,
+) -> dict[str, object]:
+    association = str(issue.get("author_association") or "").upper()
+    return {
+        "task_ref": ledger_ref,
+        "repository": repository,
+        "body_sha256": canonical_body_sha256(body),
+        "state": str(issue.get("state") or "UNKNOWN").upper(),
+        "work_status": ledger_work_status(body),
+        "trusted": association in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "is_pull_request": "pull_request" in issue,
+        "entry_ref": (
+            "https://github.com/"
+            + ledger_ref.rsplit("#", 1)[0]
+            + "/issues/"
+            + ledger_ref.rsplit("#", 1)[1]
+        ),
+        "active_run": asdict(active),
+    }
+
+
+def execute_catalog_maintenance_publication(
+    transport: _SyncCheckGitHubTransport,
+    selection: dict[str, object],
+    *,
+    attempt_id: str,
+    observed_at: str,
+    apply: bool,
+) -> dict[str, object]:
+    repository = selection.get("repository")
+    control_ref = selection.get("control_ref")
+    ledger_ref = selection.get("ledger_ref")
+    if not all(
+        isinstance(value, str) and value
+        for value in (repository, control_ref, ledger_ref)
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance selection identities are incomplete"
+        )
+    ledger_repo, ledger_number = _split_issue_ref(ledger_ref)
+    if ledger_repo != repository:
+        raise MaintenanceSupplyError(
+            "maintenance Ledger does not belong to selected repository"
+        )
+
+    issue = transport.get_issue(ledger_repo, ledger_number)
+    association = str(issue.get("author_association") or "").upper()
+    if (
+        str(issue.get("state") or "").lower() != "open"
+        or issue.get("title") != "[MAINTENANCE] Audit Ledger"
+        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or "pull_request" in issue
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance Ledger is not the trusted open canonical Ledger"
+        )
+    ledger_body = str(issue.get("body") or "")
+    if not ledger_body.strip():
+        raise MaintenanceSupplyError("maintenance Ledger body is empty")
+
+    desired_active = _active_run_from_selection(
+        selection,
+        attempt_id,
+        observed_at,
+    )
+    current_active = extract_active_run(ledger_body, repository)
+    if current_active is not None:
+        stable_fields = (
+            "repository",
+            "run_id",
+            "slot_id",
+            "generation",
+            "catalog_digest",
+            "fingerprint",
+            "depth",
+            "coverage_key",
+        )
+        if any(
+            getattr(current_active, field) != getattr(desired_active, field)
+            for field in stable_fields
+        ):
+            raise MaintenanceSupplyError(
+                "a different maintenance run is already active"
+            )
+        desired_active = replace_active(
+            current_active,
+            publisher_attempt_id=attempt_id,
+        )
+
+    edited_ledger, ledger_changed = replace_active_run(
+        ledger_body,
+        desired_active,
+    )
+    effective_ledger_body = edited_ledger
+    if apply and ledger_changed:
+        if not transport.update_issue_body(
+            ledger_repo,
+            ledger_number,
+            canonical_body_sha256(ledger_body),
+            edited_ledger,
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance Ledger changed before active-run publication"
+            )
+        confirmed = transport.get_issue(
+            ledger_repo,
+            ledger_number,
+        )
+        confirmed_body = str(confirmed.get("body") or "")
+        if confirmed_body != edited_ledger:
+            raise MaintenanceSupplyError(
+                "post-write maintenance Ledger differs from intended active run"
+            )
+        issue = confirmed
+        effective_ledger_body = confirmed_body
+
+    control_snapshot, control_body, _existing_admission = (
+        _control_supply_snapshot(
+            transport,
+            repository,
+            control_ref,
+            owner_ref=ledger_ref,
+            observed_at=observed_at,
+            attempt_id=attempt_id,
+        )
+    )
+    control_snapshot.pop("expected_owner_body_sha256", None)
+    ledger_snapshot = _catalog_ledger_snapshot(
+        issue,
+        repository,
+        ledger_ref,
+        effective_ledger_body,
+        desired_active,
+    )
+    desired = build_catalog_maintenance_candidate(
+        selection,
+        ledger_snapshot,
+        control_snapshot,
+    )
+    if desired is None:
+        raise MaintenanceSupplyError(
+            "active maintenance Ledger is not publishable"
+        )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            control_body,
+            desired,
+            task_ref=ledger_ref,
+        )
+    )
+
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-catalog-publication.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "run_id": desired_active.run_id,
+        "publication_id": desired["publication_id"],
+        "ledger_changed": ledger_changed,
+        "control_changed": control_changed,
+        "applied": False,
+        "transition_recorded": False,
+        "reconciliation_required": False,
+        "reason_code": None,
+    }
+    if not apply:
+        return payload
+
+    if control_changed:
+        if not transport.update_control_body(
+            repository,
+            control_ref,
+            canonical_body_sha256(control_body),
+            edited_control,
+        ):
+            raise MaintenanceSupplyError(
+                "Control changed before catalog maintenance publication"
+            )
+        observed = transport.get_control(repository, control_ref)
+        if observed.get("body") != edited_control:
+            raise MaintenanceSupplyError(
+                "post-write Control differs from catalog maintenance publication"
+            )
+
+    payload["applied"] = True
+
+    # Re-read the exact Ledger after Control publication. The candidate is
+    # digest-bound to the Ledger body used above, so any concurrent Ledger
+    # mutation after the first readback makes the just-published projection
+    # stale and requires reconciliation rather than silent success.
+    final_ledger = transport.get_issue(
+        ledger_repo,
+        ledger_number,
+    )
+    final_ledger_body = str(final_ledger.get("body") or "")
+    if final_ledger_body != effective_ledger_body:
+        payload["reconciliation_required"] = True
+        payload["reason_code"] = (
+            "LEDGER_DRIFT_AFTER_CONTROL_PUBLICATION"
+        )
+        return payload
+
+    transition = (
+        "## Standing maintenance supply transition\n\n"
+        f"- repository: `{repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        f"- run: `{desired_active.run_id}`\n"
+        f"- action: `published`\n"
+        f"- publication: `{desired['publication_id']}`\n"
+    )
+    if control_changed:
+        recorded = transport.post_supply_transition(transition)
+        payload["transition_recorded"] = recorded
+        if not recorded:
+            payload["reporting_error"] = (
+                "Control publication succeeded but #209 transition recording failed"
+            )
+    else:
+        payload["transition_recorded"] = True
+    return payload
+
+
+def _publish_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-catalog-publication.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+            "applied": False,
+        }
+        _write(payload, args.output)
+        return 0
+
+    ledger_ref = f"{args.repository}#{ledger['number']}"
+    exact = transport.get_issue(
+        args.repository,
+        int(ledger["number"]),
+    )
+    ledger_body = str(exact.get("body") or "")
+    active = extract_active_run(ledger_body, args.repository)
+    if active is not None:
+        selection = _selection_from_active_run(
+            args.repository,
+            control_ref,
+            ledger_ref,
+            active,
+        )
+    else:
+        selection = collect_maintenance_selection(
+            transport,
+            args.repository,
+            control_ref,
+            observed_at,
+        )
+        if selection.get("status") != "SELECTED":
+            _write(selection, args.output)
+            return 0
+
+    payload = execute_catalog_maintenance_publication(
+        transport,
+        selection,
+        attempt_id=args.attempt_id,
+        observed_at=observed_at,
+        apply=args.apply,
+    )
+    _write(payload, args.output)
+    return 2 if (
+        payload.get("reporting_error")
+        or payload.get("reconciliation_required")
+    ) else 0
+
+
+def _withdraw_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-catalog-publication.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "status": "NEEDS_EVIDENCE",
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+            "applied": False,
+        }
+        _write(payload, args.output)
+        return 0
+
+    ledger_ref = f"{args.repository}#{ledger['number']}"
+    _snapshot, control_body, _admission = _control_supply_snapshot(
+        transport,
+        args.repository,
+        control_ref,
+        owner_ref=ledger_ref,
+        observed_at=observed_at,
+        attempt_id=args.attempt_id,
+    )
+    edited, changed = reconcile_catalog_maintenance_projection_body(
+        control_body,
+        None,
+        task_ref=ledger_ref,
+    )
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-catalog-publication.v1",
+        "repository": args.repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "action": "withdrawn",
+        "changed": changed,
+        "applied": False,
+        "transition_recorded": False,
+    }
+    if not changed or not args.apply:
+        _write(payload, args.output)
+        return 0
+    if not transport.update_control_body(
+        args.repository,
+        control_ref,
+        canonical_body_sha256(control_body),
+        edited,
+    ):
+        raise MaintenanceSupplyError(
+            "Control changed before maintenance withdrawal"
+        )
+    observed = transport.get_control(
+        args.repository,
+        control_ref,
+    )
+    if observed.get("body") != edited:
+        raise MaintenanceSupplyError(
+            "post-write Control differs from maintenance withdrawal"
+        )
+    payload["applied"] = True
+    transition = (
+        "## Standing maintenance supply transition\n\n"
+        f"- repository: `{args.repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        "- action: `withdrawn`\n"
+    )
+    recorded = transport.post_supply_transition(transition)
+    payload["transition_recorded"] = recorded
+    if not recorded:
+        payload["reporting_error"] = (
+            "Control withdrawal succeeded but #209 transition recording failed"
+        )
+    _write(payload, args.output)
+    return 2 if payload.get("reporting_error") else 0
+
+
+def execute_maintenance_completion(
+    transport: _SyncCheckGitHubTransport,
+    *,
+    repository: str,
+    control_ref: str,
+    ledger_ref: str,
+    run_id: str,
+    result: dict[str, object],
+    attempt_id: str,
+    apply: bool,
+) -> dict[str, object]:
+    ledger_repo, ledger_number = _split_issue_ref(ledger_ref)
+    if ledger_repo != repository:
+        raise MaintenanceSupplyError(
+            "maintenance completion Ledger does not belong to repository"
+        )
+
+    issue = transport.get_issue(ledger_repo, ledger_number)
+    association = str(issue.get("author_association") or "").upper()
+    if (
+        str(issue.get("state") or "").lower() != "open"
+        or issue.get("title") != "[MAINTENANCE] Audit Ledger"
+        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or "pull_request" in issue
+    ):
+        raise MaintenanceSupplyError(
+            "maintenance completion requires the trusted open Ledger"
+        )
+    ledger_body = str(issue.get("body") or "")
+    active = extract_active_run(ledger_body, repository)
+
+    history = collect_maintenance_history(
+        transport,
+        repository,
+        ledger_number,
+    )
+    existing = next(
+        (record for record in history if record.run_id == run_id),
+        None,
+    )
+
+    if active is None:
+        if existing is not None:
+            return {
+                "schema_version": "maintenance-completion.v1",
+                "repository": repository,
+                "control_ref": control_ref,
+                "ledger_ref": ledger_ref,
+                "run_id": run_id,
+                "applied": False,
+                "already_completed": True,
+                "reconciliation_required": False,
+                "reason_code": "ALREADY_COMPLETED",
+                "transition_recorded": True,
+            }
+        raise MaintenanceSupplyError(
+            "run_id does not identify an active or completed maintenance run"
+        )
+    if active.run_id != run_id:
+        raise MaintenanceSupplyError(
+            "run_id does not match the active maintenance run"
+        )
+
+    record = existing if existing is not None else complete_run(
+        active,
+        result,
+    )
+    if record.run_id != active.run_id:
+        raise MaintenanceSupplyError(
+            "completion record does not match active run_id"
+        )
+
+    cleared_body, ledger_changed = replace_active_run(
+        ledger_body,
+        None,
+    )
+    _snapshot, control_body, _admission = _control_supply_snapshot(
+        transport,
+        repository,
+        control_ref,
+        owner_ref=ledger_ref,
+        observed_at=record.completed_at,
+        attempt_id=attempt_id,
+    )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            control_body,
+            None,
+            task_ref=ledger_ref,
+        )
+    )
+
+    payload: dict[str, object] = {
+        "schema_version": "maintenance-completion.v1",
+        "repository": repository,
+        "control_ref": control_ref,
+        "ledger_ref": ledger_ref,
+        "run_id": run_id,
+        "result": record.result,
+        "ledger_changed": ledger_changed,
+        "control_changed": control_changed,
+        "applied": False,
+        "already_completed": existing is not None,
+        "reconciliation_required": False,
+        "reason_code": None,
+        "transition_recorded": False,
+    }
+    if not apply:
+        return payload
+
+    if existing is None:
+        if not transport.post_issue_comment(
+            ledger_repo,
+            ledger_number,
+            render_run_comment(record),
+        ):
+            raise MaintenanceSupplyError(
+                "maintenance completion comment was not confirmed"
+            )
+        payload["applied"] = True
+    else:
+        payload["applied"] = True
+
+    # Completion evidence is durable once the trusted run comment exists.
+    # From this point onward, any body/projection failure is a typed
+    # reconciliation requirement rather than grounds to erase history.
+    live_ledger = transport.get_issue(
+        ledger_repo,
+        ledger_number,
+    )
+    live_ledger_body = str(live_ledger.get("body") or "")
+    if ledger_changed:
+        if not transport.update_issue_body(
+            ledger_repo,
+            ledger_number,
+            canonical_body_sha256(live_ledger_body),
+            cleared_body,
+        ):
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "LEDGER_CLEAR_FAILED_AFTER_COMPLETION"
+            )
+            return payload
+        confirmed_ledger = transport.get_issue(
+            ledger_repo,
+            ledger_number,
+        )
+        if str(confirmed_ledger.get("body") or "") != cleared_body:
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "LEDGER_CLEAR_DRIFT_AFTER_COMPLETION"
+            )
+            return payload
+
+    # Re-read Control after durable Ledger completion so withdrawal is
+    # fenced against the latest exact body, not the earlier planning read.
+    _snapshot, fresh_control_body, _admission = (
+        _control_supply_snapshot(
+            transport,
+            repository,
+            control_ref,
+            owner_ref=ledger_ref,
+            observed_at=record.completed_at,
+            attempt_id=attempt_id,
+        )
+    )
+    edited_control, control_changed = (
+        reconcile_catalog_maintenance_projection_body(
+            fresh_control_body,
+            None,
+            task_ref=ledger_ref,
+        )
+    )
+    payload["control_changed"] = control_changed
+    if control_changed:
+        if not transport.update_control_body(
+            repository,
+            control_ref,
+            canonical_body_sha256(fresh_control_body),
+            edited_control,
+        ):
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "CONTROL_WITHDRAWAL_FAILED_AFTER_COMPLETION"
+            )
+            return payload
+        observed_control = transport.get_control(
+            repository,
+            control_ref,
+        )
+        if observed_control.get("body") != edited_control:
+            payload["reconciliation_required"] = True
+            payload["reason_code"] = (
+                "CONTROL_WITHDRAWAL_DRIFT_AFTER_COMPLETION"
+            )
+            return payload
+
+    transition = (
+        "## Standing maintenance run completion\n\n"
+        f"- repository: `{repository}`\n"
+        f"- Ledger: `{ledger_ref}`\n"
+        f"- run: `{run_id}`\n"
+        f"- result: `{record.result}`\n"
+        "- action: `completed-and-withdrawn`\n"
+    )
+    if control_changed:
+        recorded = transport.post_supply_transition(transition)
+        payload["transition_recorded"] = recorded
+        if not recorded:
+            payload["reporting_error"] = (
+                "maintenance completion applied but #209 transition recording failed"
+            )
+    else:
+        payload["transition_recorded"] = True
+    return payload
+
+
+def _complete_maintenance(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = _SyncCheckGitHubTransport(token)
+    completed_at = args.completed_at or _utc_now()
+    control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+
+    ledger, ledger_error = find_maintenance_ledger(
+        transport,
+        args.repository,
+    )
+    if ledger_error is not None or ledger is None:
+        payload = {
+            "schema_version": "maintenance-completion.v1",
+            "repository": args.repository,
+            "control_ref": control_ref,
+            "run_id": args.run_id,
+            "applied": False,
+            "reconciliation_required": False,
+            "reason_code": ledger_error or "LEDGER_NOT_FOUND",
+        }
+        _write(payload, args.output)
+        return 0
+
+    result = {
+        "lens": args.lens,
+        "result": args.result,
+        "findings_summary": args.findings_summary,
+        "completed_at": completed_at,
+        "next_eligibility_reason": args.next_eligibility_reason,
+        "evidence_refs": tuple(args.evidence_ref or ()),
+    }
+    payload = execute_maintenance_completion(
+        transport,
+        repository=args.repository,
+        control_ref=control_ref,
+        ledger_ref=f"{args.repository}#{ledger['number']}",
+        run_id=args.run_id,
+        result=result,
+        attempt_id=args.attempt_id,
+        apply=args.apply,
+    )
+    _write(payload, args.output)
+    return 2 if (
+        payload.get("reconciliation_required")
+        or payload.get("reporting_error")
+    ) else 0
+
+
 def _summarize(args: argparse.Namespace) -> int:
     value = json.loads(
         Path(args.input).read_text(encoding="utf-8")
@@ -898,6 +1715,33 @@ def _parser() -> argparse.ArgumentParser:
     portfolio.add_argument("--output")
     portfolio.set_defaults(func=_portfolio)
 
+    select_maintenance = sub.add_parser("select-maintenance")
+    select_maintenance.add_argument("--repository", required=True)
+    select_maintenance.add_argument("--control", required=True, type=int)
+    select_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_AUDIT_TOKEN",
+    )
+    select_maintenance.add_argument("--observed-at")
+    select_maintenance.add_argument("--output")
+    select_maintenance.set_defaults(func=_select_maintenance)
+
+    select_maintenance_portfolio = sub.add_parser(
+        "select-maintenance-portfolio"
+    )
+    select_maintenance_portfolio.add_argument(
+        "--token-env",
+        default="MAINTENANCE_AUDIT_TOKEN",
+    )
+    select_maintenance_portfolio.add_argument(
+        "--previous-repository",
+    )
+    select_maintenance_portfolio.add_argument("--observed-at")
+    select_maintenance_portfolio.add_argument("--output")
+    select_maintenance_portfolio.set_defaults(
+        func=_select_maintenance_portfolio
+    )
+
     sync_check = sub.add_parser("sync-check")
     sync_check.add_argument("--repository", required=True)
     sync_check.add_argument(
@@ -950,6 +1794,69 @@ def _parser() -> argparse.ArgumentParser:
         help="apply bounded existing-owner supply publication/withdrawal",
     )
     publish.set_defaults(func=_publish_supply)
+
+    publish_maintenance = sub.add_parser("publish-maintenance")
+    publish_maintenance.add_argument("--repository", required=True)
+    publish_maintenance.add_argument("--control", required=True, type=int)
+    publish_maintenance.add_argument("--attempt-id", required=True)
+    publish_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    publish_maintenance.add_argument("--observed-at")
+    publish_maintenance.add_argument("--output")
+    publish_maintenance.add_argument("--apply", action="store_true")
+    publish_maintenance.set_defaults(func=_publish_maintenance)
+
+    withdraw_maintenance = sub.add_parser("withdraw-maintenance")
+    withdraw_maintenance.add_argument("--repository", required=True)
+    withdraw_maintenance.add_argument("--control", required=True, type=int)
+    withdraw_maintenance.add_argument("--attempt-id", required=True)
+    withdraw_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    withdraw_maintenance.add_argument("--observed-at")
+    withdraw_maintenance.add_argument("--output")
+    withdraw_maintenance.add_argument("--apply", action="store_true")
+    withdraw_maintenance.set_defaults(func=_withdraw_maintenance)
+
+    complete_maintenance = sub.add_parser("complete-maintenance")
+    complete_maintenance.add_argument("--repository", required=True)
+    complete_maintenance.add_argument("--control", required=True, type=int)
+    complete_maintenance.add_argument("--run-id", required=True)
+    complete_maintenance.add_argument("--lens", required=True)
+    complete_maintenance.add_argument(
+        "--result",
+        required=True,
+        choices=(
+            "CLEAN",
+            "FINDINGS",
+            "RECONCILED",
+            "BLOCKED",
+            "SUPERSEDED",
+            "NEEDS_REAUDIT",
+        ),
+    )
+    complete_maintenance.add_argument(
+        "--findings-summary",
+        default="",
+    )
+    complete_maintenance.add_argument("--completed-at")
+    complete_maintenance.add_argument("--next-eligibility-reason")
+    complete_maintenance.add_argument(
+        "--evidence-ref",
+        action="append",
+        default=[],
+    )
+    complete_maintenance.add_argument("--attempt-id", required=True)
+    complete_maintenance.add_argument(
+        "--token-env",
+        default="MAINTENANCE_SUPPLY_TOKEN",
+    )
+    complete_maintenance.add_argument("--output")
+    complete_maintenance.add_argument("--apply", action="store_true")
+    complete_maintenance.set_defaults(func=_complete_maintenance)
 
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--input", required=True)

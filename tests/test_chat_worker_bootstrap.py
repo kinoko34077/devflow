@@ -110,6 +110,41 @@ class ContractPropertyTests(unittest.TestCase):
         self.assertEqual("kinoko34077/execution-coordinator#80", result["task_ref"])
         self.assertIsInstance(result["task_ref"], str)
 
+    def test_same_publication_attempt_is_omitted_but_fresh_attempt_can_consume(self):
+        from tools import maintenance_supply as ms
+
+        data = copy.deepcopy(example("01-broad-instruction-fresh-claim"))
+        candidate = data["evidence"]["frontier"]["candidates"][0]
+        publisher_attempt = data["request"]["execution_attempt_id"]
+        supply = {"publisher_execution_attempt_id": publisher_attempt}
+
+        candidate["published_by_this_attempt"] = ms.published_by_attempt(
+            supply,
+            data["request"]["execution_attempt_id"],
+        )
+        same = cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("NO_ELIGIBLE_WORK", same["disposition"])
+        self.assertIn(
+            {
+                "task_ref": candidate["task_ref"],
+                "role": candidate["role"],
+                "reason": "PUBLISHED_BY_THIS_ATTEMPT",
+            },
+            same["omissions"],
+        )
+
+        later_request = dict(
+            data["request"],
+            execution_attempt_id="chatgpt-maintenance-fresh-attempt",
+        )
+        candidate["published_by_this_attempt"] = ms.published_by_attempt(
+            supply,
+            later_request["execution_attempt_id"],
+        )
+        later = cwb.classify(later_request, data["evidence"])
+        self.assertEqual("CLAIM_AND_WORK", later["disposition"])
+        self.assertEqual(candidate["task_ref"], later["task_ref"])
+
     def test_coordinator_worker_id_binds_system_and_session(self):
         result = example("01-broad-instruction-fresh-claim")["expected"]
         self.assertEqual("claude:claude-20260928-a", result["coordinator_worker_id"])

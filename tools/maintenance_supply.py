@@ -11,6 +11,7 @@ from typing import Any, Mapping
 ADMISSION_SCHEMA_VERSION = 1
 PORTFOLIO_SCHEMA_VERSION = "execution-portfolio-metadata.v1"
 SUPPLY_SCHEMA_VERSION = "maintenance-existing-owner-supply.v1"
+CATALOG_SUPPLY_SCHEMA_VERSION = "maintenance-catalog-supply.v1"
 CANDIDATE_BEGIN = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
 CANDIDATE_END = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
 PORTFOLIO_BEGIN = "<!-- DEVFLOW_EXECUTION_PORTFOLIO_METADATA_V1_BEGIN -->"
@@ -793,6 +794,305 @@ def reconcile_control_projection_body(
         if not isinstance(metadata, dict):
             raise MaintenanceSupplyError(
                 "desired supply portfolio metadata is missing"
+            )
+        next_entries.append(dict(metadata))
+    next_entries.sort(
+        key=lambda item: (
+            str(item.get("task") or ""),
+            str(item.get("role") or ""),
+        )
+    )
+    portfolio["entries"] = next_entries
+    final = _replace_projection_payload(
+        edited,
+        start=pstart,
+        end=pend,
+        value=portfolio,
+    )
+    return final, final != body
+
+
+def build_catalog_maintenance_candidate(
+    selection: object,
+    ledger_snapshot: object,
+    control_snapshot: object,
+) -> dict[str, object] | None:
+    selected_envelope = _mapping(selection, "selection")
+    ledger = _mapping(ledger_snapshot, "ledger_snapshot")
+    control = _mapping(control_snapshot, "control_snapshot")
+
+    if selected_envelope.get("status") != "SELECTED":
+        return None
+    selected = selected_envelope.get("selected")
+    if not isinstance(selected, dict):
+        return None
+
+    repository = selected_envelope.get("repository")
+    control_ref = selected_envelope.get("control_ref")
+    ledger_ref = selected_envelope.get("ledger_ref")
+    if not all(isinstance(value, str) and value for value in (repository, control_ref, ledger_ref)):
+        return None
+    if ledger_ref.rsplit("#", 1)[0] != repository:
+        return None
+    if control.get("repository") != repository or control.get("control_ref") != control_ref:
+        return None
+    if control.get("trusted") is not True or control.get("repository_state") != "ACTIVE":
+        return None
+    if _gated(control):
+        return None
+
+    if ledger.get("task_ref") != ledger_ref or ledger.get("repository") != repository:
+        return None
+    if ledger.get("trusted") is not True or ledger.get("is_pull_request") is not False:
+        return None
+    if str(ledger.get("state") or "").upper() != "OPEN":
+        return None
+    if ledger.get("work_status") != "READY_FOR_IMPLEMENTATION":
+        return None
+
+    body_sha = ledger.get("body_sha256")
+    try:
+        body_sha = _sha(body_sha, "ledger_snapshot.body_sha256")
+    except MaintenanceSupplyError:
+        return None
+
+    entry_ref = ledger.get("entry_ref")
+    expected_entry = (
+        "https://github.com/"
+        + ledger_ref.rsplit("#", 1)[0]
+        + "/issues/"
+        + ledger_ref.rsplit("#", 1)[1]
+    )
+    if entry_ref != expected_entry:
+        return None
+
+    active = ledger.get("active_run")
+    if not isinstance(active, dict):
+        return None
+    exact_pairs = {
+        "run_id": selected.get("run_id"),
+        "slot_id": selected.get("slot_id"),
+        "generation": selected.get("generation"),
+        "catalog_digest": selected_envelope.get("catalog_digest"),
+        "fingerprint": selected.get("fingerprint"),
+        "depth": selected.get("depth"),
+        "coverage_key": selected.get("coverage_key"),
+    }
+    if any(active.get(field) != value for field, value in exact_pairs.items()):
+        return None
+    publisher_attempt = control.get("publisher_execution_attempt_id")
+    if active.get("publisher_attempt_id") != publisher_attempt:
+        return None
+
+    observed_at = control.get("observed_at")
+    fresh_until = control.get("fresh_until")
+    try:
+        _timestamp(observed_at, "control_snapshot.observed_at")
+        _timestamp(fresh_until, "control_snapshot.fresh_until")
+    except MaintenanceSupplyError:
+        return None
+    if _timestamp(fresh_until, "control_snapshot.fresh_until") <= _timestamp(
+        observed_at,
+        "control_snapshot.observed_at",
+    ):
+        return None
+
+    selected_slot_id = selected.get("slot_id")
+    if not isinstance(selected_slot_id, str) or not selected_slot_id:
+        return None
+    conflict_keys = sorted(
+        {
+            f"repo:{repository}",
+            f"component:{repository}:maintenance/{selected_slot_id}",
+        }
+    )
+    admission: dict[str, object] = {
+        "task": ledger_ref,
+        "task_body_sha256": body_sha,
+        "task_work_status": "READY_FOR_IMPLEMENTATION",
+        "entry_ref": entry_ref,
+        "scope_ready": True,
+        "blocked": False,
+        "requires_user_confirmation": False,
+        "conflict_keys": conflict_keys,
+        "roles": [
+            {
+                "role": "implementer",
+                "next_action_tag": "IMPLEMENT",
+            }
+        ],
+    }
+    fingerprint = _candidate_fingerprint(admission)
+    portfolio: dict[str, object] = {
+        "task": ledger_ref,
+        "role": "implementer",
+        "work_class": "audit",
+        "task_body_sha256": body_sha,
+        "candidate_fingerprint": fingerprint,
+        "controller_urgency": None,
+        "dependency_ready": True,
+        "dependency_order": 0,
+        "readiness_class": "IMPLEMENT",
+        "ready_at": None,
+        "required_capabilities": [],
+        "required_environment": [],
+        "observed_at": observed_at,
+        "fresh_until": fresh_until,
+    }
+    logical = {
+        "repository": repository,
+        "control_ref": control_ref,
+        "admission": admission,
+        "portfolio": portfolio,
+        "active_run": exact_pairs,
+    }
+    return {
+        "schema_version": CATALOG_SUPPLY_SCHEMA_VERSION,
+        "publication_id": _canonical_hash(logical),
+        "repository": repository,
+        "control_ref": control_ref,
+        "candidate_fingerprint": fingerprint,
+        "admission": admission,
+        "portfolio": portfolio,
+        "publisher_execution_attempt_id": publisher_attempt,
+    }
+
+
+def reconcile_catalog_maintenance_projection_body(
+    body: str,
+    desired_supply: object,
+    *,
+    task_ref: str,
+) -> tuple[str, bool]:
+    if not isinstance(body, str):
+        raise MaintenanceSupplyError("Control body must be a string")
+    task_ref = _string(task_ref, "task_ref")
+    repository = task_ref.rsplit("#", 1)[0]
+
+    supply: dict[str, Any] | None
+    control_ref: str | None = None
+    if desired_supply is None:
+        supply = None
+    else:
+        supply = _mapping(desired_supply, "desired_supply")
+        if supply.get("schema_version") != CATALOG_SUPPLY_SCHEMA_VERSION:
+            raise MaintenanceSupplyError(
+                "catalog maintenance supply schema mismatch"
+            )
+        if supply.get("repository") != repository or _supply_task(supply) != task_ref:
+            raise MaintenanceSupplyError(
+                "catalog maintenance supply identity mismatch"
+            )
+        control_ref = _string(
+            supply.get("control_ref"),
+            "desired_supply.control_ref",
+        )
+
+    if control_ref is None:
+        if body.count(CANDIDATE_BEGIN) != 1 or body.count(CANDIDATE_END) != 1:
+            raise MaintenanceSupplyError(
+                "candidate projection block is missing or ambiguous"
+            )
+        start = body.index(CANDIDATE_BEGIN) + len(CANDIDATE_BEGIN)
+        end = body.index(CANDIDATE_END)
+        if end <= start:
+            raise MaintenanceSupplyError(
+                "candidate projection markers are out of order"
+            )
+        try:
+            outer = json.loads(body[start:end].strip())
+        except json.JSONDecodeError as exc:
+            raise MaintenanceSupplyError(
+                "candidate projection contains invalid JSON"
+            ) from exc
+        if not isinstance(outer, dict):
+            raise MaintenanceSupplyError("candidate projection must be an object")
+        control_ref = _string(
+            outer.get("source_ref"),
+            "candidate projection source_ref",
+        )
+        if outer.get("repository") != repository:
+            raise MaintenanceSupplyError(
+                "candidate projection repository mismatch"
+            )
+
+    candidate, cstart, cend = _parse_projection_block(
+        body,
+        start_marker=CANDIDATE_BEGIN,
+        end_marker=CANDIDATE_END,
+        repository=repository,
+        control_ref=control_ref,
+        schema_version=ADMISSION_SCHEMA_VERSION,
+        array_key="candidates",
+    )
+    candidates = candidate["candidates"]
+    if not all(isinstance(item, dict) for item in candidates):
+        raise MaintenanceSupplyError(
+            "candidate projection entries must be objects"
+        )
+    tasks = [item.get("task") for item in candidates]
+    if not all(isinstance(item, str) and item for item in tasks):
+        raise MaintenanceSupplyError("candidate projection task is malformed")
+    if len(set(tasks)) != len(tasks):
+        raise MaintenanceSupplyError(
+            "candidate projection contains duplicate task envelopes"
+        )
+    next_candidates = [
+        dict(item) for item in candidates if item.get("task") != task_ref
+    ]
+    if supply is not None:
+        admission = supply.get("admission")
+        if not isinstance(admission, dict) or admission.get("task") != task_ref:
+            raise MaintenanceSupplyError(
+                "catalog maintenance admission is missing or mismatched"
+            )
+        next_candidates.append(dict(admission))
+    next_candidates.sort(key=lambda item: str(item.get("task") or ""))
+    candidate["candidates"] = next_candidates
+    edited = _replace_projection_payload(
+        body,
+        start=cstart,
+        end=cend,
+        value=candidate,
+    )
+
+    portfolio, pstart, pend = _parse_projection_block(
+        edited,
+        start_marker=PORTFOLIO_BEGIN,
+        end_marker=PORTFOLIO_END,
+        repository=repository,
+        control_ref=control_ref,
+        schema_version=PORTFOLIO_SCHEMA_VERSION,
+        array_key="entries",
+    )
+    entries = portfolio["entries"]
+    if not all(isinstance(item, dict) for item in entries):
+        raise MaintenanceSupplyError(
+            "portfolio projection entries must be objects"
+        )
+    identities = [
+        (item.get("task"), item.get("role")) for item in entries
+    ]
+    if not all(
+        isinstance(task, str) and task
+        and isinstance(role, str) and role
+        for task, role in identities
+    ):
+        raise MaintenanceSupplyError(
+            "portfolio projection identity is malformed"
+        )
+    if len(set(identities)) != len(identities):
+        raise MaintenanceSupplyError(
+            "portfolio projection contains duplicate task/role entries"
+        )
+    next_entries = [
+        dict(item) for item in entries if item.get("task") != task_ref
+    ]
+    if supply is not None:
+        metadata = supply.get("portfolio")
+        if not isinstance(metadata, dict) or metadata.get("task") != task_ref:
+            raise MaintenanceSupplyError(
+                "catalog maintenance portfolio metadata is missing or mismatched"
             )
         next_entries.append(dict(metadata))
     next_entries.sort(

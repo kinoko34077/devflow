@@ -33,6 +33,27 @@ user broad instruction (+ current working context)
 
 The classification is a pure function of `(request, evidence)`. Provider transport identity never grants capability, priority or rank. For an explicit different-reviewer demand only, a directly supplied Review Provenance `System + Model` signature may participate as a hard eligibility gate; it is not inferred from `worker_system`.
 
+### 1.1 Standing-maintenance outer fallback
+
+Standing maintenance is deliberately **outside** `classify(request, evidence)`. This contract does not add a disposition, reason code, rank rule, or candidate role to bootstrap-v1.
+
+For a generic broad-work instruction, the worker first runs the ordinary bootstrap cycle. Only an ordinary `NO_ELIGIBLE_WORK` result may enter the standing-maintenance outer loop:
+
+```text
+recoverable work
+-> normal runnable work
+-> predefined maintenance
+-> alternate/deeper maintenance
+-> portfolio maintenance
+-> true NO_ELIGIBLE_WORK
+```
+
+The final true `NO_ELIGIBLE_WORK` requires **maintenance exhaustion** as defined by the accepted standing-maintenance policy. It is not permission to invent an audit.
+
+A **repository-scoped** request remains repository-scoped and **must not** silently widen to portfolio scope. Portfolio maintenance participates only when the original request/working scope is portfolio-wide or the user explicitly broadens it.
+
+Publication and consumption remain separated by decision 3C. If attempt A publishes or relaxes a maintenance candidate, attempt A ends after publication. A later attempt B must use a new `execution_attempt_id` and gather fresh evidence. The published candidate is omitted from attempt A as `PUBLISHED_BY_THIS_ATTEMPT`; only attempt B may proceed to the normal serialized claim and acknowledge path.
+
 ## 2. Request envelope (`chat-worker-bootstrap-request.v1`)
 
 The original v1 fields remain required. Additive optional fields are `accepted_work_classes` (#215) and `review_provenance` (#211). Unknown fields are rejected.

@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/docs/spec/schemas/maintenance-catalog.v1.schema.json",
+  "title": "Maintenance Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "baseline",
+    "rollout",
+    "risk_profile",
+    "scope_risk_overrides",
+    "repository_lenses",
+    "common_slot_overrides",
+    "repository_slots"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "maintenance-catalog.v1"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "baseline": {
+      "const": "maintenance-common-baseline.v1"
+    },
+    "rollout": {
+      "enum": [
+        "DISABLED",
+        "PILOT",
+        "ENABLED"
+      ]
+    },
+    "risk_profile": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "scope_risk_overrides": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scopeRisk"
+      }
+    },
+    "repository_lenses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/lens"
+      }
+    },
+    "common_slot_overrides": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/commonOverride"
+      }
+    },
+    "repository_slots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/slot"
+      }
+    }
+  },
+  "$defs": {
+    "lens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "selector"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "repository",
+            "path",
+            "component",
+            "runtime_boundary",
+            "workflow",
+            "external_system"
+          ]
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scopeRisk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "risk"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "risk": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        }
+      }
+    },
+    "commonOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "rationale"
+      ],
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "ACTIVE",
+            "MERGED",
+            "SUPERSEDED",
+            "RETIRED"
+          ]
+        },
+        "cadence_class": {
+          "enum": [
+            "GENERAL",
+            "SECURITY"
+          ]
+        },
+        "minimum_depth": {
+          "enum": [
+            "CONTROL",
+            "STANDARD",
+            "DEEP"
+          ]
+        },
+        "external_freshness_class": {
+          "enum": [
+            "FAST",
+            "NORMAL",
+            "SLOW"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "title",
+        "lifecycle",
+        "scope",
+        "lens",
+        "coverage_key",
+        "cadence_class",
+        "minimum_depth",
+        "external_freshness_class",
+        "description"
+      ],
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "ACTIVE",
+            "MERGED",
+            "SUPERSEDED",
+            "RETIRED"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "lens": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "coverage_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cadence_class": {
+          "enum": [
+            "GENERAL",
+            "SECURITY"
+          ]
+        },
+        "minimum_depth": {
+          "enum": [
+            "CONTROL",
+            "STANDARD",
+            "DEEP"
+          ]
+        },
+        "external_freshness_class": {
+          "enum": [
+            "FAST",
+            "NORMAL",
+            "SLOW"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
