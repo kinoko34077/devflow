@@ -251,6 +251,94 @@ class CatalogCollectionTests(unittest.TestCase):
         )
         self.assertNotEqual(first, second)
 
+    def test_rollout_disable_reenable_preserves_history_and_restores_selection(self):
+        from tools.maintenance_ledger import RunRecord, render_run_comment
+
+        prior = RunRecord(
+            repository=REPO,
+            run_id=f"audit:{REPO}:common.correctness:1",
+            slot_id="common.correctness",
+            generation=1,
+            lens="correctness",
+            depth="STANDARD",
+            fingerprint="sha256:" + "1" * 64,
+            result="CLEAN",
+            findings_summary="prior accepted history",
+            completed_at="2026-09-01T00:00:00Z",
+            next_eligibility_reason=None,
+            evidence_refs=("https://example.invalid/evidence",),
+        )
+        comments = {
+            7: [{
+                "body": render_run_comment(prior),
+                "author_association": "OWNER",
+            }]
+        }
+        issues = [issue(7, "[MAINTENANCE] Audit Ledger")]
+
+        pilot = FakeTransport(
+            baseline=self.baseline,
+            catalog={"content": self.catalog, "sha": "d" * 40},
+            issues=issues,
+            comments=comments,
+        )
+        history_before = mg.collect_maintenance_history(pilot, REPO, 7)
+        selected_before = mg.collect_maintenance_selection(
+            pilot,
+            REPO,
+            CONTROL,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", selected_before["status"])
+
+        disabled_catalog = json.loads(self.catalog)
+        disabled_catalog["rollout"] = "DISABLED"
+        disabled = FakeTransport(
+            baseline=self.baseline,
+            catalog={
+                "content": json.dumps(disabled_catalog),
+                "sha": "e" * 40,
+            },
+            issues=issues,
+            comments=comments,
+        )
+        disabled_result = mg.collect_maintenance_selection(
+            disabled,
+            REPO,
+            CONTROL,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(
+            ("NO_ELIGIBLE_WORK", "MAINTENANCE_DISABLED"),
+            (disabled_result["status"], disabled_result["reason_code"]),
+        )
+        self.assertEqual(
+            history_before,
+            mg.collect_maintenance_history(disabled, REPO, 7),
+        )
+
+        restored = FakeTransport(
+            baseline=self.baseline,
+            catalog={"content": self.catalog, "sha": "f" * 40},
+            issues=issues,
+            comments=comments,
+        )
+        selected_after = mg.collect_maintenance_selection(
+            restored,
+            REPO,
+            CONTROL,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", selected_after["status"])
+        self.assertEqual(
+            history_before,
+            mg.collect_maintenance_history(restored, REPO, 7),
+        )
+        self.assertEqual(
+            selected_before["selected"],
+            selected_after["selected"],
+        )
+
 
 class MultiRepoTransport:
     def __init__(
