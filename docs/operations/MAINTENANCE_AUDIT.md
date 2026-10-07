@@ -71,6 +71,29 @@ and as the explicit `workflow_dispatch` mode `publish`. The workflow's default `
 
 A compact `devflow#209` transition comment is emitted only when the machine-readable supply set materially changes. Repeated identical publication is a no-op.
 
+## Standing maintenance as broad-work fallback
+
+Standing maintenance is predefined recurring supply backed by the repository Catalog and the standing `[MAINTENANCE] Audit Ledger`. It is not generated from idle state.
+
+The outer broad-work order is:
+
+```text
+recoverable work
+-> normal runnable work
+-> predefined maintenance
+-> alternate/deeper maintenance
+-> portfolio maintenance
+-> true NO_ELIGIBLE_WORK
+```
+
+The existing bootstrap-v1 classifier remains unchanged. Maintenance fallback runs only after ordinary `NO_ELIGIBLE_WORK`; it does not replace `NEEDS_HUMAN`, `WAIT_EXTERNAL`, or `NEEDS_EVIDENCE`.
+
+A **repository-scoped** request remains repository-scoped and **must not** silently widen to portfolio scope. Cross-repository/portfolio maintenance is considered only when the request itself is global/portfolio-scoped.
+
+Decision 3C applies to Catalog-backed supply exactly as it does to other publication. attempt A may select and publish, but must stop after publication. attempt B uses a new `execution_attempt_id` and fresh evidence; attempt A must be omitted as `PUBLISHED_BY_THIS_ATTEMPT`.
+
+A final true `NO_ELIGIBLE_WORK` requires **maintenance exhaustion**: no due/overdue predefined slot, useful unexecuted Lens/Depth, eligible alternate repository within scope, portfolio slot where applicable, or security/external-freshness reason is expected to produce materially new evidence.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
