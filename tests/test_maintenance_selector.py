@@ -212,6 +212,25 @@ class SelectorEligibilityTests(unittest.TestCase):
         self.assertIsNone(ms.score_slot(value, current, (run,)))
         self.assertIsNone(ms.select_maintenance((value,), current, (run,)))
 
+    def test_exact_equivalent_after_cooldown_but_before_cadence_is_still_ineligible(self):
+        value = slot(risk="MEDIUM")
+        current = context((value,))
+        fp = current.current_fingerprints[key(value)]
+        run = history(value, days_ago=10, fingerprint=fp)
+
+        self.assertIsNone(ms.score_slot(value, current, (run,)))
+        self.assertIsNone(ms.select_maintenance((value,), current, (run,)))
+
+    def test_exact_equivalent_becomes_eligible_when_cadence_is_due(self):
+        value = slot(risk="MEDIUM")
+        current = context((value,))
+        fp = current.current_fingerprints[key(value)]
+        run = history(value, days_ago=61, fingerprint=fp)
+
+        breakdown = ms.score_slot(value, current, (run,))
+        self.assertIsNotNone(breakdown)
+        self.assertIn(("overdue", 20), breakdown.components)
+
     def test_cooldown_bypass_triggers_allow_reaudit(self):
         value = slot(risk="HIGH")
         base = context((value,))
