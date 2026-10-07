@@ -360,5 +360,43 @@ class MaintenanceCatalogTests(unittest.TestCase):
         self.assertRegex(first, r"^sha256:[0-9a-f]{64}$")
 
 
+class DevflowPilotCatalogTests(unittest.TestCase):
+    def test_devflow_pilot_catalog_exists_and_validates_against_common_baseline(self):
+        root = Path(__file__).resolve().parents[1]
+        baseline = mc.load_common_baseline(
+            root / "docs" / "spec" / "maintenance" / "common-baseline.v1.yaml"
+        )
+        catalog = mc.load_repository_catalog(
+            root / ".devflow" / "maintenance.yaml",
+            baseline,
+        )
+        self.assertEqual("kinoko34077/devflow", catalog.repository)
+        self.assertEqual("PILOT", catalog.rollout)
+        self.assertEqual("HIGH", catalog.risk_profile)
+        self.assertEqual(
+            {
+                "control.consistency",
+                "session.staleness",
+                "supply.claim-consistency",
+                "spec.current-state-drift",
+                "security.workflow-permissions",
+                "dependency.actions-pins",
+            },
+            {slot.slot_id for slot in catalog.repository_slots},
+        )
+        resolved = mc.resolve_catalog(baseline, catalog)
+        self.assertTrue(any(slot.lens == "security" for slot in resolved))
+        self.assertTrue(
+            {
+                "control.consistency",
+                "session.staleness",
+                "supply.claim-consistency",
+                "spec.current-state-drift",
+                "security.workflow-permissions",
+                "dependency.actions-pins",
+            }.issubset({slot.slot_id for slot in resolved})
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
