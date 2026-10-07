@@ -897,7 +897,15 @@ def build_catalog_maintenance_candidate(
     ):
         return None
 
-    conflict_keys = [f"component:{repository}:maintenance"]
+    selected_slot_id = selected.get("slot_id")
+    if not isinstance(selected_slot_id, str) or not selected_slot_id:
+        return None
+    conflict_keys = sorted(
+        {
+            f"repo:{repository}",
+            f"component:{repository}:maintenance/{selected_slot_id}",
+        }
+    )
     admission: dict[str, object] = {
         "task": ledger_ref,
         "task_body_sha256": body_sha,
