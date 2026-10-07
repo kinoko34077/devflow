@@ -1599,6 +1599,49 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertNotIn('"task": "o/r#7"', withdrawn)
 
+    def test_catalog_withdrawal_preserves_unrelated_normal_candidate(self):
+        normal = ms.build_existing_owner_candidate(
+            decision(owner_ref="o/r#8"),
+            owner(
+                task_ref="o/r#8",
+                body_sha256=OTHER_SHA,
+                entry_ref="https://github.com/o/r/issues/8",
+                conflict_keys=("component:o/r:normal",),
+            ),
+            control(expected_owner_body_sha256=OTHER_SHA),
+        )
+        self.assertIsNotNone(normal)
+        body, changed = ms.reconcile_control_projection_body(
+            empty_control_body(),
+            normal,
+            task_ref="o/r#8",
+        )
+        self.assertTrue(changed)
+
+        maintenance = ms.build_catalog_maintenance_candidate(
+            catalog_selection(),
+            catalog_ledger(),
+            control(),
+        )
+        body, changed = ms.reconcile_catalog_maintenance_projection_body(
+            body,
+            maintenance,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertIn('"task": "o/r#8"', body)
+        self.assertIn('"task": "o/r#7"', body)
+
+        withdrawn, changed = ms.reconcile_catalog_maintenance_projection_body(
+            body,
+            None,
+            task_ref="o/r#7",
+        )
+        self.assertTrue(changed)
+        self.assertIn('"task": "o/r#8"', withdrawn)
+        self.assertIn('"work_class": "sync-check"', withdrawn)
+        self.assertNotIn('"task": "o/r#7"', withdrawn)
+
     def test_catalog_publisher_attempt_preserves_3c_fence(self):
         supply = ms.build_catalog_maintenance_candidate(
             catalog_selection(),
