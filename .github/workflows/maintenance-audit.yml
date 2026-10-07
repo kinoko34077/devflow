@@ -14,6 +14,8 @@ on:
         options:
           - audit
           - maintenance-select
+          - maintenance-publish
+          - maintenance-withdraw
           - projection-shadow
           - publish
           - projection-cache
@@ -273,6 +275,52 @@ jobs:
         with:
           name: maintenance-supply-result
           path: maintenance-supply-result.json
+
+  catalog-maintenance-publish:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    concurrency:
+      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Publish or withdraw catalog-backed maintenance supply
+        env:
+          MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}
+          MAINTENANCE_REPOSITORY: ${{ inputs.repository }}
+          MAINTENANCE_CONTROL: ${{ inputs.control }}
+          MAINTENANCE_ATTEMPT_ID: ${{ inputs.attempt_id }}
+          MAINTENANCE_MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in             "$MAINTENANCE_SUPPLY_TOKEN"             "$MAINTENANCE_REPOSITORY"             "$MAINTENANCE_CONTROL"             "$MAINTENANCE_ATTEMPT_ID"
+          do
+            if [[ -z "$value" ]]; then
+              echo "catalog maintenance publication requires preconfigured token, repository, control, and attempt_id" >&2
+              exit 2
+            fi
+          done
+
+          if [[ "$MAINTENANCE_MODE" == "maintenance-publish" ]]; then
+            COMMAND=publish-maintenance
+          else
+            COMMAND=withdraw-maintenance
+          fi
+
+          python scripts/maintenance_audit.py "$COMMAND"             --repository "$MAINTENANCE_REPOSITORY"             --control "$MAINTENANCE_CONTROL"             --attempt-id "$MAINTENANCE_ATTEMPT_ID"             --token-env MAINTENANCE_SUPPLY_TOKEN             --apply             --output maintenance-catalog-publication-result.json
+      - name: Upload catalog maintenance publication result
+        if: always() && hashFiles('maintenance-catalog-publication-result.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: maintenance-catalog-publication-result
+          path: maintenance-catalog-publication-result.json
 
   projection-cache:
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
