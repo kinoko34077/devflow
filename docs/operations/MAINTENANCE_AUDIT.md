@@ -94,6 +94,35 @@ Decision 3C applies to Catalog-backed supply exactly as it does to other publica
 
 A final true `NO_ELIGIBLE_WORK` requires **maintenance exhaustion**: no due/overdue predefined slot, useful unexecuted Lens/Depth, eligible alternate repository within scope, portfolio slot where applicable, or security/external-freshness reason is expected to produce materially new evidence.
 
+## Standing Maintenance PILOT acceptance and rollout decision
+
+Task 11 acceptance under `devflow#363` completed the required evidence matrix and reversible rollout proof for the Standing Maintenance Catalog.
+
+Accepted pilot evidence includes:
+
+- devflow Task 9: deterministic/explainable selection, 3C publisher/consumer separation, serialized claim + acknowledge, Ledger-only completion, bounded-Issue promotion, interrupted successor resume without replay, alternate-Lens rotation, and true `NO_ELIGIBLE_WORK` after controlled exhaustion;
+- execution-coordinator Task 10: cross-repository publication, duplicate-claim fencing, one bounded `common.correctness / STANDARD` run, candidate withdrawal, and clean final runtime state;
+- selector/regression evidence for justified DEEP, same-audit suppression, external freshness with unchanged code SHA, repository-bias penalty, and portfolio selection;
+- no duplicate catalog/history/projection authority and no weakening of Human/security/credential/session/permission gates.
+
+Rollback/re-enable proof used `kinoko34077/execution-coordinator`:
+
+- PR #129 changed only catalog rollout `PILOT -> DISABLED`; exact-head Verify `37698646772`, Formal Review `5449379595`, merge `78bb6a930be7b668fcbc8ac42aa569a840c67572`, and post-main Verify `37698886593` were clean;
+- with rollout `DISABLED`, read-only maintenance selection returned `NO_ELIGIBLE_WORK / MAINTENANCE_DISABLED`; ordinary `/pickup` remained on the existing normal bootstrap path and returned `NO_ELIGIBLE_WORK / NO_CANDIDATES_PUBLISHED`; Ledger history remained intact and runtime claims remained empty;
+- PR #130 restored only `DISABLED -> PILOT`; exact-head Verify `37699092017`, Formal Review CLEAN, merge `2cf67fd5d9bc169f8f7c5f17851dcf323779f5ab`, and post-main Verify `37699167087` were clean;
+- after restoration, read-only selector run `37654926004` attempt 4 returned `MAINTENANCE_SELECTED` for `common.dependency-external-assumptions / STANDARD`, score `80`; no Ledger activation, Control candidate publication, or runtime claim was created.
+
+### Rollout decision
+
+The accepted outcome is **expand PILOT, not fleet-wide ENABLED**.
+
+- `devflow` and `execution-coordinator` remain accepted `PILOT` participants.
+- The next rollout stage may onboard **at most one additional control-plane repository** through its own repository-local catalog/Ledger/PR/verification path.
+- That additional onboarding is separate work and must not be inferred as already enabled by this decision.
+- Fleet-wide `ENABLED` remains unauthorized. Broader automatic maintenance supply requires additional repository breadth and accepted evidence under the same Human/security/runtime-authority boundaries.
+- A participating repository may be returned to `DISABLED` without deleting its catalog or durable run history; normal work/recovery bootstrap must remain unaffected.
+
+Canonical detailed evidence remains on `devflow#363`; this operations document records the accepted operational state and decision rather than duplicating run-by-run history.
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
