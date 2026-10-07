@@ -112,6 +112,10 @@ standing_maintenance:
   publication_requires_new_execution_attempt: true
   fresh_execution_attempt_required_after_publish: true
   true_no_eligible_work_requires_maintenance_exhausted: true
+  same_attempt_omission_reason: PUBLISHED_BY_THIS_ATTEMPT
+  claim_authority: execution-coordinator
+  catalog_is_task_definition_not_claim_authority: true
+  synthetic_idle_work: forbidden
 
 compatibility:
   legacy_work_states_read_only:
@@ -468,32 +472,6 @@ project_sync:
       - owner_or_field_migration
       - repository_identity_migration
       - explicit_user_request
-
-standing_maintenance:
-  authority: devflow#363
-  mode: outer_fallback_after_bootstrap_v1_no_work
-  bootstrap_v1_classifier_unchanged: true
-  rollout_values:
-    - DISABLED
-    - PILOT
-    - ENABLED
-  initial_rollout: PILOT
-  generic_broad_pickup_order:
-    - recoverable_work
-    - normal_runnable_work
-    - predefined_maintenance
-    - alternate_or_deeper_maintenance
-    - portfolio_maintenance
-    - NO_ELIGIBLE_WORK
-  repository_scope_auto_widen: forbidden
-  publication_requires_new_execution_attempt: true
-  same_attempt_omission_reason: PUBLISHED_BY_THIS_ATTEMPT
-  true_no_eligible_work_requires:
-    - maintenance_exhaustion
-    - no_materially_new_evidence_expected
-  claim_authority: execution-coordinator
-  catalog_is_task_definition_not_claim_authority: true
-  synthetic_idle_work: forbidden
 
 repository_bootstrap:
   contract_schema: repository-bootstrap.v1
