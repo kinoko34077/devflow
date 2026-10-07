@@ -195,14 +195,17 @@ def score_slot(
     cooldown = _cooldown(slot, context)
     bypass = _bypass(slot, context)
 
-    exact_recent = [
+    exact_runs = [
         item
         for item in history
         if _exact_equivalent(slot, depth, fingerprint, item)
-        and now - item.completed_at < cooldown
     ]
-    if exact_recent and not bypass:
-        return None
+    latest_exact = _latest(exact_runs)
+    if latest_exact is not None and not bypass:
+        exact_age = now - latest_exact.completed_at
+        cadence = timedelta(days=_cadence_days(slot, depth, context))
+        if exact_age <= cadence:
+            return None
 
     weights = context.selector_weights
     components: list[tuple[str, int]] = []
