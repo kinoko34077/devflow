@@ -190,5 +190,191 @@ class CatalogCollectionTests(unittest.TestCase):
         self.assertNotEqual(first, second)
 
 
+class MultiRepoTransport:
+    def __init__(self, *, baseline, catalogs, issues, comments=None, heads=None):
+        self.baseline = baseline
+        self.catalogs = catalogs
+        self.issues = issues
+        self.comments = comments or {}
+        self.heads = heads or {}
+
+    def get_default_branch(self, repository):
+        default = {
+            "kinoko34077/devflow": "d" * 40,
+            "kinoko34077/a": "a" * 40,
+            "kinoko34077/b": "b" * 40,
+        }
+        return {
+            "name": "main",
+            "commit": {"sha": self.heads.get(repository, default.get(repository, "c" * 40))},
+        }
+
+    def get_repository_file(self, repository, path, ref=None):
+        if repository == "kinoko34077/devflow" and path == BASELINE_PATH:
+            return {"content": self.baseline, "sha": "e" * 40}
+        if path == CATALOG_PATH:
+            return self.catalogs.get(repository)
+        raise AssertionError((repository, path, ref))
+
+    def list_issues(self, repository, state="open"):
+        return list(self.issues.get(repository, []))
+
+    def list_issue_comments(self, repository, issue_number):
+        return list(self.comments.get((repository, issue_number), []))
+
+
+def portfolio_issue(repository, number=7):
+    return {
+        "number": number,
+        "title": "[MAINTENANCE] Audit Ledger",
+        "body": "## Work Status\n\n`AUDITED`\n",
+        "state": "open",
+        "html_url": f"https://github.com/{repository}/issues/{number}",
+        "repository_url": f"https://api.github.com/repos/{repository}",
+        "author_association": "OWNER",
+    }
+
+
+def portfolio_catalog(repository, *, risk="MEDIUM", rollout="PILOT"):
+    return {
+        "content": json.dumps({
+            "schema_version": "maintenance-catalog.v1",
+            "repository": repository,
+            "baseline": "maintenance-common-baseline.v1",
+            "rollout": rollout,
+            "risk_profile": risk,
+            "scope_risk_overrides": [],
+            "repository_lenses": [],
+            "common_slot_overrides": [],
+            "repository_slots": [],
+        }),
+        "sha": ("1" if repository.endswith("/a") else "2") * 40,
+    }
+
+
+class PortfolioMaintenanceCollectionTests(unittest.TestCase):
+    def setUp(self):
+        self.baseline = Path(
+            "docs/spec/maintenance/common-baseline.v1.yaml"
+        ).read_text(encoding="utf-8")
+        self.controls = [
+            {"repository": "kinoko34077/a", "control_ref": "kinoko34077/devflow#10"},
+            {"repository": "kinoko34077/b", "control_ref": "kinoko34077/devflow#11"},
+        ]
+
+    def transport(self, *, catalogs=None, issues=None, comments=None):
+        return MultiRepoTransport(
+            baseline=self.baseline,
+            catalogs=catalogs or {
+                "kinoko34077/a": portfolio_catalog("kinoko34077/a", risk="LOW"),
+                "kinoko34077/b": portfolio_catalog("kinoko34077/b", risk="CRITICAL"),
+            },
+            issues=issues or {
+                "kinoko34077/a": [portfolio_issue("kinoko34077/a")],
+                "kinoko34077/b": [portfolio_issue("kinoko34077/b")],
+            },
+            comments=comments,
+        )
+
+    def test_portfolio_selection_scores_all_participating_repositories_together(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", result["status"])
+        self.assertEqual("kinoko34077/b", result["repository"])
+        self.assertEqual("kinoko34077/devflow#11", result["control_ref"])
+        self.assertEqual("kinoko34077/b#7", result["ledger_ref"])
+        self.assertEqual("PORTFOLIO", result["selection_scope"])
+
+    def test_missing_catalog_is_nonparticipant_not_guessed_work(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(catalogs={
+                "kinoko34077/a": None,
+                "kinoko34077/b": portfolio_catalog("kinoko34077/b", risk="HIGH"),
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", result["status"])
+        self.assertEqual("kinoko34077/b", result["repository"])
+
+    def test_malformed_existing_catalog_fails_portfolio_closed(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(catalogs={
+                "kinoko34077/a": portfolio_catalog("kinoko34077/a"),
+                "kinoko34077/b": {"content": "{bad", "sha": "2" * 40},
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(("NEEDS_EVIDENCE", "CATALOG_INVALID"), (
+            result["status"],
+            result["reason_code"],
+        ))
+        self.assertEqual("kinoko34077/b", result["repository"])
+
+    def test_participating_repository_without_ledger_fails_closed(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(issues={
+                "kinoko34077/a": [portfolio_issue("kinoko34077/a")],
+                "kinoko34077/b": [],
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(("NEEDS_EVIDENCE", "LEDGER_NOT_FOUND"), (
+            result["status"],
+            result["reason_code"],
+        ))
+        self.assertEqual("kinoko34077/b", result["repository"])
+
+    def test_disabled_catalog_is_not_eligible(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(catalogs={
+                "kinoko34077/a": portfolio_catalog("kinoko34077/a", risk="LOW"),
+                "kinoko34077/b": portfolio_catalog(
+                    "kinoko34077/b",
+                    risk="CRITICAL",
+                    rollout="DISABLED",
+                ),
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual("SELECTED", result["status"])
+        self.assertEqual("kinoko34077/a", result["repository"])
+
+    def test_previous_repository_penalty_rotates_equal_candidates(self):
+        catalogs = {
+            "kinoko34077/a": portfolio_catalog("kinoko34077/a", risk="MEDIUM"),
+            "kinoko34077/b": portfolio_catalog("kinoko34077/b", risk="MEDIUM"),
+        }
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(catalogs=catalogs),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+            previous_repository="kinoko34077/a",
+        )
+        self.assertEqual("kinoko34077/b", result["repository"])
+
+    def test_no_catalogs_returns_true_maintenance_exhaustion(self):
+        result = mg.collect_maintenance_portfolio_selection(
+            self.transport(catalogs={
+                "kinoko34077/a": None,
+                "kinoko34077/b": None,
+            }),
+            self.controls,
+            "2026-10-07T00:00:00Z",
+        )
+        self.assertEqual(("NO_ELIGIBLE_WORK", "MAINTENANCE_EXHAUSTED"), (
+            result["status"],
+            result["reason_code"],
+        ))
+        self.assertEqual("PORTFOLIO", result["selection_scope"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
