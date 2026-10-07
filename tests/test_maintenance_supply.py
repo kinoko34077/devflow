@@ -1451,7 +1451,10 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
         self.assertEqual(BODY_SHA, supply["portfolio"]["task_body_sha256"])
         self.assertEqual("attempt-p5", supply["publisher_execution_attempt_id"])
         self.assertEqual(
-            ["component:o/r:maintenance"],
+            [
+                "component:o/r:maintenance/common.correctness",
+                "repo:o/r",
+            ],
             supply["admission"]["conflict_keys"],
         )
 
