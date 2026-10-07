@@ -60,7 +60,9 @@ def control(**overrides):
         "repository_state": "ACTIVE",
         "trusted": True,
         "human_gate": False,
+        "reviewer_gate": False,
         "external_wait": False,
+        "security_gate": False,
         "observed_at": "2026-10-01T00:00:00Z",
         "fresh_until": "2026-10-01T01:00:00Z",
         "publisher_execution_attempt_id": "attempt-p5",
@@ -1502,7 +1504,7 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
                 )
 
     def test_catalog_supply_respects_stronger_control_gates(self):
-        for field in ("human_gate", "external_wait"):
+        for field in ("human_gate", "reviewer_gate", "external_wait", "security_gate"):
             with self.subTest(field=field):
                 self.assertIsNone(
                     ms.build_catalog_maintenance_candidate(
@@ -1602,6 +1604,189 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
         )
         self.assertTrue(ms.published_by_attempt(supply, "attempt-p5"))
         self.assertFalse(ms.published_by_attempt(supply, "attempt-b"))
+
+
+
+class CatalogMaintenancePublicationApplyTests(unittest.TestCase):
+    def _base_ledger_body(self):
+        return (
+            "## Work Status\n\n"
+            "`AUDITED`\n\n"
+            "## Notes\n\n"
+            "standing Ledger\n"
+        )
+
+    def _base_control_body(self):
+        return (
+            "## Repository\n\n"
+            "`o/r`\n\n"
+            "## Repository State\n\n"
+            "`ACTIVE`\n\n"
+            "## Next Action\n\n"
+            "`[IMPLEMENT]`\n\n"
+            + empty_control_body()
+        )
+
+    class FakeTransport:
+        def __init__(
+            self,
+            *,
+            fail_control_once=False,
+            drift_ledger_after_control=False,
+        ):
+            self.ledger_body = (
+                "## Work Status\n\n"
+                "`AUDITED`\n\n"
+                "## Notes\n\n"
+                "standing Ledger\n"
+            )
+            self.control_body = (
+                "## Repository\n\n"
+                "`o/r`\n\n"
+                "## Repository State\n\n"
+                "`ACTIVE`\n\n"
+                "## Next Action\n\n"
+                "`[IMPLEMENT]`\n\n"
+                + empty_control_body()
+            )
+            self.fail_control_once = fail_control_once
+            self.drift_ledger_after_control = drift_ledger_after_control
+            self.control_attempts = []
+            self.ledger_attempts = []
+            self.transitions = []
+
+        def get_issue(self, repository, number):
+            if (repository, number) == ("o/r", 7):
+                return {
+                    "number": 7,
+                    "state": "open",
+                    "title": "[MAINTENANCE] Audit Ledger",
+                    "body": self.ledger_body,
+                    "html_url": "https://github.com/o/r/issues/7",
+                    "author_association": "OWNER",
+                }
+            if (repository, number) == ("kinoko34077/devflow", 1):
+                return {
+                    "number": 1,
+                    "state": "open",
+                    "title": "[REPO] r",
+                    "body": self.control_body,
+                    "author_association": "OWNER",
+                }
+            raise AssertionError((repository, number))
+
+        def update_issue_body(
+            self,
+            repository,
+            number,
+            expected_body_sha256,
+            body,
+        ):
+            from scripts import maintenance_audit as cli
+
+            if (repository, number) == ("o/r", 7):
+                self.ledger_attempts.append(expected_body_sha256)
+                if cli.canonical_body_sha256(self.ledger_body) != expected_body_sha256:
+                    return False
+                self.ledger_body = body
+                return True
+            raise AssertionError((repository, number))
+
+        def update_control_body(
+            self,
+            repository,
+            control_ref,
+            expected_body_sha256,
+            body,
+        ):
+            from scripts import maintenance_audit as cli
+
+            self.control_attempts.append(expected_body_sha256)
+            if self.fail_control_once:
+                self.fail_control_once = False
+                self.control_body += "\nconcurrent-control-observation\n"
+                return False
+            if cli.canonical_body_sha256(self.control_body) != expected_body_sha256:
+                return False
+            self.control_body = body
+            if self.drift_ledger_after_control:
+                self.ledger_body += "\nconcurrent-ledger-drift\n"
+            return True
+
+        def get_control(self, repository, control_ref):
+            return {
+                "repository": repository,
+                "control_ref": control_ref,
+                "body": self.control_body,
+            }
+
+        def post_supply_transition(self, body):
+            self.transitions.append(body)
+            return True
+
+    def test_control_cas_failure_leaves_same_active_run_recoverable_and_retry_is_fresh(self):
+        from scripts import maintenance_audit as cli
+        from tools.maintenance_ledger import extract_active_run
+
+        transport = self.FakeTransport(fail_control_once=True)
+        selection = catalog_selection()
+
+        with self.assertRaisesRegex(
+            ms.MaintenanceSupplyError,
+            "Control changed before catalog maintenance publication",
+        ):
+            cli.execute_catalog_maintenance_publication(
+                transport,
+                selection,
+                attempt_id="attempt-p5",
+                observed_at="2026-10-01T00:00:00Z",
+                apply=True,
+            )
+
+        active = extract_active_run(transport.ledger_body, "o/r")
+        self.assertIsNotNone(active)
+        self.assertEqual(1, active.generation)
+        self.assertEqual(
+            "audit:o/r:common.correctness:1",
+            active.run_id,
+        )
+
+        stale_expected = transport.control_attempts[0]
+        result = cli.execute_catalog_maintenance_publication(
+            transport,
+            selection,
+            attempt_id="attempt-p5",
+            observed_at="2026-10-01T00:00:00Z",
+            apply=True,
+        )
+        self.assertTrue(result["applied"])
+        self.assertEqual(active.run_id, result["run_id"])
+        self.assertEqual(2, len(transport.control_attempts))
+        self.assertNotEqual(stale_expected, transport.control_attempts[1])
+        self.assertEqual(
+            2,
+            transport.control_body.count('"task": "o/r#7"'),
+            "one admission + one portfolio entry, never duplicate candidates",
+        )
+
+    def test_ledger_drift_after_control_publication_returns_reconciliation_required(self):
+        from scripts import maintenance_audit as cli
+
+        transport = self.FakeTransport(drift_ledger_after_control=True)
+        result = cli.execute_catalog_maintenance_publication(
+            transport,
+            catalog_selection(),
+            attempt_id="attempt-p5",
+            observed_at="2026-10-01T00:00:00Z",
+            apply=True,
+        )
+        self.assertTrue(result["applied"])
+        self.assertTrue(result["reconciliation_required"])
+        self.assertEqual(
+            "LEDGER_DRIFT_AFTER_CONTROL_PUBLICATION",
+            result["reason_code"],
+        )
+        self.assertFalse(result["transition_recorded"])
 
 
 if __name__ == "__main__":
