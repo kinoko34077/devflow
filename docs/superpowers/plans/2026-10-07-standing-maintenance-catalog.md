@@ -576,6 +576,38 @@ The Ledger body is a durable owner template with no active run and Work Status `
 
 ---
 
+## Execution replan — pre-pilot accepted-main gate
+
+**Recorded:** 2026-10-07  
+**Disposition:** `CHANGE_PATH`
+
+The implemented maintenance collector intentionally resolves both the shared Common Baseline and repository Catalog from each repository's **default-branch head**. Therefore the live Task 9 selector cannot consume the Task 8 catalog while PR #366 remains unmerged without adding a special branch-ref bypass. Adding such a bypass only for the pilot would weaken the exact accepted-source contract and create a path that normal operation does not use.
+
+Accordingly, move the implementation acceptance boundary before live pilot execution:
+
+1. finish Tasks 1–8 on PR #366;
+2. require exact-head Required PR gate;
+3. require Formal Review and a different reviewer because this change materially changes devflow source-of-truth / supply authority semantics;
+4. merge PR #366 under expected-head fencing;
+5. run post-main Required verification;
+6. only then execute Task 9 against the real default-branch Catalog;
+7. continue Task 10 and Task 11 under PILOT.
+
+This changes execution order only. It does **not** waive any Task 9–11 acceptance criterion, does not broaden rollout beyond PILOT, and does not treat merge as pilot acceptance.
+
+### Pre-pilot acceptance gate
+
+- [ ] PR #366 exact head Required PR gate GREEN
+- [ ] PR body declares `Formal review required: yes`
+- [ ] PR body declares `Different reviewer required: yes`
+- [ ] qualifying different-reviewer Review Provenance v2 targets the exact current head
+- [ ] review-readiness GREEN
+- [ ] expected-head guarded merge
+- [ ] post-main Required verification GREEN
+- [ ] #363 checkpoint advances to Task 9 on accepted main
+
+---
+
 ### Task 9: End-to-end devflow pilot through selection -> publication -> fresh-attempt claim
 
 **Files:**
