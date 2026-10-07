@@ -89,6 +89,8 @@ The workflow maintains one Issue with exact title:
 
 The Health Issue stores the latest verification result rather than append-only history, plus a bounded machine-owned memory of unresolved scoped failures so a later unrelated event cannot mask an earlier failure.
 
+Project item fields and this Health failure-memory record are shared mutable surfaces. The Project Sync workflow therefore serializes all Issue-event and manual sync mutators through one repository-wide concurrency group with `cancel-in-progress: false`; different Issue numbers must not update these shared surfaces concurrently.
+
 Result values:
 
 - `PASS`: API-verifiable canonical state matches the Project **and no unresolved failure memory remains**.
