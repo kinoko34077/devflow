@@ -172,13 +172,22 @@ If devflow summary and repository-local canon disagree, the owning repository go
 
 ## 8.1 Broad-instruction pickup (already-open chat workers)
 
-When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a broad instruction for a managed repository, such as 「このリポ側に合わせてなんか作業して」, do **not** ask the user to pick an Issue. Run one discovery cycle through the common path in `docs/operations/CHAT_WORKER_INTEGRATION.md`. That path uses the contract `docs/spec/CHAT_WORKER_BOOTSTRAP.md` and the profiles `docs/spec/CHAT_WORKER_PROFILES.md`, and it returns exactly one disposition:
+When a manually-started Codex, Claude/Claude Code or ChatGPT chat receives a broad instruction for a managed repository, such as 「このリポ側に合わせてなんか作業して」, do **not** ask the user to pick an Issue. Run the common path in `docs/operations/CHAT_WORKER_INTEGRATION.md`. That path uses the contract `docs/spec/CHAT_WORKER_BOOTSTRAP.md` and the profiles `docs/spec/CHAT_WORKER_PROFILES.md`.
+
+The bootstrap-v1 classifier itself remains unchanged and still returns exactly one existing disposition:
 
 - `CLAIM_AND_WORK` / `REVIEW_WORK` / `RECOVERY_WORK`: begin only after the execution-coordinator claim and acknowledge succeed; then follow the normal lifecycle above.
 - `NEEDS_HUMAN`: ask only about that gate.
-- `WAIT_EXTERNAL`, `NO_ELIGIBLE_WORK` or `NEEDS_EVIDENCE`: report the typed result; never invent a task from prose, Issue age, branches, Project fields or chat history.
+- `WAIT_EXTERNAL` or `NEEDS_EVIDENCE`: report the typed result; do not route around the blocker.
+- ordinary `NO_ELIGIBLE_WORK`: enter the **standing-maintenance outer fallback** only when the request is a broad-work request and the maintenance rollout/catalog contract permits it.
 
-Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository broad pickup is accepted through completed #198/#208; only currently published, fresh, eligible portfolio evidence may participate.
+Standing maintenance is predefined legitimate supply, never improvised busywork. The outer order for a generic broad request is recovery -> normal runnable work -> predefined maintenance -> alternate/deeper maintenance -> portfolio maintenance -> true `NO_ELIGIBLE_WORK`. The final state requires **maintenance exhaustion**: no due/overdue slot, useful unexecuted Lens/Depth, eligible alternate repository in scope, portfolio slot when portfolio scope applies, or security/external-freshness reason likely to produce materially new evidence.
+
+A **repository-scoped** broad request remains repository-scoped. It **must not** silently widen to portfolio scope merely because that repository currently has no useful maintenance. A separate global/portfolio request is required for widening.
+
+3C remains mandatory. If attempt A publishes/relaxes a maintenance candidate, attempt A stops after publication. Pickup starts only in attempt B with a new `execution_attempt_id`; the original attempt must observe `PUBLISHED_BY_THIS_ATTEMPT` and cannot consume its own supply.
+
+Live GitHub/devflow remains the only durable task authority. Adoption mode is `PILOT` (#189). Cross-repository broad pickup is accepted through completed #198/#208; standing-maintenance rollout is separately gated by #363 and only currently published, fresh, eligible evidence may participate. Never invent a task from prose, Issue age, branches, Project fields or chat history.
 
 ## 8.2 Chat rollover record command
 
