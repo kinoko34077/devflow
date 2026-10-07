@@ -84,6 +84,35 @@ workflow:
     - WAIT
     - NONE
 
+standing_maintenance:
+  authority: devflow#363
+  adoption: PILOT
+  rollout_values:
+    - DISABLED
+    - PILOT
+    - ENABLED
+  bootstrap_v1_classifier_unchanged: true
+  generic_broad_pickup_order:
+    - recoverable_work
+    - normal_runnable_work
+    - predefined_maintenance
+    - alternate_or_deeper_maintenance
+    - portfolio_maintenance
+    - NO_ELIGIBLE_WORK
+  publication_flow:
+    - normal_bootstrap
+    - standing_maintenance_after_no_eligible_work
+    - publish_under_attempt_a
+    - fresh_attempt_b_bootstrap
+    - serialized_claim_and_acknowledge
+    - exact_ledger_run
+    - true_no_eligible_work_after_maintenance_exhaustion
+  repository_scope_auto_widen: forbidden
+  same_attempt_consume_after_publish: forbidden
+  publication_requires_new_execution_attempt: true
+  fresh_execution_attempt_required_after_publish: true
+  true_no_eligible_work_requires_maintenance_exhausted: true
+
 compatibility:
   legacy_work_states_read_only:
     - NEW
