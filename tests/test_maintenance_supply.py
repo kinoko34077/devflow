@@ -1611,8 +1611,20 @@ class CatalogMaintenanceSupplyTests(unittest.TestCase):
             control(expected_owner_body_sha256=OTHER_SHA),
         )
         self.assertIsNotNone(normal)
+        admission_json = __import__("json").dumps(
+            normal["admission"],
+            indent=4,
+            ensure_ascii=False,
+        )
+        body = empty_control_body().replace(
+            '  "candidates": []',
+            '  "candidates": [\n'
+            + "\n".join("    " + line for line in admission_json.splitlines())
+            + '\n  ]',
+            1,
+        )
         body, changed = ms.reconcile_control_projection_body(
-            empty_control_body(),
+            body,
             normal,
             task_ref="o/r#8",
         )
