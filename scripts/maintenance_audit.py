@@ -41,6 +41,7 @@ from tools.maintenance_github import (  # noqa: E402
     GitHubReadError,
     GitHubReadTransport,
     collect_maintenance_selection,
+    collect_maintenance_portfolio_selection,
     collect_maintenance_history,
     find_maintenance_ledger,
     collect_portfolio,
@@ -202,6 +203,21 @@ def _select_maintenance(args: argparse.Namespace) -> int:
         args.repository,
         f"{DEVFLOW_REPOSITORY}#{args.control}",
         observed_at,
+    )
+    _write(result, args.output)
+    return 0
+
+
+def _select_maintenance_portfolio(args: argparse.Namespace) -> int:
+    token = _token_from_env(args.token_env)
+    transport = GitHubReadTransport(token)
+    observed_at = args.observed_at or _utc_now()
+    controls = discover_controls(transport)
+    result = collect_maintenance_portfolio_selection(
+        transport,
+        controls,
+        observed_at,
+        previous_repository=args.previous_repository,
     )
     _write(result, args.output)
     return 0
@@ -1709,6 +1725,22 @@ def _parser() -> argparse.ArgumentParser:
     select_maintenance.add_argument("--observed-at")
     select_maintenance.add_argument("--output")
     select_maintenance.set_defaults(func=_select_maintenance)
+
+    select_maintenance_portfolio = sub.add_parser(
+        "select-maintenance-portfolio"
+    )
+    select_maintenance_portfolio.add_argument(
+        "--token-env",
+        default="MAINTENANCE_AUDIT_TOKEN",
+    )
+    select_maintenance_portfolio.add_argument(
+        "--previous-repository",
+    )
+    select_maintenance_portfolio.add_argument("--observed-at")
+    select_maintenance_portfolio.add_argument("--output")
+    select_maintenance_portfolio.set_defaults(
+        func=_select_maintenance_portfolio
+    )
 
     sync_check = sub.add_parser("sync-check")
     sync_check.add_argument("--repository", required=True)
