@@ -45,7 +45,7 @@ class GitHubWriteApi:
         self.api_base = api_base.rstrip("/")
 
     def _request(self, method: str, path: str, payload: Any = None) -> Any:
-        if method not in ("GET", "POST", "PATCH") or not path.startswith("/"):
+        if method not in ("GET", "POST", "PATCH") or (path and not path.startswith("/")):
             raise WritebackRejected("unsupported GitHub API operation")
         data = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
         request = urllib.request.Request(
@@ -176,7 +176,7 @@ def _read_files(api: GitHubWriteApi, root_tree_sha: str, paths: list[str]) -> di
                 if not isinstance(blob, dict) or blob.get("encoding") != "base64":
                     raise WritebackRejected("Git blob response encoding unavailable")
                 try:
-                    value = base64.b64decode(blob.get("content", ""), validate=False)
+                    value = base64.b64decode(blob.get("content", "").replace("\n", ""), validate=True)
                 except (ValueError, TypeError) as exc:
                     raise WritebackRejected("invalid Git blob bytes") from exc
                 if len(value) > 100 * 1024 * 1024:
