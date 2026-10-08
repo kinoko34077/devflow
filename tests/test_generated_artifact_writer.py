@@ -82,7 +82,7 @@ class FakeGitHub:
             if sha == DIST:
                 return {"tree": [
                     {"path": p.split("/")[1], "type": "blob", "mode": self.mode,
-                     "sha": self.first_blob_shas[p] if self.branch_head == HEAD
+                     "sha": self.first_blob_shas[p] if self.new_entries is None
                          else self.new_entries[p]}
                     for p in sorted(self.files)
                 ]}
