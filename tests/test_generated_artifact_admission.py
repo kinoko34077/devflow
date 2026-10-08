@@ -20,7 +20,7 @@ def args():
         "paths": ["data/reports/orthography-v2-source-accounting.json"],
     }
     policy["producer_workflow_ref"] = f"{REPO}/{PATH}@{SHA}"
-    policy["branch_prefix"] = "artifact/devflow384-"
+    policy["branch_prefix"] = "artifact/devflow384/"
     runner = {
         "repository": REPO,
         "actor": "kinoko34077", "triggering_actor": "kinoko34077",
@@ -48,7 +48,7 @@ def args():
 
 
 class GeneratedArtifactAdmissionTests(unittest.TestCase):
-    def attempt(self, policy=None, runner=None, run=None, workflow=None, *, branch="artifact/devflow384-pilot-1"):
+    def attempt(self, policy=None, runner=None, run=None, workflow=None, *, branch="artifact/devflow384/pilot-1"):
         p, ctx, r, w = args()
         return attest_producer(policy or p, runner or ctx, run or r,
                                workflow or w, target_branch=branch,
@@ -128,7 +128,7 @@ class GeneratedArtifactAdmissionTests(unittest.TestCase):
     def test_unverified_workflow_metadata_denied(self):
         p, ctx, run, wf = args()
         with self.assertRaises(ArtifactRejected):
-            self.attempt(p, ctx, run, None if False else {"id": 998, "path": "different"})
+            self.attempt(p, ctx, run, {"id": 998, "path": "different"})
 
 
 if __name__ == "__main__":
