@@ -58,6 +58,8 @@ Repo Monitor and other consumers must consume this projection rather than resolv
 
 Missing Issue sections are not guessed or used to clear existing Project values. Unknown select values fail explicitly.
 
+Project custom TEXT fields are **bounded display projections**, not alternative canonical storage. When canonical text exceeds a conservative 1,000 UTF-8-byte projection budget, sync deterministically shows its initial excerpt followed by `... [truncated; see canonical Issue]`. Full text remains unchanged in the owning Issue, which is the source of truth and accessible from the Project item. Shorter values are projected exactly. The same bounded display value is used by event-sync, full/targeted reconcile, and verify; a truncation does not hide other drift or clear failure memory. The byte budget is a conservative integration guard for an observed GitHub GraphQL text-column rejection, **not a claim that GitHub publicly documents an exact 1,000-byte ceiling**.
+
 ## 3. Automation
 
 Workflow: `.github/workflows/project-sync.yml`
