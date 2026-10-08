@@ -116,8 +116,8 @@ def _policy(raw: Any) -> Mapping[str, Any]:
     if not isinstance(paths, list) or not paths or len(paths) > _MAX_FILES_CEILING:
         raise ArtifactRejected("recipe.paths: invalid number of paths")
     normalized = [_path(item) for item in paths]
-    if len(set(normalized)) != len(normalized):
-        raise ArtifactRejected("recipe.paths: duplicates")
+    if len({path.casefold() for path in normalized}) != len(normalized):
+        raise ArtifactRejected("recipe.paths: duplicates or case-fold collisions")
     ref = _string(p["producer_workflow_ref"], "producer_workflow_ref")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml@[0-9a-f]{40}", ref):
         raise ArtifactRejected("producer_workflow_ref must be an exact SHA pin")
@@ -209,7 +209,9 @@ def validate_and_plan(
     for i, item in enumerate(items):
         f = _object(item, f"manifest.files[{i}]", {"path", "size", "sha256"})
         path = _path(f["path"])
-        size = _positive_int(f["size"], "size", limits["max_file_bytes"])
+        size = f["size"]
+        if type(size) is not int or not (0 <= size <= limits["max_file_bytes"]):
+            raise ArtifactRejected("size: invalid integer or limit")
         digest = f["sha256"]
         if not isinstance(digest, str) or not _HASH.fullmatch(digest):
             raise ArtifactRejected("invalid manifest sha256")
