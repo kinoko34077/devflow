@@ -1,0 +1,132 @@
+name: Generated artifact writeback (reusable, devflow#384)
+
+# Shared reusable workflow for the single-repository Pilot (japanese-orthography#300).
+# Trust model (docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md, runbook):
+# - `produce` runs target-repository code with `contents: read` only, no secrets,
+#   and emits low-trust data (manifest + ZIP) as a run-scoped artifact.
+# - `write` never checks out, installs or executes target-repository code or
+#   artifact contents. It loads helpers only from the devflow SHA pinned by the
+#   caller, authenticates the producer run through GitHub REST, verifies the
+#   caller content at the run's workflow_sha, and performs a non-force CAS
+#   update of one approved PR branch. It is the only job with contents:write.
+# - All caller inputs reach scripts through environment variables, never via
+#   expression interpolation inside `run:`.
+
+on:
+  workflow_call:
+    inputs:
+      devflow_sha:
+        description: Exact devflow commit SHA (must equal the caller's `uses:` pin)
+        type: string
+        required: true
+      target_branch:
+        description: Existing open same-repository PR branch under the approved prefix
+        type: string
+        required: true
+      expected_head:
+        description: Exact current head SHA of target_branch
+        type: string
+        required: true
+      mode:
+        description: dry-run or write
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVFLOW_SHA: ${{ inputs.devflow_sha }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Validate inputs before any checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEVFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid devflow_sha" >&2; exit 2; }
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid expected_head" >&2; exit 2; }
+          [[ "$TARGET_BRANCH" =~ ^artifact/devflow384/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "target branch outside approved prefix" >&2; exit 2; }
+          [[ "$MODE" == "dry-run" || "$MODE" == "write" ]] || { echo "invalid mode" >&2; exit 2; }
+      - name: Fetch pinned devflow helpers (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q devflow
+          git -C devflow fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"
+          git -C devflow checkout -q --detach FETCH_HEAD
+          test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"
+      - name: Check out target source at expected_head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_head }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Run the fixed recipe (untrusted code, read-only token, no secrets)
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          script="$(cd ../devflow && python3 -m tools.generated_artifact_pilot recipe-script)"
+          npm ci
+          npm run "$script"
+      - name: Package approved outputs (low-trust data)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SOURCE_HEAD="$(git -C source rev-parse HEAD)"
+          export DEVFLOW_CHECKOUT_SHA="$DEVFLOW_SHA"
+          cd devflow
+          python3 -m tools.generated_artifact_pilot produce --source ../source --out ../out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: generated-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  write:
+    needs: produce
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    env:
+      DEVFLOW_SHA: ${{ inputs.devflow_sha }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Fetch pinned devflow helpers (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEVFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid devflow_sha" >&2; exit 2; }
+          git init -q devflow
+          git -C devflow fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"
+          git -C devflow checkout -q --detach FETCH_HEAD
+          test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: generated-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifact
+      - name: Verify and write (no target-repository code is executed)
+        shell: bash
+        env:
+          WRITER_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
+          cd devflow
+          python3 -I -c 'import sys; sys.path.insert(0, "."); from tools.generated_artifact_pilot import main; raise SystemExit(main(sys.argv[1:]))' write --artifact ../artifact

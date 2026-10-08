@@ -73,3 +73,12 @@ S3 exitがHOLDの場合、S4を「完了」とは表記しない。進捗Cursor�
 - PRとSession/Task Cursor: SUCCESS と失敗の両方の実証、最終Review/CI、正しいユーザー承認範囲を復元可能にする。
 
 **結論:** 「コードテストが成功した」「単一Pilotが成功した」「全repositoriyで使える」「S5 ACCEPTED」は別状態であり、段階ごとに独立した根拠が必要。
+
+## 7. S3.3 実装（共通workflow・CLI・caller雛形）— 独立Review待ち
+
+- 共通 `workflow_call`: `.github/workflows/generated-artifact-writeback.yml`。top-level `permissions: {}`。
+  - `produce` job: `contents: read` のみ、secretsなし、`persist-credentials: false`。固定recipe（`tools/generated_artifact_pilot.py` の `RECIPE_NPM_SCRIPT`）だけを `npm run` し、出力は低信頼dataとしてrun限定artifactへ。
+  - `write` job: `contents: write` + `actions: read` + `pull-requests: read`（後2者はrun/PR観測用のread）。target repoのcheckout・npm・node・artifact実行なし。devflow helperは caller が `uses:` で固定した同一SHAを資格情報なしで取得し、`rev-parse` で一致検証。
+- Writer認証（#387 review F1の解消）: `workflow_sha` はJO mainのHEADで変動するため静的pinしない。runner context + `GET /actions/runs/{id}` + `GET /actions/workflows/{id}` の厳密一致に加え、**`workflow_sha` 時点のcaller内容**を取得し、`uses:` pinと `devflow_sha:` 入力が同一SHAで各1回、`workflow_dispatch` のみ、secrets/`run:`/他trigger無しを確認してから、run固有の `producer_workflow_ref` を導出する。
+- caller雛形: `docs/operations/templates/verified-artifacts-pilot.yml`（devflowでは非稼働）。JO導入は独立security Review合格後、レビュー済みSHAで `<DEVFLOW_SHA>` を2箇所置換し、JO側の通常PR/Review経由で行う。
+- 新HEADのexact CI: JO `Verify` は `pull_request` トリガー。`GITHUB_TOKEN` pushでは起動しないため、`actions:write` 無しでは **Humanによるscratch PRのclose/reopen等のPRイベント** が正当経路。これはHuman操作として記録する。

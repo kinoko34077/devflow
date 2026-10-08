@@ -148,6 +148,9 @@ def _read_files(api: GitHubWriteApi, root_tree_sha: str, paths: list[str]) -> di
             response = api.get("/git/trees/" + tree_sha)
             if not isinstance(response, dict) or not isinstance(response.get("tree"), list):
                 raise WritebackRejected("Git tree listing unavailable")
+            if response.get("truncated") is not False:
+                # A truncated listing could hide an existing non-blob entry.
+                raise WritebackRejected("Git tree listing truncated or unverifiable")
             entries = response["tree"]
             if len({e.get("path") for e in entries}) != len(entries):
                 raise WritebackRejected("ambiguous Git tree entries")

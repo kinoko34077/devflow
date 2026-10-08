@@ -27,6 +27,7 @@ class FakeGitHub:
         self.pr = True
         self.mode = "100644"
         self.parent_mode = "040000"
+        self.truncated = False
         self.target_repo = self.repository
         self.head_repo = self.repository
         self.base_repo = self.repository
@@ -77,10 +78,10 @@ class FakeGitHub:
         if path.startswith("/git/trees/"):
             sha = path.rsplit("/", 1)[-1]
             if sha in (ROOT, NEW_TREE):
-                return {"tree": [{"path": "dist", "type": "tree",
+                return {"truncated": self.truncated, "tree": [{"path": "dist", "type": "tree",
                                   "mode": self.parent_mode, "sha": DIST}]}
             if sha == DIST:
-                return {"tree": [
+                return {"truncated": False, "tree": [
                     {"path": p.split("/")[1], "type": "blob", "mode": self.mode,
                      "sha": self.first_blob_shas[p] if self.new_entries is None
                          else self.new_entries[p]}
@@ -181,6 +182,13 @@ class GeneratedArtifactWriterTests(unittest.TestCase):
                 with self.assertRaises(WritebackRejected):
                     self.invoke(api=api, dry_run=False)
                 self.assertEqual(api.mutation_count, 0)
+
+    def test_truncated_tree_listing_rejected_before_any_write(self):
+        api = FakeGitHub(self.files)
+        api.truncated = True
+        with self.assertRaises(WritebackRejected):
+            self.invoke(api=api, dry_run=False)
+        self.assertEqual(api.mutation_count, 0)
 
     def test_unsafe_parent_path_rejected(self):
         api = FakeGitHub(self.files)
