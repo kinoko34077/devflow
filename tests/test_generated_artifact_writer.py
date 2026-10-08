@@ -5,6 +5,7 @@ import hashlib
 import unittest
 
 from tools.generated_artifact_writer import WritebackRejected, verified_writeback
+from tools.generated_artifact_contract import ArtifactRejected
 from tests.test_generated_artifact_contract import fixture, zip_bytes
 
 HEAD = "b" * 40
@@ -232,7 +233,7 @@ class GeneratedArtifactWriterTests(unittest.TestCase):
     def test_producer_payload_digest_mismatch_rejected_before_write(self):
         files = dict(self.files)
         files["dist/table.bin"] = b"not same"
-        with self.assertRaises(WritebackRejected):
+        with self.assertRaises(ArtifactRejected):
             self.invoke(dry_run=False, zipdata=zip_bytes(files))
         self.assertEqual(self.api.mutation_count, 0)
 
