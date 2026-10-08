@@ -69,6 +69,11 @@ SELECT_OPTIONS = {
 TEXT_FIELDS = {"Managed Repository", "Next Action", "Audit SHA", "Audit Ref", "Audit Scope", "Audit Evidence"}
 DATE_FIELDS = {"Last Audit", "Last Deep Audit"}
 EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS | DATE_FIELDS
+# Conservative UTF-8 budget for non-canonical Project text display cells.
+# GitHub returned an invalid-text-column error for an overlong canonical audit
+# field; GitHub does not publish the exact limit in its GraphQL schema.
+PROJECT_TEXT_MAX_UTF8_BYTES = 1000
+PROJECT_TEXT_TRUNCATION_MARKER = " ... [truncated; see canonical Issue]"
 
 AUDIT_PROJECT_FIELD_SPECS = {
     "Audit Ref": {"kind": "text", "options": []},
@@ -172,6 +177,17 @@ def _project_date(value: str, section: str) -> str:
             raise ConfigError(f"invalid {section}: expected ISO date/time") from exc
 
 
+def _project_text_for_display(value: str) -> str:
+    """Bound Project text-cell display without mutating canonical Issue values."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= PROJECT_TEXT_MAX_UTF8_BYTES:
+        return value
+    marker = PROJECT_TEXT_TRUNCATION_MARKER
+    budget = PROJECT_TEXT_MAX_UTF8_BYTES - len(marker.encode("utf-8"))
+    prefix = encoded[:budget].decode("utf-8", errors="ignore").rstrip()
+    return prefix + marker
+
+
 def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
     sections = parse_sections(
         str(issue.get("body") or ""),
@@ -190,7 +206,7 @@ def desired_project_fields(issue: dict[str, Any]) -> dict[str, str]:
         if section in {"Last Audit At", "Last Deep Audit At"} and value:
             value = _project_date(value, section)
         if value:
-            desired[field] = value
+            desired[field] = _project_text_for_display(value) if field in TEXT_FIELDS else value
     if str(issue.get("state", "")).lower() == "closed":
         desired["Status"] = "DONE"
     return desired
