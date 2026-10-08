@@ -38,9 +38,9 @@ class ProjectTextDisplayTests(unittest.TestCase):
         body = (
             "## Repository\n\nkinoko34077/demo\n\n"
             "## Work Status\n\nAUDITED\n\n"
-            f"## Audit Evidence\n\n\`{audit_evidence}\`\n\n"
-            f"## Next Action\n\n\`{next_action}\`\n"
-        ).replace("\\`", "`")
+            f"## Audit Evidence\n\n`{audit_evidence}`\n\n"
+            f"## Next Action\n\n`{next_action}`\n"
+        )
         issue = {"state": "open", "body": body}
         original = issue["body"]
         fields = project_sync.desired_project_fields(issue)
