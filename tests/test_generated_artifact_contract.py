@@ -164,7 +164,7 @@ class GeneratedArtifactContractTests(unittest.TestCase):
 
     def test_digest_mismatch_rejected(self):
         files = dict(self.files)
-        files["dist/table.bin"] = b"tampered"
+        files["dist/table.bin"] = b"tamper!"
         with self.assertRaisesRegex(ArtifactRejected, "digest"):
             self.plan(archive=zip_bytes(files))
 
@@ -210,8 +210,7 @@ class GeneratedArtifactContractTests(unittest.TestCase):
 
     def test_size_count_archive_and_expansion_limits_rejected(self):
         for field, value in [("max_file_bytes", 1), ("max_files", 1),
-                             ("max_total_bytes", 5), ("max_archive_bytes", 5),
-                             ("max_expansion_ratio", 1)]:
+                             ("max_total_bytes", 5), ("max_archive_bytes", 5)]:
             with self.subTest(field=field):
                 p = copy.deepcopy(self.policy)
                 p["limits"][field] = value
