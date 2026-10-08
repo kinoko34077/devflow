@@ -116,7 +116,7 @@ jobs:
           >> "$GITHUB_STEP_SUMMARY"
       - name: Upload machine report
         if: always() && hashFiles('maintenance-audit-report.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maintenance-audit-report
           path: maintenance-audit-report.json
@@ -177,7 +177,7 @@ jobs:
           PY
       - name: Upload projection shadow report
         if: always() && hashFiles('repository-projection-shadow.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: repository-projection-shadow
           path: repository-projection-shadow.json
@@ -231,7 +231,7 @@ jobs:
           fi
       - name: Upload maintenance selection
         if: always() && hashFiles('maintenance-selection.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maintenance-selection
           path: maintenance-selection.json
@@ -283,7 +283,7 @@ jobs:
             --output maintenance-supply-result.json
       - name: Upload supply result
         if: always() && hashFiles('maintenance-supply-result.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maintenance-supply-result
           path: maintenance-supply-result.json
@@ -329,7 +329,7 @@ jobs:
           python scripts/maintenance_audit.py "$COMMAND"             --repository "$MAINTENANCE_REPOSITORY"             --control "$MAINTENANCE_CONTROL"             --attempt-id "$MAINTENANCE_ATTEMPT_ID"             --token-env MAINTENANCE_SUPPLY_TOKEN             --apply             --output maintenance-catalog-publication-result.json
       - name: Upload catalog maintenance publication result
         if: always() && hashFiles('maintenance-catalog-publication-result.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maintenance-catalog-publication-result
           path: maintenance-catalog-publication-result.json
@@ -387,7 +387,7 @@ jobs:
           fi
       - name: Upload projection cache result
         if: always() && hashFiles('repository-projection-cache-result.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: repository-projection-cache-result
           path: repository-projection-cache-result.json
