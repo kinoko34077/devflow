@@ -242,6 +242,22 @@ class GeneratedArtifactContractTests(unittest.TestCase):
             with self.assertRaises(ArtifactRejected):
                 self.plan(existing_files=observed)
 
+    def test_empty_binary_file_is_preserved_as_exact_bytes(self):
+        files = dict(self.files)
+        files["dist/table.bin"] = b""
+        m = copy.deepcopy(self.manifest)
+        m["files"][1]["size"] = 0
+        m["files"][1]["sha256"] = hashlib.sha256(b"").hexdigest()
+        result = self.plan(manifest=m, archive=zip_bytes(files))
+        self.assertEqual(result["status"], "CHANGE")
+        self.assertEqual(result["changes"][1]["size"], 0)
+
+    def test_case_fold_colliding_paths_are_rejected_by_policy(self):
+        p = copy.deepcopy(self.policy)
+        p["recipe"]["paths"] = ["dist/Table.bin", "dist/table.bin"]
+        with self.assertRaisesRegex(ArtifactRejected, "collisions"):
+            self.plan(policy=p)
+
     def test_cannot_supply_unexpected_force_or_command_field(self):
         a = copy.deepcopy(self.admission)
         a["force"] = True
