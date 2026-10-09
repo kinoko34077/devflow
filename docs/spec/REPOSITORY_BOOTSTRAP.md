@@ -122,6 +122,7 @@ Other V1 defaults that do not invent semantic/project policy are:
 - missing `initial_content.license` -> null;
 - Repository Base adoption is never implied by `minimal`;
 - no release, deployment, publication, repository deletion, shared-history rewrite, credential change or permission expansion is part of bootstrap.
+- for **new** managed repositories, request emitters MUST include `bootstrap.repo_native_dispatch=true` without asking the user to visit each repository's settings. Omitted for legacy v1 bootstrap requests retains the historical minimal behavior, including safe retries.
 
 V1 does not automatically generate licence text. A non-null licence request is unsupported until a later version defines exact licence material and attribution inputs; it MUST fail validation rather than be silently ignored or guessed.
 
@@ -134,6 +135,28 @@ Required template:
 `minimal` means only the explicitly requested seed and bootstrap provenance. It does not create `.kinotch/`, repository-local `AGENTS.md`, `CURRENT_STATE.md`, Repository Base directories, package scaffolding, CI, release workflows, or language-specific files unless the request schema/version explicitly adds them.
 
 Template taxonomy MUST NOT be expanded merely for cosmetic uniformity.
+
+### 5.1 Optional repository-local Actions command receiver (#395)
+
+`bootstrap.repo_native_dispatch=true` (valid only for `devflow_managed=true`)
+automatically seeds `.github/workflows/kinotch-repo-command.yml` from the
+version-controlled `templates/bootstrap/kinotch-repo-command.yml`.
+No new secret, App install, permission setting, universal token or privileged
+workflow is introduced in each repository. GitHub issues a temporary
+repository-scoped `GITHUB_TOKEN` to the read-only job. v1 only accepts the
+exact `/kinotch status` Issue comment from the owner account on an
+owner-created Issue (not a pull request); any arbitrary shell/workflow name,
+unknown actor, deploy/release, secrets or write permission is rejected.
+A later approved repo-specific operation requires normal reviewed code, **not**
+manual repository authorization by the owner.
+
+Historical Bootstrap Requests without this explicit field still use the
+original `minimal` contract and do not auto-mutate repositories on replay.
+This is essential for idempotent recovery. New agents generating managed-repo
+Bootstrap Requests must add the field automatically; no user checkbox.
+Repositories created directly in the GitHub UI are outside this automatic
+bootstrap path unless a separate user-approved external creation hook or
+template path exists. Do not claim zero-touch setup for every GitHub creation route.
 
 ## 6. Trust boundary
 

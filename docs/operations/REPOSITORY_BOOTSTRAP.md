@@ -206,3 +206,26 @@ Primary evidence order:
 6. target default-branch head.
 
 If these disagree, fail closed and reconcile observed identity before further mutation.
+
+## Automatic repository-local Actions receiver (devflow#395)
+
+On new **devflow-managed** repository creation, the agent automatically emits
+`bootstrap.repo_native_dispatch=true` in the already-required structured
+Bootstrap Request. The existing trusted bootstrap executor seeds a fixed,
+read-only `.github/workflows/kinotch-repo-command.yml` with no extra App,
+secret or per-repository settings. The initial safe command is exactly
+`/kinotch status` on an owner-created Issue, posted by `kinoko34077`.
+Newly created default-branch workflow is only a command entrypoint; it does not
+authorize arbitrary existing workflows, deploy, or execute untrusted user text.
+
+**Compatibility:** original requests with no flag retain old minimal behavior;
+existing repositories require a separately reviewed migration PR. If the
+template workflow already exists but differs, fail closed rather than
+overwriting user changes. If the user creates a repository directly through
+GitHub's standard web form, the devflow bootstrap executor was not invoked
+and cannot claim that receiver was automatically installed. For full coverage
+of those out-of-band creations, a separate one-time authorized event source
+or template-based creation path would be needed.
+
+Docs: https://docs.github.com/en/actions/concepts/security/github_token
+and https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
