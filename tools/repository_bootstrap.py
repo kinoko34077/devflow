@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
+    from .github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
+except ImportError:  # direct script execution
+    from github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
+
+try:
     from . import workflow_contract
 except ImportError:  # direct module execution
     import workflow_contract
@@ -863,10 +868,22 @@ class GitHubApi:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             code = exc.code
-            exc.close()
             if allow_404 and code == 404:
+                exc.close()
                 return None
-            raise GitHubApiError(f"{method} {path} failed with HTTP {code}") from exc
+            try:
+                # HTTPError is a readable response. Bound the read and never
+                # expose arbitrary response text or headers in exceptions.
+                error_body = exc.read(MAX_ERROR_BODY_BYTES)
+            except (OSError, ValueError):
+                error_body = b""
+            finally:
+                exc.close()
+            diagnostic = summarize_github_http_error(code, exc.headers, error_body)
+            # Do not chain the raw HTTPError: it may retain the request/headers.
+            raise GitHubApiError(
+                f"{method} {path} failed with HTTP {code} ({diagnostic})"
+            ) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise GitHubApiError(f"{method} {path} transport failed: {type(exc).__name__}") from exc
         if not body:
