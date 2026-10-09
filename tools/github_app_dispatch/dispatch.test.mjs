@@ -76,7 +76,7 @@ test("dispatch requests only repo-scoped short-lived token then exact allowed wo
   });
   assert.equal(seen[1].url,
     "https://api.github.com/repos/kinoko34077/devflow/actions/workflows/project-sync.yml/dispatches");
-  assert.deepEqual(JSON.parse(seen[1].body), VALID);
+  assert.deepEqual(JSON.parse(seen[1].body), {ref: "main", inputs: {mode: "verify", issue_number: ""}});
   assert.equal(seen[1].headers.authorization, "Bearer installation-token");
 });
 test("upstream errors stay sanitized and do not claim workflow success", async () => {
