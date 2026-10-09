@@ -27,6 +27,9 @@
 ## Implementer Provenance
 - Implementer-System:
 - Implementer-Model:
+<!-- Only when Implementer-System is mixed: name the worker of the latest change. -->
+<!-- - Last-Implementer-System: -->
+<!-- - Last-Implementer-Model: -->
 - Owning-Issue:
 - Branch:
 - Head-SHA:

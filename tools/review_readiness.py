@@ -33,11 +33,48 @@ class ReadinessResult:
 
 
 def _single_field(body: str, name: str) -> tuple[str | None, bool]:
-    pattern = re.compile(rf"(?mi)^\s*-\s*{re.escape(name)}\s*:\s*(.*?)\s*$")
+    pattern = re.compile(rf"(?mi)^[ \t]*-[ \t]*{re.escape(name)}[ \t]*:[ \t]*(.*?)[ \t]*$")
     values = [match.group(1).strip() for match in pattern.finditer(body or "")]
     if len(values) != 1:
         return None, False
     return values[0], True
+
+
+def _field_present(body: str, name: str) -> bool:
+    pattern = re.compile(rf"(?mi)^[ \t]*-[ \t]*{re.escape(name)}[ \t]*:")
+    return pattern.search(body or "") is not None
+
+
+_COMPOSITE_IDENTITY = re.compile(r"[+,&/]|\band\b", re.IGNORECASE)
+
+
+def _last_implementer_error(body: str) -> str | None:
+    """Validate Last-Implementer metadata regardless of the formal review gate."""
+    implementer_system, _ = _single_field(body, "Implementer-System")
+    is_mixed = (
+        implementer_system is not None
+        and _normalize_identity_part(implementer_system) == "mixed"
+    )
+    has_last = _field_present(body, "Last-Implementer-System") or _field_present(
+        body, "Last-Implementer-Model"
+    )
+    if not is_mixed:
+        if has_last:
+            return "Last-Implementer fields are only valid with Implementer-System: mixed"
+        return None
+    last_system, last_system_unique = _single_field(body, "Last-Implementer-System")
+    last_model, last_model_unique = _single_field(body, "Last-Implementer-Model")
+    if (
+        not last_system_unique
+        or not last_model_unique
+        or not last_system
+        or not last_model
+        or _normalize_identity_part(last_system) in _UNKNOWN_IDENTITY | {"mixed"}
+        or _COMPOSITE_IDENTITY.search(last_system)
+        or _COMPOSITE_IDENTITY.search(last_model)
+    ):
+        return "Mixed implementer requires one explicit single Last-Implementer-System/Model"
+    return None
 
 
 def _yes_no_field(body: str, name: str) -> tuple[bool | None, bool]:
@@ -189,6 +226,9 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
 
     if different_required and not formal_required:
         return ReadinessResult(False, "Review gate is inconsistent: different reviewer requires formal review")
+    last_error = _last_implementer_error(body)
+    if last_error:
+        return ReadinessResult(False, last_error)
     if not formal_required:
         return ReadinessResult(True, "Formal review is not required by explicit PR classification")
 
@@ -202,6 +242,15 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
     ):
         return ReadinessResult(False, "Implementer signature is missing or ambiguous")
     implementer_signature = _signature(implementer_system, implementer_model)
+    # Co-implemented PRs (`Implementer-System: mixed`) must name the worker who
+    # made the most recent change. Different-reviewer eligibility is judged
+    # against that last implementer only; earlier co-implementers may review.
+    independence_signature = implementer_signature
+    if implementer_signature[0] == "mixed":
+        last_system, _ = _single_field(body, "Last-Implementer-System")
+        last_model, _ = _single_field(body, "Last-Implementer-Model")
+        assert last_system is not None and last_model is not None
+        independence_signature = _signature(last_system, last_model)
 
     head = pr.get("head") or {}
     head_sha = str(head.get("sha") or "")
@@ -257,7 +306,7 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
         reviewer_signature = _signature(fields["Reviewer-System"], fields["Reviewer-Model"])
         if not _qualifies_as_different_reviewer(
             reviewer_signature,
-            implementer_signature,
+            independence_signature,
         ):
             continue
         rejection = _review_rejection(
