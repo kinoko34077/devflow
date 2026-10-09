@@ -72,6 +72,12 @@ request a **full-scope** Project Sync with exact text:
 - `/kinotch sync verify`
 - `/kinotch sync reconcile`
 
+Only newly **created** comments trigger this path; editing an old comment
+does not re-issue a command. To request a second run, the owner posts a new
+exact command after checking the previous run's outcome. The shared
+`project-sync` serialization is at JOB level after admission, so skipped
+untrusted comments do not take mutator queue slots.
+
 GitHub's `issue_comment.created` event is authenticated by GitHub and
 evaluated at the **job** boundary. The workflow checks this repository identity,
 non-PR Issue authored by GitHub user ID `79015263`, and both commenter and

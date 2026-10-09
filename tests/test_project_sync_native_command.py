@@ -42,6 +42,10 @@ class NativeProjectSyncCommandTests(unittest.TestCase):
 
     def test_privileged_job_is_serialized_without_new_permissions(self):
         self.assertIn("group: project-sync", self.source)
+        self.assertEqual(self.source.count("    concurrency:"), 1)
+        self.assertNotIn("\\nconcurrency:\\n", self.source)
+        self.assertLess(self.source.index("    if: >-"), self.source.index("    concurrency:"))
+        self.assertLess(self.source.index("    concurrency:"), self.source.index("    runs-on: ubuntu-latest"))
         self.assertIn("cancel-in-progress: false", self.source)
         self.assertIn("permissions:\n  contents: read\n  issues: write", self.source)
         self.assertEqual(self.source.count("PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}"), 2)
