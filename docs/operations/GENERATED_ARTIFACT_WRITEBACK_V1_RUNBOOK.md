@@ -17,6 +17,25 @@
 8. \`GITHUB_TOKEN\`を用いた通常のpushだけではrequired PR CIを起動できない。承認済みの明示的な検証経路で**新しいexact HEAD**にcheckoutしてUbuntu/Windows正式checkを実行し、runログ・実際にテストしたSHA・結果をIssueへ永続化する。\`repository_dispatch\` は \`contents:write\` のみで起動可能だが **runのCheckがdefault-branch SHAへ付く可能性**があるため、required PR checkが新HEADに付いたものとしては扱わず、正式merge gateの条件を別途確認する。\`workflow_dispatch\` REST経由には \`actions:write\` が必要となり、未承認なら実行しない。
 9. source PR codeやarchiveが悪意あるものとして無条件実行しない設計と、trusted workflow編集者への権限昇格を含めて独立セキュリティReviewで確認する。秘匿情報をログへ出さない。
 
+## 1A. S3のtrusted SHA確立とPilot順序（S3/S4循環依存の解消案・独立Review/受入待ち）
+
+### 循環依存の原因
+現行の「S3出口にlive Pilot成功が必須」かつ「writerは受入済みdevflow SHAのみをロード」かつ「devflowへのmergeをS4で初めて行う」は、三条件を同時に満たせない。未mergeの権限付きコードを実行してPilotを先行させる方法、またはPilot未成功を成功と扱う方法は**採用しない**。
+
+### 段階を区別する
+- **S3.4 — code security gate（未受入）:** 当該最終コードの統合PRのexact HEAD／base・完全なdiff・Required CI・正式な独立レビュー・未解決finding・job permission/actor/runner境界・現行の関連Issueをゼロから再監査する。GPTとClaudeの各担当差分への別Reviewは維持するが、**両者が実装した統合全体には両者以外の独立したセキュリティReviewer**が必要。特に#387のB1未修正の中間HEADを合格させない。成功してもPilot受入ではない。
+- **S3.5 — trusted-code bootstrap merge（特例・未許可）:** S3.4の全gateに加え、**security-sensitiveな前倒しの統合mergeについて対象・SHA・復旧方法を明示したHuman承認**がある場合に限り、B1修正済みの統合コードを**一つの原子的なPR merge**でdevflow default branchに反映する。#385/#390/#387/#391を順次mainへmergeして、途中で権限付きworkflowの未修正版が有効なmainを作ってはならない。merge前にPR/base HEADを再照合し、差分14ファイル等の観測を記録し、post-mainのRequired checksを当該main SHAで確認する。チェックがFAILならPilotへ進まずrevert PR等の復旧を判断する。これは「trusted codeのbootstrap受入」であり、**S3/S4の機能・Pilot完了ではない**。
+- **S3.6 — bounded Pilot:** 受入済みmain上の**正確なcommit SHA**だけをreusable workflowとtrusted helperに使用。Pilot対象repoがJO一件、recipeが`jo-orthography-accounting@1`、生成ファイルが`data/reports/orthography-v2-source-accounting.json` 1件であることを実行時に再確認。対象側callerは**別PRで独立レビューを経た後**、安全に有効化されたdefault branchでのみ`workflow_dispatch`実行可能。過去に拒否された特権workflow入口の作成を別tool/経路へ切り替えて回避しない。限定job権限の明示許可を超えたら停止。最初にdry-run、次に非force write、exact replay、競合拒否、不正入力拒否、rollback、writer HEADのreadback、新HEADの正規Ubuntu/Windows Required CIを実証する。初回scratch PRの意図的stale CI失敗は成功証拠に流用しない。
+- **S3出口 — operational Pilot gate:** 本節と§2のlive Pilot・不正入力・権限・復旧・CI・記録を全件満たして初めてS3をGREENとする。bootstrap merge完了だけの場合、Cursorは従来どおり`S3_SINGLE_REPO_PILOT`に留める。
+- **S4 — final acceptance / reconciliation gate:** §3に沿い、新たなmainの受入済みSHA／Pilot成果／正規CI／独立Review／merge履歴と、bootstrap後に変更があった場合の別PRの安全なmergeとpost-main checksを再監査する。追加変更がなければbootstrap mergeを唯一のcode mergeとして承認記録を照合し、同じコードを二重にmergeしない。S4はbootstrap mergeによって自動GREENとしない。全gate完了後にだけS5文書・Control同期へ進む。
+
+### Bootstrap mergeに関する停止・復旧
+1. S3.4の独立レビューが無い、現行HEADのreview-readinessがFAIL、B1が統合最終treeに残る、Humanの特例承認が無い場合は**S3.5に進まない**。
+2. bootstrap mergeしてもJO側のcallerを導入するまではPilotの`workflow_dispatch`は存在しない。devflow側は単体で`workflow_call`入口を公開し得るため、merge前に**同じリポジトリ／他リポジトリから予期せず権限付きjobが起動できないこと**と、caller repo identity/actor/recipe/path allowlistの拒否を独立監査する。
+3. bootstrap後のmain CI/security観測が失敗、意図しないwriteが観測された、あるいはreviewed SHAと実行中のhelperが不一致なら、特権Pilotを停止し、revocation/close/revert PR等の復旧と再レビューへ戻す。default branchのforce/rewriteは禁止。
+4. 許可済みスコープは単一JO Pilotのwriter job`contents:write`とread用`actions:read`、`pull-requests:read`まで。`actions:write`、PAT、GitHub App、secrets、settings/rulesets/protection変更、他repoの有効化は別Human gateである。
+5. 本節は**受入前の仕様変更案**として別PRでレビューし、devflow#384の正式なphase-order決定と必要なHuman承認を得るまでは、既存§1–§3の安全境界を緩和しない。
+
 ## 2. S3 → S4：毎回ゼロベース監査
 
 対象を固定せずに古いcheckpointを再利用しない。S3のexitで、次の項目を**現行正本から新規照合**し、合否・evidence URL・未解決findingをIssueに記録する。
