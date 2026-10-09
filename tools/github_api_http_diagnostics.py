@@ -17,7 +17,8 @@ _ALLOWED_PERMISSIONS = frozenset({
     "issues", "metadata", "pull_requests", "workflows",
 })
 _PERMISSION = re.compile(r"([a-z_]+)\s*=\s*(read|write|admin)", re.IGNORECASE)
-_REQUEST_ID = re.compile(r"[A-Za-z0-9:-]{1,80}\Z")
+# GitHub request IDs are colon-delimited hex groups; reject opaque IDs/tokens.
+_REQUEST_ID = re.compile(r"[0-9A-F]{3,10}(?::[0-9A-F]{3,12}){2,4}\Z", re.IGNORECASE)
 
 
 def _header(headers: Any, name: str) -> str | None:
