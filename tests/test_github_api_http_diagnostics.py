@@ -108,6 +108,36 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         )
         self.assertEqual(result, "category=forbidden_unclassified")
 
+    def test_request_id_must_be_hex_groups_not_opaque_token(self):
+        result = self.classify(
+            403, "Forbidden", X_GitHub_Request_Id="A" * 64,
+        )
+        self.assertEqual(result, "category=forbidden_unclassified")
+
+    def test_adapter_reads_only_bounded_error_body(self):
+        class TrackingBuffer(io.BytesIO):
+            def __init__(self, content):
+                super().__init__(content)
+                self.read_sizes = []
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                return super().read(size)
+
+        buffer = TrackingBuffer(
+            b'{"message":"Forbidden"}' + b"z" * 6000 + b"secret"
+        )
+        exception = urllib.error.HTTPError(
+            "https://api.github.com/repos/kinoko34077/fixture/contents/x",
+            403, "error", Message(), buffer,
+        )
+        with mock.patch("tools.repository_bootstrap.urllib.request.urlopen", side_effect=exception):
+            with self.assertRaises(bootstrap.GitHubApiError) as caught:
+                bootstrap.GitHubApi("dummy-token").get_repository("kinoko34077/fixture")
+        self.assertEqual(buffer.read_sizes, [diagnostics.MAX_ERROR_BODY_BYTES])
+        self.assertIn("category=forbidden_unclassified", str(caught.exception))
+        self.assertNotIn("secret", str(caught.exception))
+
     def test_never_echo_arbitrary_github_response(self):
         secret = "ghp_EXAMPLE_SECRET_DO_NOT_PRINT"
         data = json.dumps({
