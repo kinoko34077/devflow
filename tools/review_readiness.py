@@ -33,7 +33,7 @@ class ReadinessResult:
 
 
 def _single_field(body: str, name: str) -> tuple[str | None, bool]:
-    pattern = re.compile(rf"(?mi)^\s*-\s*{re.escape(name)}\s*:\s*(.*?)\s*$")
+    pattern = re.compile(rf"(?mi)^[ \t]*-[ \t]*{re.escape(name)}[ \t]*:[ \t]*(.*?)[ \t]*$")
     values = [match.group(1).strip() for match in pattern.finditer(body or "")]
     if len(values) != 1:
         return None, False
@@ -202,6 +202,30 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
     ):
         return ReadinessResult(False, "Implementer signature is missing or ambiguous")
     implementer_signature = _signature(implementer_system, implementer_model)
+    # Co-implemented PRs (`Implementer-System: mixed`) must name the worker who
+    # made the most recent change. Different-reviewer eligibility is judged
+    # against that last implementer only; earlier co-implementers may review.
+    independence_signature = implementer_signature
+    last_system, last_system_unique = _single_field(body, "Last-Implementer-System")
+    last_model, last_model_unique = _single_field(body, "Last-Implementer-Model")
+    if implementer_signature[0] == "mixed":
+        if (
+            not last_system_unique
+            or not last_model_unique
+            or not last_system
+            or not last_model
+            or _normalize_identity_part(last_system) in _UNKNOWN_IDENTITY | {"mixed"}
+        ):
+            return ReadinessResult(
+                False,
+                "Mixed implementer requires one explicit Last-Implementer-System/Model",
+            )
+        independence_signature = _signature(last_system, last_model)
+    elif last_system is not None or last_model is not None:
+        return ReadinessResult(
+            False,
+            "Last-Implementer fields are only valid with Implementer-System: mixed",
+        )
 
     head = pr.get("head") or {}
     head_sha = str(head.get("sha") or "")
@@ -257,7 +281,7 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
         reviewer_signature = _signature(fields["Reviewer-System"], fields["Reviewer-Model"])
         if not _qualifies_as_different_reviewer(
             reviewer_signature,
-            implementer_signature,
+            independence_signature,
         ):
             continue
         rejection = _review_rejection(

@@ -435,6 +435,19 @@ signatures differ
 => different-reviewer Review
 ```
 
+#### Co-implemented PRs (`Implementer-System: mixed`)
+
+When more than one worker system/model implemented the reviewed head, the PR body declares `Implementer-System: mixed` with a descriptive `Implementer-Model`, **plus exactly one** `Last-Implementer-System` / `Last-Implementer-Model` pair naming the worker that made the most recent change to the reviewed head:
+
+```markdown
+- Implementer-System: mixed
+- Implementer-Model: <e.g. ChatGPT GPT-6 + Claude Code unknown>
+- Last-Implementer-System: ChatGPT | Codex | Claude Code | Human
+- Last-Implementer-Model: <model/version or unknown>
+```
+
+Different-reviewer eligibility for a mixed PR is judged **only against the last implementer**: any earlier co-implementer may submit the qualifying different-reviewer Review, so co-implemented work never becomes unreviewable. The Review still declares the PR's own `Implementer-System: mixed` / `Implementer-Model` values. A mixed PR without one explicit, known, non-`mixed` last implementer fails closed. Every new push that changes the head must update the `Last-Implementer-*` pair to whoever pushed it; a reviewer who authored the latest change cannot satisfy the gate. `Last-Implementer-*` fields are invalid on a non-mixed PR.
+
 Do not add `Review-Role`, `Independence`, `self-review`, `independent-review`, `SAME_AGENT_SELF_REVIEW`, `DIFFERENT_AGENT` or equivalent derived relation fields to the standard v2 schema. Add an instance/session discriminator only if real operation later demonstrates that `System + Model` is insufficient.
 
 #### Exact-SHA freshness and incremental re-review
