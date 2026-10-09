@@ -79,6 +79,17 @@ jobs:
           script="$(cd ../devflow && python3 -m tools.generated_artifact_pilot recipe-script)"
           npm ci
           npm run "$script"
+      # These tests run in the same unprivileged source job, *before*
+      # uploading any archive and before the separately privileged write job.
+      # With bash -e any validation failure prevents produce from succeeding,
+      # and needs: produce prevents write from starting.
+      - name: Validate generated accounting and full source checks (read-only)
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run validate:orthography-accounting
+          npm run check
       - name: Package approved outputs (low-trust data)
         shell: bash
         run: |
