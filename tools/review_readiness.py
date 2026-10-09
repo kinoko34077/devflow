@@ -99,15 +99,46 @@ def _signature(system: str, model: str) -> tuple[str, str]:
     return _normalize_identity_part(system), _normalize_identity_part(model)
 
 
+def _implementer_members(
+    implementer_signature: tuple[str, str],
+) -> tuple[tuple[str, str], ...] | None:
+    """Parse explicit joined implementer provenance without merging identities.
+
+    A single implementer retains the existing different-model policy.
+    Mixed-implementer PRs use paired `System + System` / `Model + Model`
+    declarations; a reviewer from ANY contributing system is not independent
+    of that combined PR. Prose metadata is self-declared, not authentication.
+    """
+    systems, models = implementer_signature
+    if "+" not in systems and "+" not in models:
+        return (implementer_signature,)
+    system_parts = systems.split(" + ")
+    model_parts = models.split(" + ")
+    if (
+        len(system_parts) < 2
+        or len(system_parts) != len(model_parts)
+        or any(not part or "+" in part for part in system_parts + model_parts)
+        or any(part in _UNKNOWN_IDENTITY for part in system_parts)
+        or len(set(system_parts)) != len(system_parts)
+    ):
+        return None
+    return tuple(zip(system_parts, model_parts))
+
+
 def _qualifies_as_different_reviewer(
     reviewer_signature: tuple[str, str],
     implementer_signature: tuple[str, str],
 ) -> bool:
     reviewer_system, reviewer_model = reviewer_signature
-    implementer_system, implementer_model = implementer_signature
-
-    if reviewer_system in _UNKNOWN_IDENTITY:
+    members = _implementer_members(implementer_signature)
+    if reviewer_system in _UNKNOWN_IDENTITY or members is None:
         return False
+    if len(members) > 1:
+        # For a combined PR, the same system cannot independently review
+        # work it authored, even when it reports a different model.
+        return all(reviewer_system != member_system for member_system, _ in members)
+
+    implementer_system, implementer_model = members[0]
     if reviewer_system != implementer_system:
         return True
     if reviewer_model in _UNKNOWN_IDENTITY or implementer_model in _UNKNOWN_IDENTITY:
