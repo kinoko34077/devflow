@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 try:
@@ -89,6 +90,7 @@ class BootstrapRequest:
     risk: str
     template: str
     devflow_managed: bool
+    repo_native_dispatch: bool
     readme: str
     specification: str | None
     license: None
@@ -219,7 +221,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     risk = _enum(classification.get("risk"), "classification.risk", RISKS)
 
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
-    _reject_unknown_keys(bootstrap, "bootstrap", {"template", "devflow_managed"})
+    _reject_unknown_keys(bootstrap, "bootstrap", {"template", "devflow_managed", "repo_native_dispatch"})
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
         devflow_managed = _boolean(bootstrap.get("devflow_managed"), "bootstrap.devflow_managed")
@@ -227,6 +229,14 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         devflow_managed = name not in EXCLUDED_REPOSITORIES
     if name in EXCLUDED_REPOSITORIES and devflow_managed:
         raise BootstrapError(f"repository {name!r} is excluded from devflow management")
+    # Absent means legacy v1 minimal behavior: retries of old requests do not
+    # suddenly inject a new workflow. Future managed-repo request emitters
+    # explicitly set this true automatically; users need no GitHub UI setup.
+    repo_native_dispatch = _boolean(
+        bootstrap.get("repo_native_dispatch", False), "bootstrap.repo_native_dispatch"
+    )
+    if repo_native_dispatch and not devflow_managed:
+        raise BootstrapError("bootstrap.repo_native_dispatch requires devflow_managed=true")
 
     initial = _mapping(raw.get("initial_content", {}), "initial_content")
     _reject_unknown_keys(initial, "initial_content", {"readme", "specification", "license"})
@@ -280,6 +290,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         risk=risk,
         template=template,
         devflow_managed=devflow_managed,
+        repo_native_dispatch=repo_native_dispatch,
         readme=readme,
         specification=specification,
         license=None,
@@ -611,6 +622,15 @@ class BootstrapExecutor:
         seed_files: list[tuple[str, str]] = [("README.md", request.readme)]
         if request.specification is not None:
             seed_files.append(("docs/SPECIFICATION.md", request.specification))
+        if request.repo_native_dispatch:
+            # Versioned/trusted source from devflow accepted main. No
+            # repository-wide App or new Actions secret is provisioned.
+            workflow_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/kinotch-repo-command.yml"
+            command_workflow = self._call(
+                context, "SEED", resources,
+                lambda: workflow_path.read_text(encoding="utf-8"),
+            )
+            seed_files.append((".github/workflows/kinotch-repo-command.yml", command_workflow))
         for path, content in seed_files:
             existing = self._call(
                 context,
@@ -629,6 +649,20 @@ class BootstrapExecutor:
                         content,
                         f"chore: add bootstrap seed {path} ({context.request_ref})",
                     ),
+                    # Workflow-file creation needs an extra one-time
+                    # credential permission; stop for a Human scope review,
+                    # never auto-retry with a broader credential.
+                    safe_retry=(
+                        "after-human-decision"
+                        if path == ".github/workflows/kinotch-repo-command.yml"
+                        else "yes"
+                    ),
+                )
+            elif path == ".github/workflows/kinotch-repo-command.yml" and existing.get("content") != content:
+                self._raise_failure(
+                    context, "SEED",
+                    "existing native-dispatch workflow differs from trusted template; never overwrite",
+                    safe_retry="after-human-decision", resources=resources,
                 )
             resources.append(f"file:{path}")
 
