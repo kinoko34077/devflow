@@ -99,3 +99,7 @@ References:
 - https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
 - https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/
 - https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/
+
+## Review follow-up (2026-10-09; new head requires new independent review)
+
+Claude Code's [Formal Review #5469943583](https://github.com/kinoko34077/devflow/pull/396#pullrequestreview-5469943583) found no blocking **prototype-code** issue at the older `6439c74` head. Implementer provenance is now recorded in the PR as `ChatGPT / GPT-6`. Subsequent commits address its P3 findings: scoped installation-token revocation via GitHub's official `DELETE /installation/token` (status separately reported), direct 32-character client-key minimum, full stale counter sweep across idle periods, hard failure if CI runner lacks Node.js, and consistent setup documentation. Unit tests cover successful/failed revocation, an ambiguous network timeout, replay, short secrets and stale counter cleanup. The **current exact head is NOT covered by the earlier Claude review**; a new independent reviewer check is mandatory, and the Human gate for `All repositories` + `Actions: write` remains unchanged.

@@ -31,7 +31,7 @@ Request:
 
 Successful response:
 ```json
-{"state":"DISPATCH_REQUESTED","repository":"kinoko34077/devflow","workflow":"project-sync.yml","ref":"main","mode":"reconcile","verification":"REQUIRED"}
+{"state":"DISPATCH_REQUESTED","repository":"kinoko34077/devflow","workflow":"project-sync.yml","ref":"main","mode":"reconcile","request_id":"<request-id>","token_revocation":"CONFIRMED","verification":"REQUIRED"}
 ```
 
 A 202 indicates acceptance by the GitHub dispatch API, **not** success of the workflow itself. The existing GitHub connector can read subsequent run details and Sync Health without new permissions.

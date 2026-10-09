@@ -199,6 +199,26 @@ test("invalid missing request ID is rejected before installation token mint", as
   assert.equal(calls, 0);
 });
 
+test("dispatch network exception still revokes token once and reserves UUID", async () => {
+  const env = gateEnv();
+  const seen = [];
+  const handler = createHandler({
+    jwtFactory: async () => "test.jwt",
+    githubFetch: async (url, opts) => {
+      seen.push({url, method: opts.method});
+      if (url.endsWith("/access_tokens")) return Response.json({token:"mock"});
+      if (opts.method === "DELETE") return new Response(null, {status:204});
+      throw Error("network timeout after request may have reached GitHub");
+    },
+  });
+  const result = await handler(authorizedRequest(), env);
+  assert.equal(result.status, 502);
+  assert.equal(env._store.store.get("request:" + ID).state, "AMBIGUOUS");
+  assert.equal((await handler(authorizedRequest(), env)).status, 409);
+  assert.equal(seen.length, 3);
+  assert.equal(seen[2].method, "DELETE");
+});
+
 test("short client secret fails closed before GitHub and durable storage", async () => {
   const env = {...gateEnv(), CLIENT_API_TOKEN: "x".repeat(25)};
   let calls = 0;
