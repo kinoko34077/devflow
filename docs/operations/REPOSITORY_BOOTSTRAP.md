@@ -213,7 +213,18 @@ On new **devflow-managed** repository creation, the agent automatically emits
 `bootstrap.repo_native_dispatch=true` in the already-required structured
 Bootstrap Request. The existing trusted bootstrap executor seeds a fixed,
 read-only `.github/workflows/kinotch-repo-command.yml` with no extra App,
-secret or per-repository settings. The initial safe command is exactly
+secret or **per-repository** settings. **One-time setup is required before
+real new-repo auto-seeding:** `REPOSITORY_BOOTSTRAP_TOKEN` must be authorized
+for workflow-file creation. GitHub requires classic PAT `repo` + `workflow`
+or fine-grained `Contents: write` + `Workflows: write`; the latter must
+cover future managed repositories. Scope verification, credential creation,
+replacement and secret registration are a Human security gate and not
+performed automatically by this change. If missing, the accepted bootstrap
+workflow fails closed at `SEED` with `Safe-Retry: after-human-decision`.
+Already-written README/spec seeds may remain, but new Issues/Control are not
+created after the failed workflow step. Retry only after authorization and
+readback. Do not claim a live end-to-end until observed on a genuine new repo.
+The initial safe command is exactly
 `/kinotch status` on an owner-created Issue, posted by `kinoko34077`.
 Newly created default-branch workflow is only a command entrypoint; it does not
 authorize arbitrary existing workflows, deploy, or execute untrusted user text.

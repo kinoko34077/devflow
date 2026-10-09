@@ -649,6 +649,14 @@ class BootstrapExecutor:
                         content,
                         f"chore: add bootstrap seed {path} ({context.request_ref})",
                     ),
+                    # Workflow-file creation needs an extra one-time
+                    # credential permission; stop for a Human scope review,
+                    # never auto-retry with a broader credential.
+                    safe_retry=(
+                        "after-human-decision"
+                        if path == ".github/workflows/kinotch-repo-command.yml"
+                        else "yes"
+                    ),
                 )
             elif path == ".github/workflows/kinotch-repo-command.yml" and existing.get("content") != content:
                 self._raise_failure(

@@ -141,8 +141,22 @@ Template taxonomy MUST NOT be expanded merely for cosmetic uniformity.
 `bootstrap.repo_native_dispatch=true` (valid only for `devflow_managed=true`)
 automatically seeds `.github/workflows/kinotch-repo-command.yml` from the
 version-controlled `templates/bootstrap/kinotch-repo-command.yml`.
-No new secret, App install, permission setting, universal token or privileged
-workflow is introduced in each repository. GitHub issues a temporary
+No new secret, App installation, **per-repository** manual permission setting,
+universal token or privileged runtime workflow is introduced for each repository.
+**One-time Human Gate:** the existing `REPOSITORY_BOOTSTRAP_TOKEN` used to seed
+`.github/workflows/*` must already have workflow-file writing authority:
+classic PAT `repo` + `workflow` scopes, or fine-grained `Contents: write`
++ `Workflows: write` on future managed repositories. This is an additional
+privilege compared to creating README files and must be explicitly reviewed
+and authorized **once**, never silently added by Bootstrap. Credential compromise
+could then modify Actions logic; runtime `GITHUB_TOKEN` isolation does not
+eliminate the bootstrap credential risk. If the credential lacks that permission,
+GitHub rejects workflow creation, Bootstrap records failure at `SEED` with
+`Safe-Retry: after-human-decision`, does not create a partial workflow,
+and does not proceed to new Issue/Control creation; already-created README/
+specification files remain for an identity-safe recovery. No privileged
+permission or credential mutation is performed by this PR.
+GitHub issues a temporary
 repository-scoped `GITHUB_TOKEN` to the read-only job. v1 only accepts the
 exact `/kinotch status` Issue comment from the owner account on an
 owner-created Issue (not a pull request); any arbitrary shell/workflow name,
@@ -205,6 +219,10 @@ Retry rules:
 - duplicate or conflicting Controls -> fail closed.
 
 Existing user-edited seed files are never silently overwritten during a retry.
+When native-dispatch seeding fails for missing workflow-file credentials,
+the failure is explicitly Human-gated at `SEED` and the executor does not
+proceed to Issues/Control. Partial README/specification seed is retained
+for safe, provenance-checked recovery after approval.
 
 ### 8.1 Downstream Control trust
 
@@ -347,7 +365,8 @@ A real repository-creation E2E is separate. It may run only after an approved le
 - GitHub Project as authority;
 - automatic public visibility;
 - licence guessing;
-- automatic credential/secret/permission setup;
+- automatic credential/secret/permission setup (even if workflow-file writes
+  require a one-time `REPOSITORY_BOOTSTRAP_TOKEN` scope change);
 - forced Repository Base adoption;
 - automatic release/deploy/publication;
 - automatic repository deletion;

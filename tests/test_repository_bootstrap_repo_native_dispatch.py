@@ -29,7 +29,7 @@ class RepoNativeBootstrapTests(unittest.TestCase):
         self.assertIn("github.event.issue.user.login == 'kinoko34077'", seeded)
         self.assertIn("github.event.issue.pull_request == null", seeded)
         self.assertIn("permissions: {}", seeded)
-        self.assertIn("actions: read", seeded)
+        self.assertNotIn("actions: read", seeded)
         self.assertNotIn("actions: write", seeded)
         self.assertNotIn("${{ github.event.comment.body }}", seeded)
         self.assertIn(f"file:{PATH}", result.resources)
@@ -57,6 +57,22 @@ class RepoNativeBootstrapTests(unittest.TestCase):
             rb.BootstrapExecutor(repository, devflow).execute(request(enabled=True), context())
         self.assertEqual(caught.exception.stage, "SEED")
         self.assertEqual(repository.files[("kinoko34077/example-repo", PATH)], "user edits\n")
+
+    def test_workflow_scope_denial_halts_before_issues_and_control(self):
+        repository, devflow = FakeApi(), FakeApi()
+        repository.fail_on = f"create_file:{PATH}"
+        with self.assertRaises(rb.BootstrapFailure) as caught:
+            rb.BootstrapExecutor(repository, devflow).execute(
+                request(enabled=True), context()
+            )
+        self.assertEqual(caught.exception.stage, "SEED")
+        self.assertEqual(caught.exception.safe_retry, "after-human-decision")
+        self.assertEqual(repository.files.get(("kinoko34077/example-repo", "README.md")), "# example-repo\\n")
+        self.assertNotIn(("kinoko34077/example-repo", PATH), repository.files)
+        self.assertEqual(repository.issues, {})
+        self.assertEqual(devflow.issues, {})
+        self.assertFalse(any("Repository-Bootstrap-State: DONE" in body
+                             for _, _, body in devflow.comments))
 
     def test_receiver_cannot_be_installed_on_unmanaged_repo(self):
         with self.assertRaises(rb.BootstrapError):
