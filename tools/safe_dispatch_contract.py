@@ -18,7 +18,7 @@ _DENIED = "DENIED"
 _HUMAN = "NEEDS_HUMAN"
 
 _ACTOR = re.compile(r"[A-Za-z0-9_.-]{1,39}", re.ASCII)
-_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.ASCII)
+_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", re.ASCII)
 _NAME = re.compile(r"[a-z][a-z0-9_.-]{1,63}", re.ASCII)
 _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,80}", re.ASCII)
 _SHA = re.compile(r"[0-9a-f]{40}", re.ASCII)
