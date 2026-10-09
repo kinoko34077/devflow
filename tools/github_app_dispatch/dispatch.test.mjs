@@ -128,7 +128,7 @@ test("upstream errors stay sanitized and do not claim workflow success", async (
     jwtFactory: async () => "test.jwt",
     githubFetch: async () => new Response("sensitive upstream details", {status: 403}),
   });
-  const result = await handler(authorizedRequest(), ENV);
+  const result = await handler(authorizedRequest(), gateEnv());
   assert.equal(result.status, 502);
   assert.doesNotMatch(await result.text(), /sensitive upstream details/);
 });
