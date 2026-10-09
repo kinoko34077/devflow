@@ -233,6 +233,8 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
     ):
         return ReadinessResult(False, "Implementer signature is missing or ambiguous")
     implementer_signature = _signature(implementer_system, implementer_model)
+    if _implementer_members(implementer_signature) is None:
+        return ReadinessResult(False, "Multiple implementer systems/models are ambiguous or malformed")
 
     head = pr.get("head") or {}
     head_sha = str(head.get("sha") or "")
