@@ -24,11 +24,11 @@ account-wide GitHub App.
 ## Service design
 
 This proof-of-implementation is a Cloudflare Worker ES module
-(`worker.mjs` imports `policy.mjs`). It can be adapted to a different
+(`index.mjs` imports `worker.mjs` and a SQLite-backed Durable Object gate). It can be adapted to a different
 trusted runtime without changing the accepted admission contract.
 
 POST `/v1/dispatch` with
-`Authorization: Bearer <client-specific secret>` and `Content-Type: application/json`:
+`Authorization: Bearer <client-specific secret>`, `x-request-id: <fresh UUID v4>` and `Content-Type: application/json`:
 
 ```json
 {"repository":"kinoko34077/devflow","workflow":"project-sync.yml","ref":"main","inputs":{"mode":"verify","issue_number":""}}
@@ -90,3 +90,23 @@ GitHub documentation:
 - https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
 - https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation
 - https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
+
+## Persistent request admission (not deployed)
+
+The Worker requires the Cloudflare `DISPATCH_GATE` Durable Object binding. The
+SQL-backed persistent ledger reserves a one-use UUID before any GitHub API call,
+rejects a duplicate ID (HTTP 409), limits rapid requests (HTTP 429; at most 12
+reservations per hour, 3 seconds minimum spacing) and records a bounded audit
+of requested/rejected/ambiguous outcomes for seven days. On ambiguous GitHub
+response or ledger failure it **never automatically dispatches again**; an
+operator must use the GitHub run/Health readback. The request ID must be
+carried unchanged on transport retries, including from the ChatGPT plugin.
+
+Durable Object source: `gate-object.mjs`, storage contract: `gate-state.mjs`.
+Wrangler `wrangler.jsonc` declares the SQLite-backed namespace using Cloudflare's
+2026 declarative `exports` syntax. This file is NOT deployed by GitHub PR/CI.
+
+Production still requires independent review of the privileged App key trust
+boundary, private-client authentication, DO replay guarantees and deployment.
+- https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/
+- https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/

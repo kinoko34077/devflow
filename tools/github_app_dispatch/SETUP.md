@@ -22,6 +22,7 @@ The following is an operator checklist only, **not** permission to carry it out 
 Headers:
 - `Authorization: Bearer <gateway-client-secret>`
 - `Content-Type: application/json`
+- `x-request-id: <fresh UUID v4>; reuse same ID on transport retry`
 
 Request:
 ```json

@@ -1,7 +1,15 @@
 {
   // Deployment configuration is an example only; NO service is deployed by this PR.
   "name": "kinotch-actions-dispatch",
-  "main": "./worker.mjs",
+  "main": "./index.mjs",
   "compatibility_date": "2026-10-08",
-  "workers_dev": false
+  "workers_dev": false,
+  "durable_objects": {
+    "bindings": [
+      {"name": "DISPATCH_GATE", "class_name": "DispatchGate"}
+    ]
+  },
+  "exports": {
+    "DispatchGate": {"type": "durable-object", "storage": "sqlite"}
+  }
 }
