@@ -64,6 +64,38 @@ Project custom TEXT fields are **bounded display projections**, not alternative 
 
 Workflow: `.github/workflows/project-sync.yml`
 
+### Owner-only GitHub-native command transport (devflow#395 — Draft)
+
+On accepted default-branch code, a trusted owner-authored Issue comment may
+request a **full-scope** Project Sync with exact text:
+
+- `/kinotch sync verify`
+- `/kinotch sync reconcile`
+
+Only newly **created** comments trigger this path; editing an old comment
+does not re-issue a command. To request a second run, the owner posts a new
+exact command after checking the previous run's outcome. The shared
+`project-sync` serialization is at JOB level after admission, so skipped
+untrusted comments do not take mutator queue slots.
+
+GitHub's `issue_comment.created` event is authenticated by GitHub and
+evaluated at the **job** boundary. The workflow checks this repository identity,
+non-PR Issue authored by GitHub user ID `79015263`, and both commenter and
+sender with the same owner ID; it rejects any other body. The comment content
+is **never used as a shell expression or executable argument**: it selects
+a fixed mode, with an empty issue_number (full scope). Existing manual
+`workflow_dispatch` and normal `issues` event behavior remain unchanged.
+A successful run does not imply Sync Health PASS: check the actual run and
+machine Health #41 before advancing or calling reconcile → verify complete.
+
+No private App key or cross-repository token is needed for the request path;
+the existing Project Sync secret remains privileged as before and is supplied
+only to a guarded, authorized job. There is no new background scheduler.
+This feature does **not** configure a repo created outside devflow Bootstrap.
+The actual GitHub Actions trigger and secret boundary must receive independent
+security Review and Human-authorized merge before becoming active.
+
+
 Event sync runs for devflow Issue events:
 
 - opened

@@ -3,6 +3,10 @@ name: Project sync
 on:
   issues:
     types: [opened, edited, reopened, closed]
+  # Owner-authored Issue command is the native transport for ChatGPT clients
+  # without workflow_dispatch OAuth access; no account-wide App key.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       mode:
@@ -22,16 +26,30 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  # Project fields and Sync Health are shared mutable surfaces across all Issues.
-  # Serialize every event/manual mutator so scoped failure memory and Project
-  # updates cannot race across different Issue numbers.
-  group: project-sync
-  queue: max
-  cancel-in-progress: false
-
 jobs:
   sync:
+    # No Project secret or runner allocation for untrusted comments.
+    # Identity is from GitHub's signed event payload, not comment text.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (
+        github.repository == 'kinoko34077/devflow' &&
+        github.event.issue.pull_request == null &&
+        github.event.issue.user.id == 79015263 &&
+        github.event.comment.user.id == 79015263 &&
+        github.event.sender.id == 79015263 &&
+        (
+          github.event.comment.body == '/kinotch sync verify' ||
+          github.event.comment.body == '/kinotch sync reconcile'
+        )
+      )
+    # Only admitted jobs join the shared Project mutator queue; untrusted
+    # public Issue comments cannot occupy slots before being skipped.
+    # Job-level serialization preserves the same cross-run mutator fence.
+    concurrency:
+      group: project-sync
+      queue: max
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -52,13 +70,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/project_sync.py event-sync
 
-      - name: Manual verify or reconcile
-        if: github.event_name == 'workflow_dispatch'
+      - name: Manual or approved owner-command verify/reconcile
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment'
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           MAINTENANCE_AUDIT_TOKEN: ${{ secrets.MAINTENANCE_AUDIT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
-          MODE: ${{ inputs.mode }}
+          # Fixed lookup only; never interpolate the comment body into shell.
+          MODE: ${{ github.event_name == 'issue_comment' && (github.event.comment.body == '/kinotch sync verify' && 'verify' || 'reconcile') || inputs.mode }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
         shell: bash
         run: |
