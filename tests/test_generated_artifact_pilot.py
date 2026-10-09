@@ -271,6 +271,29 @@ class ReusableWorkflowStructureTests(unittest.TestCase):
         self.assertIn("generated_artifact_pilot import main", self.write)
         self.assertIn("python3 -I", self.write)
 
+    def test_generate_canonical_validation_and_full_checks_precede_archive(self):
+        # The source's check scripts are untrusted; only the read-only job
+        # executes them. If any exit nonzero, shell -e stops before upload.
+        recipe_pos = self.produce.index('npm run "$script"')
+        accounting_pos = self.produce.index('npm run validate:orthography-accounting')
+        full_pos = self.produce.index('npm run check')
+        package_pos = self.produce.index('python3 -m tools.generated_artifact_pilot produce')
+        upload_pos = self.produce.index('actions/upload-artifact@')
+        self.assertLess(recipe_pos, accounting_pos)
+        self.assertLess(accounting_pos, full_pos)
+        self.assertLess(full_pos, package_pos)
+        self.assertLess(package_pos, upload_pos)
+        validation = self.produce.split(
+            '- name: Validate generated accounting and full source checks (read-only)', 1
+        )[1].split('- name: Package approved outputs (low-trust data)', 1)[0]
+        self.assertIn('set -euo pipefail', validation)
+        self.assertIn('working-directory: source', validation)
+        self.assertIn('needs: produce', self.write)
+
+    def test_no_unreviewed_source_commands_after_validation_in_write(self):
+        self.assertNotIn('npm run check', self.write)
+        self.assertNotIn('npm run validate:orthography-accounting', self.write)
+
     def test_token_only_in_writer_and_no_secrets(self):
         self.assertNotIn("secrets.", self.text)
         self.assertNotIn("github.token", self.produce)
