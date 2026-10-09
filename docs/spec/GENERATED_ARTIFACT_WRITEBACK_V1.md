@@ -5,6 +5,14 @@ Owner: devflow#384
 Authority: devflow \`AGENTS.md\`, \`.devflow/WORKFLOW.yaml\`, #384  
 Initial adoption: not enabled; S3 separately Human-gated single-repository PILOT.
 
+## S3工程の現行提案とS2記述の区別（2026-10-09）
+
+以下に記された「S2 prototype」「At this checkpoint only contract implemented」等の記述は、S2当時の歴史的スナップショットであり、**現在のS3コード・実Pilot受入状況を表すものではない**。
+
+現行の開発対象はdevflow#384、統合security-review候補はDraft PR #392の `02a5d26202bb9d40dd534397128e6a5f068d4217`。GPTのwriterとClaudeのworkflowを最終状態へ積み重ねた段階であり、Required testsはGREENだが、統合全体の独立security Review、PR readiness、JO Pilot、merge/post-main/rollbackは未完了である。各PRの現在HEADと状態は常にliveで再取得する。
+
+正式なphase-order変更**案**は `docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md` の「§1A S3のtrusted SHA確立とPilot順序」を参照。未merge codeの権限付き実行は禁止という従来の安全境界は維持し、独立全体security ReviewとHumanによる前倒しbootstrap mergeの明示承認がない場合はS3出口をHOLDする。S3/S4の循環依存を解消する案の存在は、S3/S4/S5またはPilotの受入を意味しない。
+
 ## 1. Boundary
 
 The purpose is to transfer large JSON/binary files from an unprivileged generator into a *separately privileged*, narrowly bounded GitHub PR-branch writer, without executing archive code and without ever authorizing arbitrary paths or push-to-main. Ordinary UTF-8 source file editing via existing GitHub Git Data / Contents API remains unchanged. Launch/discovery/claim/fencing from #202/#223/execution-coordinator is not part of this feature.
