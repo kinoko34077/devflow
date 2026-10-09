@@ -67,7 +67,7 @@ class RepoNativeBootstrapTests(unittest.TestCase):
             )
         self.assertEqual(caught.exception.stage, "SEED")
         self.assertEqual(caught.exception.safe_retry, "after-human-decision")
-        self.assertEqual(repository.files.get(("kinoko34077/example-repo", "README.md")), "# example-repo\\n")
+        self.assertEqual(repository.files.get(("kinoko34077/example-repo", "README.md")), "# example-repo\n")
         self.assertNotIn(("kinoko34077/example-repo", PATH), repository.files)
         self.assertEqual(repository.issues, {})
         self.assertEqual(devflow.issues, {})
