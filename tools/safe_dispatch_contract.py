@@ -87,9 +87,11 @@ def parse_json_object(text: str, *, max_bytes: int = 8192) -> dict[str, Any]:
 
 
 def _valid_spec(spec: Any) -> bool:
-    if type(spec) is not dict or spec.get("type") not in _INPUT_TYPE_KEYS:
+    if type(spec) is not dict or type(spec.get("type")) is not str:
         return False
     kind = spec["type"]
+    if kind not in _INPUT_TYPE_KEYS:
+        return False
     if frozenset(spec) != _INPUT_TYPE_KEYS[kind] or type(spec["required"]) is not bool:
         return False
     if kind == "choice":
