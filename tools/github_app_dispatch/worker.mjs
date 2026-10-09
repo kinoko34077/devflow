@@ -1,6 +1,7 @@
 // Unpublished Cloudflare Worker proof-of-implementation for devflow#395.
 // Security/credential/installation/deployment gates remain human-controlled.
 import { DispatchPolicyError, validateDispatchRequest } from "./policy.mjs";
+import { REQUEST_ID_PATTERN } from "./gate-state.mjs";
 
 const textEncoder = new TextEncoder();
 const API = "https://api.github.com";
@@ -124,7 +125,38 @@ export function createHandler({
     if (!/^\d+$/.test(String(env.GITHUB_INSTALLATION_ID))) {
       return reply(503, {error: "NOT_CONFIGURED"});
     }
+    // A per-request UUID remains the same on transport retries. The ledger
+    // rejects duplicates before touching GitHub, even across Worker restarts.
+    const requestId = request.headers.get("x-request-id");
+    if (!requestId || !REQUEST_ID_PATTERN.test(requestId)) {
+      return reply(400, {error: "INVALID_REQUEST_ID"});
+    }
+    if (!env.DISPATCH_GATE || typeof env.DISPATCH_GATE.getByName !== "function") {
+      return reply(503, {error: "GATE_NOT_CONFIGURED"});
+    }
+    let reserved = false;
+    const gate = env.DISPATCH_GATE.getByName("v1-global");
+    const gateCall = async (path, body) => {
+      const response = await gate.fetch(new Request("https://internal.invalid/" + path, {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify(body),
+      }));
+      const result = await response.json();
+      return {ok: response.ok, status: response.status, result};
+    };
     try {
+      const admitted = await gateCall("reserve", {
+        id: requestId,
+        repository: dispatch.repository,
+        workflow: dispatch.workflow,
+        mode: dispatch.inputs.mode,
+      });
+      if (!admitted.ok) {
+        return reply([400, 409, 429].includes(admitted.status) ? admitted.status : 503,
+          {error: admitted.result.error || "GATE_UNAVAILABLE"});
+      }
+      reserved = true;
       const jwt = await jwtFactory(
         env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, clock(),
       );
@@ -144,9 +176,13 @@ export function createHandler({
           }),
         },
       );
-      if (!tokenReply.ok) return reply(502, {error: "APP_TOKEN_FAILED"});
+      if (!tokenReply.ok) {
+        await gateCall("complete", {id: requestId, decision: "GITHUB_REJECTED"});
+        return reply(502, {error: "APP_TOKEN_FAILED"});
+      }
       const tokenBody = await tokenReply.json();
       if (typeof tokenBody.token !== "string" || !tokenBody.token) {
+        await gateCall("complete", {id: requestId, decision: "GITHUB_REJECTED"});
         return reply(502, {error: "APP_TOKEN_FAILED"});
       }
       const [owner, name] = dispatch.repository.split("/");
@@ -165,17 +201,31 @@ export function createHandler({
         },
       );
       if (!dispatchReply.ok) {
-        return reply(502, {error: "GITHUB_DISPATCH_FAILED"});
+        // HTTP failure may still be ambiguous at the upstream boundary.
+        // A retry with the same id must never issue a second dispatch.
+        await gateCall("complete", {id: requestId, decision: "AMBIGUOUS"});
+        return reply(502, {error: "GITHUB_DISPATCH_UNCONFIRMED"});
       }
+      const finished = await gateCall("complete", {
+        id: requestId, decision: "REQUESTED",
+      });
+      if (!finished.ok) return reply(503, {error: "GATE_COMPLETION_UNCONFIRMED"});
       // A successful dispatch API call is NOT proof of workflow execution/success.
       // A separate Actions-run and canonical Issue readback is required.
       return reply(202, {
         state: "DISPATCH_REQUESTED",
         repository: dispatch.repository, workflow: dispatch.workflow,
         ref: dispatch.ref, mode: dispatch.inputs.mode,
+        request_id: requestId,
         verification: "REQUIRED",
       });
     } catch (_error) {
+      // No automatic retry. If any external call had an ambiguous response,
+      // a human/operator must read the GitHub run status first.
+      if (reserved) {
+        try { await gateCall("complete", {id: requestId, decision: "AMBIGUOUS"}); }
+        catch { /* leave RESERVED: the duplicate nonce still fails closed */ }
+      }
       // Never echo credentials, upstream HTML, or arbitrary GraphQL/API bodies.
       return reply(502, {error: "UPSTREAM_UNAVAILABLE"});
     }
