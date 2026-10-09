@@ -1,0 +1,44 @@
+# TEMPLATE — not active in devflow. Install as
+#   kinoko34077/japanese-orthography:.github/workflows/verified-artifacts-pilot.yml
+# only after the reusable workflow at <DEVFLOW_SHA> has passed an independent
+# security Review (devflow#384 S3). Replace both <DEVFLOW_SHA> placeholders with
+# the same exact reviewed 40-hex devflow commit SHA. The writer refuses to run
+# unless this file, read at the run's workflow_sha, pins that same SHA twice,
+# is workflow_dispatch-only, forwards no credentials and has no shell steps.
+name: Verified artifacts pilot (devflow#384)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Open same-repository PR branch under artifact/devflow384/
+        type: string
+        required: true
+      expected_head:
+        description: Exact current head SHA of target_branch
+        type: string
+        required: true
+      mode:
+        description: dry-run or write
+        type: choice
+        options: [dry-run, write]
+        default: dry-run
+
+permissions: {}
+
+concurrency:
+  group: verified-artifacts-pilot-${{ inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  writeback:
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    uses: kinoko34077/devflow/.github/workflows/generated-artifact-writeback.yml@<DEVFLOW_SHA>
+    with:
+      devflow_sha: <DEVFLOW_SHA>
+      target_branch: ${{ inputs.target_branch }}
+      expected_head: ${{ inputs.expected_head }}
+      mode: ${{ inputs.mode }}
