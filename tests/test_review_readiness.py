@@ -164,6 +164,74 @@ class ReviewReadinessTests(unittest.TestCase):
         self.assertTrue(result.ready)
         self.assertEqual(result.matched_review_id, 101)
 
+    def test_mixed_pr_rejects_own_contributing_systems_as_independent(self):
+        # #392 is implemented by both systems. Neither may certify the whole.
+        systems = "ChatGPT + Claude Code"
+        models = "GPT-6 + unknown"
+        proposal = pr(
+            different_required="yes", implementer_system=systems,
+            implementer_model=models,
+        )
+        for reviewer_system, reviewer_model in (
+            ("ChatGPT", "GPT-6"),
+            ("ChatGPT", "GPT-5.6"),
+            ("Claude Code", "unknown"),
+            ("Claude Code", "Sonnet"),
+        ):
+            with self.subTest(reviewer=reviewer_system, model=reviewer_model):
+                result = review_readiness.evaluate(
+                    proposal,
+                    [review(
+                        reviewer_system=reviewer_system,
+                        reviewer_model=reviewer_model,
+                        implementer_system=systems,
+                        implementer_model=models,
+                    )],
+                )
+                self.assertFalse(result.ready)
+
+    def test_mixed_pr_accepts_real_different_system(self):
+        systems = "ChatGPT + Claude Code"
+        models = "GPT-6 + unknown"
+        for reviewer_system in ("Human", "Codex"):
+            with self.subTest(reviewer=reviewer_system):
+                result = review_readiness.evaluate(
+                    pr(different_required="yes", implementer_system=systems,
+                       implementer_model=models),
+                    [review(
+                        reviewer_system=reviewer_system,
+                        reviewer_model="unknown",
+                        implementer_system=systems, implementer_model=models,
+                    )],
+                )
+                self.assertTrue(result.ready)
+
+    def test_mixed_pr_rejects_malformed_or_ambiguous_author_pairs(self):
+        cases = (
+            ("ChatGPT + Claude Code", "GPT-6"),
+            ("ChatGPT", "GPT-6 + unknown"),
+            ("ChatGPT + ", "GPT-6 + unknown"),
+            ("ChatGPT + ChatGPT", "GPT-6 + GPT-5.6"),
+            ("unknown + Claude Code", "unknown + unknown"),
+            ("ChatGPT+Claude Code", "GPT-6 + unknown"),
+        )
+        for systems, models in cases:
+            with self.subTest(systems=systems, models=models):
+                result = review_readiness.evaluate(
+                    pr(different_required="yes", implementer_system=systems,
+                       implementer_model=models),
+                    [review(reviewer_system="Human", reviewer_model="unknown",
+                            implementer_system=systems, implementer_model=models)],
+                )
+                self.assertFalse(result.ready)
+
+    def test_single_implementer_different_model_rule_is_preserved(self):
+        result = review_readiness.evaluate(
+            pr(different_required="yes"),
+            [review(reviewer_system="ChatGPT", reviewer_model="GPT-6")],
+        )
+        self.assertTrue(result.ready)
+
     def test_stale_reviewed_commit_fails(self):
         result = review_readiness.evaluate(
             pr(), [review(reviewed_commit=OTHER, commit_id=OTHER)]
