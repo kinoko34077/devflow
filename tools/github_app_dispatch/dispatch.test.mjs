@@ -113,7 +113,8 @@ test("dispatch requests only repo-scoped short-lived token then exact allowed wo
   assert.equal(answer.state, "DISPATCH_REQUESTED");
   assert.equal(answer.verification, "REQUIRED");
   assert.equal(answer.request_id, ID);
-  assert.equal(seen.length, 2);
+  assert.equal(answer.token_revocation, "CONFIRMED");
+  assert.equal(seen.length, 3);
   assert.equal(seen[0].url, "https://api.github.com/app/installations/456/access_tokens");
   assert.deepEqual(JSON.parse(seen[0].body), {
     repositories: ["devflow"], permissions: {actions: "write"},
@@ -122,6 +123,8 @@ test("dispatch requests only repo-scoped short-lived token then exact allowed wo
     "https://api.github.com/repos/kinoko34077/devflow/actions/workflows/project-sync.yml/dispatches");
   assert.deepEqual(JSON.parse(seen[1].body), {ref: "main", inputs: {mode: "verify", issue_number: ""}});
   assert.equal(seen[1].headers.authorization, "Bearer installation-token");
+  assert.equal(seen[2].url, "https://api.github.com/installation/token");
+  assert.equal(seen[2].method, "DELETE");
 });
 test("upstream errors stay sanitized and do not claim workflow success", async () => {
   const handler = createHandler({
@@ -147,7 +150,7 @@ test("persistent nonce survives retry and prevents another GitHub call", async (
   });
   assert.equal((await handler(authorizedRequest(), env)).status, 202);
   assert.equal((await handler(authorizedRequest(), env)).status, 409);
-  assert.equal(calls, 2); // one mint + one dispatch
+  assert.equal(calls, 3); // mint, dispatch, revoke
   assert.equal(env._store.store.get("request:" + ID).state, "REQUESTED");
 });
 test("replay gate rejects rapid second intent, preserves audit and counts", async () => {
@@ -184,7 +187,7 @@ test("ambiguous upstream dispatch never replays same UUID", async () => {
   assert.doesNotMatch(await failure.text(), /maybe accepted/);
   assert.equal(env._store.store.get("request:" + ID).state, "AMBIGUOUS");
   assert.equal((await handler(authorizedRequest(), env)).status, 409);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 test("invalid missing request ID is rejected before installation token mint", async () => {
   let calls = 0;
@@ -196,6 +199,48 @@ test("invalid missing request ID is rejected before installation token mint", as
   assert.equal(calls, 0);
 });
 
+test("short client secret fails closed before GitHub and durable storage", async () => {
+  const env = {...gateEnv(), CLIENT_API_TOKEN: "x".repeat(25)};
+  let calls = 0;
+  const handler = createHandler({githubFetch: async () => {calls++; throw Error("unexpected");}});
+  const res = await handler(authorizedRequest(VALID, "x".repeat(25)), env);
+  assert.equal(res.status, 503);
+  assert.equal(calls, 0);
+  assert.equal(env._store.store.size, 0);
+});
+test("failed token revocation remains explicitly unconfirmed but dispatch does not retry", async () => {
+  const env = gateEnv();
+  const seen = [];
+  const handler = createHandler({
+    jwtFactory: async () => "test.jwt",
+    githubFetch: async (url, options) => {
+      seen.push({url, method: options.method});
+      if (url.endsWith("/access_tokens")) return Response.json({token: "mock-token"});
+      if (options.method === "DELETE") return new Response("upstream error", {status: 503});
+      return new Response(null, {status: 204});
+    },
+  });
+  const res = await handler(authorizedRequest(), env);
+  assert.equal(res.status, 202);
+  const out = await res.json();
+  assert.equal(out.state, "DISPATCH_REQUESTED");
+  assert.equal(out.token_revocation, "UNCONFIRMED");
+  assert.equal(env._store.store.get("request:" + ID).state, "REQUESTED");
+  assert.equal(seen.length, 3);
+});
+test("stale hourly counters across idle hours are fully swept", async () => {
+  const store = new MemoryStorage();
+  const now = 1700000000, hour = Math.floor(now / 3600);
+  store.store.set("counter:" + (hour - 500), 1);
+  store.store.set("counter:" + (hour - 10), 1);
+  store.store.set("counter:" + (hour - 1), 1);
+  const out = await reserveDispatch(store, {id: ID, repository: VALID.repository,
+    workflow: VALID.workflow, mode: "verify"}, now);
+  assert.equal(out.status, 200);
+  assert.equal(store.store.has("counter:" + (hour - 500)), false);
+  assert.equal(store.store.has("counter:" + (hour - 10)), false);
+  assert.equal(store.store.has("counter:" + (hour - 1)), true);
+});
 test("JWT is RS256 signed with short expiry, without exposing private key", async () => {
   const pair = await crypto.subtle.generateKey(
     {name: "RSASSA-PKCS1-v1_5", modulusLength: 2048,
