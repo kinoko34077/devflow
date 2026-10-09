@@ -35,7 +35,9 @@ POST `/v1/dispatch` with
 ```
 
 The API replies HTTP 202 `DISPATCH_REQUESTED` after the GitHub dispatch
-API accepts the request. It **never** claims the Actions run succeeded;
+API accepts the request. It attempts immediate revocation of the temporary
+installation token, returning `token_revocation=CONFIRMED|UNCONFIRMED`.
+It **never** claims the Actions run succeeded;
 read back the exact run and Sync Health Issue #41 after execution.
 The bridge must not be asked to sequence `reconcile` and `verify` without
 checking the previous step's actual outcome.

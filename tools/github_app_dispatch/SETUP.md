@@ -40,7 +40,7 @@ A 202 indicates acceptance by the GitHub dispatch API, **not** success of the wo
 
 - `All repositories` extends **GitHub-side permission** to the whole installation. Gateway allowlist only limits normal app calls; a compromised App private key could obtain wider tokens. This risk must be consciously accepted before installation.
 - The app key remains exclusively in the trusted gateway. Per-request installation tokens request only one repo and `actions:write`, and expire in about one hour.
-- Current prototype authenticates a static gateway client secret and **does not yet** implement persistent replay deduplication, strong per-caller audit identity or a production rate limiter. These are **blocking production review items**, not hidden assumptions.
+- Current prototype authenticates a single static gateway client secret. The Durable Object already implements persistent request-ID replay rejection, a basic 12/hour and 3-second global rate limit, and a bounded audit trail. Per-caller audit identity, production abuse monitoring and live-runtime replay verification remain unverified. The scoped installation token is revoked after dispatch when GitHub confirms revocation, with uncertainty explicitly reported otherwise.
 - Do not expose administrative "install", "rotate", "change allowlist" or arbitrary GitHub API tools via the ChatGPT integration.
 - GitHub App installation is not a license to execute third-party/untrusted Actions. Adding a new workflow requires another reviewed exact-policy update.
 - Emergency rollback: revoke client secret, disable gateway endpoint, revoke App private key and/or uninstall the GitHub App. Uninstalling/credential revocation is a security-sensitive user/admin action.

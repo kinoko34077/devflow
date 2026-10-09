@@ -6,8 +6,8 @@ import unittest
 
 
 class GitHubAppDispatchBridgeTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node.js required for isolated gateway tests")
     def test_node_policy_and_worker_contract(self):
+        self.assertIsNotNone(shutil.which("node"), "Node.js is required; never silently skip security tests")
         root = pathlib.Path(__file__).resolve().parents[1]
         result = subprocess.run(
             ["node", "--test", "tools/github_app_dispatch/dispatch.test.mjs"],

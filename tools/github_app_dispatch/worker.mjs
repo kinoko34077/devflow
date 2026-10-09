@@ -106,7 +106,8 @@ export function createHandler({
     const url = new URL(request.url);
     if (request.method !== "POST" || url.pathname !== "/v1/dispatch" ||
         url.search !== "") return reply(404, {error: "NOT_FOUND"});
-    if (!env || !env.CLIENT_API_TOKEN || !env.GITHUB_APP_ID ||
+    if (!env || typeof env.CLIENT_API_TOKEN !== "string" ||
+        env.CLIENT_API_TOKEN.length < 32 || !env.GITHUB_APP_ID ||
         !env.GITHUB_INSTALLATION_ID || !env.GITHUB_APP_PRIVATE_KEY) {
       return reply(503, {error: "NOT_CONFIGURED"});
     }
@@ -186,7 +187,10 @@ export function createHandler({
         return reply(502, {error: "APP_TOKEN_FAILED"});
       }
       const [owner, name] = dispatch.repository.split("/");
-      const dispatchReply = await githubFetch(
+      let dispatchReply;
+      let tokenRevoked = false;
+      try {
+      dispatchReply = await githubFetch(
         API + "/repos/" + owner + "/" + name + "/actions/workflows/" +
           dispatch.workflow + "/dispatches",
         {
@@ -200,6 +204,24 @@ export function createHandler({
           body: JSON.stringify({ref: dispatch.ref, inputs: dispatch.inputs}),
         },
       );
+
+      } finally {
+        // Dispose of the one-repository token even when dispatch is ambiguous.
+        // Never retry a workflow dispatch due to a revocation failure.
+        try {
+          const revoked = await githubFetch(API + "/installation/token", {
+            method: "DELETE",
+            headers: {
+              "accept": "application/vnd.github+json",
+              "authorization": "Bearer " + tokenBody.token,
+              "x-github-api-version": API_VERSION,
+            },
+          });
+          tokenRevoked = revoked.ok;
+        } catch {
+          tokenRevoked = false;
+        }
+      }
       if (!dispatchReply.ok) {
         // HTTP failure may still be ambiguous at the upstream boundary.
         // A retry with the same id must never issue a second dispatch.
@@ -217,6 +239,7 @@ export function createHandler({
         repository: dispatch.repository, workflow: dispatch.workflow,
         ref: dispatch.ref, mode: dispatch.inputs.mode,
         request_id: requestId,
+        token_revocation: tokenRevoked ? "CONFIRMED" : "UNCONFIRMED",
         verification: "REQUIRED",
       });
     } catch (_error) {

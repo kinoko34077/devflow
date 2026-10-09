@@ -29,8 +29,12 @@ export async function reserveDispatch(storage, request, nowSeconds) {
     for (const [key, value] of snapshots) {
       if (value && value.at < expiry) await tx.delete(key);
     }
-    // Counters beyond two hours are no longer used; bound their storage.
-    if (hour > 3) await tx.delete("counter:" + (hour - 3));
+    // Sweep stale counters across inactivity gaps, not only one prior hour.
+    const counters = await tx.list({prefix: "counter:"});
+    for (const [key] of counters) {
+      const bucket = Number(key.slice("counter:".length));
+      if (Number.isSafeInteger(bucket) && bucket < hour - 2) await tx.delete(key);
+    }
     return {status: 200, state: "RESERVED"};
   });
 }
