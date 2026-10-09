@@ -89,6 +89,41 @@ class MixedImplementerReadinessTests(unittest.TestCase):
         result = review_readiness.evaluate(mixed_pr("ChatGPT", "GPT-6"), [review])
         self.assertFalse(result.ready)
 
+    def test_no_formal_gate_does_not_bypass_mixed_validation(self):
+        gate = "- Formal review required: no\n- Different reviewer required: no\n"
+        missing = {"body": gate + f"- Implementer-System: mixed\n- Implementer-Model: {MIXED_MODEL}\n",
+                   "head": {"sha": HEAD}}
+        self.assertFalse(review_readiness.evaluate(missing, []).ready)
+        stray = {"body": gate + "- Implementer-System: ChatGPT\n- Implementer-Model: GPT-6\n"
+                 "- Last-Implementer-System: Codex\n- Last-Implementer-Model: x\n",
+                 "head": {"sha": HEAD}}
+        self.assertFalse(review_readiness.evaluate(stray, []).ready)
+        plain = {"body": gate, "head": {"sha": HEAD}}
+        self.assertTrue(review_readiness.evaluate(plain, []).ready)
+
+    def test_composite_last_implementer_fails_closed(self):
+        for system in ("ChatGPT + Claude Code", "ChatGPT, Claude Code", "ChatGPT and Codex", "ChatGPT/Codex"):
+            with self.subTest(system=system):
+                result = review_readiness.evaluate(mixed_pr(system, "unknown"), [mixed_review("Codex")])
+                self.assertFalse(result.ready)
+
+    def test_duplicate_last_fields_rejected_for_single_implementer(self):
+        body = """- Formal review required: yes
+- Different reviewer required: yes
+- Implementer-System: ChatGPT
+- Implementer-Model: GPT-6
+- Last-Implementer-System: Codex
+- Last-Implementer-System: Codex
+"""
+        review = {
+            "id": 1, "state": "COMMENTED", "commit_id": HEAD,
+            "body": review_body(reviewer_system="Codex", reviewer_model="x",
+                                implementer_system="ChatGPT", implementer_model="GPT-6"),
+        }
+        result = review_readiness.evaluate({"body": body, "head": {"sha": HEAD}}, [review])
+        self.assertFalse(result.ready)
+        self.assertIn("Last-Implementer", result.reason)
+
 
 if __name__ == "__main__":
     unittest.main()
