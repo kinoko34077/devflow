@@ -17,6 +17,7 @@ on:
           - maintenance-select-portfolio
           - maintenance-publish
           - maintenance-withdraw
+          - maintenance-complete
           - projection-shadow
           - publish
           - projection-cache
@@ -29,7 +30,7 @@ on:
         required: false
         type: string
       owner:
-        description: Existing owner/repository#issue for manual supply publication
+        description: Existing owner Issue for publication; findings summary for completion
         required: false
         type: string
       work_class:
@@ -45,6 +46,30 @@ on:
           - implementation
       attempt_id:
         description: Publisher execution-attempt identifier for 3C fencing
+        required: false
+        type: string
+      run_id:
+        description: Existing exact active maintenance audit run ID (completion only)
+        required: false
+        type: string
+      lens:
+        description: Audited lens (completion only)
+        required: false
+        type: string
+      result:
+        description: Accepted terminal maintenance result (completion only)
+        required: false
+        type: choice
+        default: FINDINGS
+        options:
+          - CLEAN
+          - FINDINGS
+          - RECONCILED
+          - BLOCKED
+          - SUPERSEDED
+          - NEEDS_REAUDIT
+      evidence_ref:
+        description: Trusted GitHub issue comment evidence URL (completion only)
         required: false
         type: string
 
@@ -333,6 +358,74 @@ jobs:
         with:
           name: maintenance-catalog-publication-result
           path: maintenance-catalog-publication-result.json
+
+  catalog-maintenance-complete:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    concurrency:
+      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Complete previously audited and released maintenance run
+        env:
+          MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}
+          MAINTENANCE_REPOSITORY: ${{ inputs.repository }}
+          MAINTENANCE_CONTROL: ${{ inputs.control }}
+          MAINTENANCE_RUN_ID: ${{ inputs.run_id }}
+          MAINTENANCE_LENS: ${{ inputs.lens }}
+          MAINTENANCE_RESULT: ${{ inputs.result }}
+          MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.owner }}
+          MAINTENANCE_EVIDENCE_REF: ${{ inputs.evidence_ref }}
+          MAINTENANCE_ATTEMPT_ID: ${{ inputs.attempt_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          invalid_input() {
+            printf '%s\n' '{"schema_version":"maintenance-completion-error.v1","reason_code":"INVALID_INPUT"}' > maintenance-completion-result.json
+            echo 'Invalid bounded maintenance completion input' >&2
+            exit 2
+          }
+          [[ -n "$MAINTENANCE_SUPPLY_TOKEN" ]] || invalid_input
+          [[ "$MAINTENANCE_REPOSITORY" =~ ^kinoko34077/[A-Za-z0-9_.-]+$ ]] || invalid_input
+          [[ "$MAINTENANCE_CONTROL" =~ ^[1-9][0-9]*$ ]] || invalid_input
+          [[ "$MAINTENANCE_RUN_ID" == "audit:${MAINTENANCE_REPOSITORY}:"* ]] || invalid_input
+          [[ "$MAINTENANCE_LENS" =~ ^[a-z][a-z0-9-]{0,63}$ ]] || invalid_input
+          case "$MAINTENANCE_RESULT" in
+            CLEAN|FINDINGS|RECONCILED|BLOCKED|SUPERSEDED|NEEDS_REAUDIT) ;;
+            *) invalid_input ;;
+          esac
+          [[ "$MAINTENANCE_ATTEMPT_ID" =~ ^[A-Za-z][A-Za-z0-9_.:-]{5,127}$ ]] || invalid_input
+          [[ "$MAINTENANCE_EVIDENCE_REF" =~ ^https://github[.]com/kinoko34077/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*\#issuecomment-[1-9][0-9]*$ ]] || invalid_input
+          [[ "$MAINTENANCE_EVIDENCE_REF" == "https://github.com/${MAINTENANCE_REPOSITORY}/issues/"* ]] || invalid_input
+          [[ ${#MAINTENANCE_FINDINGS_SUMMARY} -le 512 ]] || invalid_input
+          if [[ "$MAINTENANCE_RESULT" == FINDINGS && -z "$MAINTENANCE_FINDINGS_SUMMARY" ]]; then
+            invalid_input
+          fi
+          python scripts/maintenance_audit.py complete-maintenance \
+            --repository "$MAINTENANCE_REPOSITORY" \
+            --control "$MAINTENANCE_CONTROL" \
+            --run-id "$MAINTENANCE_RUN_ID" \
+            --lens "$MAINTENANCE_LENS" \
+            --result "$MAINTENANCE_RESULT" \
+            --findings-summary "$MAINTENANCE_FINDINGS_SUMMARY" \
+            --evidence-ref "$MAINTENANCE_EVIDENCE_REF" \
+            --attempt-id "$MAINTENANCE_ATTEMPT_ID" \
+            --token-env MAINTENANCE_SUPPLY_TOKEN \
+            --apply \
+            --output maintenance-completion-result.json
+      - name: Upload typed completion result
+        if: always() && hashFiles('maintenance-completion-result.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maintenance-completion-result
+          path: maintenance-completion-result.json
 
   projection-cache:
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}

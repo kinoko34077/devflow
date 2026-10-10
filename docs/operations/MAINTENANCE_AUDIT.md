@@ -108,6 +108,32 @@ For a participating repository:
 
 Task 11 controlled regression `test_rollout_disable_reenable_preserves_history_and_restores_selection` exercises the DISABLED -> PILOT round trip against the accepted collector/selector implementation. Existing supply-withdrawal and chat-fallback contract tests independently verify that rollback removes only the maintenance Ledger candidate and does not add a maintenance-specific bootstrap disposition.
 
+### Manual catalog run completion
+
+The accepted `complete-maintenance` CLI is exposed by the explicit
+`maintenance-audit.yml` **workflow_dispatch** mode `maintenance-complete`.
+It is not scheduled and does not claim, perform, or republish maintenance work.
+The action reuses the existing `MAINTENANCE_SUPPLY_TOKEN`, the publisher's
+per-repository concurrency group, and the script's exact Ledger/Control
+read-before-write/readback checks; the default Actions token stays read-only.
+
+Supply `repository`, `control`, `run_id`, `lens`, `result`, `attempt_id`,
+and an `evidence_ref` pointing to a trusted Issue comment on that repository.
+For this mode alone, the existing `owner` workflow input carries the bounded
+`findings_summary` (required when `result=FINDINGS`). In all other modes,
+`owner` retains its documented existing-owner reference meaning. This
+explicit alias avoids exceeding GitHub's ten `workflow_dispatch` inputs.
+
+Before dispatch, verify the claim has already been released and the named
+run was actually audited under a separate 3C consumer attempt. Do not use
+completion to skip claim/release or invent audit evidence.
+The action fails closed on malformed inputs and uploads a typed
+`maintenance-completion-result` artifact. After SUCCESS, confirm
+`applied=true`, `reconciliation_required=false`, a trusted canonical
+`devflow-maintenance-run:v1` history comment, cleared Ledger Active Run,
+an empty Control candidate/portfolio for the completed run and no
+coordinator claim. On partial failure, retain the evidence, reconcile the
+exact persisted state and **do not blindly replay** the mutation.
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.

@@ -1,4 +1,9 @@
+import os
 import pathlib
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import unittest
 
 
@@ -14,7 +19,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             "\n  publish:\n", 1
         )[0]
         cls.publish = cls.text.split("\n  publish:\n", 1)[1].split(
-            "\n  projection-cache:\n", 1
+            "\n  catalog-maintenance-publish:\n", 1
         )[0]
         cls.projection_cache = cls.text.split("\n  projection-cache:\n", 1)[1]
 
@@ -123,6 +128,136 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertIn("--apply", job)
         self.assertNotIn("schedule:", job)
         self.assertNotIn("issues: write", job)
+
+    def test_manual_trusted_catalog_completion_is_dispatch_only_and_fail_closed(self):
+        self.assertIn('- maintenance-complete', self.text)
+        self.assertIn("inputs.mode == 'maintenance-complete'", self.text)
+        job = self.text.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", job)
+        self.assertNotIn('schedule:', job)
+        self.assertIn('issues: read', job)
+        self.assertNotIn('issues: write', job)
+        self.assertIn('MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}', job)
+        self.assertNotIn('GITHUB_TOKEN:', job)
+        self.assertIn('python scripts/maintenance_audit.py complete-maintenance', job)
+        self.assertIn('--token-env MAINTENANCE_SUPPLY_TOKEN', job)
+        self.assertIn('--apply', job)
+        self.assertIn('cancel-in-progress: false', job)
+        self.assertIn(
+            'group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}',
+            job,
+        )
+        self.assertIn('maintenance-completion-result.json', job)
+        self.assertIn('Upload typed completion result', job)
+
+    def test_completion_argument_boundary_uses_env_and_rejects_unbounded_inputs(self):
+        job = self.text.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        for field in ('repository', 'control', 'run_id', 'lens', 'result',
+                      'owner', 'evidence_ref', 'attempt_id'):
+            self.assertIn('inputs.' + field, job)
+        self.assertIn('invalid_input()', job)
+        self.assertIn('INVALID_INPUT', job)
+        self.assertIn('MAINTENANCE_EVIDENCE_REF', job)
+        self.assertIn('MAINTENANCE_RUN_ID', job)
+        self.assertIn('MAINTENANCE_RESULT', job)
+        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.owner }}', job)
+        self.assertIn('${#MAINTENANCE_FINDINGS_SUMMARY} -le 512', job)
+        self.assertIn('"$MAINTENANCE_EVIDENCE_REF"', job)
+        self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY"', job)
+        self.assertNotIn('${{ inputs.', job.split('        run: |', 1)[1])
+
+    def test_dispatch_keeps_at_most_ten_top_level_inputs(self):
+        section = self.text.split('  workflow_dispatch:\n    inputs:\n', 1)[1].split('\npermissions:', 1)[0]
+        keys = [line for line in section.splitlines() if line.startswith('      ') and line.rstrip().endswith(':') and not line.startswith('        ')]
+        self.assertLessEqual(len(keys), 10)
+        self.assertEqual(len(keys), len(set(keys)))
+    @staticmethod
+    def _completion_preflight_script(workflow):
+        section = workflow.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        body = section.split('        run: |\n', 1)[1].split(
+            '      - name: Upload typed completion result', 1
+        )[0]
+        guard = body.split(
+            '          python scripts/maintenance_audit.py complete-maintenance', 1
+        )[0]
+        return textwrap.dedent(guard) + "printf 'PREFLIGHT_OK\\n'\n"
+
+    def test_completion_preflight_rejects_invalid_requests_without_writes(self):
+        if shutil.which('bash') is None:
+            self.skipTest('bash is unavailable on this host')
+        guard = self._completion_preflight_script(self.text)
+        base_env = {
+            'MAINTENANCE_SUPPLY_TOKEN': 'FAKE_TEST_TOKEN',
+            'MAINTENANCE_REPOSITORY': 'kinoko34077/kinotch-repository-base',
+            'MAINTENANCE_CONTROL': '20',
+            'MAINTENANCE_RUN_ID': 'audit:kinoko34077/kinotch-repository-base:base.consumer-compatibility:1',
+            'MAINTENANCE_LENS': 'spec-implementation-drift',
+            'MAINTENANCE_RESULT': 'FINDINGS',
+            'MAINTENANCE_FINDINGS_SUMMARY': 'P3 docs-only provenance label drift',
+            'MAINTENANCE_EVIDENCE_REF': 'https://github.com/kinoko34077/kinotch-repository-base/issues/50#issuecomment-6100787142',
+            'MAINTENANCE_ATTEMPT_ID': 'base49-20261011-native-complete-b1',
+        }
+        cases = (
+            ('MAINTENANCE_SUPPLY_TOKEN', ''),
+            ('MAINTENANCE_REPOSITORY', 'kinoko34077/../escape'),
+            ('MAINTENANCE_CONTROL', '20;echo BAD'),
+            ('MAINTENANCE_RUN_ID', 'audit:kinoko34077/other-repo:unrelated'),
+            ('MAINTENANCE_LENS', 'spec-implementation-drift;echo BAD'),
+            ('MAINTENANCE_RESULT', 'FINISHED'),
+            ('MAINTENANCE_FINDINGS_SUMMARY', 'X' * 513),
+            ('MAINTENANCE_EVIDENCE_REF', 'https://evil.example/issues/50#issuecomment-1'),
+            ('MAINTENANCE_ATTEMPT_ID', 'short'),
+        )
+        for key, invalid_value in cases:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
+                env = os.environ.copy()
+                env.update(base_env)
+                env[key] = invalid_value
+                proc = subprocess.run(
+                    ['bash', '-c', guard], cwd=tmp, env=env,
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertNotIn('PREFLIGHT_OK', proc.stdout)
+                self.assertIn(
+                    '"reason_code":"INVALID_INPUT"',
+                    (pathlib.Path(tmp) / 'maintenance-completion-result.json').read_text(encoding='utf-8'),
+                )
+
+    def test_completion_preflight_accepts_bounded_example(self):
+        if shutil.which('bash') is None:
+            self.skipTest('bash is unavailable on this host')
+        guard = self._completion_preflight_script(self.text)
+        env = os.environ.copy()
+        env.update({
+            'MAINTENANCE_SUPPLY_TOKEN': 'FAKE_TEST_TOKEN',
+            'MAINTENANCE_REPOSITORY': 'kinoko34077/kinotch-repository-base',
+            'MAINTENANCE_CONTROL': '20',
+            'MAINTENANCE_RUN_ID': 'audit:kinoko34077/kinotch-repository-base:base.consumer-compatibility:1',
+            'MAINTENANCE_LENS': 'spec-implementation-drift',
+            'MAINTENANCE_RESULT': 'FINDINGS',
+            'MAINTENANCE_FINDINGS_SUMMARY': 'P3 docs-only provenance label drift',
+            'MAINTENANCE_EVIDENCE_REF': 'https://github.com/kinoko34077/kinotch-repository-base/issues/50#issuecomment-6100787142',
+            'MAINTENANCE_ATTEMPT_ID': 'base49-20261011-native-complete-b1',
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                ['bash', '-c', guard], cwd=tmp, env=env,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn('PREFLIGHT_OK', proc.stdout)
+            self.assertFalse((pathlib.Path(tmp) / 'maintenance-completion-result.json').exists())
+    def test_completion_mode_does_not_modify_existing_read_only_audit(self):
+        self.assertNotIn('complete-maintenance', self.audit)
+        self.assertNotIn('MAINTENANCE_SUPPLY_TOKEN:', self.audit)
+        self.assertNotIn('maintenance-complete', self.publish)
 
     def test_failure_evidence_remains_typed_and_uploaded(self):
         self.assertIn(
