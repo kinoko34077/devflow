@@ -16,9 +16,11 @@ class ReplayProbeRejected(Exception):
     """Failure may occur after a real branch write: manual recovery is required."""
 
     def __init__(self, reason: str, *, first_committed: bool = False,
+                 outcome_unknown: bool = False,
                  previous_head: str | None = None, new_head: str | None = None):
         super().__init__(reason)
         self.first_committed = first_committed
+        self.outcome_unknown = outcome_unknown
         self.previous_head = previous_head
         self.new_head = new_head
 
@@ -66,7 +68,15 @@ def probe_exact_replay(api: Any, policy: Mapping[str, Any],
     or rollback, even if the live branch has subsequently moved.
     """
     snapshot = copy.deepcopy((policy, admission, manifest))
-    first = verified_writeback(api, policy, admission, manifest, archive, dry_run=False)
+    try:
+        first = verified_writeback(api, policy, admission, manifest, archive, dry_run=False)
+    except Exception as exc:
+        # The core may have updated the ref before losing its post-write readback.
+        # Never classify an exception as proof that no Git mutation occurred.
+        raise ReplayProbeRejected(
+            "initial write outcome unknown; reconcile target HEAD before any retry",
+            outcome_unknown=True,
+        ) from exc
     if not isinstance(first, dict) or first.get("status") != "COMMITTED" or first.get("writes_performed") is not True:
         raise ReplayProbeRejected("first invocation did not confirm COMMITTED")
     # As soon as COMMITTED is reported, every subsequent failure is classified
