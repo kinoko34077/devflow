@@ -11,7 +11,7 @@ from hashlib import sha256
 import re
 from typing import Protocol
 
-from tools.safe_dispatch_contract import parse_json_object
+from tools.safe_dispatch_contract import admit_dispatch, parse_json_object
 from tools.safe_dispatch_g2a import ObservedReadContext, inspect_read_request
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -123,19 +123,42 @@ def verify_offline_metadata_fixture(
 
     # The provider is test-only and supplied by the caller. Replacing it with
     # a live connector REQUIRES separately admitted security work.
+    # Actor observation is the only provider method allowed before G1
+    # admission. Target metadata/head calls model externally visible reads:
+    # a denied request must never reach them even in a future real adapter.
     try:
         actor = fixture.current_actor()
-        metadata_before = fixture.repository_metadata(pins.repository)
-        head_before = fixture.branch_head(pins.repository, pins.ref)
     except Exception:
         return deny("FIXTURE_OBSERVATION_FAILED")
-
     if (
         type(actor) is not ActorObservation
         or type(actor.id) is not int or actor.id != pins.operator_id
         or type(actor.login) is not str or actor.login != pins.operator_login
     ):
         return deny("ACTOR_MISMATCH")
+
+    first_admission = admit_dispatch(
+        request, catalog, verified_actor=actor.login
+    )
+    if first_admission.status != "ADMITTED":
+        return deny("G1_G2A_DID_NOT_ADMIT")
+    # G1 allows other catalog backends. G2A only ever models exactly this
+    # fixed read-only handler, so reject alternative G1-allowed executors
+    # before observing the target metadata/head.
+    if (
+        first_admission.action != "repo.status"
+        or first_admission.backend != "github_api"
+        or first_admission.executor != "github.repository_metadata"
+        or first_admission.reviewed_workflow_sha is not None
+    ):
+        return deny("NON_ALLOWLISTED_HANDLER")
+
+    try:
+        metadata_before = fixture.repository_metadata(pins.repository)
+        head_before = fixture.branch_head(pins.repository, pins.ref)
+    except Exception:
+        return deny("FIXTURE_OBSERVATION_FAILED")
+
     if not _metadata_matches(metadata_before, pins):
         return deny("TARGET_OR_PERMISSION_MISMATCH")
     if type(head_before) is not str or _SHA.fullmatch(head_before) is None:

@@ -198,6 +198,45 @@ class G2BFixtureTests(unittest.TestCase):
         req = js({**request(), "backend": "github_actions"})
         self.assertEqual(self.call(req=req).reason, "G1_G2A_DID_NOT_ADMIT")
 
+    def test_denied_actor_never_touches_target(self):
+        r, c, p, f = fixture_inputs()
+        f.actor = replace(f.actor, id=1234)
+        self.assertEqual(self.call(provider=f).reason, "ACTOR_MISMATCH")
+        self.assertEqual(f.actor_reads, 1)
+        self.assertEqual(f.metadata_reads, 0)
+        self.assertEqual(f.head_reads, 0)
+
+    def test_denied_policy_never_touches_target(self):
+        r, c, p, f = fixture_inputs()
+        malicious = js({**request(), "backend": "github_actions"})
+        self.assertEqual(self.call(req=malicious, provider=f).reason,
+                         "G1_G2A_DID_NOT_ADMIT")
+        self.assertEqual(f.metadata_reads, 0)
+        self.assertEqual(f.head_reads, 0)
+
+    def test_g1_admitted_unallowlisted_handler_never_touches_target(self):
+        r, c, p, f = fixture_inputs()
+        changed = catalog()
+        changed["actions"]["repo.status"]["executor"] = "github.repository_read_other"
+        changed_cat = js(changed)
+        pinned = replace(p, catalog_sha256=sha256(changed_cat.encode()).hexdigest())
+        self.assertEqual(self.call(cat=changed_cat, pins=pinned, provider=f).reason,
+                         "NON_ALLOWLISTED_HANDLER")
+        self.assertEqual(f.metadata_reads, 0)
+        self.assertEqual(f.head_reads, 0)
+
+    def test_rejected_write_catalog_never_touches_target(self):
+        r, c, p, f = fixture_inputs()
+        changed = catalog()
+        changed["actions"]["repo.status"]["effects"] = "write"
+        changed["actions"]["repo.status"]["human_gate"] = True
+        raw = js(changed)
+        pin = replace(p, catalog_sha256=sha256(raw.encode()).hexdigest())
+        self.assertEqual(self.call(cat=raw, pins=pin, provider=f).reason,
+                         "G1_G2A_DID_NOT_ADMIT")
+        self.assertEqual(f.metadata_reads, 0)
+        self.assertEqual(f.head_reads, 0)
+
     def test_request_unknown_action_denied_by_g1(self):
         r, c, p, f = fixture_inputs()
         req = js({**request(), "action": "run.shell"})
