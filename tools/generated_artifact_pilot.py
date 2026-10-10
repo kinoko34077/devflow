@@ -40,6 +40,7 @@ from tools.generated_artifact_admission import (
 )
 from tools.generated_artifact_contract import ArtifactRejected, _policy, _provenance
 from tools.generated_artifact_packager import canonical_manifest_json, package_approved_outputs
+from tools.generated_artifact_replay_probe import ReplayProbeRejected, probe_exact_replay
 from tools.generated_artifact_writer import GitHubWriteApi, verified_writeback
 
 REUSABLE_WORKFLOW = "kinoko34077/devflow/.github/workflows/generated-artifact-writeback.yml"
@@ -138,8 +139,8 @@ def _inputs(env: Mapping[str, str]) -> tuple[str, str, str, str]:
     if not branch.startswith(BRANCH_PREFIX) or branch == BRANCH_PREFIX:
         raise ArtifactRejected("target branch outside the approved Pilot prefix")
     mode = str(env.get("MODE") or "")
-    if mode not in ("dry-run", "write"):
-        raise ArtifactRejected("mode must be dry-run or write")
+    if mode not in ("dry-run", "write", "write-replay-test"):
+        raise ArtifactRejected("mode must be dry-run, write or write-replay-test")
     return devflow_sha, expected_head, branch, mode
 
 
@@ -224,6 +225,9 @@ def write(env: Mapping[str, str], artifact_dir: pathlib.Path, api: GitHubWriteAp
         manifest = json.loads(manifest_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         raise ArtifactRejected("manifest is not valid UTF-8 JSON") from exc
+    if mode == "write-replay-test":
+        return probe_exact_replay(api, policy, admission, manifest, archive,
+                                  verified_writeback=verified_writeback)
     return verified_writeback(api, policy, admission, manifest, archive, dry_run=(mode != "write"))
 
 
@@ -245,6 +249,18 @@ def main(argv: list[str] | None = None) -> int:
             result = produce(os.environ, pathlib.Path(args.source), pathlib.Path(args.out))
         else:
             result = write(os.environ, pathlib.Path(args.artifact))
+    except ReplayProbeRejected as exc:
+        if exc.first_committed:
+            print(json.dumps({
+                "status": "REPLAY_TEST_FAILED_AFTER_COMMIT",
+                "writes_performed": True,
+                "previous_head": exc.previous_head,
+                "new_head": exc.new_head,
+                "ci_verified": False,
+                "recovery_required": True,
+            }, sort_keys=True), file=sys.stderr)
+        print(f"REJECTED: {exc}", file=sys.stderr)
+        return 2
     except ArtifactRejected as exc:
         print(f"REJECTED: {exc}", file=sys.stderr)
         return 2
