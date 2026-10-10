@@ -1,4 +1,9 @@
+import os
 import pathlib
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import unittest
 
 
@@ -170,6 +175,85 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         keys = [line for line in section.splitlines() if line.startswith('      ') and line.rstrip().endswith(':') and not line.startswith('        ')]
         self.assertLessEqual(len(keys), 10)
         self.assertEqual(len(keys), len(set(keys)))
+    @staticmethod
+    def _completion_preflight_script(workflow):
+        section = workflow.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        body = section.split('        run: |\n', 1)[1].split(
+            '      - name: Upload typed completion result', 1
+        )[0]
+        guard = body.split(
+            '          python scripts/maintenance_audit.py complete-maintenance', 1
+        )[0]
+        return textwrap.dedent(guard) + "printf 'PREFLIGHT_OK\\n'\n"
+
+    def test_completion_preflight_rejects_invalid_requests_without_writes(self):
+        if shutil.which('bash') is None:
+            self.skipTest('bash is unavailable on this host')
+        guard = self._completion_preflight_script(self.text)
+        base_env = {
+            'MAINTENANCE_SUPPLY_TOKEN': 'FAKE_TEST_TOKEN',
+            'MAINTENANCE_REPOSITORY': 'kinoko34077/kinotch-repository-base',
+            'MAINTENANCE_CONTROL': '20',
+            'MAINTENANCE_RUN_ID': 'audit:kinoko34077/kinotch-repository-base:base.consumer-compatibility:1',
+            'MAINTENANCE_LENS': 'spec-implementation-drift',
+            'MAINTENANCE_RESULT': 'FINDINGS',
+            'MAINTENANCE_FINDINGS_SUMMARY': 'P3 docs-only provenance label drift',
+            'MAINTENANCE_EVIDENCE_REF': 'https://github.com/kinoko34077/kinotch-repository-base/issues/50#issuecomment-6100787142',
+            'MAINTENANCE_ATTEMPT_ID': 'base49-20261011-native-complete-b1',
+        }
+        cases = (
+            ('MAINTENANCE_SUPPLY_TOKEN', ''),
+            ('MAINTENANCE_REPOSITORY', 'kinoko34077/../escape'),
+            ('MAINTENANCE_CONTROL', '20;echo BAD'),
+            ('MAINTENANCE_RUN_ID', 'audit:kinoko34077/other-repo:unrelated'),
+            ('MAINTENANCE_LENS', 'spec-implementation-drift;echo BAD'),
+            ('MAINTENANCE_RESULT', 'FINISHED'),
+            ('MAINTENANCE_FINDINGS_SUMMARY', 'X' * 513),
+            ('MAINTENANCE_EVIDENCE_REF', 'https://evil.example/issues/50#issuecomment-1'),
+            ('MAINTENANCE_ATTEMPT_ID', 'short'),
+        )
+        for key, invalid_value in cases:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
+                env = os.environ.copy()
+                env.update(base_env)
+                env[key] = invalid_value
+                proc = subprocess.run(
+                    ['bash', '-c', guard], cwd=tmp, env=env,
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertNotIn('PREFLIGHT_OK', proc.stdout)
+                self.assertIn(
+                    '"reason_code":"INVALID_INPUT"',
+                    (pathlib.Path(tmp) / 'maintenance-completion-result.json').read_text(encoding='utf-8'),
+                )
+
+    def test_completion_preflight_accepts_bounded_example(self):
+        if shutil.which('bash') is None:
+            self.skipTest('bash is unavailable on this host')
+        guard = self._completion_preflight_script(self.text)
+        env = os.environ.copy()
+        env.update({
+            'MAINTENANCE_SUPPLY_TOKEN': 'FAKE_TEST_TOKEN',
+            'MAINTENANCE_REPOSITORY': 'kinoko34077/kinotch-repository-base',
+            'MAINTENANCE_CONTROL': '20',
+            'MAINTENANCE_RUN_ID': 'audit:kinoko34077/kinotch-repository-base:base.consumer-compatibility:1',
+            'MAINTENANCE_LENS': 'spec-implementation-drift',
+            'MAINTENANCE_RESULT': 'FINDINGS',
+            'MAINTENANCE_FINDINGS_SUMMARY': 'P3 docs-only provenance label drift',
+            'MAINTENANCE_EVIDENCE_REF': 'https://github.com/kinoko34077/kinotch-repository-base/issues/50#issuecomment-6100787142',
+            'MAINTENANCE_ATTEMPT_ID': 'base49-20261011-native-complete-b1',
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                ['bash', '-c', guard], cwd=tmp, env=env,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn('PREFLIGHT_OK', proc.stdout)
+            self.assertFalse((pathlib.Path(tmp) / 'maintenance-completion-result.json').exists())
     def test_completion_mode_does_not_modify_existing_read_only_audit(self):
         self.assertNotIn('complete-maintenance', self.audit)
         self.assertNotIn('MAINTENANCE_SUPPLY_TOKEN:', self.audit)
