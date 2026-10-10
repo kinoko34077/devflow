@@ -30,7 +30,7 @@ on:
         required: false
         type: string
       owner:
-        description: Existing owner/repository#issue for manual supply publication
+        description: Existing owner Issue for publication; findings summary for completion
         required: false
         type: string
       work_class:
@@ -68,10 +68,6 @@ on:
           - BLOCKED
           - SUPERSEDED
           - NEEDS_REAUDIT
-      findings_summary:
-        description: Bounded findings summary (completion only)
-        required: false
-        type: string
       evidence_ref:
         description: Trusted GitHub issue comment evidence URL (completion only)
         required: false
@@ -385,7 +381,7 @@ jobs:
           MAINTENANCE_RUN_ID: ${{ inputs.run_id }}
           MAINTENANCE_LENS: ${{ inputs.lens }}
           MAINTENANCE_RESULT: ${{ inputs.result }}
-          MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.findings_summary }}
+          MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.owner }}
           MAINTENANCE_EVIDENCE_REF: ${{ inputs.evidence_ref }}
           MAINTENANCE_ATTEMPT_ID: ${{ inputs.attempt_id }}
         shell: bash
