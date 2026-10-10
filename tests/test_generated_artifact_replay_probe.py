@@ -102,6 +102,18 @@ class ReplayProbeTests(unittest.TestCase):
             self.invoke(broken)
         self.assertEqual(self.api.mutations, [])
 
+    def test_first_write_post_ref_readback_failure_is_unknown(self):
+        def fail_after_ref(api, *args, **kwargs):
+            api.patch("/git/refs/heads/target", {"force": False})
+            self.api.head = NEW
+            raise OSError("mock post-write readback unavailable")
+        with self.assertRaises(ReplayProbeRejected) as captured:
+            self.invoke(fail_after_ref)
+        self.assertTrue(captured.exception.outcome_unknown)
+        self.assertFalse(captured.exception.first_committed)
+        self.assertEqual(self.api.mutations, [("PATCH", "/git/refs/heads/target")])
+        self.assertEqual(self.api.head, NEW)
+
     def test_malformed_commit_response_still_reports_recovery(self):
         def malformed(api, *args, **kwargs):
             self.api.head = NEW
