@@ -14,7 +14,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             "\n  publish:\n", 1
         )[0]
         cls.publish = cls.text.split("\n  publish:\n", 1)[1].split(
-            "\n  projection-cache:\n", 1
+            "\n  catalog-maintenance-publish:\n", 1
         )[0]
         cls.projection_cache = cls.text.split("\n  projection-cache:\n", 1)[1]
 
@@ -152,19 +152,24 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             '\n  projection-cache:\n', 1
         )[0]
         for field in ('repository', 'control', 'run_id', 'lens', 'result',
-                      'findings_summary', 'evidence_ref', 'attempt_id'):
+                      'owner', 'evidence_ref', 'attempt_id'):
             self.assertIn('inputs.' + field, job)
         self.assertIn('invalid_input()', job)
         self.assertIn('INVALID_INPUT', job)
         self.assertIn('MAINTENANCE_EVIDENCE_REF', job)
         self.assertIn('MAINTENANCE_RUN_ID', job)
         self.assertIn('MAINTENANCE_RESULT', job)
-        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY', job)
+        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.owner }}', job)
         self.assertIn('${#MAINTENANCE_FINDINGS_SUMMARY} -le 512', job)
         self.assertIn('"$MAINTENANCE_EVIDENCE_REF"', job)
         self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY"', job)
         self.assertNotIn('${{ inputs.', job.split('        run: |', 1)[1])
 
+    def test_dispatch_keeps_at_most_ten_top_level_inputs(self):
+        section = self.text.split('  workflow_dispatch:\n    inputs:\n', 1)[1].split('\npermissions:', 1)[0]
+        keys = [line for line in section.splitlines() if line.startswith('      ') and line.rstrip().endswith(':') and not line.startswith('        ')]
+        self.assertLessEqual(len(keys), 10)
+        self.assertEqual(len(keys), len(set(keys)))
     def test_completion_mode_does_not_modify_existing_read_only_audit(self):
         self.assertNotIn('complete-maintenance', self.audit)
         self.assertNotIn('MAINTENANCE_SUPPLY_TOKEN:', self.audit)
