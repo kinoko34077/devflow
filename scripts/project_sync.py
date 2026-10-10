@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,6 +75,10 @@ EXPECTED_FIELDS = set(SELECT_OPTIONS) | TEXT_FIELDS | DATE_FIELDS
 # field; GitHub does not publish the exact limit in its GraphQL schema.
 PROJECT_TEXT_MAX_UTF8_BYTES = 1000
 PROJECT_TEXT_TRUNCATION_MARKER = " ... [truncated; see canonical Issue]"
+GRAPHQL_TRANSIENT_RETRY_ATTEMPTS = 3
+GRAPHQL_TRANSIENT_BACKOFF_SECONDS = 0.25
+PROJECT_MEMBERSHIP_READBACK_RETRIES = 2
+PROJECT_MEMBERSHIP_READBACK_BACKOFF_SECONDS = 0.5
 
 AUDIT_PROJECT_FIELD_SPECS = {
     "Audit Ref": {"kind": "text", "options": []},
@@ -125,6 +130,11 @@ class ConfigError(SyncError):
 
 
 class APIError(SyncError):
+    pass
+
+
+class TransientAPIError(APIError):
+    """Transport-only 502/503/504 or timeout; never GraphQL validation errors."""
     pass
 
 
@@ -651,6 +661,23 @@ class ProjectSnapshot:
     items_by_content_id: dict[str, ProjectItem]
 
 
+def _graphql_retry_safe(document: str) -> bool:
+    """Retry only reads and the known desired-value field update mutation."""
+    if re.match(r"^\s*query\b", document):
+        return True
+    if not re.match(r"^\s*mutation\b", document):
+        return False
+    # Other GraphQL mutations may create/delete objects or change schema.
+    # A timeout after those operations leaves the write outcome unknown.
+    return (
+        len(re.findall(r"\bupdateProjectV2ItemFieldValue\s*\(", document)) == 1
+        and not re.search(
+            r"\b(?:addProjectV2ItemById|createProjectV2Field|deleteProjectV2Item)\s*\(",
+            document,
+        )
+    )
+
+
 def _default_graphql_transport(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -659,9 +686,13 @@ def _default_graphql_transport(url: str, headers: dict[str, str], payload: dict[
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise APIError(f"GitHub GraphQL HTTP {exc.code}: {body[:500]}") from None
+        error_type = TransientAPIError if exc.code in {502, 503, 504} else APIError
+        raise error_type(f"GitHub GraphQL HTTP {exc.code}: {body[:500]}") from None
     except urllib.error.URLError as exc:
-        raise APIError(f"GitHub GraphQL network error: {exc.reason}") from None
+        error_type = TransientAPIError if isinstance(exc.reason, TimeoutError) else APIError
+        raise error_type(f"GitHub GraphQL network error: {exc.reason}") from None
+    except TimeoutError:
+        raise TransientAPIError("GitHub GraphQL transport failed: TimeoutError") from None
 
 
 def _default_rest_transport(method: str, url: str, headers: dict[str, str], payload: dict[str, Any] | None) -> Any:
@@ -693,20 +724,35 @@ class GitHubGraphQL:
             "Content-Type": "application/json",
             "User-Agent": "devflow-project-sync",
         }
-        try:
-            response = self._transport(self.endpoint, headers, {"query": query, "variables": variables or {}})
-        except APIError:
-            raise
-        except Exception as exc:
-            raise APIError(f"GitHub GraphQL transport failed: {type(exc).__name__}") from None
-        if not isinstance(response, dict):
-            raise APIError("GitHub GraphQL response was not an object")
-        if response.get("errors"):
-            messages = "; ".join(str(e.get("message", "GraphQL error")) for e in response["errors"])
-            raise APIError(f"GitHub GraphQL error: {messages}")
-        if "data" not in response:
-            raise APIError("GitHub GraphQL response missing data")
-        return response["data"]
+        safe_retry = _graphql_retry_safe(query)
+        max_attempts = GRAPHQL_TRANSIENT_RETRY_ATTEMPTS if safe_retry else 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = self._transport(self.endpoint, headers, {"query": query, "variables": variables or {}})
+            except TransientAPIError:
+                if attempt >= max_attempts:
+                    raise
+                time.sleep(GRAPHQL_TRANSIENT_BACKOFF_SECONDS * 2 ** (attempt - 1))
+                continue
+            except TimeoutError:
+                if attempt >= max_attempts:
+                    raise TransientAPIError("GitHub GraphQL transport failed: TimeoutError") from None
+                time.sleep(GRAPHQL_TRANSIENT_BACKOFF_SECONDS * 2 ** (attempt - 1))
+                continue
+            except APIError:
+                raise
+            except Exception as exc:
+                raise APIError(f"GitHub GraphQL transport failed: {type(exc).__name__}") from None
+            if not isinstance(response, dict):
+                raise APIError("GitHub GraphQL response was not an object")
+            if response.get("errors"):
+                messages = "; ".join(str(e.get("message", "GraphQL error")) for e in response["errors"])
+                raise APIError(f"GitHub GraphQL error: {messages}")
+            if "data" not in response:
+                raise APIError("GitHub GraphQL response missing data")
+            return response["data"]
+        raise AssertionError("unreachable GraphQL retry loop")
+
 
     def get_project_identity(self, owner: str, number: int) -> dict[str, Any]:
         query = """
@@ -1335,6 +1381,7 @@ def run_sync(
         )
     ):
         # Only direct trusted-author Issues or canonical verified Repository Controls may drive Project writes.
+        print("Project sync run: current=SKIPPED; aggregate=SKIPPED; no Project access", flush=True)
         return 0
 
     if rest is None and cfg.github_token:
@@ -1360,6 +1407,7 @@ def run_sync(
                         unresolved_failures=failure_state,
                     ),
                 )
+            print(f"Project sync run: mode={mode} current=NOT_CONFIGURED; aggregate=NOT_CONFIGURED", flush=True)
             return 2
 
         gql = gql or GitHubGraphQL(cfg.project_token)
@@ -1413,6 +1461,17 @@ def run_sync(
                 issues, snapshot2, gql, mode="verify",
                 freshness_resolver=freshness_resolver, rest=rest,
             )
+            # Project item visibility may lag a successful add/auto-add.
+            # Only read again; never re-apply mutations or mask persistent drift.
+            for readback_attempt in range(PROJECT_MEMBERSHIP_READBACK_RETRIES):
+                if not verify_summary.get("membership_drift") or verify_summary.get("errors"):
+                    break
+                time.sleep(PROJECT_MEMBERSHIP_READBACK_BACKOFF_SECONDS * (readback_attempt + 1))
+                snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
+                verify_summary = process_issues(
+                    issues, snapshot2, gql, mode="verify",
+                    freshness_resolver=freshness_resolver, rest=rest,
+                )
             verify_summary["mutations"] = summary.get("mutations", 0)
             summary = verify_summary
         else:
@@ -1489,6 +1548,14 @@ def run_sync(
         )
         if rest is not None:
             upsert_health_issue(rest, body)
+        retained = ",".join(sorted(failure_state, key=lambda key: (0, 0) if key == "global" else (1, int(key)))) or "none"
+        print(
+            f"Project sync run: mode={mode}; current_errors={len(summary.get('errors') or [])}; "
+            f"current_membership_drift={summary.get('membership_drift', 0)}; "
+            f"current_field_drift={summary.get('drift_fields', 0)}; "
+            f"retained_failure_keys={retained}; aggregate={result}",
+            flush=True,
+        )
         return 0 if result == "PASS" else 1
     except SyncError as exc:
         scoped_issue_number = (
@@ -1522,6 +1589,12 @@ def run_sync(
                 upsert_health_issue(rest, body)
             except Exception:
                 pass
+        retained = ",".join(sorted(failure_state, key=lambda key: (0, 0) if key == "global" else (1, int(key)))) or "none"
+        print(
+            f"Project sync run: mode={mode}; current=ERROR; "
+            f"retained_failure_keys={retained}; aggregate=FAIL",
+            file=sys.stderr, flush=True,
+        )
         print(_redact(str(exc), [cfg.project_token, cfg.github_token, cfg.maintenance_audit_token]), file=sys.stderr)
         return 1
 
