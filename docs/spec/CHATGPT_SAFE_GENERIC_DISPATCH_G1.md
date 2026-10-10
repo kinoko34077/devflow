@@ -28,6 +28,7 @@ All fields required and extras denied. No caller-supplied actor, backend, execut
 - repository/action: match a trusted reviewed catalog record exactly.
 - ref/head_sha: declared ref and syntactically valid 40-hex commit. G2 must verify the current immutable head and reject movement before effects. G1 cannot see GitHub state.
 - inputs: finite typed declared enum, boolean or bounded integer values. Unknown/missing-required keys denied. No arbitrary shell interpolation.
+- ref: exactly catalog-bound and Git branch-ref syntax-constrained, including rejection of dot-prefixed components, trailing dot and `.lock`; G1 cannot resolve its target.
 
 Use parse_json_object at the transport boundary: it rejects duplicate JSON keys (including nested), non-object, oversized documents, invalid JSON and NaN/Infinity. Untrusted Issue text must not substitute for authenticated GitHub event identity.
 
@@ -51,6 +52,7 @@ Use parse_json_object at the transport boundary: it rejects duplicate JSON keys 
       "repository": "kinoko34077/devflow",
       "backend": "github_actions",
       "executor": ".github/workflows/required.yml",
+      "reviewed_workflow_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "ref": "main",
       "effects": "read",
       "human_gate": false,
@@ -62,6 +64,7 @@ Use parse_json_object at the transport boundary: it rejects duplicate JSON keys 
       "repository": "kinoko34077/devflow",
       "backend": "github_actions",
       "executor": ".github/workflows/project-sync.yml",
+      "reviewed_workflow_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "ref": "main",
       "effects": "write",
       "human_gate": true,
@@ -74,14 +77,14 @@ Use parse_json_object at the transport boundary: it rejects duplicate JSON keys 
 Examples only; no production catalog is installed by G1. Catalog authority is an external invariant: G2 MUST load from a trusted reviewed commit, not from request text, untrusted Issue or PR code. An executor label alone is NOT proof of GitHub token permission or read-only implementation.
 
 - github_api executors are symbolic typed handler names; G2 must bind each to reviewed code, NOT dynamic URLs.
-- github_actions executors are fixed reviewed repository-local workflow paths. G2 must check workflow SHA, GitHub permission and runtime runner capacity.
+- github_actions executors are fixed reviewed repository-local workflow paths **plus a mandatory `reviewed_workflow_sha` 40-hex Git blob SHA loaded exclusively from the trusted catalog** (the `b...` values shown above are illustrative placeholders, not deployable identities). API entries must not carry this field. G1 passes the trusted SHA through Admission; the request cannot override it. G2 must obtain the actual workflow file blob identity from the immutable reviewed source, prove the live intended target/ref and reviewed workflow blob match, check authorization/permission and capacity before any effect. A mutable workflow path/ref or caller-supplied `head_sha` alone is insufficient. GitHub Actions dispatch by a mutable branch/ref is not made atomic by G1: G2 must design and separately review ref-change/TOCTOU controls before activation.
 - effects=write requires human_gate=true. G1 always returns NEEDS_HUMAN for any such operation; a claimed approval field is rejected.
 - effects=read/human_gate=false may be ADMITTED, but still requires authenticated execution checks.
 - Unknown schema keys, unlisted backends or invalid input definitions cause DENIED.
 
 ## Output and future states
 
-Admission fields are status, reason, request_id, repository, action, backend, executor, ref, head_sha. Denials never disclose an executable target. No request inputs, secret text or arbitrary shell content is echoed.
+Admission fields are status, reason, request_id, repository, action, backend, executor, ref, head_sha and the trusted `reviewed_workflow_sha` (Actions only; `null` for API). Denials never disclose an executable target. No request inputs, secret text or arbitrary shell content is echoed.
 
 - DENIED: invalid trust, request, catalog or input.
 - NEEDS_HUMAN: valid request but separately trusted approval is mandatory.

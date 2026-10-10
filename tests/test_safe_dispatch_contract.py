@@ -11,6 +11,7 @@ from tools.safe_dispatch_contract import (
 )
 
 SHA = "a" * 40
+WORKFLOW_SHA = "b" * 40
 REPO = "kinoko34077/devflow"
 
 
@@ -32,6 +33,7 @@ def catalog():
                 "repository": REPO,
                 "backend": "github_actions",
                 "executor": ".github/workflows/required.yml",
+                "reviewed_workflow_sha": WORKFLOW_SHA,
                 "ref": "main",
                 "effects": "read",
                 "human_gate": False,
@@ -54,6 +56,7 @@ def catalog():
                 "repository": REPO,
                 "backend": "github_actions",
                 "executor": ".github/workflows/project-sync.yml",
+                "reviewed_workflow_sha": WORKFLOW_SHA,
                 "ref": "main",
                 "effects": "write",
                 "human_gate": True,
@@ -95,6 +98,7 @@ class PositiveTests(unittest.TestCase):
         self.assertEqual(result.status, "ADMITTED")
         self.assertEqual(result.backend, "github_actions")
         self.assertEqual(result.executor, ".github/workflows/required.yml")
+        self.assertEqual(result.reviewed_workflow_sha, WORKFLOW_SHA)
 
     def test_valid_optional_inputs(self):
         result = run(request("ci.verify", inputs={"mode": "verify", "details": False, "limit": 0}))
@@ -109,8 +113,9 @@ class PositiveTests(unittest.TestCase):
         result = run(request("ci.verify"))
         self.assertEqual(set(vars(result)), {
             "status", "reason", "request_id", "repository", "action",
-            "backend", "executor", "ref", "head_sha",
+            "backend", "executor", "ref", "head_sha", "reviewed_workflow_sha",
         })
+        self.assertIsNone(run().reviewed_workflow_sha)
 
 
 class RequestRejectTests(unittest.TestCase):
@@ -132,6 +137,12 @@ class RequestRejectTests(unittest.TestCase):
         self.assert_denied(req, "INVALID_REQUEST_SCHEMA")
         req = request(executor=".github/workflows/arbitrary.yml")
         self.assert_denied(req, "INVALID_REQUEST_SCHEMA")
+
+    def test_request_cannot_substitute_reviewed_workflow_identity(self):
+        self.assert_denied(
+            request("ci.verify", reviewed_workflow_sha="c" * 40),
+            "INVALID_REQUEST_SCHEMA",
+        )
 
     def test_claimed_actor_in_request_is_never_authority(self):
         self.assert_denied(request(actor="kinoko34077"), "INVALID_REQUEST_SCHEMA")
@@ -160,6 +171,26 @@ class RequestRejectTests(unittest.TestCase):
         self.assert_denied(request("ci.verify", inputs={"mode": "verify", "limit": 999}), "INVALID_INPUTS")
         self.assert_denied(request("ci.verify", inputs={"mode": "verify", "details": "true"}), "INVALID_INPUTS")
 
+    def test_catalog_branch_rejects_git_invalid_ref_components(self):
+        for ref in ("release/x.lock", "release/x.", "release/.hidden",
+                    "release/foo..bar", "release//foo", ".private"):
+            with self.subTest(ref=ref):
+                cat = catalog()
+                cat["actions"]["ci.verify"]["ref"] = ref
+                self.assert_denied(
+                    request("ci.verify", ref=ref),
+                    "INVALID_TRUSTED_CATALOG",
+                    cat=cat,
+                )
+
+    def test_valid_non_default_branch_ref_is_catalog_bound(self):
+        cat = catalog()
+        cat["actions"]["ci.verify"]["ref"] = "feature/test_1"
+        self.assertEqual(
+            run(request("ci.verify", ref="feature/test_1"), cat=cat).status,
+            "ADMITTED",
+        )
+
     def test_invalid_schema_and_request_id(self):
         self.assert_denied(request(schema="dispatch-request.v2"), "INVALID_REQUEST_SCHEMA")
         self.assert_denied(request(request_id="!"), "INVALID_REQUEST_ID")
@@ -186,6 +217,37 @@ class CatalogRejectTests(unittest.TestCase):
 
     def test_unsafe_workflow_path_rejected(self):
         self.assert_bad_catalog(lambda x: x["actions"]["ci.verify"].update(executor="../../bad.yml"))
+
+    def test_actions_requires_immutable_reviewed_workflow_blob(self):
+        self.assert_bad_catalog(
+            lambda x: x["actions"]["ci.verify"].pop("reviewed_workflow_sha")
+        )
+        self.assert_bad_catalog(
+            lambda x: x["actions"]["ci.verify"].update(
+                reviewed_workflow_sha="not-a-sha"
+            )
+        )
+        self.assert_bad_catalog(
+            lambda x: x["actions"]["ci.verify"].update(
+                reviewed_workflow_sha=["b" * 40]
+            )
+        )
+
+    def test_api_executor_rejects_spoofed_workflow_identity(self):
+        self.assert_bad_catalog(
+            lambda x: x["actions"]["repo.status"].update(
+                reviewed_workflow_sha=WORKFLOW_SHA
+            )
+        )
+
+    def test_workflow_blob_pin_is_preserved_exactly_for_g2_verification(self):
+        item = catalog()
+        item["actions"]["ci.verify"]["reviewed_workflow_sha"] = "c" * 40
+        result = run(request("ci.verify"), cat=item)
+        self.assertEqual(result.status, "ADMITTED")
+        self.assertEqual(result.reviewed_workflow_sha, "c" * 40)
+        # G1 validates the reviewed catalog's pin, not live GitHub contents.
+        # G2 MUST compare actual fetched blob with this trusted pin.
 
     def test_unknown_backend_rejected(self):
         self.assert_bad_catalog(lambda x: x["actions"]["repo.status"].update(backend="shell"))
@@ -224,6 +286,10 @@ class JsonBoundariesTests(unittest.TestCase):
         for text in (" " * 8193, "[]", '{"x":NaN}', '{"x":Infinity}', "not json"):
             with self.subTest(text=text[:15]), self.assertRaises(ValueError):
                 parse_json_object(text)
+
+    def test_lone_surrogate_predecoded_input_fails_as_valueerror(self):
+        with self.assertRaisesRegex(ValueError, "INVALID_JSON"):
+            parse_json_object("\\ud800".encode("ascii").decode("unicode_escape"))
 
     def test_bool_never_passes_integer_schema(self):
         cat = catalog()

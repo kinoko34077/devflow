@@ -28,6 +28,7 @@ _WORKFLOW_EXECUTOR = re.compile(r"\.github/workflows/[a-zA-Z0-9_-]+\.ya?ml", re.
 _KEYS_REQUEST = frozenset({"schema", "request_id", "repository", "action", "ref", "head_sha", "inputs"})
 _KEYS_CATALOG = frozenset({"schema", "operator", "actions"})
 _KEYS_ENTRY = frozenset({"repository", "backend", "executor", "ref", "effects", "human_gate", "inputs"})
+_KEYS_ACTION_ENTRY = _KEYS_ENTRY | frozenset({"reviewed_workflow_sha"})
 _INPUT_TYPE_KEYS = {
     "choice": frozenset({"type", "required", "choices"}),
     "boolean": frozenset({"type", "required"}),
@@ -47,10 +48,25 @@ class Admission:
     executor: str | None = None
     ref: str | None = None
     head_sha: str | None = None
+    # Trusted catalog pin: Git blob SHA of the reviewed workflow, not the request SHA.
+    reviewed_workflow_sha: str | None = None
 
 
 def _matching(value: Any, pattern: re.Pattern[str]) -> bool:
     return type(value) is str and pattern.fullmatch(value) is not None
+
+
+def _valid_ref(value: Any) -> bool:
+    """Reject Git-forbidden branch ref shapes before any offline admission."""
+    if not _matching(value, _REF):
+        return False
+    if ".." in value or "//" in value or value.endswith(("/", ".")):
+        return False
+    return all(
+        component and not component.startswith(".")
+        and not component.endswith((".", ".lock"))
+        for component in value.split("/")
+    )
 
 
 def _exact_object(value: Any, keys: frozenset[str]) -> bool:
@@ -59,7 +75,13 @@ def _exact_object(value: Any, keys: frozenset[str]) -> bool:
 
 def parse_json_object(text: str, *, max_bytes: int = 8192) -> dict[str, Any]:
     """Decode bounded JSON without accepting duplicate keys or NaN/Infinity."""
-    if type(text) is not str or len(text.encode("utf-8")) > max_bytes:
+    if type(text) is not str:
+        raise ValueError("INVALID_JSON_SIZE")
+    try:
+        encoded_size = len(text.encode("utf-8"))
+    except UnicodeError as exc:
+        raise ValueError("INVALID_JSON") from exc
+    if encoded_size > max_bytes:
         raise ValueError("INVALID_JSON_SIZE")
 
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -120,16 +142,20 @@ def _valid_catalog(catalog: Any) -> bool:
     if type(actions) is not dict or not (1 <= len(actions) <= 128):
         return False
     for name, entry in actions.items():
-        if not _matching(name, _NAME) or not _exact_object(entry, _KEYS_ENTRY):
+        if not _matching(name, _NAME) or type(entry) is not dict:
             return False
-        if not _matching(entry["repository"], _REPO) or not _matching(entry["ref"], _REF):
+        backend = entry.get("backend")
+        if type(backend) is not str or backend not in ("github_api", "github_actions"):
             return False
-        if entry["ref"].startswith("/") or ".." in entry["ref"] or "//" in entry["ref"] or entry["ref"].endswith("/"):
+        required_keys = _KEYS_ACTION_ENTRY if backend == "github_actions" else _KEYS_ENTRY
+        if not _exact_object(entry, required_keys):
             return False
-        if entry["backend"] not in ("github_api", "github_actions"):
+        if not _matching(entry["repository"], _REPO) or not _valid_ref(entry["ref"]):
             return False
-        executor_re = _API_EXECUTOR if entry["backend"] == "github_api" else _WORKFLOW_EXECUTOR
+        executor_re = _API_EXECUTOR if backend == "github_api" else _WORKFLOW_EXECUTOR
         if not _matching(entry["executor"], executor_re):
+            return False
+        if backend == "github_actions" and not _matching(entry["reviewed_workflow_sha"], _SHA):
             return False
         if entry["effects"] not in ("read", "write") or type(entry["human_gate"]) is not bool:
             return False
@@ -204,6 +230,7 @@ def admit_dispatch(request: Any, catalog: Any, *, verified_actor: str) -> Admiss
         executor=entry["executor"],
         ref=entry["ref"],
         head_sha=request["head_sha"],
+        reviewed_workflow_sha=entry.get("reviewed_workflow_sha"),
     )
     if entry["human_gate"] or entry["effects"] != "read":
         # A claim embedded in the request never constitutes human approval.
