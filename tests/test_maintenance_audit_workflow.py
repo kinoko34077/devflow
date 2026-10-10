@@ -124,6 +124,52 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("schedule:", job)
         self.assertNotIn("issues: write", job)
 
+    def test_manual_trusted_catalog_completion_is_dispatch_only_and_fail_closed(self):
+        self.assertIn('- maintenance-complete', self.text)
+        self.assertIn("inputs.mode == 'maintenance-complete'", self.text)
+        job = self.text.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", job)
+        self.assertNotIn('schedule:', job)
+        self.assertIn('issues: read', job)
+        self.assertNotIn('issues: write', job)
+        self.assertIn('MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}', job)
+        self.assertNotIn('GITHUB_TOKEN:', job)
+        self.assertIn('python scripts/maintenance_audit.py complete-maintenance', job)
+        self.assertIn('--token-env MAINTENANCE_SUPPLY_TOKEN', job)
+        self.assertIn('--apply', job)
+        self.assertIn('cancel-in-progress: false', job)
+        self.assertIn(
+            'group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}',
+            job,
+        )
+        self.assertIn('maintenance-completion-result.json', job)
+        self.assertIn('Upload typed completion result', job)
+
+    def test_completion_argument_boundary_uses_env_and_rejects_unbounded_inputs(self):
+        job = self.text.split('\n  catalog-maintenance-complete:\n', 1)[1].split(
+            '\n  projection-cache:\n', 1
+        )[0]
+        for field in ('repository', 'control', 'run_id', 'lens', 'result',
+                      'findings_summary', 'evidence_ref', 'attempt_id'):
+            self.assertIn('inputs.' + field, job)
+        self.assertIn('invalid_input()', job)
+        self.assertIn('INVALID_INPUT', job)
+        self.assertIn('MAINTENANCE_EVIDENCE_REF', job)
+        self.assertIn('MAINTENANCE_RUN_ID', job)
+        self.assertIn('MAINTENANCE_RESULT', job)
+        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY', job)
+        self.assertIn('${#MAINTENANCE_FINDINGS_SUMMARY} -le 512', job)
+        self.assertIn('"$MAINTENANCE_EVIDENCE_REF"', job)
+        self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY"', job)
+        self.assertNotIn('${{ inputs.', job.split('        run: |', 1)[1])
+
+    def test_completion_mode_does_not_modify_existing_read_only_audit(self):
+        self.assertNotIn('complete-maintenance', self.audit)
+        self.assertNotIn('MAINTENANCE_SUPPLY_TOKEN:', self.audit)
+        self.assertNotIn('maintenance-complete', self.publish)
+
     def test_failure_evidence_remains_typed_and_uploaded(self):
         self.assertIn(
             "if: always() && hashFiles('maintenance-audit-report.json') != ''",
