@@ -250,6 +250,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = write(os.environ, pathlib.Path(args.artifact))
     except ReplayProbeRejected as exc:
+        if exc.outcome_unknown:
+            print(json.dumps({
+                "status": "REPLAY_TEST_WRITE_OUTCOME_UNKNOWN",
+                "writes_performed": "UNKNOWN",
+                "ci_verified": False,
+                "recovery_required": True,
+            }, sort_keys=True), file=sys.stderr)
         if exc.first_committed:
             print(json.dumps({
                 "status": "REPLAY_TEST_FAILED_AFTER_COMMIT",
