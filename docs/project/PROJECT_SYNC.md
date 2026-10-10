@@ -203,6 +203,29 @@ After credential recreation/rotation, run full `reconcile` then full `verify` an
 
 When audit Project fields are introduced or structurally changed, use explicit full `reconcile` to create/validate them, then full `verify`, followed by direct Project inspection because field structure is an API/UI structural boundary. Event sync and ordinary verify do not create Project fields.
 
+### Failure prevention (#406)
+
+Transient GitHub GraphQL transport failures (HTTP 502/503/504 and transport
+timeouts) are retried with bounded backoff (at most three attempts) **only** for
+read queries and idempotent `updateProjectV2ItemFieldValue` mutations that set
+the desired field value. Failed add/remove/schema mutations, 4xx, and GraphQL
+validation errors are not retried: an indeterminate write must not be repeated
+without proof of safety. Exhausted retries remain explicit failures.
+
+After event-sync writes, a missing Project member in immediate readback triggers
+at most two extra read-only Project snapshot checks with short delays. No
+additional mutation is attempted in that loop. Persistent absence still fails
+and remains in Sync Health. This guards against possible read-after-write
+visibility lag; its occurrence was hypothesized, not conclusively established.
+
+Every run emits a bounded, non-sensitive diagnostic summary: current-run
+membership/field drift and error counts, separately from the keys of
+unresolved retained failures and the final aggregate result. The summary never
+prints credential values or raw canonical Issue/Project text. An event whose
+current write/readback is clean can therefore be recognized even when an older
+unresolved failure keeps the aggregate exit status red. **Fail-closed health and
+failure-memory clearing semantics are unchanged.**
+
 ## 8. Failure handling
 
 Blocking failures include:
