@@ -32,7 +32,7 @@ class C3BProbeOfflineNodeTests(unittest.TestCase):
                     f"{run.stdout[-3500:]}\n{run.stderr[-3500:]}",
                 )
                 if args[1] == "--test":
-                    self.assertIn("pass 20", run.stdout)
+                    self.assertIn("pass 24", run.stdout)
                     self.assertIn("fail 0", run.stdout)
 
 
