@@ -48,6 +48,39 @@ class NativeConnectorTests(unittest.TestCase):
             "HOLD", "NEEDS_SEPARATELY_AUTHORIZED_API_TRANSPORT"
         ))
 
+    def test_existing_owner_gh_cli_is_non_executable_alternative(self):
+        r = report(
+            connector_operation="unsupported",
+            local_gh_cli="authenticated_owner_observed",
+        )
+        self.assertEqual((r.status, r.route), (
+            "PLAN_ONLY", "OWNER_LOCAL_GH_CLI_API"
+        ))
+        self.assertIn("RECHECKED_NOT_EXECUTED", r.reason)
+
+    def test_unavailable_local_gh_does_not_trigger_new_auth(self):
+        r = report(
+            connector_operation="unsupported", local_gh_cli="unavailable",
+        )
+        self.assertEqual(r.reason, "NEEDS_SEPARATELY_AUTHORIZED_API_TRANSPORT")
+
+    def test_connector_remains_first_even_when_gh_observed(self):
+        r = report(
+            connector_operation="verified",
+            local_gh_cli="authenticated_owner_observed",
+        )
+        self.assertEqual(r.route, "GITHUB_CONNECTOR_INTERACTIVE")
+
+    def test_local_gh_observation_cannot_override_g1_human_gate(self):
+        r = plan_fallback(
+            replace(admitted(), status="NEEDS_HUMAN"),
+            EvidenceSnapshot(
+                "private", connector_operation="unsupported",
+                local_gh_cli="authenticated_owner_observed",
+            ),
+        )
+        self.assertEqual(r.reason, "G1_POLICY_NOT_ADMITTED")
+
     def test_unknown_connector_is_not_inferred_available(self):
         self.assertEqual(report().reason, "CONNECTOR_OPERATION_CAPABILITY_UNKNOWN")
 
@@ -82,6 +115,30 @@ class FixedActionsTests(unittest.TestCase):
     def test_quota_unknown_not_treated_as_zero(self):
         r = report("github_actions", fixed_workflow_trigger="verified")
         self.assertEqual(r.reason, "HOSTED_CAPACITY_CAUSE_UNVERIFIED")
+
+    def test_historic_private_billing_block_is_not_free_quota_exhausted(self):
+        r = plan_fallback(admitted("github_actions"), EvidenceSnapshot(
+            "private", fixed_workflow_trigger="verified",
+            hosted_runner="private_billing_blocked",
+        ))
+        self.assertEqual((r.status, r.route), ("HOLD", None))
+        self.assertEqual(r.reason, "PRIVATE_BILLING_BLOCK_NEEDS_FRESH_RUNNER_ELIGIBILITY")
+
+    def test_billing_block_does_not_auto_admit_selfhosted_runner(self):
+        r = plan_fallback(admitted("github_actions"), EvidenceSnapshot(
+            "private", fixed_workflow_trigger="verified",
+            hosted_runner="private_billing_blocked",
+            self_hosted_runner="ready", self_hosted_isolation="verified",
+            self_hosted_approved=True,
+        ))
+        self.assertEqual(r.reason, "PRIVATE_BILLING_BLOCK_NEEDS_FRESH_RUNNER_ELIGIBILITY")
+        self.assertIsNone(r.route)
+
+    def test_public_billing_block_is_not_a_private_status(self):
+        r = report("github_actions",
+                   fixed_workflow_trigger="verified",
+                   hosted_runner="private_billing_blocked")
+        self.assertEqual(r.reason, "PRIVATE_QUOTA_STATE_ON_PUBLIC_REPO")
 
     def test_private_exhausted_without_alternative_holds(self):
         r = plan_fallback(admitted("github_actions"), EvidenceSnapshot(
@@ -180,11 +237,18 @@ class DeniedEvidenceTests(unittest.TestCase):
         self.assertEqual(plan_fallback(
             admitted(), EvidenceSnapshot("private", self_hosted_approved=1)
         ).reason, "INVALID_OR_UNVERIFIED_FACT_SHAPE")
+        self.assertEqual(plan_fallback(
+            admitted(), EvidenceSnapshot("private", local_gh_cli="self_claimed")
+        ).reason, "INVALID_OR_UNVERIFIED_FACT_SHAPE")
 
     def test_no_executable_success_ever(self):
         candidates = [
             EvidenceSnapshot("private", connector_operation="verified"),
             EvidenceSnapshot("public", connector_operation="unsupported"),
+            EvidenceSnapshot("private", connector_operation="unsupported",
+                             local_gh_cli="authenticated_owner_observed"),
+            EvidenceSnapshot("private", fixed_workflow_trigger="verified",
+                             hosted_runner="private_billing_blocked"),
             EvidenceSnapshot("private", fixed_workflow_trigger="verified",
                              hosted_runner="private_quota_exhausted",
                              self_hosted_runner="ready",
