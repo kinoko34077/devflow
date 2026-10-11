@@ -28,7 +28,11 @@ async function simulation(options={}){
   requests.push({url,method:opt?.method||'GET'});
   if(!allowedUrl(url))throw new Error('MOCK_REJECTED_EXTERNAL_URL');
   if(url.endsWith('/login/device/code'))return mockResponse(200,options.oversizeOauth?{junk:'Z'.repeat(70000)}:{device_code:'SYNTHETIC_DEVICE_ONLY',user_code:options.malformedUserCode?'INVALID':'ABCD-EFGH',verification_uri:options.badVerificationUri?'https://evil.example/login':'https://github.com/login/device',expires_in:300,interval:options.badDeviceTiming?'bad':5});
-  if(url.endsWith('/login/oauth/access_token'))return mockResponse(200,{access_token:options.badTokenClass?'ghs_FAKE_INSTALLATION_TOKEN':'ghu_SYNTHETIC_DO_NOT_USE',token_type:options.badTokenType?'mac':'bearer',refresh_token:'SYNTHETIC_REFRESH_DO_NOT_USE'});
+  if(url.endsWith('/login/oauth/access_token')){
+   if(options.oauthPollThrows)throw new TypeError('SYNTHETIC_UNDELIVERED_OAUTH_POLL');
+   if(options.oauthNoToken)return mockResponse(200,{error:'expired_token'});
+   return mockResponse(200,{access_token:options.badTokenClass?'ghs_FAKE_INSTALLATION_TOKEN':'ghu_SYNTHETIC_DO_NOT_USE',token_type:options.badTokenType?'mac':'bearer',refresh_token:'SYNTHETIC_REFRESH_DO_NOT_USE'});
+  }
   if(url==='https://api.github.com/user'){
    if(options.badTokenClass||options.badTokenType)return mockResponse(401,{message:'Unauthorized'});
    userReads++;return userReads>1?mockResponse(options.tokenRevoked===false?200:401,options.tokenRevoked===false?{id:79015263,login:'kinoko34077'}:{message:'Unauthorized'}):
@@ -149,4 +153,29 @@ test('untrusted installation ID must be positive integer and still cleanup',asyn
  const a=await simulation({invalidInstallId:true});
  assert.equal(item(a.logs,'HALT').reason,'INVALID_INSTALLATION_ID');
  assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,true);
+});
+
+test('poll error with no access token still requests BOTH owner cleanup steps',async()=>{
+ const a=await simulation({oauthNoToken:true});
+ assert.equal(item(a.logs,'HALT').reason,'OAUTH_POLL_EXPIRED_TOKEN');
+ const clean=item(a.logs,'TEARDOWN_STATUS');
+ assert.equal(clean.result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
+ assert.equal(clean.tokenRevoked,false);
+ assert.equal(clean.grantRevokeOwnerAttested,true);
+ assert.equal(clean.ownerAppUninstallConfirmed,true);
+ assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,0);
+});
+test('OAuth network exception after device authorization prompts owner cleanup even with no token',async()=>{
+ const a=await simulation({oauthPollThrows:true});
+ const clean=item(a.logs,'TEARDOWN_STATUS');
+ assert.equal(clean.result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
+ assert.equal(clean.tokenRevoked,false);
+ assert.equal(clean.grantRevokeOwnerAttested,true);
+ assert.equal(clean.ownerAppUninstallConfirmed,true);
+});
+test('invalid device verification URI also prompts cleanup without exposing token',async()=>{
+ const a=await simulation({badVerificationUri:true});
+ assert.equal(item(a.logs,'HALT').reason,'DEVICE_START_INVALID');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
+ assert.equal(a.requests.some(x=>x.url.endsWith('/login/oauth/access_token')),false);
 });
