@@ -136,6 +136,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             '\n  projection-cache:\n', 1
         )[0]
         self.assertIn("github.event_name == 'workflow_dispatch'", job)
+        self.assertIn("github.ref == 'refs/heads/main'", job)
         self.assertNotIn('schedule:', job)
         self.assertIn('issues: read', job)
         self.assertNotIn('issues: write', job)
@@ -157,23 +158,26 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             '\n  projection-cache:\n', 1
         )[0]
         for field in ('repository', 'control', 'run_id', 'lens', 'result',
-                      'owner', 'evidence_ref', 'attempt_id'):
+                      'findings_summary', 'evidence_ref', 'attempt_id'):
             self.assertIn('inputs.' + field, job)
         self.assertIn('invalid_input()', job)
+        self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY" != *"@"*', job)
+        self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY" != *"#"*', job)
         self.assertIn('INVALID_INPUT', job)
         self.assertIn('MAINTENANCE_EVIDENCE_REF', job)
         self.assertIn('MAINTENANCE_RUN_ID', job)
         self.assertIn('MAINTENANCE_RESULT', job)
-        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.owner }}', job)
+        self.assertIn('MAINTENANCE_FINDINGS_SUMMARY: ${{ inputs.findings_summary }}', job)
         self.assertIn('${#MAINTENANCE_FINDINGS_SUMMARY} -le 512', job)
         self.assertIn('"$MAINTENANCE_EVIDENCE_REF"', job)
         self.assertIn('"$MAINTENANCE_FINDINGS_SUMMARY"', job)
         self.assertNotIn('${{ inputs.', job.split('        run: |', 1)[1])
 
-    def test_dispatch_keeps_at_most_ten_top_level_inputs(self):
+    def test_dispatch_keeps_at_most_twenty_five_top_level_inputs(self):
         section = self.text.split('  workflow_dispatch:\n    inputs:\n', 1)[1].split('\npermissions:', 1)[0]
         keys = [line for line in section.splitlines() if line.startswith('      ') and line.rstrip().endswith(':') and not line.startswith('        ')]
-        self.assertLessEqual(len(keys), 10)
+        self.assertLessEqual(len(keys), 25)
+        self.assertEqual(len(keys), 11)
         self.assertEqual(len(keys), len(set(keys)))
     @staticmethod
     def _completion_preflight_script(workflow):
@@ -211,6 +215,9 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             ('MAINTENANCE_LENS', 'spec-implementation-drift;echo BAD'),
             ('MAINTENANCE_RESULT', 'FINISHED'),
             ('MAINTENANCE_FINDINGS_SUMMARY', 'X' * 513),
+            ('MAINTENANCE_FINDINGS_SUMMARY', 'bad @mention'),
+            ('MAINTENANCE_FINDINGS_SUMMARY', 'bad #123 cross-reference'),
+            ('MAINTENANCE_FINDINGS_SUMMARY', 'multi\nline'),
             ('MAINTENANCE_EVIDENCE_REF', 'https://evil.example/issues/50#issuecomment-1'),
             ('MAINTENANCE_ATTEMPT_ID', 'short'),
         )
