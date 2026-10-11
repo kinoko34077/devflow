@@ -30,8 +30,10 @@ async function simulation(options={}){
   if(url.endsWith('/login/device/code'))return mockResponse(200,options.oversizeOauth?{junk:'Z'.repeat(70000)}:{device_code:'SYNTHETIC_DEVICE_ONLY',user_code:options.malformedUserCode?'INVALID':'ABCD-EFGH',verification_uri:options.badVerificationUri?'https://evil.example/login':'https://github.com/login/device',expires_in:300,interval:options.badDeviceTiming?'bad':5});
   if(url.endsWith('/login/oauth/access_token')){
    if(options.oauthPollThrows)throw new TypeError('SYNTHETIC_UNDELIVERED_OAUTH_POLL');
+   if(options.oauthPollTimeout){const e=new Error('SYNTHETIC_TIMEOUT');e.name='TimeoutError';throw e;}
+   if(options.oauthPollHttp500)return mockResponse(500,{error:'server_error'});
    if(options.oauthNoToken)return mockResponse(200,{error:'expired_token'});
-   return mockResponse(200,{access_token:options.badTokenClass?'ghs_FAKE_INSTALLATION_TOKEN':'ghu_SYNTHETIC_DO_NOT_USE',token_type:options.badTokenType?'mac':'bearer',refresh_token:'SYNTHETIC_REFRESH_DO_NOT_USE'});
+   return mockResponse(200,{access_token:options.numericIssuedToken?12345:options.oversizedIssuedToken?'ghu_'+ 'Z'.repeat(1200):options.badTokenClass?'ghs_FAKE_INSTALLATION_TOKEN':'ghu_SYNTHETIC_DO_NOT_USE',token_type:options.badTokenType?'mac':'bearer',refresh_token:'SYNTHETIC_REFRESH_DO_NOT_USE'});
   }
   if(url==='https://api.github.com/user'){
    if(options.badTokenClass||options.badTokenType)return mockResponse(401,{message:'Unauthorized'});
@@ -139,15 +141,17 @@ test('malformed device polling timing denied before access token',async()=>{
 test('installation-class token denied AND issued-credential teardown still required',async()=>{
  const a=await simulation({badTokenClass:true});
  assert.equal(item(a.logs,'HALT').reason,'INVALID_USER_TOKEN_CLASS');
- assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,true);
- assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,1);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,false);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'CLEANUP_UNVERIFIED');
+ assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,0);
  assert(!a.logs.join('').includes('SYNTHETIC_REFRESH_DO_NOT_USE'));
 });
 test('unexpected bearer response type still enters owner teardown after token issued',async()=>{
  const a=await simulation({badTokenType:true});
  assert.equal(item(a.logs,'HALT').reason,'INVALID_USER_TOKEN_CLASS');
- assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,true);
- assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,1);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,false);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'CLEANUP_UNVERIFIED');
+ assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,0);
 });
 test('untrusted installation ID must be positive integer and still cleanup',async()=>{
  const a=await simulation({invalidInstallId:true});
@@ -178,4 +182,33 @@ test('invalid device verification URI also prompts cleanup without exposing toke
  assert.equal(item(a.logs,'HALT').reason,'DEVICE_START_INVALID');
  assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
  assert.equal(a.requests.some(x=>x.url.endsWith('/login/oauth/access_token')),false);
+});
+
+test('numeric access token must not send Bearer null or claim revoke on 401',async()=>{
+ const a=await simulation({numericIssuedToken:true});
+ assert.equal(item(a.logs,'HALT').reason,'INVALID_USER_TOKEN_CLASS');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'CLEANUP_UNVERIFIED');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,false);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').grantRevokeOwnerAttested,true);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').ownerAppUninstallConfirmed,true);
+ assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,0);
+});
+test('oversized issued token never yields false-positive revocation',async()=>{
+ const a=await simulation({oversizedIssuedToken:true});
+ assert.equal(item(a.logs,'HALT').reason,'INVALID_USER_TOKEN_CLASS');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'CLEANUP_UNVERIFIED');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,false);
+ assert.equal(a.requests.filter(x=>x.url.startsWith('https://api.github.com')).length,0);
+});
+test('post-authorization OAuth HTTP 500 triggers cleanup with no bearer',async()=>{
+ const a=await simulation({oauthPollHttp500:true});
+ assert.equal(item(a.logs,'HALT').reason,'OAUTH_HTTP_500');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,false);
+});
+test('post-authorization OAuth timeout triggers cleanup with no bearer',async()=>{
+ const a=await simulation({oauthPollTimeout:true});
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').result,'OWNER_CLEANUP_ATTESTED_NO_TOKEN');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').grantRevokeOwnerAttested,true);
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').ownerAppUninstallConfirmed,true);
 });
