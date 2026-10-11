@@ -20,6 +20,8 @@ on:
       - 'docs/operations/DEVFLOW_MCP.md'
       - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
       - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
+      - 'docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md'
+      - 'docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md'
       - 'docs/spec/REPOSITORY_BOOTSTRAP.md'
       - 'docs/spec/maintenance/**'
       - 'docs/spec/schemas/maintenance-catalog.v1.schema.json'
