@@ -133,4 +133,4 @@ async function main(){
  }
  stop('DEVICE_EXPIRED');
 }
-main().catch(e=>{if(e.message!=='__HALT__')print('ERROR',{category:e.name||'Exception'});process.exitCode=2});
+main().catch(e=>{if(e?.message!=='__HALT__')print('ERROR',{category:['TypeError','AbortError','TimeoutError','RangeError'].includes(e?.name)?e.name:'UNKNOWN'});process.exitCode=2});
