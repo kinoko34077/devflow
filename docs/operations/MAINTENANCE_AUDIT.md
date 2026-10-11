@@ -139,6 +139,75 @@ an empty Control candidate/portfolio for the completed run and no
 coordinator claim. On partial failure, retain the evidence, reconcile the
 exact persisted state and **do not blindly replay** the mutation.
 
+## Maintenance supply credential — protected Environment (devflow#428)
+
+The three manual, effectful `maintenance-audit.yml` jobs (`publish`,
+`catalog-maintenance-publish`, including withdraw, and
+`catalog-maintenance-complete`) reference the pre-created GitHub Environment
+`maintenance-supply` with `deployment: false`. Their `if:` conditions
+additionally require `github.ref == 'refs/heads/main'` as defense in depth.
+No scheduled/read-only job receives this Environment or supply credential.
+This is not a deploy; no GitHub Deployment object is needed.
+
+GitHub Environment settings, not checked-in workflow YAML, own the actual
+secret-use boundary. The accepted configuration is
+`deployment_branch_policy={protected_branches:false, custom_branch_policies:true}`
+and exactly one deployment branch policy `type=branch,name=main` (no tags,
+wildcards or other branch allowances). Read the live GitHub API policy before
+and after any migration; a missing or newly auto-created Environment with no
+rules is **not** a secure fallback. An operational run should be refused if
+the live policy differs, the secret scope is unresolved, or the consumer
+workflow ref has not been verified.
+
+### Approved cutover / credential source and recovery
+
+A job pointing to an Environment does **not** remove or isolate an existing
+same-named **repository-level** Secret. The repository Secret remains
+available to any other otherwise eligible workflow until explicitly retired.
+GitHub cannot disclose previously stored Secret plaintext, so do not
+attempt to export, relay, print or recover it from GitHub Actions.
+
+Perform a bounded approved migration in this order:
+
+1. Verify the Environment exists, has **exactly** the single `main` branch
+   policy, no unauthorized reviewers/bypass rule, and no other workflows
+   depend on the repository `MAINTENANCE_SUPPLY_TOKEN`.
+2. Verify current workflow PR-head Required CI and its **independent
+   security review**, then safely source an existing **appropriately scoped**
+   credential via the original credential owner/password manager or the
+   approved credential issuance process. **Do not substitute the GitHub CLI's
+   broader login token**, and never paste any Secret into Issue/PR/chat/log.
+3. Enter the credential into the `maintenance-supply` **Environment
+   Secret** named `MAINTENANCE_SUPPLY_TOKEN` via GitHub Settings or
+   `gh secret set --env maintenance-supply MAINTENANCE_SUPPLY_TOKEN`
+   on the owner's private interactive terminal. Verify only the name and
+   timestamp through `gh secret list --env maintenance-supply`.
+4. With rollback and owner/operator readiness confirmed, merge the
+   reviewed main-only Environment workflow changes. Confirm post-main
+   Required checks and safe **non-credential-bearing** branch-negative
+   tests. Do not execute real publish/withdraw/complete simply as a smoke
+   test, or infer token permissions from Secret metadata alone.
+5. Promptly remove the old **repository-level**
+   `MAINTENANCE_SUPPLY_TOKEN` using approved owner-controlled actions
+   once the Environment credential and consumer path are independently
+   verified. Read back repository and Environment Secret inventories. If
+   absence of original token material prevents secure provisioning or
+   recovery, mark `WAIT / HUMAN CREDENTIAL INPUT` and **do not delete**
+   the original or claim isolation complete.
+6. If blocked after the reviewed workflow is merged, restore the prior
+   workflow revision via a guarded revert PR **before** deleting any
+   remaining working credential. Environment settings/Secrets are
+   independent GitHub settings and must be explicitly inspected in
+   recovery; a code revert does not reverse their state. Never roll back
+   by putting a write-capable Secret into an unprotected scope.
+
+The branch policy is the security boundary; a mutable per-job
+`github.ref` conditional alone is **not**. Environment deployment
+approvals are separately optional for this single-operator manual workflow,
+while the security-sensitive workflow/settings migration still requires a
+different reviewer and proper provenance. The underlying supply/claim
+semantics, data schemas and third PILOT acceptance are unchanged.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
