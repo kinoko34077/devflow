@@ -5,7 +5,7 @@ const REPO_ID = 1384948130;
 const USER_ID = 79015263;
 const EXPECTED_SLUG = 'kinotch-c3b-meta-proof';
 const API = 'https://api.github.com';
-let apiCalls=0, token=null, oauthCredentialIssued=false;
+let apiCalls=0, token=null, oauthCredentialIssued=false, verifiedUserToken=false;
 const MAX_API=12, pause=(ms)=>new Promise(r=>setTimeout(r,ms));
 const print=(name,body)=>console.log(name+' '+JSON.stringify(body));
 function stop(reason){print('HALT',{reason,apiCalls});process.exitCode=2;throw new Error('__HALT__')}
@@ -46,6 +46,7 @@ function hasError(v){
 async function test(){
  const u=await call(API+'/user');
  if(u.status!==200||u.data?.id!==USER_ID||u.data?.login!=='kinoko34077')stop('PRINCIPAL_MISMATCH');
+ verifiedUserToken=true; // Only this same issued bearer was observed to authenticate the fixed human actor.
  print('PRINCIPAL_OK',{numericIdMatch:true});
  const ins=await call(API+'/user/installations?per_page=100');
  if(ins.status!==200||!Array.isArray(ins.data?.installations))stop('INSTALLATION_LIST_DENIED');
@@ -100,10 +101,12 @@ async function teardown(){
  const grantAttested=await ownerStep('REVOKE_USER_AUTHORIZATION','AUTHORIZATION_REVOKED','https://github.com/settings/connections/applications');
  const uninstallAttested=await ownerStep('UNINSTALL_TEMPORARY_APP','APP_UNINSTALLED','https://github.com/settings/installations');
  let status='NOT_ISSUED';
- if(typeof token==='string'&&token.length){
+ if(verifiedUserToken&&typeof token==='string'&&token.length){
   try{const r=await call(API+'/user');status=r.status}catch{}
  }
- const revoked=oauthCredentialIssued&&status===401;
+ // A 401 from Bearer null, ghs_ or a never-authenticated token is not proof
+ // of revocation; only a previously successful same-bearer /user counts.
+ const revoked=oauthCredentialIssued&&verifiedUserToken&&status===401;
  // When no bearer reached us, no API 401 test can prove revocation. Owner
  // attestations still have to cover both the OAuth grant and installation.
  const clean=grantAttested&&uninstallAttested&&(!oauthCredentialIssued||revoked);
