@@ -783,11 +783,10 @@ class BootstrapExecutor:
                     f"## Next Action\n\n`{request.next_action}`\n\n"
                     "## Canonical Entry Points\n\n"
                     + "\n".join(entry_points)
-                    + "\n\n## Detailed Current State\n\n"
+                    + "\n\n## Control Notes\n\n"
                     f"Repository was initialized through `{context.request_ref}` using `{SCHEMA_VERSION}`. "
                     f"Accepted initial head is `{head_sha}`. No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
                     f"{render_control_provenance(context, full_name)}\n\n"
-                    "## Control Notes\n\n"
                     f"Cross-repository routing summary only. Bootstrap request: {context.request_url}. "
                     f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`."
                 )

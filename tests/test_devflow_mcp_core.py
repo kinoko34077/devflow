@@ -105,6 +105,19 @@ class DevflowMCPServiceTests(unittest.TestCase):
         self.assertEqual(result["issue_number"], 16)
         self.assertEqual(result["repository"], "kinoko34077/devflow")
 
+    def test_new_control_without_legacy_current_state_remains_readable(self):
+        new_control = {**self.control, "body": self.control["body"].replace(
+            "## Detailed Current State\n\nOperational.\n\n", ""
+        )}
+        service = devflow_mcp_core.DevflowService(FakeReader([new_control]))
+        result = service.get_repository_control("devflow")
+        self.assertEqual(result["detailed_current_state"], "")
+        self.assertEqual(result["canonical_entry_points"], "- Agent start: `AGENTS.md`")
+        self.assertEqual(result["active_work"], "#41 Sync Health")
+        self.assertEqual(result["next_action"], "normal operation [WAIT]")
+        legacy = devflow_mcp_core.DevflowService(FakeReader([self.control])).get_repository_control("devflow")
+        self.assertEqual(legacy["detailed_current_state"], "Operational.")
+
     def test_bootstrap_returns_live_control_fields_and_read_order(self):
         service = devflow_mcp_core.DevflowService(FakeReader([self.control]))
         result = service.bootstrap_repository("kinoko34077/devflow")

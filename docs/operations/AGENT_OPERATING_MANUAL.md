@@ -37,14 +37,16 @@ Always inspect:
 - `Audit SHA`
 - `Active Work`
 - `Next Action`
-- `Detailed Current State`
+- `Canonical Entry Points` (or verified equivalent entry references on a legacy Control)
 - `Control Notes`
+
+If present, `Detailed Current State` is a legacy, optional heading; its absence is not a task-empty signal or a reason to reject a trusted Control. Continue using the manual `Active Work` and `Next Action` under the existing M3 authority boundary.
 
 The Control Issue tells the agent where to enter the repository. It is not a substitute for local specifications.
 
 ### Step 3 — Enter repository-local canon
 
-Follow the actual entry points listed in `Detailed Current State` / `Control Notes`.
+Follow the verified `Canonical Entry Points` first. A legacy Control may instead provide equivalent entry references under `Detailed Current State` / `Control Notes`. Missing `Detailed Current State` alone must never trigger a guess about local work.
 
 Base-adopted repository default:
 1. local `AGENTS.md`

@@ -144,6 +144,10 @@ class RepositoryBootstrapExecutorTests(unittest.TestCase):
         self.assertIn("## Audit SHA", controls[0]["body"])
         self.assertIn(result.head_sha, controls[0]["body"])
         self.assertIn("## Audit Ref", controls[0]["body"])
+        self.assertIn("## Canonical Entry Points", controls[0]["body"])
+        self.assertIn("## Control Notes", controls[0]["body"])
+        self.assertNotIn("## Detailed Current State", controls[0]["body"])
+        self.assertIn("Accepted initial head", controls[0]["body"])
         self.assertIn("`main`", controls[0]["body"])
         self.assertIn(rb.CONTROL_START_MARKER, controls[0]["body"])
         self.assertEqual(
