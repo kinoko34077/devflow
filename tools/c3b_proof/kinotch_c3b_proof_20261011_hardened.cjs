@@ -121,10 +121,17 @@ async function main(){
   await pause(interval*1000);
   const r=await oauth('/login/oauth/access_token',{client_id:CLIENT_ID,device_code:start.device_code,grant_type:'urn:ietf:params:oauth:grant-type:device_code',repository_id:String(REPO_ID)});
   if(Object.hasOwn(r,'access_token')){
-   if(typeof r.access_token!=='string'||!/^ghu_[A-Za-z0-9_]{8,512}$/.test(r.access_token)||r.token_type!=='bearer')stop('INVALID_USER_TOKEN_CLASS');
-   token=r.access_token; r.access_token=null; r.refresh_token=null; // Never log/store even an optional refresh token.
-   print('AUTH_DONE',{tokenInMemoryOnly:true,refreshTokenPersisted:false});
-   try{await test()}finally{await teardown()}
+   // A credential may have been minted even when its class or response shape is
+   // invalid. ALWAYS enter the owner revocation/uninstall flow for any issuance.
+   // Clear optional refresh token before any later processing or diagnostics.
+   const issued=r.access_token,reportedType=r.token_type;
+   r.access_token=null;r.refresh_token=null;
+   token=typeof issued==='string'&&issued.length<=1024?issued:null;
+   try{
+    if(typeof token!=='string'||!/^ghu_[A-Za-z0-9_]{8,512}$/.test(token)||reportedType!=='bearer')stop('INVALID_USER_TOKEN_CLASS');
+    print('AUTH_DONE',{tokenInMemoryOnly:true,refreshTokenPersisted:false});
+    await test();
+   }finally{await teardown()}
    return;
   }
   if(r.error==='authorization_pending')continue;
