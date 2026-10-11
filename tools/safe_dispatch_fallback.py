@@ -18,9 +18,10 @@ class EvidenceSnapshot:
 
     visibility: str                         # public | private
     connector_operation: str = "unknown"    # verified | unsupported | unknown
+    local_gh_cli: str = "unknown"          # authenticated_owner_observed | unavailable | unknown
     fixed_workflow_trigger: str = "unknown"  # verified | unavailable | unknown
     hosted_runner: str = "unknown"          # available | private_quota_exhausted
-                                             # all_actions_disabled | unknown
+                                             # private_billing_blocked | all_actions_disabled | unknown
     self_hosted_runner: str = "unknown"     # ready | unavailable | unknown
     self_hosted_isolation: str = "unknown"  # verified | unsafe | unknown
     self_hosted_approved: bool = False      # human approval; not provable here
@@ -36,9 +37,11 @@ class RouteDiagnostic:
 _ENUMS = {
     "visibility": frozenset(("public", "private")),
     "connector_operation": frozenset(("verified", "unsupported", "unknown")),
+    "local_gh_cli": frozenset(("authenticated_owner_observed", "unavailable", "unknown")),
     "fixed_workflow_trigger": frozenset(("verified", "unavailable", "unknown")),
     "hosted_runner": frozenset((
-        "available", "private_quota_exhausted", "all_actions_disabled", "unknown"
+        "available", "private_quota_exhausted", "private_billing_blocked",
+        "all_actions_disabled", "unknown"
     )),
     "self_hosted_runner": frozenset(("ready", "unavailable", "unknown")),
     "self_hosted_isolation": frozenset(("verified", "unsafe", "unknown")),
@@ -84,6 +87,11 @@ def plan_fallback(admission: object, facts: object) -> RouteDiagnostic:
                 "DIRECT_TYPED_OPERATION_ONLY_NOT_MACHINE_ENFORCED",
             )
         if facts.connector_operation == "unsupported":
+            if facts.local_gh_cli == "authenticated_owner_observed":
+                return candidate(
+                    "OWNER_LOCAL_GH_CLI_API",
+                    "OPERATION_PERMISSION_AND_LOCAL_SESSION_MUST_BE_RECHECKED_NOT_EXECUTED",
+                )
             return hold("NEEDS_SEPARATELY_AUTHORIZED_API_TRANSPORT")
         return hold("CONNECTOR_OPERATION_CAPABILITY_UNKNOWN")
 
@@ -108,8 +116,10 @@ def plan_fallback(admission: object, facts: object) -> RouteDiagnostic:
         return hold("HOSTED_CAPACITY_CAUSE_UNVERIFIED")
     if facts.visibility != "private":
         return hold("PRIVATE_QUOTA_STATE_ON_PUBLIC_REPO")
+    if facts.hosted_runner == "private_billing_blocked":
+        return hold("PRIVATE_BILLING_BLOCK_NEEDS_FRESH_RUNNER_ELIGIBILITY")
 
-    # Only a confirmed PRIVATE hosted-minute/budget exhaustion may try this
+    # Only a confirmed PRIVATE hosted-minute exhaustion may try this
     # route. This does NOT prove self-hosted scheduling or GitHub auth.
     if facts.self_hosted_runner == "ready":
         if facts.self_hosted_isolation != "verified":
