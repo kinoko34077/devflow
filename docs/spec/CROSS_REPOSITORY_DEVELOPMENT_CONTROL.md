@@ -66,9 +66,10 @@ Canonical content:
 - Audit SHA
 - Active Work
 - Next Action
-- Detailed Current State
 - Canonical Entry Points, or an equivalent explicitly identified repository-local entry reference in a legacy Control pending normalization
 - Control Notes
+
+`Detailed Current State` is **not required** for new Controls: detailed technical state belongs to the owning repository. Existing Controls may retain this legacy section; readers MUST accept its presence or absence without treating missing text as missing work or an untrusted Control. The manually maintained `Active Work` and `Next Action` remain required/authoritative until their separate M3 gates are accepted.
 
 New Controls must use the current template and include an explicit `Canonical Entry Points` section. Legacy Controls remain usable when their equivalent entry references are unambiguous; normalize them when the Control is materially updated rather than rewriting unrelated repository state only for formatting.
 
