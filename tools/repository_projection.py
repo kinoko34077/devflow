@@ -97,6 +97,14 @@ def _issue_only_attention(metadata: IssueMetadata) -> str | None:
         disposition = "NEEDS_HUMAN"
     elif metadata.external_wait:
         disposition = "WAIT_EXTERNAL"
+    elif (
+        metadata.is_task
+        and metadata.work_status == "PARKED"
+        and not metadata.scope_ready
+        and not metadata.blocked_by
+    ):
+        # Valid deferred tasks without an active gate do not require attention.
+        return None
     elif not metadata.scope_ready:
         disposition = "NEEDS_EVIDENCE"
     else:
