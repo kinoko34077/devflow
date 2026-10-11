@@ -90,7 +90,7 @@ def inspect_run_metadata(
 ) -> M9Evidence:
     """Check synthetic GET /actions/runs/{id} metadata only.
 
-    Does not verify protected ref/immutable workflow blob, job-side pre-effect
+    Uses live-observed GitHub Actions run.path (workflow file only, no @ref).\n    Rejects attempts >= 2 to prevent confusing a rerun with initial launch.\n    Does not verify protected ref/immutable workflow blob, job-side pre-effect
     gates, durable request IDs, GitHub transport, execution or permissions.
     """
     if not _valid_pin(pin) or not _is_positive_int(expected_run_id):
@@ -112,11 +112,11 @@ def inspect_run_metadata(
             or type(run.get("head_sha")) is not str or run["head_sha"] != pin.head_sha):
         return M9Evidence("BLOCKED", "RUN_EVENT_OR_HEAD_MISMATCH")
     if (type(run.get("path")) is not str
-            or run["path"] != pin.workflow_path + "@" + pin.ref
+            or run["path"] != pin.workflow_path
             or type(run.get("head_branch")) is not str
             or run["head_branch"] != pin.ref.split("/", 2)[2]):
         return M9Evidence("BLOCKED", "RUN_PATH_OR_REF_MISMATCH")
-    if not _is_positive_int(run.get("run_attempt")):
+    if type(run.get("run_attempt")) is not int or run["run_attempt"] != 1:
         return M9Evidence("BLOCKED", "INVALID_RUN_ATTEMPT")
     api, browser = _urls(pin, expected_run_id)
     if (type(run.get("url")) is not str or run["url"] != api
