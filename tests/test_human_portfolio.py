@@ -18,15 +18,18 @@ def _issue(
     external_wait=False,
     scope_ready=True,
     author_association="OWNER",
+    blocked_by=(),
+    record_role="TASK",
 ):
     metadata = {
         "schema_version": 1,
-        "record_role": "TASK",
+        "record_role": record_role,
         "type": "FEATURE",
         "work_status": work_status,
         "scope_ready": scope_ready,
         "requires_user_confirmation": requires_user_confirmation,
         "external_wait": external_wait,
+        "blocked_by": list(blocked_by),
     }
     return {
         "number": number,
@@ -157,6 +160,29 @@ class HumanPortfolioReadModelTests(unittest.TestCase):
         dispositions = {entry.task_ref: entry.disposition for entry in result.entries}
         self.assertEqual("WAIT_EXTERNAL", dispositions["owner/repo#1"])
         self.assertEqual("NEEDS_EVIDENCE", dispositions["owner/repo#2"])
+
+    def test_parked_nongated_task_does_not_pollute_operator_attention(self):
+        projection = _projection(
+            issues=[
+                _issue(1, work_status="PARKED", scope_ready=False),
+                _issue(2, work_status="PARKED", scope_ready=False, requires_user_confirmation=True),
+                _issue(3, work_status="PARKED", scope_ready=False, external_wait=True),
+                _issue(4, work_status="PARKED", scope_ready=False, blocked_by=("owner/repo#99",)),
+                _issue(5, work_status="READY_FOR_IMPLEMENTATION", scope_ready=False),
+                _issue(6, work_status="BLOCKED", scope_ready=False),
+                _issue(7, work_status="PARKED", scope_ready=False, record_role="TRACKER"),
+                _issue(8, work_status="PARKED", scope_ready=False, author_association="NONE"),
+            ]
+        )
+        result = human_portfolio.build_repository_human_portfolio(projection)
+        by_task = {entry.task_ref: entry.disposition for entry in result.entries}
+        self.assertNotIn("owner/repo#1", by_task)
+        self.assertEqual("NEEDS_HUMAN", by_task["owner/repo#2"])
+        self.assertEqual("WAIT_EXTERNAL", by_task["owner/repo#3"])
+        for number in (4, 5, 6, 7, 8):
+            self.assertEqual("NEEDS_EVIDENCE", by_task[f"owner/repo#{number}"])
+        self.assertEqual(6, projection.machine_task_count)
+        self.assertEqual([], [item.number for item in projection.implementing_tasks])
 
     def test_untrusted_machine_metadata_surfaces_needs_evidence(self):
         projection = _projection(
