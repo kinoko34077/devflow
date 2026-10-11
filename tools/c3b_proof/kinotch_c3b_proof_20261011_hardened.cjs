@@ -52,6 +52,7 @@ async function test(){
  const matches=ins.data.installations.filter(x=>x.app_slug===EXPECTED_SLUG&&x.account?.login==='kinoko34077');
  if(matches.length!==1)stop('APP_NOT_FOUND_OR_AMBIGUOUS');
  const inst=matches[0];
+ if(!Number.isSafeInteger(inst.id)||inst.id<=0)stop('INVALID_INSTALLATION_ID');
  const perm=inst.permissions||{};
  const metadataOnly=perm.metadata==='read'&&Object.entries(perm).every(([k,v])=>k==='metadata'||v==='none');
  if(!metadataOnly||inst.repository_selection!=='selected')stop('EFFECTIVE_APP_SCOPE_INVALID');
@@ -113,12 +114,14 @@ async function main(){
  if(typeof CLIENT_ID!=='string'||!/^Iv[0-9A-Za-z]{18,40}$/.test(CLIENT_ID))stop('PUBLIC_CLIENT_ID_INVALID');
  const start=await oauth('/login/device/code',{client_id:CLIENT_ID});
  if(typeof start.device_code!=='string'||!start.device_code||typeof start.user_code!=='string'||!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(start.user_code)||start.verification_uri!=='https://github.com/login/device'||start.error)stop('DEVICE_START_INVALID');
+ if(!Number.isInteger(start.interval)||start.interval<5||start.interval>120||!Number.isInteger(start.expires_in)||start.expires_in<60||start.expires_in>3600)stop('INVALID_DEVICE_FLOW_TIMING');
  print('AUTHORIZE',{url:'https://github.com/login/device',user_code:start.user_code,expires_in:start.expires_in});
- let interval=Math.max(5,start.interval||5);let expiresAt=Date.now()+Math.min(start.expires_in||900,900)*1000;
+ let interval=start.interval;let expiresAt=Date.now()+Math.min(start.expires_in,900)*1000;
  while(Date.now()<expiresAt){
   await pause(interval*1000);
   const r=await oauth('/login/oauth/access_token',{client_id:CLIENT_ID,device_code:start.device_code,grant_type:'urn:ietf:params:oauth:grant-type:device_code',repository_id:String(REPO_ID)});
-  if(r.access_token){
+  if(Object.hasOwn(r,'access_token')){
+   if(typeof r.access_token!=='string'||!/^ghu_[A-Za-z0-9_]{8,512}$/.test(r.access_token)||r.token_type!=='bearer')stop('INVALID_USER_TOKEN_CLASS');
    token=r.access_token; r.access_token=null; r.refresh_token=null; // Never log/store even an optional refresh token.
    print('AUTH_DONE',{tokenInMemoryOnly:true,refreshTokenPersisted:false});
    try{await test()}finally{await teardown()}
