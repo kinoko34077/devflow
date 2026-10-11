@@ -30,7 +30,7 @@ def run(run_id=123):
         "id": run_id, "workflow_id": 71, "event": "workflow_dispatch",
         "repository": {"id": 314, "full_name": "kinoko34077/example"},
         "head_sha": SHA, "head_branch": "m9-protected-v1",
-        "path": ".github/workflows/approved.yml@refs/tags/m9-protected-v1",
+        "path": ".github/workflows/approved.yml",
         "run_attempt": 1,
         "url": f"https://api.github.com/repos/kinoko34077/example/actions/runs/{run_id}",
         "html_url": f"https://github.com/kinoko34077/example/actions/runs/{run_id}",
@@ -138,7 +138,7 @@ class OfflineM9EvidenceTests(unittest.TestCase):
             self.assert_run_denied(item)
 
     def test_metadata_wrong_path_or_ref(self):
-        for key, value in (("path", ".github/workflows/other.yml@refs/tags/m9-protected-v1"),
+        for key, value in (("path", ".github/workflows/other.yml"),\n                           ("path", ".github/workflows/approved.yml@refs/tags/m9-protected-v1"),
                            ("path", ".github/workflows/approved.yml@refs/heads/main"),
                            ("head_branch", "main"), ("head_branch", None)):
             item = run()
@@ -148,10 +148,28 @@ class OfflineM9EvidenceTests(unittest.TestCase):
     def test_metadata_unsafe_url_and_attempt(self):
         for key, value in (("url", "https://api.github.com/repos/other/repo/actions/runs/123"),
                            ("html_url", "https://github.com/kinoko34077/example/actions/runs/123?view=1"),
-                           ("run_attempt", 0), ("run_attempt", True), ("run_attempt", "1")):
+                           ("run_attempt", 0), ("run_attempt", True), ("run_attempt", "1"),\n                           ("run_attempt", 2), ("run_attempt", 3)):
             item = run()
             item[key] = value
             self.assert_run_denied(item)
+
+    def test_real_github_workflow_dispatch_path_is_plain_file(self):
+        # Live public workflow_dispatch run GET (devflow run 38118114901)
+        # returns path without "@ref"; reject old incorrect shape.
+        item = run()
+        self.assertEqual(item["path"], ".github/workflows/approved.yml")
+        result = inspect_run_metadata(pin(), expected_run_id=123, run=item)
+        self.assertEqual(result.status, "OFFLINE_RUN_METADATA_MATCHED")
+        item["path"] += "@refs/tags/m9-protected-v1"
+        self.assert_run_denied(item)
+
+    def test_rerun_attempt_is_not_initial_dispatch_evidence(self):
+        item = run()
+        item["run_attempt"] = 2
+        self.assert_run_denied(item)
+        item["run_attempt"] = 1
+        self.assertEqual(inspect_run_metadata(pin(), expected_run_id=123, run=item).status,
+                         "OFFLINE_RUN_METADATA_MATCHED")
 
     def test_concurrent_run_id_cross_binding(self):
         first = inspect_dispatch_response(pin(), http_status=200, response=response(123))
