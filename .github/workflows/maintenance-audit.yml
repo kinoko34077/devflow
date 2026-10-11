@@ -267,7 +267,11 @@ jobs:
 
 
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' }}
+    # Pre-created GitHub Environment permits only refs/heads/main.
+    environment:
+      name: maintenance-supply
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -318,7 +322,11 @@ jobs:
           path: maintenance-supply-result.json
 
   catalog-maintenance-publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') && github.ref == 'refs/heads/main' }}
+    # Pre-created GitHub Environment permits only refs/heads/main.
+    environment:
+      name: maintenance-supply
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -365,6 +373,10 @@ jobs:
 
   catalog-maintenance-complete:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' && github.ref == 'refs/heads/main' }}
+    # Pre-created GitHub Environment permits only refs/heads/main.
+    environment:
+      name: maintenance-supply
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
