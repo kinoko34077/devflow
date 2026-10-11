@@ -108,6 +108,37 @@ For a participating repository:
 
 Task 11 controlled regression `test_rollout_disable_reenable_preserves_history_and_restores_selection` exercises the DISABLED -> PILOT round trip against the accepted collector/selector implementation. Existing supply-withdrawal and chat-fallback contract tests independently verify that rollback removes only the maintenance Ledger candidate and does not add a maintenance-specific bootstrap disposition.
 
+### Manual catalog run completion
+
+The accepted `complete-maintenance` CLI is exposed by the explicit
+`maintenance-audit.yml` **workflow_dispatch** mode `maintenance-complete`.
+It is not scheduled and does not claim, perform, or republish maintenance work.
+The action reuses the existing `MAINTENANCE_SUPPLY_TOKEN`, the publisher's
+per-repository concurrency group, and the script's exact Ledger/Control
+read-before-write/readback checks; the default Actions token stays read-only.
+
+Supply `repository`, `control`, `run_id`, `lens`, `result`, `attempt_id`,
+and an `evidence_ref` pointing to a trusted Issue comment on that repository.
+Supply a dedicated `findings_summary` field (required when `result=FINDINGS`,
+maximum 512 characters). It must be one line and must not contain `@` or `#`
+to avoid issuing unintended GitHub mentions or issue references. The `owner`
+input retains its existing-owner reference meaning for other modes. GitHub
+allows up to 25 `workflow_dispatch` inputs, so no field overloading is needed.
+The completion job also requires a default-branch dispatch as a defense in
+depth; this is not a substitute for restricting secret access through an
+approved GitHub Environment and deployment-branch policy.
+
+Before dispatch, verify the claim has already been released and the named
+run was actually audited under a separate 3C consumer attempt. Do not use
+completion to skip claim/release or invent audit evidence.
+The action fails closed on malformed inputs and uploads a typed
+`maintenance-completion-result` artifact. After SUCCESS, confirm
+`applied=true`, `reconciliation_required=false`, a trusted canonical
+`devflow-maintenance-run:v1` history comment, cleared Ledger Active Run,
+an empty Control candidate/portfolio for the completed run and no
+coordinator claim. On partial failure, retain the evidence, reconcile the
+exact persisted state and **do not blindly replay** the mutation.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
