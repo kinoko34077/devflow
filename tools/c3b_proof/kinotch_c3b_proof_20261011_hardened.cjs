@@ -5,7 +5,7 @@ const REPO_ID = 1384948130;
 const USER_ID = 79015263;
 const EXPECTED_SLUG = 'kinotch-c3b-meta-proof';
 const API = 'https://api.github.com';
-let apiCalls=0, token=null, results={};
+let apiCalls=0, token=null, oauthCredentialIssued=false;
 const MAX_API=12, pause=(ms)=>new Promise(r=>setTimeout(r,ms));
 const print=(name,body)=>console.log(name+' '+JSON.stringify(body));
 function stop(reason){print('HALT',{reason,apiCalls});process.exitCode=2;throw new Error('__HALT__')}
@@ -99,11 +99,15 @@ async function teardown(){
  // Optional GitHub App deletion is a further owner-only UI action, NOT inferred here.
  const grantAttested=await ownerStep('REVOKE_USER_AUTHORIZATION','AUTHORIZATION_REVOKED','https://github.com/settings/connections/applications');
  const uninstallAttested=await ownerStep('UNINSTALL_TEMPORARY_APP','APP_UNINSTALLED','https://github.com/settings/installations');
- let status='UNKNOWN';
- try{const r=await call(API+'/user');status=r.status}catch{}
- const revoked=status===401;
- const clean=grantAttested&&uninstallAttested&&revoked;
- print('TEARDOWN_STATUS',{result:clean?'TOKEN_REVOKED_OWNER_APP_UNINSTALL_ATTESTED':'CLEANUP_UNVERIFIED',
+ let status='NOT_ISSUED';
+ if(typeof token==='string'&&token.length){
+  try{const r=await call(API+'/user');status=r.status}catch{}
+ }
+ const revoked=oauthCredentialIssued&&status===401;
+ // When no bearer reached us, no API 401 test can prove revocation. Owner
+ // attestations still have to cover both the OAuth grant and installation.
+ const clean=grantAttested&&uninstallAttested&&(!oauthCredentialIssued||revoked);
+ print('TEARDOWN_STATUS',{result:clean?(oauthCredentialIssued?'TOKEN_REVOKED_OWNER_APP_UNINSTALL_ATTESTED':'OWNER_CLEANUP_ATTESTED_NO_TOKEN'):'CLEANUP_UNVERIFIED',
    tokenRevoked:revoked,grantRevokeOwnerAttested:grantAttested,ownerAppUninstallConfirmed:uninstallAttested,
    appUninstallIndependentlyVerified:false,refreshTokenRevocationIndependentlyVerified:false});
  if(!clean)process.exitCode=2;
@@ -112,6 +116,7 @@ async function teardown(){
 
 async function main(){
  if(typeof CLIENT_ID!=='string'||!/^Iv[0-9A-Za-z]{18,40}$/.test(CLIENT_ID))stop('PUBLIC_CLIENT_ID_INVALID');
+ try{
  const start=await oauth('/login/device/code',{client_id:CLIENT_ID});
  if(typeof start.device_code!=='string'||!start.device_code||typeof start.user_code!=='string'||!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(start.user_code)||start.verification_uri!=='https://github.com/login/device'||start.error)stop('DEVICE_START_INVALID');
  if(!Number.isInteger(start.interval)||start.interval<5||start.interval>120||!Number.isInteger(start.expires_in)||start.expires_in<60||start.expires_in>3600)stop('INVALID_DEVICE_FLOW_TIMING');
@@ -125,13 +130,12 @@ async function main(){
    // invalid. ALWAYS enter the owner revocation/uninstall flow for any issuance.
    // Clear optional refresh token before any later processing or diagnostics.
    const issued=r.access_token,reportedType=r.token_type;
+   oauthCredentialIssued=true;
    r.access_token=null;r.refresh_token=null;
    token=typeof issued==='string'&&issued.length<=1024?issued:null;
-   try{
-    if(typeof token!=='string'||!/^ghu_[A-Za-z0-9_]{8,512}$/.test(token)||reportedType!=='bearer')stop('INVALID_USER_TOKEN_CLASS');
-    print('AUTH_DONE',{tokenInMemoryOnly:true,refreshTokenPersisted:false});
-    await test();
-   }finally{await teardown()}
+   if(typeof token!=='string'||!/^ghu_[A-Za-z0-9_]{8,512}$/.test(token)||reportedType!=='bearer')stop('INVALID_USER_TOKEN_CLASS');
+   print('AUTH_DONE',{tokenInMemoryOnly:true,refreshTokenPersisted:false});
+   await test();
    return;
   }
   if(r.error==='authorization_pending')continue;
@@ -139,5 +143,11 @@ async function main(){
   stop('OAUTH_POLL_'+(['expired_token','access_denied','authorization_pending','slow_down'].includes(r.error)?r.error.toUpperCase():'UNKNOWN'));
  }
  stop('DEVICE_EXPIRED');
+ }finally{
+  // A user could have authorized the App before an OAuth poll was denied,
+  // malformed, timed out or lost. Revoke/uninstall on EVERY attempted flow,
+  // not merely after a usable access token reaches this process.
+  await teardown();
+ }
 }
 main().catch(e=>{if(e?.message!=='__HALT__')print('ERROR',{category:['TypeError','AbortError','TimeoutError','RangeError'].includes(e?.name)?e.name:'UNKNOWN'});process.exitCode=2});
