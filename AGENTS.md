@@ -21,7 +21,7 @@ Detailed durability and decision procedures live in `docs/operations/DURABLE_PRO
 Given `kinoko34077/<repo>`:
 
 1. Find the open devflow Issue titled exactly `[REPO] <repo>`.
-2. Read its `Work Status`, `Repository State`, `Audit SHA`, `Active Work`, `Next Action`, `Detailed Current State`, and `Control Notes`.
+2. Read its `Work Status`, `Repository State`, `Audit SHA`, `Active Work`, `Next Action`, `Canonical Entry Points` and `Control Notes` (and any legacy `Detailed Current State` if present; it is not required).
 3. Follow the repository-local canonical entry points recorded there.
 4. Open the referenced repository-local Issue / Work Order / PR when `Active Work` points to one.
 5. Read only the local specifications, Current State, code, tests and history needed for the current task.
