@@ -119,10 +119,14 @@ read-before-write/readback checks; the default Actions token stays read-only.
 
 Supply `repository`, `control`, `run_id`, `lens`, `result`, `attempt_id`,
 and an `evidence_ref` pointing to a trusted Issue comment on that repository.
-For this mode alone, the existing `owner` workflow input carries the bounded
-`findings_summary` (required when `result=FINDINGS`). In all other modes,
-`owner` retains its documented existing-owner reference meaning. This
-explicit alias avoids exceeding GitHub's ten `workflow_dispatch` inputs.
+Supply a dedicated `findings_summary` field (required when `result=FINDINGS`,
+maximum 512 characters). It must be one line and must not contain `@` or `#`
+to avoid issuing unintended GitHub mentions or issue references. The `owner`
+input retains its existing-owner reference meaning for other modes. GitHub
+allows up to 25 `workflow_dispatch` inputs, so no field overloading is needed.
+The completion job also requires a default-branch dispatch as a defense in
+depth; this is not a substitute for restricting secret access through an
+approved GitHub Environment and deployment-branch policy.
 
 Before dispatch, verify the claim has already been released and the named
 run was actually audited under a separate 3C consumer attempt. Do not use
@@ -134,6 +138,7 @@ The action fails closed on malformed inputs and uploads a typed
 an empty Control candidate/portfolio for the completed run and no
 coordinator claim. On partial failure, retain the evidence, reconcile the
 exact persisted state and **do not blindly replay** the mutation.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
