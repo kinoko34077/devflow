@@ -276,6 +276,84 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertNotIn("body", result["records"][0])
         self.assertIn(("kinoko34077/demo", "open"), reader.calls)
 
+    def test_m3_full_open_task_projection_is_not_limited_to_cached_ready_implementing_summaries(self):
+        # M3 must never infer all active work from the M2 cache's capped
+        # READY/IMPLEMENTING lists. The already accepted live M1 projection
+        # contains every trusted open machine TASK, including other statuses.
+        from tools import repository_projection_cache as cache
+
+        def task(number, status, *, state="open"):
+            issue = self._task_issue(number)
+            return {
+                **issue,
+                "state": state,
+                "body": issue["body"].replace(
+                    '"work_status": "READY_FOR_IMPLEMENTATION"',
+                    f'"work_status": "{status}"',
+                ),
+            }
+
+        source_issues = [
+            *(task(number, "READY_FOR_IMPLEMENTATION") for number in range(1, 22)),
+            *(task(number, "IMPLEMENTING") for number in range(22, 25)),
+            task(25, "AWAITING_REVIEW"),
+            task(26, "BLOCKED"),
+            task(27, "DONE", state="closed"),
+        ]
+        reader = FakeReader(
+            [],
+            issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [self._control("demo", 70)],
+                "kinoko34077/demo": source_issues,
+            },
+        )
+        service = devflow_mcp_core.DevflowService(
+            reader, observed_at_factory=lambda: "2026-10-04T04:00:00Z"
+        )
+        projection = service.get_repository_projection("demo")
+
+        self.assertEqual(projection["source_status"], "AVAILABLE")
+        self.assertEqual(projection["source_freshness"], "CURRENT")
+        self.assertEqual(projection["open_issue_count"], 26)
+        self.assertEqual(projection["machine_task_count"], 26)
+        self.assertEqual(len(projection["task_records"]), 26)
+        self.assertEqual(len(projection["ready_tasks"]), 21)
+        self.assertEqual(len(projection["implementing_tasks"]), 3)
+        self.assertEqual(
+            {task["issue_number"]: task["work_status"] for task in projection["task_records"]}[25],
+            "AWAITING_REVIEW",
+        )
+        self.assertEqual(
+            {task["issue_number"]: task["work_status"] for task in projection["task_records"]}[26],
+            "BLOCKED",
+        )
+        self.assertNotIn(27, [task["issue_number"] for task in projection["task_records"]])
+        self.assertNotIn("body", projection["task_records"][0])
+
+        cached = cache.build_cached_projection(
+            "kinoko34077/demo", projection,
+            generated_at="2026-10-04T04:00:00Z",
+            control_trust={
+                "status": "VERIFIED",
+                "freshness": "CURRENT",
+                "source": cache.CONTROL_TRUST_SOURCE,
+                "observed_at": "2026-10-04T04:00:00Z",
+                "detail": None,
+            },
+        )
+        self.assertEqual(cached["coverage"]["status"], "COMPLETE")
+        self.assertEqual(len(cached["tasks"]["ready"]), cache.MAX_TASK_SUMMARIES)
+        self.assertEqual(len(cached["tasks"]["implementing"]), 3)
+        compact_refs = {
+            entry["issue_number"]
+            for entries in cached["tasks"].values()
+            for entry in entries
+        }
+        self.assertNotIn(21, compact_refs)
+        self.assertNotIn(25, compact_refs)
+        self.assertNotIn(26, compact_refs)
+        self.assertFalse(cached["coverage"]["can_replace_manual_active_work"])
+
     def test_repository_projection_requires_managed_control(self):
         reader = FakeReader(
             [],
