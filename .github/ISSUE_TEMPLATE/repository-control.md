@@ -40,10 +40,6 @@ None.
 
 `Initial STANDARD audit [AUDIT]`
 
-## Detailed Current State
-
-<!-- Cross-repository summary only. Do not copy full repository specifications/history here. -->
-
 ## Canonical Entry Points
 
 <!-- Exact repository-local paths/Issues/PRs a fresh agent should open after this Control Issue. -->
