@@ -27,14 +27,14 @@ async function simulation(options={}){
  async function fakeFetch(url,opt){
   requests.push({url,method:opt?.method||'GET'});
   if(!allowedUrl(url))throw new Error('MOCK_REJECTED_EXTERNAL_URL');
-  if(url.endsWith('/login/device/code'))return mockResponse(200,options.oversizeOauth?{junk:'Z'.repeat(70000)}:{device_code:'SYNTHETIC_DEVICE_ONLY',user_code:options.malformedUserCode?'INVALID':'ABCD-EFGH',verification_uri:options.badVerificationUri?'https://evil.example/login':'https://github.com/login/device',expires_in:300,interval:5});
-  if(url.endsWith('/login/oauth/access_token'))return mockResponse(200,{access_token:'ghu_SYNTHETIC_DO_NOT_USE'});
+  if(url.endsWith('/login/device/code'))return mockResponse(200,options.oversizeOauth?{junk:'Z'.repeat(70000)}:{device_code:'SYNTHETIC_DEVICE_ONLY',user_code:options.malformedUserCode?'INVALID':'ABCD-EFGH',verification_uri:options.badVerificationUri?'https://evil.example/login':'https://github.com/login/device',expires_in:300,interval:options.badDeviceTiming?'bad':5});
+  if(url.endsWith('/login/oauth/access_token'))return mockResponse(200,{access_token:options.badTokenClass?'ghs_FAKE_INSTALLATION_TOKEN':'ghu_SYNTHETIC_DO_NOT_USE',token_type:'bearer'});
   if(url==='https://api.github.com/user'){
    userReads++;return userReads>1?mockResponse(options.tokenRevoked===false?200:401,options.tokenRevoked===false?{id:79015263,login:'kinoko34077'}:{message:'Unauthorized'}):
    mockResponse(200,{id:79015263,login:'kinoko34077'});
   }
   if(url.includes('/user/installations?per_page=100'))return mockResponse(200,{installations:[{
-   id:928,app_slug:'kinotch-c3b-meta-proof',account:{login:'kinoko34077'},
+   id:options.invalidInstallId?'oops':928,app_slug:'kinotch-c3b-meta-proof',account:{login:'kinoko34077'},
    repository_selection:'selected',permissions:options.badPermissions?{metadata:'read',contents:'read'}:{metadata:'read'}
   }]});
   if(url.includes('/user/installations/928/repositories'))return mockResponse(200,{total_count:1,repositories:[{id:1384948130}]});
@@ -124,4 +124,20 @@ test('malformed Device Flow user code fails before any token use',async()=>{
  const a=await simulation({malformedUserCode:true,terminalHalt:true});
  assert.equal(item(a.logs,'HALT').reason,'DEVICE_START_INVALID');
  assert.equal(a.requests.some(x=>x.url.endsWith('/login/oauth/access_token')),false);
+});
+
+test('malformed device polling timing denied before access token',async()=>{
+ const a=await simulation({badDeviceTiming:true,terminalHalt:true});
+ assert.equal(item(a.logs,'HALT').reason,'INVALID_DEVICE_FLOW_TIMING');
+ assert.equal(a.requests.some(x=>x.url.endsWith('/login/oauth/access_token')),false);
+});
+test('installation-class token denied before repo metadata access',async()=>{
+ const a=await simulation({badTokenClass:true,terminalHalt:true});
+ assert.equal(item(a.logs,'HALT').reason,'INVALID_USER_TOKEN_CLASS');
+ assert.equal(a.requests.some(x=>x.url.startsWith('https://api.github.com')),false);
+});
+test('untrusted installation ID must be positive integer and still cleanup',async()=>{
+ const a=await simulation({invalidInstallId:true});
+ assert.equal(item(a.logs,'HALT').reason,'INVALID_INSTALLATION_ID');
+ assert.equal(item(a.logs,'TEARDOWN_STATUS').tokenRevoked,true);
 });
