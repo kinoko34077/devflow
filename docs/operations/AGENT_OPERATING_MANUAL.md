@@ -254,19 +254,24 @@ Review is required for non-trivial PRs.
 Reviewer != Implementer is NOT required by default.
 ```
 
-A different-reviewer Review becomes an additional mandatory gate only when at least one of the following applies:
+**Different-reviewer escalation is decided from the concrete safety impact of the actual changed surface, not its label, future application, or apparent importance** (devflow #439; clarifies #111). Before declaring `Different reviewer required: yes`, record the actual affected code/spec and activation boundary, reachable secrets/private data/permissions/external execution/persistent state, a credible causal path to concrete harm, reversibility, and what independent review can detect that ordinary current-head Review/tests cannot. Never infer a mandatory peer from a hypothetical *future* privileged adapter when the current diff is demonstrably offline/no-effect.
 
-1. the owning Issue / Work Order explicitly requires a different reviewer;
-2. security/auth/credential/permission/privacy boundaries change materially;
-3. destructive or difficult-to-reverse state/data migration is involved;
-4. persistent schema/data migration can cause non-trivial unrecoverable loss/corruption;
-5. a public/shared contract has a breaking or high-impact compatibility change;
-6. one semantic change propagates across multiple repositories/consumers and rollback is not purely local;
-7. devflow authority / merge safety / source-of-truth semantics themselves change materially;
-8. the first Review finds a P0/P1 issue whose resolution warrants independent confirmation;
-9. the user explicitly asks for another reviewer.
+Require a genuinely different reviewer when that analysis identifies a real safety-critical or materially irreversible boundary: for example, exposing secrets/tokens or private data; changing authentication, permissions, credential/session handling or protections so unauthorized access becomes possible; enabling unapproved external effects/execution; destroying or irrecoverably corrupting meaningful data; or changing review/merge/authority enforcement in a way that concretely weakens these protections. Equivalent severe impact must be explained from evidence, not asserted from category. **Human consent remains a separate mandatory gate** for release/deploy/publication, credential/permission/security-sensitive operations, destruction and other difficult-to-reverse effects; a self-review never authorizes them.
 
-Priority, Risk and repository identity are inputs to review depth and escalation analysis, not automatic second-reviewer triggers. P1, MEDIUM, `devflow`, Repository Base, Runtime or shared-control labels alone do not require reviewer separation when the actual change is local, reversible and does not cross one of the escalation boundaries above.
+The following are **reasons to inspect the actual impact**, not automatic peer gates in the absence of a credible safety/irrecoverability path:
+
+1. an owning Issue / Work Order names a different reviewer (keep the gate if justified; otherwise reconcile the stale or overbroad requirement explicitly before proceeding);
+2. security/auth/credential/permission/privacy-related files or specifications change;
+3. destructive or difficult-to-reverse migration is proposed;
+4. persistent schema/data migration could lose or corrupt data;
+5. public/shared contract compatibility changes significantly;
+6. changes propagate across repositories/consumers and are not purely locally revertible;
+7. devflow authority / merge safety / source-of-truth semantics change;
+8. a P0/P1 review finding merits independent confirmation.
+
+An **explicit user instruction requiring a different reviewer** remains mandatory regardless of classification. No missing peer is treated as a blocker merely because of P1/MEDIUM, devflow/Base/Runtime, `SECURITY` in a title, design importance, propagation, or later potential reuse. If an older Issue/PR declares a peer gate without concrete grounds, repair its applicable declaration with a recorded risk rationale before running Readiness; never silently bypass a current native check or existing explicit Human gate.
+
+**Default:** current-head implementer-authored Formal Review, adequate focused verification/CI and guarded reversible merge. Example: #437/#438's synthetic offline workflow-run shape checker cannot touch tokens, Private data, credentials, Actions dispatch or runtime authority and does not require a second reviewer. A later real authenticated M9 dispatch, Actions write grant, secret handling or live permission/security-gate change needs its *own* independent review and applicable Human approval. If a genuine peer/Human blocker applies to one unit, HOLD only that dependent effectful step and continue other independent, authorized work; do not stop the whole roadmap without assessing executable fronts.
 
 The PR declares only the applicable gates:
 
@@ -330,6 +335,8 @@ Do not treat semantic importance as a proxy for change size, test breadth, cerem
 `review depth`, `test breadth`, and `process/ceremony depth` are separate decisions. High authority significance may justify deep semantic review or a different reviewer while still requiring little or no executable regression when runtime tests cannot observe the changed contract. Conversely, a small runtime diff needs executable regression when its failure mode is behavioral.
 
 For every nontrivial verification step or gate, identify the plausible defect class it can detect for the current changed surface. If no such defect class exists, omit that step unless an external repository rule explicitly requires it. Existing security, credential, permission, deployment/release/publication, destructive, migration, protected-Gate and other hard-to-reverse safeguards remain stronger and are not reduced by this proportionality rule.
+
+For **peer-review or work-HOLD selection**, distinguish potential importance from presently reachable direct harm: exposure of information/credentials, unauthorized privileges/effects, or severe irreversible loss. Classify the active changed surface and the failure path first. Documentation, local tests and offline simulations are not effectful runtime changes merely because their subject is security-sensitive. Retain independently justified external/Human gates, and run unrelated authorized tasks while the particular protected action waits (see #439).
 
 Example — a one-paragraph source-of-truth policy change may be semantically critical while physically tiny and trivially reversible. Appropriate evidence can be exact diff inspection, comparison with the task-relevant authority documents, cross-reference/structure checks when applicable, and deep semantic/Formal Review (including a different reviewer when the authority rule requires it). A full runtime suite is not added solely because the policy is important unless code consumes the changed document or another concrete runtime defect is observable through that suite.
 
