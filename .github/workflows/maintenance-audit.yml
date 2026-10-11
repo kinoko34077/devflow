@@ -410,7 +410,8 @@ jobs:
           [[ "$MAINTENANCE_EVIDENCE_REF" == "https://github.com/${MAINTENANCE_REPOSITORY}/issues/"* ]] || invalid_input
           [[ ${#MAINTENANCE_FINDINGS_SUMMARY} -le 512 ]] || invalid_input
           [[ "$MAINTENANCE_FINDINGS_SUMMARY" != *"@"* && "$MAINTENANCE_FINDINGS_SUMMARY" != *"#"* ]] || invalid_input
-          [[ "$MAINTENANCE_FINDINGS_SUMMARY" != *          if [[ "$MAINTENANCE_RESULT" == FINDINGS && -z "$MAINTENANCE_FINDINGS_SUMMARY" ]]; then
+          [[ ! "$MAINTENANCE_FINDINGS_SUMMARY" =~ [[:cntrl:]] ]] || invalid_input
+          if [[ "$MAINTENANCE_RESULT" == FINDINGS && -z "$MAINTENANCE_FINDINGS_SUMMARY" ]]; then
             invalid_input
           fi
           python scripts/maintenance_audit.py complete-maintenance \
