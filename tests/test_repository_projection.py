@@ -538,6 +538,48 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
                 )
                 self.assertEqual(record.attention_disposition, expected)
 
+    def test_parked_machine_task_without_gates_is_not_operator_attention(self):
+        parked = VALID_TASK.replace(
+            '"work_status": "READY_FOR_IMPLEMENTATION"',
+            '"work_status": "PARKED"',
+        ).replace('"scope_ready": true', '"scope_ready": false')
+        scenarios = [
+            (parked, None),
+            (parked.replace('"scope_ready": false', '"scope_ready": true'), None),
+            (
+                parked.replace(
+                    '"requires_user_confirmation": false',
+                    '"requires_user_confirmation": true',
+                ),
+                "NEEDS_HUMAN",
+            ),
+            (
+                parked.replace('"external_wait": false', '"external_wait": true'),
+                "WAIT_EXTERNAL",
+            ),
+            (
+                parked.replace(
+                    '"external_wait": false', '"external_wait": true'
+                ).replace(
+                    '"requires_user_confirmation": false',
+                    '"requires_user_confirmation": true',
+                ),
+                "NEEDS_HUMAN",
+            ),
+            (parked.replace('"external_wait": false', '"external_wait": false, "blocked_by": ["o/r#1"]'), "NEEDS_EVIDENCE"),
+            (parked.replace('"record_role": "TASK"', '"record_role": "TRACKER"'), "NEEDS_EVIDENCE"),
+            (parked.replace('"work_status": "PARKED"', '"work_status": "BLOCKED"'), "NEEDS_EVIDENCE"),
+            (parked.replace('"work_status": "PARKED"', '"work_status": "IMPLEMENTING"'), "NEEDS_EVIDENCE"),
+            (parked.replace('"work_status": "PARKED"', '"work_status": "READY_FOR_IMPLEMENTATION"'), "NEEDS_EVIDENCE"),
+        ]
+        for index, (payload, expected) in enumerate(scenarios):
+            with self.subTest(case=index):
+                record = repository_projection.classify_issue(
+                    self._issue(70 + index, body=block(payload))
+                )
+                self.assertEqual("MACHINE", record.source_kind)
+                self.assertEqual(expected, record.attention_disposition)
+
     def test_invalid_explicit_metadata_is_needs_evidence(self):
         record = repository_projection.classify_issue(
             self._issue(31, body=f"{BEGIN}\n{{bad}}\n{END}")
