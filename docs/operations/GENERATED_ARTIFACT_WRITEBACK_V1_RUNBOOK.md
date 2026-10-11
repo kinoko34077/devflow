@@ -1,6 +1,6 @@
 # 検証済み生成物の書戻し v1 — 安全運用・監査Runbook
 
-**適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S3 Exit／S4／S5の正式判定は最後のCaller postmain両OS CIを含むGate完了までHOLD**。以下の旧草案部分は履歴として保持する。  
+**適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S3 Exit／S4は実証・独立Review・JO Caller postmain両OS CIを満たして受入済み**（[S3親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106230186)／[S4親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106251550)）。**S5は本Runbookと仕様のPR統合・統合後CI・Control/Issue整合によって独立判定する**。以下の旧草案部分は履歴として保持する。  
 **trusted devflow pin:** `f886877e7110f2499125ecc6e07294798c33fe93`。JO CallerはこのSHAを`uses`／`devflow_sha`へ両方固定し、devflow mainへの別案件コミットで自動更新しない。
 
 ## 実証済みの安全運用と再開条件（2026-10-11）
