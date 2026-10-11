@@ -1,3 +1,23 @@
+# 検証済み生成物の書戻し v1 — 安全運用・監査Runbook
+
+**適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S3 Exit／S4／S5の正式判定は最後のCaller postmain両OS CIを含むGate完了までHOLD**。以下の旧草案部分は履歴として保持する。  
+**trusted devflow pin:** `f886877e7110f2499125ecc6e07294798c33fe93`。JO CallerはこのSHAを`uses`／`devflow_sha`へ両方固定し、devflow mainへの別案件コミットで自動更新しない。
+
+## 実証済みの安全運用と再開条件（2026-10-11）
+
+1. **通常起動:** JO main Callerの手動`workflow_dispatch`、`mode=dry-run|write`、対象PR branch・正確な`expected_head`を指定。実行対象は許可レシピとJSON1件に限定し、repo/actor/branch/PR/保護状態をGitHub APIで再認証する。想定外のmodeはCaller job-level allowlistでSKIPPEDとなる。SKIPPEDは**受入成功の証拠ではない**。
+2. **権限分離:** produceはreadのみ・secretsなし、固定recipe生成物を検証してZIP+manifestへ梱包する。writerのみ`contents:write`、`actions:read`、`pull-requests:read`。writerは未信頼のZIPやJO sourceのコードを実行せず、認証したfirst-party run/attempt＋Caller SHA/pin＋ZIP/path/mode/digestを検証する。
+3. **更新と競合:** 1 open same-repo PR＋expected HEAD、未保護scratch branchでCAS更新。commit parentはexpected HEAD、`force:false`、事後readback必須。競合/不明結果は停止し、新たな受入なしで再実行しない。
+4. **同一receiptの重複防止:** 受入専用`write-replay-test`は一時的な限定モードで実証を終えた。Run [#38072681245](https://github.com/kinoko34077/japanese-orthography/actions/runs/38072681245)は初回`COMMITTED`→同一runner/run/attempt/manifestで2回目`NO_OP_REPLAY`、追加書込0。**恒常Callerには同モードを残さない**。[PR #308](https://github.com/kinoko34077/japanese-orthography/pull/308)でUI選択肢とAPI経由のジョブ起動可能性をともに除去済み。
+5. **exact writer HEADのテスト:** token書込は通常のPR CIを自動起動しない。またPRイベントの通常checkoutは仮想マージになる場合がある。受入では一時的read-only手動[Verify #38078533001](https://github.com/kinoko34077/japanese-orthography/actions/runs/38078533001)のpilot-head両OSがwriter commit`87557afe9d3585252c94cf5352515943323dd708`を直接checkoutし、SHA assert→全check→Ubuntu buildを成功させた。GitHub run自体のhead SHA（手動起動元main）とは区別。通常運用で必要な場合も、権限変更なく**実際のcheckout SHA**で必要CIを判定する。
+6. **rollbackと清掃:** 非強制復旧commit`ce4042b9868141f5b0736b1063a22a2748d721c5`の親はwriter commitのみ、変更JSON1件で元blobへ復元。scratch PR#304は未統合Close。臨時Verify入口は[PR #307](https://github.com/kinoko34077/japanese-orthography/pull/307)で旧blobへ完全復元し、postmain [#38113279718](https://github.com/kinoko34077/japanese-orthography/actions/runs/38113279718) Ubuntu/Windows成功。Callerの一時Replayモード撤去後のmain CI [#38116891632](https://github.com/kinoko34077/japanese-orthography/actions/runs/38116891632)を必ず照合する。
+7. **負例と制約:** fork/偽run/actor/recipe/source/ZIP path・symlink・submodule・ZIP bomb・stale HEAD/race/replayの負例はdevflow全862 tests中の87 unit/staticで検証し、旧stale HEAD拒否Run [#37976552219](https://github.com/kinoko34077/japanese-orthography/actions/runs/37976552219)で実際のfail-closedも検証済み。Unit/staticの成功を、危険な特権live payload投入の成功と偽らない。ほかのrepoやrecipeへの展開・credential・settings・deploy等は別Human gate。
+8. **完了判定:** 初期PilotのS3 ExitはJO Owner #300とdevflow #415のrun/commit/review/CI/rollback/清掃の全根拠を読み直してから親#384へ記録。S4は独立Review・統合済コードのexact SHAとpostmain CI・権限境界を新規監査。S5は受入条件が揃ってから仕様、Runbook、両Control、3つのIssue/Cursorへ確定情報だけを反映。S3成功とS4／S5は独立の状態であり、一般展開#386は自動受入しない。
+
+---
+
+## 以下はS2〜S3計画時点の歴史的草案（現在の受入状態ではない）
+
 # 検証済み生成物の書戻し v1 — 安全運用・監査Runbook（受入前草案）
 
 **正本:** devflow #384、設計契約 \`docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md\`。  
