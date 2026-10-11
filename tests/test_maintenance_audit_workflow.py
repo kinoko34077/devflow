@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -128,6 +129,48 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertIn("--apply", job)
         self.assertNotIn("schedule:", job)
         self.assertNotIn("issues: write", job)
+
+    def test_supply_secret_is_scoped_only_to_three_main_only_environment_jobs(self):
+        # This is a source contract check; GitHub's main-only environment
+        # branch policy and secret inventory require independent API readback.
+        sections = re.split(r"\n  ([a-z][a-z0-9-]*):\n", "\n" + self.text)[1:]
+        jobs = dict(zip(sections[::2], sections[1::2]))
+        secret_reference = (
+            "MAINTENANCE_SUPPLY_TOKEN: "
+            "${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}"
+        )
+        protected_jobs = {
+            "publish",
+            "catalog-maintenance-publish",
+            "catalog-maintenance-complete",
+        }
+
+        self.assertEqual(3, self.text.count(secret_reference))
+        for name, source in jobs.items():
+            with self.subTest(job=name):
+                if name in protected_jobs:
+                    self.assertIn("    environment:\n      name: maintenance-supply\n      deployment: false", source)
+                    self.assertIn("github.ref == 'refs/heads/main'", source)
+                    self.assertIn("github.event_name == 'workflow_dispatch'", source)
+                    self.assertIn(secret_reference, source)
+                    self.assertNotIn("schedule:", source)
+                else:
+                    self.assertNotIn(secret_reference, source)
+                    self.assertNotIn("name: maintenance-supply", source)
+
+    def test_manual_publish_and_withdraw_cannot_be_selected_on_non_main_refs(self):
+        self.assertIn(
+            "inputs.mode == 'publish' && github.ref == 'refs/heads/main'",
+            self.publish,
+        )
+        catalog = self.text.split("\n  catalog-maintenance-publish:\n", 1)[1].split(
+            "\n  catalog-maintenance-complete:\n", 1
+        )[0]
+        self.assertIn(
+            "(inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw')"
+            " && github.ref == 'refs/heads/main'",
+            catalog,
+        )
 
     def test_manual_trusted_catalog_completion_is_dispatch_only_and_fail_closed(self):
         self.assertIn('- maintenance-complete', self.text)
