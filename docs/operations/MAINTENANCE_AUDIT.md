@@ -147,7 +147,7 @@ The implementation may consume already-approved secrets:
 
 - `MAINTENANCE_AUDIT_TOKEN` for cross-repository read-only portfolio audit;
 - `MAINTENANCE_SYNC_TOKEN` for explicit manual sync-check apply;
-- `MAINTENANCE_SUPPLY_TOKEN` for explicit manual supply publication/withdrawal.
+- `MAINTENANCE_SUPPLY_TOKEN` for explicit manual supply publication, withdrawal, and trusted catalog-run completion; this is not a scheduler/automatic completion credential.
 
 Absence of a required credential is a blocker. The automation must not create, broaden, or replace credentials.
 
