@@ -1,6 +1,6 @@
 # Review-only template for devflow#465 R1.
 # NO TARGET CALLER IS INSTALLED, ENABLED OR AUTHORIZED BY THIS TEMPLATE.
-# Only the exact bytes produced by substituting <DEVFLOW_SHA> are acceptable.
+# Only the exact bytes produced by substituting the reviewed SHA marker are acceptable.
 name: Verified artifacts rollout (IDS only)
 
 on:
