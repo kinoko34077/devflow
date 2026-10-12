@@ -435,6 +435,17 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "https://github.com/kinoko34077/demo/issues/1"
         ])
         self.assertEqual(len(crosscheck["manual_linked_local_issues"]), 2)
+        self.assertEqual(crosscheck["manual_qualified_local_issue_refs"], [])
+        self.assertEqual(crosscheck["manual_candidate_local_issue_refs"], [
+            "https://github.com/kinoko34077/demo/issues/1",
+            "https://github.com/kinoko34077/demo/issues/99",
+        ])
+        self.assertEqual(crosscheck["manual_refs_not_known_machine_tasks"], [
+            "https://github.com/kinoko34077/demo/issues/99",
+        ])
+        self.assertEqual(crosscheck["known_machine_tasks_not_manually_referenced"], [
+            "https://github.com/kinoko34077/demo/issues/2",
+        ])
         self.assertFalse(crosscheck["semantic_equivalence_proven"])
         self.assertFalse(parallel["can_replace_manual_active_work"])
         self.assertFalse(parallel["can_authorize_execution"])
@@ -455,6 +466,35 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(parallel["link_crosscheck"]["linked_known_machine_tasks"], [])
         self.assertFalse(parallel["can_replace_manual_active_work"])
 
+    def test_m3_reference_comparison_accepts_local_shorthand_not_crossrepo_or_partial_urls(self):
+        control = self._control("demo", 70)
+        control["body"] += (
+            "\n## Active Work\n\n"
+            "Actual demo#1 / kinoko34077/demo#2; "
+            "foreign other#3 and kinoko34077/other#4; "
+            "invalid https://github.com/kinoko34077/demo/issues/1typo "
+            "and https://github.com/kinoko34077/demo/issues/2/edit; "
+            "actual https://github.com/kinoko34077/demo/issues/12.\n"
+        )
+        tasks = [self._task_issue(number) for number in (1, 2, 12)]
+        view = devflow_mcp_core.DevflowService(FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": tasks,
+        })).get_repository_work_view("demo")
+        comparison = view["parallel_read"]["link_crosscheck"]
+        self.assertEqual(comparison["manual_linked_local_issues"], [
+            "https://github.com/kinoko34077/demo/issues/12",
+        ])
+        self.assertEqual(comparison["manual_qualified_local_issue_refs"], [
+            "https://github.com/kinoko34077/demo/issues/1",
+            "https://github.com/kinoko34077/demo/issues/2",
+        ])
+        self.assertEqual(len(comparison["linked_known_machine_tasks"]), 3)
+        self.assertEqual(comparison["known_machine_tasks_not_manually_referenced"], [])
+        self.assertEqual(comparison["manual_refs_not_known_machine_tasks"], [])
+        self.assertFalse(comparison["semantic_equivalence_proven"])
+        self.assertFalse(view["parallel_read"]["can_replace_manual_active_work"])
+
     def test_m3_parallel_unavailable_is_unknown_not_empty(self):
         control = self._control("demo", 70)
         class Unavailable(FakeReader):
@@ -470,6 +510,8 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertIsNone(parallel["machine"]["tasks"])
         self.assertIsNone(parallel["machine"]["unresolved_open_issue_count"])
         self.assertIsNone(parallel["link_crosscheck"]["linked_known_machine_tasks"])
+        self.assertIsNone(parallel["link_crosscheck"]["manual_refs_not_known_machine_tasks"])
+        self.assertIsNone(parallel["link_crosscheck"]["known_machine_tasks_not_manually_referenced"])
         self.assertFalse(parallel["link_crosscheck"]["semantic_equivalence_proven"])
         self.assertFalse(parallel["can_replace_manual_active_work"])
 
