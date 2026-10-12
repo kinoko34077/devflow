@@ -137,6 +137,33 @@ Use the repository's own template when present. Otherwise include, at minimum:
 
 Repository-local naming does not have to be exactly `Work Order:`. Information ownership matters more than identical labels.
 
+### 4.0a Adopted M3 A–E lazy role normalization (R1)
+
+As of 2026-10-12 the adopted [A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md) requires **new** and **meaningfully edited** active repository-local Issues to receive machine-role metadata when the genuine role/status/gates are known. This does not require mass backfill, comment-only churn, Issue-close rewrites or turning title hints into runnable tasks. Do not edit another worker's active Issue merely to improve coverage.
+
+During current V1 adoption, produce the complete accepted `DEVFLOW_REPOSITORY_ISSUE_METADATA_V1` object, preserving existing Issue prose. devflow supplies the **pure, no-GitHub-write** `tools.repository_projection.upsert_issue_metadata_v1(body, payload)` helper, which:
+- validates every required field/type/status/bool against the shared workflow contract;
+- appends exactly one metadata block or replaces the existing valid block without modifying surrounding text;
+- refuses malformed/duplicate existing markers, missing fields and future-version markers rather than overwriting evidence;
+- does **not** verify Issue ownership, author trust, actual status truth or authorize any work. Those checks remain with the caller and the canonical Issue.
+
+Example for a **real** TASK, only when the actual Issue evidence supports it (do not copy readiness blindly):
+
+```python
+from tools.repository_projection import upsert_issue_metadata_v1
+
+payload = {
+    "schema_version": 1, "record_role": "TASK", "type": "BUG",
+    "work_status": "IMPLEMENTING", "scope_ready": True,
+    "requires_user_confirmation": False, "external_wait": False,
+}
+new_body = upsert_issue_metadata_v1(current_issue_body, payload)
+# Review exact diff, author/owner and gates BEFORE a separate authorized GitHub Issue update.
+```
+
+For TRACKER/REFERENCE/SYSTEM, current V1 still requires explicit type/status/gate fields. Future lightweight non-TASK R3/V2 adoption is separately tested and not implicitly supplied by this helper. For an unresolved or untrusted Issue, leave it visible as legacy/unclassified/invalid and preserve the manual fallback.
+
+
 ### 4.1 Manual Execution Session Record
 
 For non-trivial agent work likely to span multiple tool calls, commits, sessions, PR/review/CI waits, or parallel workers, keep one worker-owned Execution Session Record on the owning Issue / Work Order, normally as one top-level Issue comment that the same session updates in place.
