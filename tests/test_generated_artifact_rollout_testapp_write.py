@@ -3,6 +3,7 @@ import pathlib
 import unittest
 
 from tools.generated_artifact_contract import ArtifactRejected
+from tools import generated_artifact_rollout_testapp_write as scoped_writer
 from tools.generated_artifact_rollout_testapp_write import NarrowTestappWriteApi, execute_testapp_scoped_write
 
 
@@ -23,6 +24,16 @@ class DummyTransport:
 
 class NarrowMutationTests(unittest.TestCase):
     branch = "artifact/writeback-testapp/e2e-20261012"
+    def test_only_explicitly_approved_testapp_recipe_has_r2_activation(self):
+        self.assertEqual(
+            scoped_writer._ACTIVATED_WRITER_RECIPES,
+            frozenset({("kinoko34077/testapp", "testapp-public-fixture-v1")}),
+        )
+        self.assertNotIn(
+            ("kinoko34077/IDS-Composit", "ids-known-merge-v0.2"),
+            scoped_writer._ACTIVATED_WRITER_RECIPES,
+        )
+
 
     def test_only_exact_branch_fast_forward_and_git_object_creation(self):
         api = DummyTransport()
