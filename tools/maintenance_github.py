@@ -578,6 +578,110 @@ def _active_owner_ref(
 
 
 
+def _m3_owner_shadow(
+    work_view: object,
+    *,
+    repository: str,
+    control_ref: str,
+    sections: Mapping[str, str],
+    trusted: bool,
+    source_status: str,
+    manual_owner_ref: str | None,
+) -> dict[str, object]:
+    """Compare a live all-state M1 read view to legacy single-owner evidence.
+
+    Strictly observational. Never use this result for Maintenance classification,
+    task supply, execution claims or authority removal.
+    """
+    def fallback(reason: str) -> dict[str, object]:
+        return {
+            "status": "MANUAL_CONTROL_FALLBACK",
+            "reason": reason,
+            "machine_task_refs": [],
+            "manual_owner_ref": manual_owner_ref,
+            "can_replace_manual_active_work": False,
+        }
+
+    if not trusted or source_status != "OK":
+        return fallback("CONTROL_OR_OWNER_NOT_VERIFIED")
+    if not isinstance(work_view, Mapping):
+        return fallback("INVALID_WORK_VIEW")
+    control_repo, control_number = _split_ref(control_ref)
+    if (
+        work_view.get("repository") != repository
+        or work_view.get("control_ref") != (
+            f"https://github.com/{control_repo}/issues/{control_number}"
+        )
+    ):
+        return fallback("CONTROL_IDENTITY_MISMATCH")
+    manual = work_view.get("manual_control")
+    if not isinstance(manual, Mapping) or (
+        manual.get("active_work") != sections.get("Active Work", "")
+        or manual.get("next_action") != sections.get("Next Action", "")
+    ):
+        return fallback("MANUAL_CONTROL_REVISION_MISMATCH")
+    if (
+        work_view.get("source_status") != "AVAILABLE"
+        or work_view.get("source_freshness") != "CURRENT"
+        or work_view.get("source_error") is not None
+        or work_view.get("coverage_status") != "COMPLETE"
+        or work_view.get("view_mode") != "MACHINE_COMPLETE_SHADOW"
+        or work_view.get("can_replace_manual_active_work") is not False
+        or any(
+            work_view.get(key) != 0
+            for key in (
+                "legacy_hint_count", "unclassified_count",
+                "invalid_metadata_count", "untrusted_metadata_count",
+            )
+        )
+    ):
+        return fallback("INCOMPLETE_OR_UNTRUSTED_SOURCE")
+
+    records = work_view.get("task_records")
+    count = work_view.get("machine_task_count")
+    if (
+        not isinstance(records, list)
+        or not isinstance(count, int) or isinstance(count, bool)
+        or count < 0 or len(records) != count
+    ):
+        return fallback("TRUNCATED_OR_INVALID_TASK_LIST")
+
+    refs: list[str] = []
+    for item in records:
+        if not isinstance(item, Mapping):
+            return fallback("INVALID_TASK_RECORD")
+        number = item.get("issue_number")
+        if (
+            not isinstance(number, int) or isinstance(number, bool)
+            or number < 1 or item.get("record_role") != "TASK"
+            or item.get("source_kind") != "MACHINE"
+            or item.get("url") != f"https://github.com/{repository}/issues/{number}"
+            or not isinstance(item.get("work_status"), str)
+            or not item["work_status"]
+        ):
+            return fallback("INVALID_TASK_RECORD")
+        refs.append(f"{repository}#{number}")
+    if len(refs) != len(set(refs)):
+        return fallback("DUPLICATE_TASK_RECORD")
+
+    # A complete multi-TASK view is not a unique Maintenance owner.
+    if len(refs) > 1:
+        status, reason = "MULTIPLE_TASKS_SHADOW", "ONE_OWNER_CONTRACT_INSUFFICIENT"
+    elif len(refs) == 1 and manual_owner_ref == refs[0]:
+        status, reason = "MATCHED_SHADOW", "SAME_SINGLE_OWNER"
+    elif not refs and manual_owner_ref is None:
+        status, reason = "MATCHED_EMPTY_SHADOW", "NO_OPEN_TASKS"
+    else:
+        status, reason = "DIVERGENT_SHADOW", "MANUAL_MACHINE_OWNER_DISAGREEMENT"
+    return {
+        "status": status,
+        "reason": reason,
+        "machine_task_refs": refs,
+        "manual_owner_ref": manual_owner_ref,
+        "can_replace_manual_active_work": False,
+    }
+
+
 def _expected_issue_url(repository: str, number: int) -> str:
     return f"https://github.com/{repository}/issues/{number}"
 
@@ -653,6 +757,8 @@ def collect_repository(
     repository: str,
     control_ref: str,
     observed_at: str,
+    *,
+    m3_work_view: object | None = None,
 ) -> dict[str, object]:
     try:
         control_repo, control_number = _split_ref(control_ref)
@@ -728,7 +834,7 @@ def collect_repository(
 
     if owner_ref is None:
         control_revision = _issue_revision(control)
-        return {
+        result: dict[str, object] = {
             "repository": repository,
             "observed_at": observed_at,
             "control_count": 1,
@@ -757,6 +863,13 @@ def collect_repository(
             "search_state": None,
             "evidence_refs": [control_ref],
         }
+        if m3_work_view is not None:
+            result["m3_shadow"] = _m3_owner_shadow(
+                m3_work_view, repository=repository, control_ref=control_ref,
+                sections=sections, trusted=trusted, source_status=source_status,
+                manual_owner_ref=None,
+            )
+        return result
 
     owner_repo, owner_number = _split_ref(owner_ref)
     try:
@@ -801,7 +914,7 @@ def collect_repository(
     producer_active = work_status == "IMPLEMENTING"
     reviewer_gate = work_status == "AWAITING_REVIEW"
 
-    return {
+    result: dict[str, object] = {
         "repository": repository,
         "observed_at": observed_at,
         "control_count": 1,
@@ -830,6 +943,13 @@ def collect_repository(
         "search_state": None,
         "evidence_refs": [control_ref, owner_ref],
     }
+    if m3_work_view is not None:
+        result["m3_shadow"] = _m3_owner_shadow(
+            m3_work_view, repository=repository, control_ref=control_ref,
+            sections=sections, trusted=trusted, source_status=source_status,
+            manual_owner_ref=owner_ref,
+        )
+    return result
 
 
 def collect_portfolio(
