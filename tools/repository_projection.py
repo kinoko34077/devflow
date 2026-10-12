@@ -259,7 +259,7 @@ def _validate_v2_non_task_payload(payload: dict[str, Any]) -> IssueMetadata:
     if type(version) is not int or version != 2:
         raise ProjectionContractError(f"unsupported V2 schema_version: {version!r}")
     role = payload["record_role"]
-    if role not in {"TRACKER", "REFERENCE", "SYSTEM"}:
+    if not isinstance(role, str) or role not in {"TRACKER", "REFERENCE", "SYSTEM"}:
         raise ProjectionContractError("V2 is restricted to non-TASK record_role")
     attention = payload["attention"]
     if not isinstance(attention, str) or attention not in _V2_NON_TASK_ATTENTIONS:
