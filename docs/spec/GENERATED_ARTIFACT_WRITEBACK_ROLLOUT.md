@@ -66,10 +66,10 @@ writerはmanifestをauthorityに昇格せず、GitHub RESTとtrusted registryか
 
 ## 5. 初期候補・導入順
 
-1. [IDS-Composit #11](https://github.com/kinoko34077/IDS-Composit/issues/11)：`known:merge` で `data/known/generated/known-index-v0.2.json` と `data/known/reports/known-index-v0.2.json` を生成。入力3種類のsource artifactは固定source/provenanceが存在するが、実バイト数とnotice/許容path/limitはこれから確定する。初回は正確な**一つの許容path**から検討。CHISE入力6,130,537 bytesはあくまで別ファイルの実績であり、merged出力サイズとして流用しない。main pushはPages公開を誘発するため、merge/deployのHuman gateを維持。
-2. `kinotch-api`：`build:text-snapshot` により `src/text-core/rules.generated.mjs`、`metadata.generated.mjs` 等を生成。Nodeの要求は **26.10.x** であり、旧JO reusable jobの固定Node22をそのまま利用できない。source lockと既存#9 credential事項とは別作業で検証。少数のUTF-8更新ならGitHub Contents APIの方が単純な可能性があるため、byte量/更新頻度/多ファイル数から便益を判定し、不必要ならPilot候補を差し替える。
-3. `standby-display`：`kinotch-api`ソースから2 clientとsha256 2件を同期。cross-repo source lockとmainのProduction/Pages公開境界が増えるためReserveとする。
-4. その他repo: 大容量で再生成可能な**Git管理対象**の正確なartifactが検証できるまで未登録。研究snapshot、秘密情報、ユーザー入力、通常のdistや一時実行ログを自動的に許可しない。
+1. [IDS-Composit #11](https://github.com/kinoko34077/IDS-Composit/issues/11)：`known:merge` で `data/known/generated/known-index-v0.2.json` と `data/known/reports/known-index-v0.2.json` を生成。入力3種類のsource artifactは固定source/provenanceを保つ。2026-10-12のGitHub Contents読取で、**merged JSON = 12,932,054 bytes、対応report = 5,341,134 bytes、合計 = 18,273,188 bytes**と判明（実データはファイル別Git blob）。生成scriptはこの2 pathを同時に出力するため、片側だけを受入対象にせず、source一致とoutput検証を確認して**原子的な2-path候補**として評価する。CHISE入力は6,130,537 bytesでありmerged JSONとは区別。size limitは実生成と容量安全証拠に基づき別途固定し、JO 1MiB上限を暗黙再利用しない。GitHub APIでは公開repo rulesets=空配列を観測したがmain protection取得はpermission不足403、**protection状態はUNVERIFIED**。main pushはPages公開を誘発するため、merge/deployのHuman gateを維持。
+2. `kinotch-api`：`build:text-snapshot` は複数の生成ファイルを出力するが、GitHub Contentsで確認した `rules.generated.mjs` は21,427 bytes、`metadata.generated.mjs` は511 bytes、`text-transform.iife.js` は10,922 bytes。通常のGitHub Contents/Git Data APIで十分処理可能な規模なので**Wave2確定から除外し、導入便益は未成立**。Node要求も26.10.xと既存JO workflow Node22が異なる。source lock・auth#9に影響する拡張を行わない。
+3. `standby-display`：`kinotch-api`ソースから2 clientとsha256 2件を同期するが、主要ファイルは約10.7KB・6.6KBで通常API更新が可能。cross-repo source lockとmainのProduction/Pages公開境界も増えるため**書戻しPilotとしては後順位**。
+4. `txt-auto-replace` は大容量binary辞書を保有するが、第三者由来圧縮辞書はrepoで決定的再生成された成果物と未証明。既存再分類scriptにmachine固有Downloads絶対pathがあり、現在のままGitHub Actions recipeにできない。**第二Pilotには不採用**。その他repoも大容量で再生成可能な**Git管理対象**の正確なartifactが検証できるまで未登録。研究snapshot、秘密情報、ユーザー入力、通常のdistや一時実行ログを自動的に許可しない。
 
 ## 6. 自動テスト・受入基準
 
