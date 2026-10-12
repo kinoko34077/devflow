@@ -1,6 +1,6 @@
 # Repository Projection M3 — staged removal of duplicate manual local-work state
 
-Status: **M3 PREFLIGHT / SHADOW ONLY — authority transition not admitted**  
+Status: **M3.2/M3.5 ACCEPTED; M3.1 AUTHORITY TRANSITION NOT ADMITTED**  
 Owner: [devflow #326](https://github.com/kinoko34077/devflow/issues/326)  
 Bounded implementation/evidence: [devflow #452](https://github.com/kinoko34077/devflow/issues/452)  
 Accepted authority direction: [devflow #325](https://github.com/kinoko34077/devflow/issues/325)  
@@ -24,7 +24,7 @@ A real, owner-authored M3 work item [devflow #452](https://github.com/kinoko3407
 
 In both runs devflow had **78 open Issues, 2 machine records (1 TASK and 1 TRACKER), 3 legacy hints, 73 unclassified, 0 invalid/untrusted**; `coverage.status=INCOMPLETE`, `coverage.can_replace_manual_active_work=false`. Only the **owning Issue** changed its work state; central fenced Producer updated generated marker blocks. No manual Control `Active Work` edit was necessary for this step. Evidence of automatic projection is not proof that manual fields can already be removed.
 
-The rest of this Issue's true REVIEW/terminal lifecycle, if reached, must be evaluated against a fresh native producer and noncolliding consumers; do not assign fictitious statuses to generate test cases.
+The genuine end-to-end continuation was accepted in existing testapp#30 (not a fabricated TASK): READY → IMPLEMENTING → AWAITING_REVIEW → DONE while open → CLOSED, with an intentionally unclassified non-TASK #31 forcing MANUAL_CONTROL_FALLBACK and COMPLETE recovery after its closure. Seven native targeted central M2/HP runs succeeded; final run [#38215794587](https://github.com/kinoko34077/devflow/actions/runs/38215794587) returned zero open Issues/TASKs and COMPLETE coverage. Full-state live MCP retained REVIEW/DONE even when compact M2 summary omitted them; manual Control Active Work and Next Action were never rewritten. This **accepts M3.5 only**, not automatic local-task authority retirement. Evidence: [#326](https://github.com/kinoko34077/devflow/issues/326#issuecomment-6119448084), [#452](https://github.com/kinoko34077/devflow/issues/452#issuecomment-6119459075).
 
 ## 3. M3 per-repository admission — fail closed
 
@@ -57,7 +57,7 @@ A zero-open-task repository can still have complete machine coverage, but **zero
 
 ## 5. Stage sequencing and milestone acceptance
 
-- **M3.5 evidence first:** #452 genuine READY→IMPLEMENTING native cache and Human Portfolio proof accepted. Need terminal/closed source re-read and negative stale/legacy/gate cases, not merely a mock.
+- **M3.5 ACCEPTED:** testapp#30 genuine full lifecycle, temporary #31 negative fallback/recovery, final zero-open full-state read and all seven native producer runs accepted. Do not repeat the E2E without a concrete new defect.
 - **M3.2 independently admissible:** remove only the redundant `Detailed Current State` heading from new Control requirements/templates/bootstrap while preserving legacy reads and canonical entry references; do not remove active-work authority as a side effect. **M3.3 preparation:** narrow `Next Action` to cross-repo/Human/policy only after real local task sources and relevant consumers are admitted; until then existing Controls and manual next actions remain valid.
 - **M3.4 + M3.6 staged consumer migration:** after per-repo admission, switch read precedence under a feature/transition rule with explicit fallback; align AGENTS, bootstrap, Control templates, MCP, Repo Monitor and Project/maintenance consumers in dependency order; verify actual old and new Controls.
 - **M3.1 authority retirement:** stop treating manual local `Active Work` as source of local TASK truth **only for explicitly verified cohorts**. Do not delete owner/provenance information that has an independent cross-repository role.
@@ -68,7 +68,7 @@ Each milestone receives an evidence pointer, review classification under accepte
 
 ## 6. Current decision and resume
 
-**GO:** continue #452 real TASK lifecycle, read-only shadow reconciliation and narrow source/test/docs updates that are justified by an unmet M3 criterion.  
+**GO:** evaluate bounded M3.1 admission on verified current real repository sources; independently repair concrete M3.4/3.6 contract/consumer drift without recreating accepted lifecycle tests.  
 **HOLD:** broad manual Active Work/Current State/Next Action removal, fleet-wide admission and cache flag flips while source coverage/consumer or trust evidence is incomplete.  
 **SPLIT:** a concrete consumer integration failure to its owning repository Issue; do not take over other active workers.  
 **STOP:** redundant synthetic tasks, second classifier/database, speculative zero-value tests, uncontrolled cross-repository rewrite and unrelated M4 work.

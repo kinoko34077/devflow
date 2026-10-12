@@ -176,8 +176,9 @@ repository_control:
     - audit_sha
     - active_work
     - next_action
-    - detailed_current_state
     - canonical_entry_points
+  optional_legacy_fields:
+    - detailed_current_state
   update_when:
     - accepted_audit_sha_changes
     - accepted_audit_provenance_changes
