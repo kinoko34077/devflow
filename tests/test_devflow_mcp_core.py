@@ -354,6 +354,80 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertNotIn(26, compact_refs)
         self.assertFalse(cached["coverage"]["can_replace_manual_active_work"])
 
+    def test_m3_local_work_view_all_status_shadow_never_grants_cutover(self):
+        control = self._control("demo", 70)
+        control["body"] += (
+            "\n## Active Work\n\nLegacy summary.\n"
+            "\n## Next Action\n\nKeep the human boundary.\n"
+            "\n## Canonical Entry Points\n\n- README.md\n"
+        )
+
+        def task(number, status):
+            issue = self._task_issue(number)
+            return {
+                **issue,
+                "body": issue["body"].replace(
+                    '"work_status": "READY_FOR_IMPLEMENTATION"',
+                    f'"work_status": "{status}"',
+                ),
+            }
+
+        issues = [*(task(n, "READY_FOR_IMPLEMENTATION") for n in range(1, 23))]
+        issues.extend([task(23, "AWAITING_REVIEW"), task(24, "BLOCKED")])
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": issues,
+        })
+        view = devflow_mcp_core.DevflowService(
+            reader, observed_at_factory=lambda: "2026-10-04T04:00:00Z"
+        ).get_repository_work_view("demo")
+        self.assertEqual(view["view_mode"], "MACHINE_COMPLETE_SHADOW")
+        self.assertEqual(view["coverage_status"], "COMPLETE")
+        self.assertEqual(view["machine_task_count"], 24)
+        self.assertEqual(len(view["task_records"]), 24)
+        self.assertEqual(view["task_records"][22]["work_status"], "AWAITING_REVIEW")
+        self.assertEqual(view["task_records"][23]["work_status"], "BLOCKED")
+        self.assertEqual(view["manual_control"]["active_work"], "Legacy summary.")
+        self.assertEqual(view["manual_control"]["next_action"], "Keep the human boundary.")
+        self.assertFalse(view["can_replace_manual_active_work"])
+        self.assertNotIn("body", view["task_records"][0])
+
+    def test_m3_local_work_view_partial_and_untrusted_fall_back(self):
+        control = self._control("demo", 70)
+        issue = self._task_issue(1)
+        unknown = self._task_issue(2, author_association="NONE")
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [issue, unknown],
+        })
+        view = devflow_mcp_core.DevflowService(reader).get_repository_work_view("demo")
+        self.assertEqual(view["view_mode"], "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(view["coverage_status"], "INCOMPLETE")
+        self.assertEqual(view["machine_task_count"], 1)
+        self.assertEqual(view["untrusted_metadata_count"], 1)
+        self.assertEqual(len(view["task_records"]), 1)
+        self.assertFalse(view["can_replace_manual_active_work"])
+
+    def test_m3_local_work_view_unavailable_falls_back_not_empty_success(self):
+        control = self._control("demo", 70)
+
+        class Unavailable(FakeReader):
+            def list_issues(self, repository, state="open"):
+                if repository == "kinoko34077/demo":
+                    raise devflow_mcp_core.DevflowMCPError("source unavailable")
+                return super().list_issues(repository, state=state)
+
+        view = devflow_mcp_core.DevflowService(
+            Unavailable([], issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            })
+        ).get_repository_work_view("demo")
+        self.assertEqual(view["coverage_status"], "UNAVAILABLE")
+        self.assertEqual(view["source_error"], "source unavailable")
+        self.assertEqual(view["view_mode"], "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(view["task_records"], [])
+        self.assertFalse(view["can_replace_manual_active_work"])
+
     def test_repository_projection_requires_managed_control(self):
         reader = FakeReader(
             [],
@@ -466,6 +540,7 @@ class RepositoryProjectionMCPEntrypointTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "tools" / "devflow_mcp.py"
         ).read_text(encoding="utf-8")
         self.assertIn("def get_repository_projection(repository: str)", source)
+        self.assertIn("def get_repository_work_view(repository: str)", source)
         self.assertIn("def get_portfolio_projection()", source)
         self.assertNotIn("def update_repository_projection(", source)
         self.assertNotIn("def write_repository_projection(", source)
