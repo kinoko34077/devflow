@@ -30,7 +30,7 @@ If no Repository Control Issue exists, do not invent managed state. Treat onboar
 
 ### MCP-capable clients
 
-If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work.
+If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work. When resolving repository-local **open tasks**, call the read-only `get_repository_work_view` after bootstrap if available: it exposes all open machine TASK states and retains explicit manual Control fallback. Neither `MACHINE_COMPLETE_SHADOW` nor a visible READY entry grants runtime claim or authority removal; incomplete/unavailable/untrusted status means preserve the manual Control view and inspect owning Issues directly. A bot-authored Control without a verified bootstrap chain is not canonical merely because it has a `[REPO]` title or an older cached `VERIFIED` marker.
 
 The MCP is a read-only access layer to the same live GitHub canon. It does not replace this file, the Control Issue, or repository-local technical truth. Setup and client trigger instructions are in `docs/operations/DEVFLOW_MCP.md`.
 
