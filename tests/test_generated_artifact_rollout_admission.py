@@ -58,12 +58,15 @@ class FakeGitHubReader:
 
 class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
     def check(self, api=None, environment=None, **overrides):
+        params = {
+            "repository": REPO, "recipe_id": RECIPE,
+            "target_branch": BRANCH, "expected_head": SHA, "source_head": SHA,
+            "devflow_sha": SHA, "devflow_checkout_sha": SHA,
+            "trusted_template": TEMPLATE,
+        }
+        params.update(overrides)
         return auth.attest_authenticated_readonly(
-            api or FakeGitHubReader(), environment or env(),
-            repository=REPO, recipe_id=RECIPE,
-            target_branch=BRANCH, expected_head=SHA, source_head=SHA,
-            devflow_sha=SHA, devflow_checkout_sha=SHA,
-            trusted_template=TEMPLATE, **overrides,
+            api or FakeGitHubReader(), environment or env(), **params,
         )
 
     def test_positive_three_independent_rest_reads_and_no_write(self):
@@ -83,11 +86,11 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
         original = auth.exact_caller_text(TEMPLATE, SHA)
         changes = [
             original.replace(f"@{SHA}", "@main"),
-            original.replace(f"devflow_sha: {SHA}", "devflow_sha: " + "a" * 40),
+            original.replace(f"devflow_sha: {SHA}", "devflow_sha: " + "c" * 40),
             original + "\n",
             original + "  malicious:\n    run: echo hi\n",
             original.replace("workflow_dispatch:", "push:"),
-            original.replace("mode: choice", "mode: string"),
+            original.replace("type: choice", "type: string"),
             original.replace("contents: write", "contents: read"),
             original.replace("uses: kinoko34077/devflow", "uses: stranger/devflow"),
         ]
