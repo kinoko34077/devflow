@@ -727,6 +727,68 @@ class DevflowService:
             include_records=True,
         )
 
+    def get_repository_work_view(self, repository: str) -> dict[str, Any]:
+        """Read-only, fail-closed local-work consumer for staged M3 migration.
+
+        Reuses the *live* M1 all-state task records. The compact M2 Control
+        cache is intentionally not an all-work source (status/size truncation).
+        This consumer never transfers active-work authority or creates supply.
+        """
+
+        normalized = normalize_repository(repository)
+        control = self.get_repository_control(normalized)
+        observed_at = self._observed_at_factory()
+        projection = self._read_repository_projection(
+            normalized, observed_at=observed_at
+        )
+        unresolved = (
+            projection.legacy_hint_count
+            + projection.unclassified_count
+            + projection.invalid_metadata_count
+            + projection.untrusted_metadata_count
+        )
+        complete = (
+            projection.source_status == "AVAILABLE"
+            and projection.source_freshness == "CURRENT"
+            and unresolved == 0
+            and len(projection.task_records) == projection.machine_task_count
+        )
+        coverage = (
+            "COMPLETE" if complete
+            else "UNAVAILABLE" if projection.source_status == "UNAVAILABLE"
+            else "INCOMPLETE"
+        )
+        return {
+            "repository": normalized,
+            "control_ref": control["url"],
+            "observed_at": observed_at,
+            "source_status": projection.source_status,
+            "source_freshness": projection.source_freshness,
+            "source_error": projection.source_error,
+            "coverage_status": coverage,
+            "machine_task_count": projection.machine_task_count,
+            "legacy_hint_count": projection.legacy_hint_count,
+            "unclassified_count": projection.unclassified_count,
+            "invalid_metadata_count": projection.invalid_metadata_count,
+            "untrusted_metadata_count": projection.untrusted_metadata_count,
+            "task_records": [
+                self._issue_record_dict(record)
+                for record in projection.task_records
+            ],
+            "view_mode": (
+                "MACHINE_COMPLETE_SHADOW" if complete
+                else "MANUAL_CONTROL_FALLBACK"
+            ),
+            "manual_control": {
+                "active_work": control["active_work"],
+                "next_action": control["next_action"],
+                "canonical_entry_points": control["canonical_entry_points"],
+            },
+            # This is an operator/read API, NOT the authority-cutover decision.
+            # An empty but complete repository cannot prove a live task cycle.
+            "can_replace_manual_active_work": False,
+        }
+
     @staticmethod
     def _human_portfolio_entry_dict(
         entry: human_portfolio.HumanPortfolioEntry,
