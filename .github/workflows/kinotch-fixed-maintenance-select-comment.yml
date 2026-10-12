@@ -1,0 +1,51 @@
+name: KiNoTch fixed owner maintenance selection
+
+# Only the owner may request a read-only maintenance candidate for devflow.
+# This workflow cannot claim, publish, dispatch, or execute the selected task.
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  select-devflow-maintenance:
+    if: >-
+      github.repository == 'kinoko34077/devflow' &&
+      github.event.issue.pull_request == null &&
+      github.event.issue.number == 413 &&
+      github.event.issue.user.login == 'kinoko34077' &&
+      github.event.comment.user.login == 'kinoko34077' &&
+      github.event.sender.login == 'kinoko34077' &&
+      github.actor == 'kinoko34077' &&
+      github.event.comment.body == '/kinotch maintenance select devflow'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+      actions: read
+    concurrency:
+      group: kinotch-fixed-maintenance-select-devflow
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Select read-only maintenance candidate for devflow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/maintenance_audit.py select-maintenance \
+            --repository kinoko34077/devflow \
+            --control 16 \
+            --token-env GITHUB_TOKEN \
+            --output maintenance-selection.json
+      - name: Upload selection without publication or claim
+        if: always() && hashFiles('maintenance-selection.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kinotch-fixed-maintenance-selection
+          path: maintenance-selection.json
