@@ -27,6 +27,12 @@ _REPOSITORY = "kinoko34077/testapp"
 _RECIPE = "testapp-public-fixture-v1"
 _PREFIX = "artifact/writeback-testapp/"
 _OUTPUT = "data/writeback-e2e/generated.json"
+# Explicit R2-specific activation contract: exactly one reviewed test recipe.
+# R1's generated_artifact_rollout_writer.WRITE_ACTIVATED=False still governs
+# the generic/dormant adapter; it is never silently flipped by this entry.
+# This code switch alone is NOT operational activation; a reviewed Caller and
+# target default-branch protection remain required independently.
+_ACTIVATED_WRITER_RECIPES = frozenset({(_REPOSITORY, _RECIPE)})
 
 
 class NarrowTestappWriteApi:
@@ -85,6 +91,8 @@ def execute_testapp_scoped_write(
     """
     if env.get("MODE") != "write" or env.get("GITHUB_REPOSITORY") != _REPOSITORY:
         raise ArtifactRejected("actual writer requires approved testapp write job")
+    if (_REPOSITORY, _RECIPE) not in _ACTIVATED_WRITER_RECIPES:
+        raise ArtifactRejected("testapp writer recipe not explicitly activated")
     if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
         raise ArtifactRejected("writer must originate from manual trusted caller")
     auth = attest_authenticated_readonly(
