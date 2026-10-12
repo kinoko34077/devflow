@@ -135,6 +135,25 @@ For `kinoko34077/<repo>`:
 
 If the MCP cannot find exactly one open `[REPO] <repo>` Control Issue, it fails instead of guessing managed state.
 
+## M3 local-work read view (operator shadow; no authority transfer)
+
+`get_repository_work_view("kinoko34077/<repo>")` is an optional read-only
+consumer of the existing live M1 Repository Projection. It returns **all**
+trusted open machine TASKs, including `AWAITING_REVIEW` and `BLOCKED`, rather
+than treating M2's first 20 READY/IMPLEMENTING summaries as a complete task list.
+
+The response always includes a separately named `manual_control` fallback
+(`active_work`, `next_action`, `canonical_entry_points`) from the verified
+Control. `view_mode=MACHINE_COMPLETE_SHADOW` only when the live source is
+AVAILABLE/CURRENT and has no unresolved legacy, unclassified, invalid or
+untrusted open records. All other source states return
+`view_mode=MANUAL_CONTROL_FALLBACK` with explicit `coverage_status` and
+error/counts. A missing source must not be interpreted as zero work. Even when
+all records are machine-classified, `can_replace_manual_active_work=false`
+until separately admitted M3.1/M3.5/M3.6 authority migration with real
+nonempty task lifecycle and consumer proof. The view does not create or
+publish work, and cannot grant execution-coordinator claims or Human approval.
+
 ## Relationship to `.ai-guidelines`
 
 The Guidelines MCP provides static shared coding/spec/UI/UX/usability policy. It must not mirror live Work Status, Audit SHA, Active Work, blockers or Sync Health.
