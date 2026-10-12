@@ -778,6 +778,58 @@ class DevflowService:
             "can_replace_manual_active_work": False,
             "can_authorize_execution": False,
         }
+        # Manual and machine results are deliberately *displayed together*.
+        # Cross-check exact local Issue URLs only: historical/parent links in
+        # manual prose are NOT claims that they are TASKs. Link overlap alone
+        # cannot establish equivalence or release a runtime/authority gate.
+        machine_task_urls = [
+            record.html_url for record in projection.task_records
+            if isinstance(record.html_url, str)
+        ] if source_is_current else None
+        local_issue_link = re.compile(
+            r"(?<![A-Za-z0-9_/-])"
+            + re.escape(f"https://github.com/{normalized}/issues/")
+            + r"([1-9][0-9]*)(?![0-9])",
+            re.IGNORECASE,
+        )
+        manual_links = sorted({
+            f"https://github.com/{normalized}/issues/{int(match)}"
+            for match in local_issue_link.findall(control["active_work"])
+        })
+        machine_link_set = set(machine_task_urls or ())
+        manually_linked_machine_tasks = sorted(
+            set(manual_links) & machine_link_set
+        ) if source_is_current else None
+        parallel_read = {
+            "phase": "DUAL_READ_OBSERVATION",
+            "manual": {
+                "active_work": control["active_work"],
+                "next_action": control["next_action"],
+                "authority": "MANUAL_CONTROL_UNTIL_COHORT_ADMISSION",
+            },
+            "machine": {
+                "status": observed_task_view["status"],
+                "tasks": [
+                    {
+                        "url": record.html_url,
+                        "work_status": record.work_status,
+                        "record_role": record.record_role,
+                    }
+                    for record in projection.task_records
+                ] if source_is_current else None,
+                "unresolved_open_issue_count": (
+                    unresolved if source_is_current else None
+                ),
+            },
+            "link_crosscheck": {
+                "basis": "EXPLICIT_LOCAL_ISSUE_URLS_ONLY_NOT_SEMANTIC_PARITY",
+                "manual_linked_local_issues": manual_links,
+                "linked_known_machine_tasks": manually_linked_machine_tasks,
+                "semantic_equivalence_proven": False,
+            },
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+        }
         return {
             "repository": normalized,
             "control_ref": control["url"],
@@ -787,6 +839,7 @@ class DevflowService:
             "source_error": projection.source_error,
             "coverage_status": coverage,
             "observed_task_view": observed_task_view,
+            "parallel_read": parallel_read,
             "machine_task_count": projection.machine_task_count,
             "legacy_hint_count": projection.legacy_hint_count,
             "unclassified_count": projection.unclassified_count,
