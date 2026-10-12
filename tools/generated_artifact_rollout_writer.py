@@ -71,3 +71,45 @@ def execute_reviewed_entry(
         "authenticated_runner": authenticated["status"],
         "ci_verified": False,
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Workflow-only, pinned-devflow CLI. No write permitted in R1 Draft."""
+    import argparse
+    import os
+    import sys
+    from tools.generated_artifact_writer import GitHubWriteApi
+
+    parser = argparse.ArgumentParser(description="R1 authenticated writeback entry (disabled)")
+    parser.add_argument("--artifact", required=True)
+    parser.add_argument("--target-branch", required=True)
+    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--recipe", required=True)
+    parser.add_argument("--devflow-sha", required=True)
+    args = parser.parse_args(argv)
+    try:
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if not repo:
+            raise ArtifactRejected("GitHub repository context missing")
+        expected = args.expected_head
+        # The producer's source SHA is only an assertion here; the trusted
+        # manifest + independently authenticated exact caller/run remain
+        # required in execute_reviewed_entry.
+        api = GitHubWriteApi(repo, os.environ.get("WRITER_TOKEN", ""))
+        result = execute_reviewed_entry(
+            api, os.environ, pathlib.Path(args.artifact),
+            repository=repo, recipe_id=args.recipe,
+            target_branch=args.target_branch, expected_head=expected,
+            source_head=expected,
+            devflow_sha=args.devflow_sha,
+            devflow_checkout_sha=os.environ.get("DEVFLOW_CHECKOUT_SHA", ""),
+        )
+    except (ArtifactRejected, OSError, ValueError) as exc:
+        print(f"REJECTED: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
