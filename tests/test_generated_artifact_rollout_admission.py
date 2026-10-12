@@ -121,6 +121,12 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
             with self.subTest(workflow=changed_workflow), self.assertRaises(ArtifactRejected):
                 self.check(api=FakeGitHubReader(workflow=changed_workflow))
 
+    def test_rest_rerun_actor_missing_or_forged_is_rejected(self):
+        with self.assertRaises(ArtifactRejected):
+            self.check(api=FakeGitHubReader(run={"triggering_actor": None}))
+        with self.assertRaises(ArtifactRejected):
+            self.check(api=FakeGitHubReader(run={"triggering_actor": {"login": "attacker"}}))
+
     def test_runner_head_branch_context_and_mode_rejections(self):
         for change in (
             {"MODE": "write-replay-test"}, {"MODE": "delete"},
