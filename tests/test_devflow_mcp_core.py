@@ -404,11 +404,11 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
     def test_m3_parallel_read_keeps_manual_and_machine_without_double_authority(self):
         control = self._control("demo", 70)
         control["body"] += (
-            "\\n## Active Work\\n\\n"
+            "\n## Active Work\n\n"
             "Work #1 https://github.com/kinoko34077/demo/issues/1 is active; "
             "historical #99 https://github.com/kinoko34077/demo/issues/99 closed. "
-            "Other repo https://github.com/kinoko34077/other/issues/3 not local.\\n"
-            "\\n## Next Action\\n\\nCross-repository Human approval.\\n"
+            "Other repo https://github.com/kinoko34077/other/issues/3 not local.\n"
+            "\n## Next Action\n\nCross-repository Human approval.\n"
         )
         task1 = self._task_issue(1)
         task2 = self._task_issue(2)
