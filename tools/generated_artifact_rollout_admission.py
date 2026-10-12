@@ -17,9 +17,12 @@ from tools.generated_artifact_rollout import (
     CALLER_PATH, fixed_policy, producer_admission, select_fixed_recipe,
 )
 
-TEMPLATE = pathlib.Path(__file__).resolve().parents[1] / (
-    "docs/operations/templates/verified-artifacts-rollout-ids.yml"
-)
+_TEMPLATE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "docs/operations/templates"
+TEMPLATE = _TEMPLATE_ROOT / "verified-artifacts-rollout-ids.yml"
+_TEMPLATES = {
+    "kinoko34077/IDS-Composit": TEMPLATE,
+    "kinoko34077/testapp": _TEMPLATE_ROOT / "verified-artifacts-rollout-testapp.yml",
+}
 PLACEHOLDER = "<DEVFLOW_SHA>"
 MAX_CALLER_BYTES = 16384
 
@@ -122,7 +125,11 @@ def attest_authenticated_readonly(
         caller_text = decoded.decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
         raise ArtifactRejected("GitHub caller is not strict UTF-8/base64") from exc
-    template = trusted_template if trusted_template is not None else TEMPLATE.read_text("utf-8")
+    template = (
+        trusted_template
+        if trusted_template is not None
+        else _TEMPLATES[repository].read_text("utf-8")
+    )
     verify_exact_caller(caller_text, template, devflow_sha)
     return {
         "status": "AUTHENTICATED_READ_ONLY",
