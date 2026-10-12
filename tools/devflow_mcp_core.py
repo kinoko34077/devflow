@@ -786,20 +786,48 @@ class DevflowService:
             record.html_url for record in projection.task_records
             if isinstance(record.html_url, str)
         ] if source_is_current else None
-        local_issue_link = re.compile(
+        # This is a reference-level triage, NOT a work-state comparator.
+        # The old Control often contains both full GitHub Issue URLs and
+        # repo#number shorthand. Restrict each to the exact target repository,
+        # and avoid accepting /issues/1typo or a path-extension as Issue #1.
+        url_pattern = re.compile(
             r"(?<![A-Za-z0-9_/-])"
             + re.escape(f"https://github.com/{normalized}/issues/")
-            + r"([1-9][0-9]*)(?![0-9])",
+            + r"([1-9][0-9]*)(?![A-Za-z0-9_/-])",
+            re.IGNORECASE,
+        )
+        owner, repo_name = normalized.split("/", 1)
+        qualified_pattern = re.compile(
+            r"(?<![A-Za-z0-9_/-])"
+            + r"(?:"
+            + re.escape(owner + "/")
+            + r")?"
+            + re.escape(repo_name)
+            + r"#([1-9][0-9]*)(?![A-Za-z0-9_/-])",
             re.IGNORECASE,
         )
         manual_links = sorted({
             f"https://github.com/{normalized}/issues/{int(match)}"
-            for match in local_issue_link.findall(control["active_work"])
+            for match in url_pattern.findall(control["active_work"])
         })
+        manual_qualified_links = sorted({
+            f"https://github.com/{normalized}/issues/{int(match)}"
+            for match in qualified_pattern.findall(control["active_work"])
+        })
+        referenced_links = sorted(set(manual_links) | set(manual_qualified_links))
         machine_link_set = set(machine_task_urls or ())
-        manually_linked_machine_tasks = sorted(
-            set(manual_links) & machine_link_set
-        ) if source_is_current else None
+        matched_refs = (
+            sorted(set(referenced_links) & machine_link_set)
+            if source_is_current else None
+        )
+        manual_only_refs = (
+            sorted(set(referenced_links) - machine_link_set)
+            if source_is_current else None
+        )
+        machine_only_refs = (
+            sorted(machine_link_set - set(referenced_links))
+            if source_is_current else None
+        )
         parallel_read = {
             "phase": "DUAL_READ_OBSERVATION",
             "manual": {
@@ -824,7 +852,14 @@ class DevflowService:
             "link_crosscheck": {
                 "basis": "EXPLICIT_LOCAL_ISSUE_URLS_ONLY_NOT_SEMANTIC_PARITY",
                 "manual_linked_local_issues": manual_links,
-                "linked_known_machine_tasks": manually_linked_machine_tasks,
+                "manual_qualified_local_issue_refs": manual_qualified_links,
+                "manual_candidate_local_issue_refs": referenced_links,
+                "linked_known_machine_tasks": matched_refs,
+                # These are *references*, not proven missing or extra TASKs.
+                # Historical and parent Issues can appear in the manual side;
+                # machine-only TASKs may simply lack manual summaries.
+                "manual_refs_not_known_machine_tasks": manual_only_refs,
+                "known_machine_tasks_not_manually_referenced": machine_only_refs,
                 "semantic_equivalence_proven": False,
             },
             "can_replace_manual_active_work": False,
