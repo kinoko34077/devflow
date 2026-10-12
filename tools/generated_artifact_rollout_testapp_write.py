@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.parse
 from collections.abc import Mapping
@@ -34,8 +35,10 @@ class NarrowTestappWriteApi:
     def __init__(self, transport: Any, branch: str) -> None:
         if getattr(transport, "repository", None) != _REPOSITORY:
             raise ArtifactRejected("writer transport is not the testapp repository")
-        if not branch.startswith(_PREFIX) or len(branch) <= len(_PREFIX):
-            raise ArtifactRejected("writer branch outside scoped prefix")
+        if not isinstance(branch, str) or not re.fullmatch(
+            r"artifact/writeback-testapp/[A-Za-z0-9][A-Za-z0-9._-]*", branch
+        ):
+            raise ArtifactRejected("writer branch outside exact scoped grammar")
         self.repository = _REPOSITORY
         self._transport = transport
         self._branch = branch
