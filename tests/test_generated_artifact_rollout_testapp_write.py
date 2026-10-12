@@ -50,7 +50,12 @@ class NarrowMutationTests(unittest.TestCase):
 
     def test_wrong_target_is_never_admitted(self):
         api = DummyTransport()
-        for branch in ("main", "artifact/writeback-ids/a", "artifact/writeback-testapp/"):
+        for branch in (
+            "main", "artifact/writeback-ids/a", "artifact/writeback-testapp/",
+            "artifact/writeback-testapp/../main",
+            "artifact/writeback-testapp/foo/bar",
+            "artifact/writeback-testapp/-injected",
+        ):
             with self.subTest(branch=branch), self.assertRaises(ArtifactRejected):
                 NarrowTestappWriteApi(api, branch)
         api.repository = "kinoko34077/IDS-Composit"
