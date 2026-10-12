@@ -62,6 +62,8 @@ Non-Base repository:
 
 ### Step 4 — Resolve active work
 
+If the Devflow MCP `get_repository_work_view` tool is available, use it after `bootstrap_repository` when resolving local open TASKs: its untruncated live M1 `task_records` and explicit `view_mode`/`coverage_status` tell whether machine evidence is complete. Regardless of mode, keep reading canonical owning Issues and the Control's `manual_control`; `MACHINE_COMPLETE_SHADOW` does **not** retire manual Active Work authority and cannot grant claims. On an absent/malformed/untrusted Control or unavailable/partial source, do not conclude there is no work; hold source-dependent decisions and follow trusted manual Control/local Issues instead.
+
 If `Active Work` references a local Issue, Work Order or PR, open it before creating a duplicate.
 
 If a durable task exists but no local record exists, decide whether a repository-local Issue is warranted using `REPOSITORY_ISSUE_MANUAL.md`.
