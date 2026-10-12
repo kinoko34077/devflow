@@ -219,14 +219,14 @@ jobs:
           replay = json.loads((Path(os.environ["RUNNER_TEMP"]) / "writeback-replay.json").read_text())
           if first.get("status") == "COMMITTED":
               assert replay.get("status") == "NO_OP_REPLAY", "exact receipt was not recognized"
-              assert replay.get("target_head") == first.get("new_head"), "replay changed HEAD"
+              assert replay["target_head"] == first["new_head"], "replay changed HEAD"
           elif first.get("status") == "NO_OP":
               assert replay.get("status") == "NO_OP", "fresh no-op changed behavior"
-              assert replay.get("target_head") == first.get("target_head"), "no-op moved HEAD"
+              assert replay["target_head"] == first["target_head"], "no-op moved HEAD"
           else:
               raise AssertionError("first result was not an accepted write/no-op outcome")
-          assert replay.get("writes_performed") is False, "replay issued a second write"
-          assert replay.get("file_count") == 1, "replay exceeded one-file scope"
-          assert first.get("producer_run_id") == replay.get("producer_run_id"), "run receipt changed"
+          assert replay["writes_performed"] is False, "replay issued a second write"
+          assert replay["file_count"] == 1, "replay exceeded one-file scope"
+          assert first["producer_run_id"] == replay["producer_run_id"], "run receipt changed"
           print("ACCEPTED: exact same-receipt idempotence", replay.get("status"))
           PY
