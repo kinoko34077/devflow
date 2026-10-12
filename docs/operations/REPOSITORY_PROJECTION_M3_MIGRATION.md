@@ -7,6 +7,8 @@ Accepted authority direction: [devflow #325](https://github.com/kinoko34077/devf
 Accepted transport: M2 [devflow #342](https://github.com/kinoko34077/devflow/issues/342)  
 Scope: all seven M3 migration items, *not* M4 operator-view additions.
 
+**2026-10-12 adopted A–E rollout:** [REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md) / [devflow #477](https://github.com/kinoko34077/devflow/issues/477) supplement the existing M3 safeguards. A bounded full-classification pilot, creation/edit-time normalization, partial read-only visibility, per-Consumer migration and a separately reviewed lightweight non-TASK schema are all approved as a *plan*, not automatically activated. This file's M3.1 full authority admission requirements and the M2 hard-false gate remain in force until explicitly changed with proof.
+
 ## 1. Non-negotiable authority boundary
 
 The owning repository's Issues, PRs, specifications and Current State remain canonical for repository-local work. devflow's trusted Repository Projection is a **derived read model**; its central, marker-owned Control cache is transport/display evidence. It must never become a second writable task database, a task supplier, or execution-coordinator claim authority. The devflow Control remains canonical for managed lifecycle, cross-repository dependencies, explicit Human/security decisions, accepted audit provenance and cross-repository Next Action.
