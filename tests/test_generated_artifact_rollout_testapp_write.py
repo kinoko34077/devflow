@@ -73,6 +73,27 @@ class NarrowMutationTests(unittest.TestCase):
         with self.assertRaises(ArtifactRejected):
             NarrowTestappWriteApi(api, self.branch)
 
+    def test_live_default_branch_protection_is_a_hard_write_precondition(self):
+        class ObserveOnly(DummyTransport):
+            def __init__(self, data):
+                super().__init__()
+                self.data = data
+            def get(self, path):
+                self.calls.append(("GET", path))
+                return self.data
+        for result in ({}, None, {"name": "main", "protected": False},
+                       {"name": "wrong", "protected": True},
+                       {"name": "main", "protected": "true"}):
+            with self.subTest(result=result):
+                transport = ObserveOnly(result)
+                bounded = NarrowTestappWriteApi(transport, self.branch)
+                with self.assertRaisesRegex(ArtifactRejected, "main protection"):
+                    scoped_writer._require_main_protection(bounded)
+                self.assertEqual(transport.calls, [("GET", "/branches/main")])
+        safe = ObserveOnly({"name": "main", "protected": True})
+        scoped_writer._require_main_protection(NarrowTestappWriteApi(safe, self.branch))
+        self.assertEqual(safe.calls, [("GET", "/branches/main")])
+
     def test_wrong_job_mode_or_repo_fails_before_any_git_operation(self):
         api = DummyTransport()
         base = {"GITHUB_REPOSITORY": "kinoko34077/testapp", "MODE": "dry-run"}
