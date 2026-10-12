@@ -68,8 +68,11 @@ Use this rule in Codex/Claude global instructions:
 ```text
 For KiNoTch managed repositories, before answering or acting on current state, resume,
 audit, implementation, review, Issue/PR/Work Order or cross-repository work, call the
-KiNoTch Devflow MCP `bootstrap_repository` for the current repository. Follow the returned
-Repository Control and Canonical Entry Points. Do not substitute chat history, static
+KiNoTch Devflow MCP `bootstrap_repository` for the current repository. When resolving
+local open work, use `get_repository_work_view` (if available) after bootstrap for
+all-state TASK records and explicit manual fallback. Even MACHINE_COMPLETE_SHADOW is
+read-only and cannot replace Control authority or create runtime claims. Follow the
+returned Repository Control and Canonical Entry Points. Do not substitute chat history, static
 .ai-guidelines content, or GitHub Project fields for live Current State. Use Issue-first
 reporting for durable detail/evidence/handoff.
 ```
