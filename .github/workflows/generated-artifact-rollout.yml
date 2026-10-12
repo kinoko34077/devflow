@@ -1,0 +1,142 @@
+name: Generated artifact rollout (review-only, devflow#465)
+
+# Separate from accepted JO v1; NOT installed on any target Caller.
+# R1 implementation: writer execution is intentionally disabled in code.
+on:
+  workflow_call:
+    inputs:
+      devflow_sha:
+        type: string
+        required: true
+      recipe_id:
+        type: string
+        required: true
+      target_branch:
+        type: string
+        required: true
+      expected_head:
+        type: string
+        required: true
+      mode:
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  produce:
+    if: ${{ inputs.mode == 'dry-run' || inputs.mode == 'write' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      DEVFLOW_SHA: ${{ inputs.devflow_sha }}
+      RECIPE_ID: ${{ inputs.recipe_id }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Reject malformed unreviewed inputs before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEVFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$MODE" == "dry-run" || "$MODE" == "write" ]] || exit 2
+          case "$GITHUB_REPOSITORY:$RECIPE_ID" in
+            "kinoko34077/IDS-Composit:ids-known-merge-v0.2") ;;
+            "kinoko34077/testapp:testapp-public-fixture-v1") ;;
+            *) echo "unadmitted target and recipe" >&2; exit 2 ;;
+          esac
+      - name: Retrieve pinned devflow source without tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q devflow
+          git -C devflow fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"
+          git -C devflow checkout -q --detach FETCH_HEAD
+          test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"
+      - name: Checkout untrusted target source at exact expected HEAD
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_head }}
+          path: source
+          persist-credentials: false
+      - name: Setup static recipe Node runtime
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.recipe_id == 'testapp-public-fixture-v1' && '26.10.0' || '22' }}
+      - name: Run fixed generator and verify in unprivileged job
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_INFO="$(cd ../devflow && python3 -m tools.generated_artifact_rollout recipe-info --repository "$GITHUB_REPOSITORY" --recipe "$RECIPE_ID")"
+          mapfile -t SCRIPTS < <(printf '%s' "$SCRIPT_INFO" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["generate_npm_script"]); print(v["verify_npm_script"])')
+          test "${#SCRIPTS[@]}" -eq 2
+          if [[ "$RECIPE_ID" == "ids-known-merge-v0.2" ]]; then
+            npm ci
+          fi
+          npm run "${SCRIPTS[0]}"
+          npm run "${SCRIPTS[1]}"
+          if [[ "$RECIPE_ID" == "ids-known-merge-v0.2" ]]; then
+            npm run check
+          else
+            npm test
+          fi
+      - name: Package static generated paths as low-trust data
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_HEAD="$(git -C source rev-parse HEAD)"
+          test "$SOURCE_HEAD" = "$EXPECTED_HEAD"
+          cd devflow
+          python3 -m tools.generated_artifact_rollout produce             --repository "$GITHUB_REPOSITORY"             --recipe "$RECIPE_ID"             --source ../source --out ../out             --target-branch "$TARGET_BRANCH"             --expected-head "$EXPECTED_HEAD" --source-head "$SOURCE_HEAD"             --devflow-sha "$DEVFLOW_SHA"             --devflow-checkout-sha "$(git rev-parse HEAD)"
+      - name: Upload low-trust manifest and ZIP
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: generated-rollout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: produce
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Deliberately READ-ONLY even if a future target Caller requests write.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      DEVFLOW_SHA: ${{ inputs.devflow_sha }}
+      RECIPE_ID: ${{ inputs.recipe_id }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Fetch pinned, independent trusted source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEVFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          git init -q devflow
+          git -C devflow fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"
+          git -C devflow checkout -q --detach FETCH_HEAD
+          test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"
+      - name: Download low-trust artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: generated-rollout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifact
+      - name: Authenticate caller, inspect trusted target state and dry-run
+        shell: bash
+        env:
+          WRITER_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
+          cd devflow
+          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_writer import main;raise SystemExit(main(sys.argv[1:]))'             --artifact ../artifact --recipe "$RECIPE_ID"             --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD"             --devflow-sha "$DEVFLOW_SHA"
