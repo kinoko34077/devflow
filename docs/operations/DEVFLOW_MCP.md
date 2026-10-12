@@ -158,6 +158,30 @@ inside this diagnostic. This is accepted approach C under
 [the A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md), not M3.1
 activation or a second task classifier.
 
+### Parallel display / dual-read migration (A–E / #477)
+
+`parallel_read` groups the *same* existing live manual Control fields and M1
+machine TASK records into one read-only operator-friendly result. It is not
+another persisted table or secondary classifier:
+
+- `manual.active_work` and `manual.next_action` preserve the existing prose
+  and cross-repository/Human semantics.
+- `machine.tasks` lists all trusted open machine TASK URLs and work states on
+  a current source, including review/blocked/open-DONE; it reports unresolved
+  open Issue count. If source unavailable/noncurrent, `tasks=null` and
+  unresolved count is `null`, **never empty or zero**.
+- `link_crosscheck` compares **only exact current-repo Issue URLs** embedded
+  in manual `Active Work` to the known machine TASK URLs. It is a navigation
+  clue: manual prose may refer to closed/history, non-TASK parents or just one
+  representative. This does **not prove semantic equivalence** and is **never
+  a promotion gate**.
+
+Every `parallel_read` result is `DUAL_READ_OBSERVATION`, with manual Control
+authority retained, `can_replace_manual_active_work=false`, and
+`can_authorize_execution=false`. Only a later explicit per-repository,
+per-Consumer reviewed M3.1 cutover could alter operational read precedence;
+this method does not do so. See [P0–P3 gradual plan](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md).
+
 The response always includes a separately named `manual_control` fallback
 (`active_work`, `next_action`, `canonical_entry_points`) from the verified
 Control. `view_mode=MACHINE_COMPLETE_SHADOW` only when the live source is

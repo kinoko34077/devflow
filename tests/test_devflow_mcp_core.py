@@ -401,6 +401,78 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertFalse(view["can_replace_manual_active_work"])
         self.assertNotIn("body", view["task_records"][0])
 
+    def test_m3_parallel_read_keeps_manual_and_machine_without_double_authority(self):
+        control = self._control("demo", 70)
+        control["body"] += (
+            "\n## Active Work\n\n"
+            "Work #1 https://github.com/kinoko34077/demo/issues/1 is active; "
+            "historical #99 https://github.com/kinoko34077/demo/issues/99 closed. "
+            "Other repo https://github.com/kinoko34077/other/issues/3 not local.\n"
+            "\n## Next Action\n\nCross-repository Human approval.\n"
+        )
+        task1 = self._task_issue(1)
+        task2 = self._task_issue(2)
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [task1, task2],
+        })
+        view = devflow_mcp_core.DevflowService(reader).get_repository_work_view("demo")
+        parallel = view["parallel_read"]
+        self.assertEqual(parallel["phase"], "DUAL_READ_OBSERVATION")
+        self.assertIn("historical #99", parallel["manual"]["active_work"])
+        self.assertEqual(parallel["manual"]["next_action"], "Cross-repository Human approval.")
+        self.assertEqual(parallel["manual"]["authority"], "MANUAL_CONTROL_UNTIL_COHORT_ADMISSION")
+        self.assertEqual(
+            [item["url"] for item in parallel["machine"]["tasks"]],
+            [
+                "https://github.com/kinoko34077/demo/issues/1",
+                "https://github.com/kinoko34077/demo/issues/2",
+            ],
+        )
+        self.assertEqual(parallel["machine"]["unresolved_open_issue_count"], 0)
+        crosscheck = parallel["link_crosscheck"]
+        self.assertEqual(crosscheck["linked_known_machine_tasks"], [
+            "https://github.com/kinoko34077/demo/issues/1"
+        ])
+        self.assertEqual(len(crosscheck["manual_linked_local_issues"]), 2)
+        self.assertFalse(crosscheck["semantic_equivalence_proven"])
+        self.assertFalse(parallel["can_replace_manual_active_work"])
+        self.assertFalse(parallel["can_authorize_execution"])
+        self.assertFalse(view["can_replace_manual_active_work"])
+
+    def test_m3_parallel_partial_shows_verified_tasks_and_unresolved_count(self):
+        control = self._control("demo", 70)
+        known = self._task_issue(1)
+        untrusted = self._task_issue(2, author_association="NONE")
+        view = devflow_mcp_core.DevflowService(FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [known, untrusted],
+        })).get_repository_work_view("demo")
+        parallel = view["parallel_read"]
+        self.assertEqual(parallel["machine"]["status"], "OBSERVED_PARTIAL")
+        self.assertEqual(len(parallel["machine"]["tasks"]), 1)
+        self.assertEqual(parallel["machine"]["unresolved_open_issue_count"], 1)
+        self.assertEqual(parallel["link_crosscheck"]["linked_known_machine_tasks"], [])
+        self.assertFalse(parallel["can_replace_manual_active_work"])
+
+    def test_m3_parallel_unavailable_is_unknown_not_empty(self):
+        control = self._control("demo", 70)
+        class Unavailable(FakeReader):
+            def list_issues(self, repository, state="open"):
+                if repository == "kinoko34077/demo":
+                    raise devflow_mcp_core.DevflowMCPError("read failed")
+                return super().list_issues(repository, state=state)
+        view = devflow_mcp_core.DevflowService(Unavailable([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+        })).get_repository_work_view("demo")
+        parallel = view["parallel_read"]
+        self.assertEqual(parallel["machine"]["status"], "SOURCE_UNAVAILABLE")
+        self.assertIsNone(parallel["machine"]["tasks"])
+        self.assertIsNone(parallel["machine"]["unresolved_open_issue_count"])
+        self.assertIsNone(parallel["link_crosscheck"]["linked_known_machine_tasks"])
+        self.assertFalse(parallel["link_crosscheck"]["semantic_equivalence_proven"])
+        self.assertFalse(parallel["can_replace_manual_active_work"])
+
     def test_m3_local_work_view_partial_and_untrusted_fall_back(self):
         control = self._control("demo", 70)
         issue = self._task_issue(1)
