@@ -96,6 +96,15 @@ class OperationArtifactPreviewAdapterTests(unittest.TestCase):
             self.assertEqual(reader.calls, [])
 
     def test_forged_actor_run_source_workflow_branch_repo_rejected(self):
+        class WrongRunReader(FakeGitHubReader):
+            def get(self, path):
+                if path == "/actions/runs/502":
+                    self.calls.append(path)
+                    # Deliberately return a real-shaped *different* run:
+                    # the accepted #465 attestation must reject mismatched IDs.
+                    return self.run
+                return super().get(path)
+
         for key, value in (
             ("GITHUB_ACTOR", "stranger"),
             ("GITHUB_TRIGGERING_ACTOR", "stranger"),
@@ -104,7 +113,7 @@ class OperationArtifactPreviewAdapterTests(unittest.TestCase):
             ("GITHUB_REPOSITORY", "kinoko34077/testapp"),
         ):
             with self.subTest(field=key), tempfile.TemporaryDirectory() as tmp:
-                reader = FakeGitHubReader()
+                reader = WrongRunReader() if key == "GITHUB_RUN_ID" else FakeGitHubReader()
                 params = call_parameters(make_bundle(tmp), reader)
                 params["env"][key] = value
                 with self.assertRaises(ArtifactRejected):
