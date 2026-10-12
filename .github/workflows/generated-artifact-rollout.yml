@@ -81,7 +81,10 @@ jobs:
           npm run "${SCRIPTS[0]}"
           npm run "${SCRIPTS[1]}"
           if [[ "$RECIPE_ID" == "ids-known-merge-v0.2" ]]; then
-            npm run check
+            npm run typecheck
+            npm run typecheck:tools
+            npm test -- --run
+            npm run build
           else
             npm test
           fi
@@ -92,7 +95,7 @@ jobs:
           SOURCE_HEAD="$(git -C source rev-parse HEAD)"
           test "$SOURCE_HEAD" = "$EXPECTED_HEAD"
           cd devflow
-          python3 -m tools.generated_artifact_rollout produce             --repository "$GITHUB_REPOSITORY"             --recipe "$RECIPE_ID"             --source ../source --out ../out             --target-branch "$TARGET_BRANCH"             --expected-head "$EXPECTED_HEAD" --source-head "$SOURCE_HEAD"             --devflow-sha "$DEVFLOW_SHA"             --devflow-checkout-sha "$(git rev-parse HEAD)"
+          python3 -m tools.generated_artifact_rollout produce --repository "$GITHUB_REPOSITORY" --recipe "$RECIPE_ID" --source ../source --out ../out --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD" --source-head "$SOURCE_HEAD" --devflow-sha "$DEVFLOW_SHA" --devflow-checkout-sha "$(git rev-parse HEAD)"
       - name: Upload low-trust manifest and ZIP
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -139,4 +142,4 @@ jobs:
           set -euo pipefail
           export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
           cd devflow
-          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_writer import main;raise SystemExit(main(sys.argv[1:]))'             --artifact ../artifact --recipe "$RECIPE_ID"             --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD"             --devflow-sha "$DEVFLOW_SHA"
+          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_writer import main;raise SystemExit(main(sys.argv[1:]))' --artifact ../artifact --recipe "$RECIPE_ID" --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD" --devflow-sha "$DEVFLOW_SHA"
