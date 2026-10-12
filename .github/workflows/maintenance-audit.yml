@@ -20,6 +20,7 @@ on:
           - maintenance-complete
           - projection-shadow
           - publish
+          - supply-credential-check
           - projection-cache
       repository:
         description: Optional owner/name target
@@ -503,3 +504,62 @@ jobs:
           name: repository-projection-cache-result
           path: repository-projection-cache-result.json
 
+  supply-credential-check:
+    # Non-mutating PAT authentication probe. Never publish supply or print credentials.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'supply-credential-check' && github.ref == 'refs/heads/main' }}
+    environment:
+      name: maintenance-supply
+      deployment: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Authenticate the existing Environment credential (read-only)
+        env:
+          MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          token = os.environ.get("MAINTENANCE_SUPPLY_TOKEN", "")
+          if not token:
+              print("supply-credential-check: MISSING_ENV_SECRET", file=sys.stderr)
+              sys.exit(1)
+
+          # Fixed HTTPS endpoint; read-only GET, no caller-supplied URL or path.
+          request = Request(
+              "https://api.github.com/user",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "devflow-maintenance-supply-check",
+              },
+              method="GET",
+          )
+          try:
+              with urlopen(request, timeout=15) as response:
+                  if response.status != 200:
+                      print("supply-credential-check: NON_200_RESPONSE", file=sys.stderr)
+                      sys.exit(1)
+                  identity = json.load(response)
+          except HTTPError as error:
+              # Only a numeric HTTP status is surfaced, never token/headers/body.
+              print(f"supply-credential-check: HTTP_{error.code}", file=sys.stderr)
+              sys.exit(1)
+          except (URLError, TimeoutError):
+              print("supply-credential-check: NETWORK_FAILURE", file=sys.stderr)
+              sys.exit(1)
+
+          if identity.get("login") != "kinoko34077":
+              print("supply-credential-check: UNEXPECTED_IDENTITY", file=sys.stderr)
+              sys.exit(1)
+          print("supply-credential-check: VALID_AUTHENTICATED_IDENTITY")
+          print("supply-credential-check: NOT_PROVEN_WRITE_PERMISSION_OR_EXPIRY_DATE")
+          PY
