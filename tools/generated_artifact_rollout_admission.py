@@ -105,10 +105,9 @@ def attest_authenticated_readonly(
         or workflow.get("path") != CALLER_PATH
     ):
         raise ArtifactRejected("independent GitHub producer metadata mismatch")
-    if "triggering_actor" in run:
-        t = run["triggering_actor"]
-        if not isinstance(t, dict) or t.get("login") != actor:
-            raise ArtifactRejected("different-actor GitHub REST rerun rejected")
+    t = run.get("triggering_actor")
+    if not isinstance(t, dict) or t.get("login") != actor:
+        raise ArtifactRejected("missing or different-actor GitHub REST rerun rejected")
     raw = api.get(f"/contents/{CALLER_PATH}?ref={expected_workflow_sha}")
     if (
         not isinstance(raw, dict)
@@ -125,11 +124,10 @@ def attest_authenticated_readonly(
         caller_text = decoded.decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
         raise ArtifactRejected("GitHub caller is not strict UTF-8/base64") from exc
-    template = (
-        trusted_template
-        if trusted_template is not None
-        else _TEMPLATES[repository].read_text("utf-8")
-    )
+    template_path = _TEMPLATES.get(repository)
+    if template_path is None:
+        raise ArtifactRejected("registered repository lacks trusted caller template")
+    template = trusted_template if trusted_template is not None else template_path.read_text("utf-8")
     verify_exact_caller(caller_text, template, devflow_sha)
     return {
         "status": "AUTHENTICATED_READ_ONLY",
