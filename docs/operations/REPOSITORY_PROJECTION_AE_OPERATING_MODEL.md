@@ -57,6 +57,23 @@ A `schema_version=2` role-only snippet is **not automatically admitted** as COMP
 
 Both require backward-compatible V1 parsing, duplicate/mixed-marker rejection, strict TASK fields, correct source-author trust, and Human Portfolio evidence tests. Never silently default unknown gate fields to `false`. Contract selection belongs to R3 evidence and review.
 
+## 4A. Explicit user-approved dual-read transition (2026-10-12 JST)
+
+The operator's preferred M3 migration is **traditional/manual and machine-derived work shown side by side, followed by a gradual change in read precedence**. This is adopted as the default implementation pattern of A/C/D and *supplements*, rather than relaxes, the preceding gate contracts.
+
+There are **not two write authorities**: only repository-local Issues/PRs own local task facts; the existing M2 machine block is automatically projected by the central producer; `Active Work` is legacy manual summary/cross-repository operational context. Do not require users to edit both fields after each task transition. Keep meaningful Human/policy and cross-repository facts in the Control until independently migrated.
+
+| Stage | What operator sees | Which source determines local-work action? | Promotion/rollback |
+| --- | --- | --- | --- |
+| **P0 DUAL_READ** (default now) | Existing Control `Active Work` / `Next Action` beside verified machine TASK refs + state, unresolved counts, timestamps/source health | Existing manual Control/owning Issues, never machine-derived runtime authority | No auto promotion. If source absent/stale, machine side says **unknown**, not empty. |
+| **P1 SHADOW_CROSSCHECK** | Both, plus source/link overlap and tracked differences/reasons; historical manual links are *not* classified as current TASK | Manual remains the operational fallback; no execution change | Collect genuine examples across READY/IMPLEMENTING/REVIEW/BLOCKED, Human/external gates and source failures. Exact link overlap is insufficient to prove semantic equivalence. |
+| **P2 PER_CONSUMER_MACHINE_READ** | Machine first, legacy still visible/readable for rollback; unknown/unclassified distinctly shown | Only a **specifically admitted read-only Consumer** may prefer machine display; effectful ownership/claims unchanged | Require real nonempty COMPLETE/CURRENT/trusted cohort, actual Consumer equivalence, review/CI and independent rollback. An observational phase does not confer task authority. |
+| **P3 MANUAL_LOCAL_WORK_RETIREMENT** | Legacy local-task summary deprecated for *verified admitted cohort*; cross-repo/Human/policy Control text retained | Owning repository machine-readable work is the local read authority for admitted Consumers only | Actual M3.1 sign-off and exact per-Consumer fallback; leave non-admitted repositories at P0/P1. Do not globally flip hard-false cache flag. |
+
+**Machine-read API transport:** existing `get_repository_work_view` returns `manual_control`, `task_records`, `observed_task_view`. The additive `parallel_read` groups the same live facts for side-by-side display and reports **only exact local Issue-URL overlaps**. Links to closed/history/parents can occur in manual prose: neither overlap nor lack of overlap is a semantic consistency judgment or permission. `parallel_read.can_replace_manual_active_work=false` and `can_authorize_execution=false` at P0/P1. This is not a second task store or a replacement for the already accepted Maintenance shadow preflight.
+
+**Operational transition rule:** keep machine projected by existing producer, not separately hand-maintained; retain manual as the current fallback with no forced full historical transcription. When two views disagree, read the original owning Issue/PR and inspect freshness/role/trust before labeling a defect. The source-of-truth discrepancy is recorded to its owning Issue; do not blindly copy manual text into new machine metadata. Each Consumer's precedence/rollback is accepted independently. Other repositories do not inherit one pilot's sign-off.
+
 ## 5. Consumer deployment order and fallback
 
 1. **MCP**: reuse existing all-state M1 read, show known and unresolved counts; `can_replace_manual_active_work=false` during observational stages.
