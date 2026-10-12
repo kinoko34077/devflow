@@ -1,0 +1,56 @@
+name: KiNoTch fixed owner audit command
+
+# Only the original owner may request the one existing, read-only devflow audit.
+# This is deliberately NOT a generic workflow dispatcher or shell command gateway.
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  audit-devflow-control:
+    if: >-
+      github.repository == 'kinoko34077/devflow' &&
+      github.event.issue.pull_request == null &&
+      github.event.issue.number == 413 &&
+      github.event.issue.user.login == 'kinoko34077' &&
+      github.event.comment.user.login == 'kinoko34077' &&
+      github.event.sender.login == 'kinoko34077' &&
+      github.actor == 'kinoko34077' &&
+      github.event.comment.body == '/kinotch audit devflow'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+      actions: read
+    concurrency:
+      group: kinotch-fixed-audit-devflow
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Audit only devflow Control 16 (read-only)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/maintenance_audit.py repository \
+            --repository kinoko34077/devflow \
+            --control 16 \
+            --token-env GITHUB_TOKEN \
+            --output maintenance-audit-report.json
+      - name: Summarize fixed audit
+        if: always() && hashFiles('maintenance-audit-report.json') != ''
+        run: |
+          python scripts/maintenance_audit.py summarize \
+            --input maintenance-audit-report.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload read-only report
+        if: always() && hashFiles('maintenance-audit-report.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kinotch-fixed-audit-report
+          path: maintenance-audit-report.json
