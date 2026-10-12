@@ -22,7 +22,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         cls.publish = cls.text.split("\n  publish:\n", 1)[1].split(
             "\n  catalog-maintenance-publish:\n", 1
         )[0]
-        cls.projection_cache = cls.text.split("\n  projection-cache:\n", 1)[1]
+        cls.projection_cache = cls.text.split("\n  projection-cache:\n", 1)[1].split("\n  supply-credential-check:\n", 1)[0]
 
     def test_daily_schedule_is_exact_and_non_cancelling(self):
         self.assertIn("schedule:", self.text)
@@ -130,7 +130,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("schedule:", job)
         self.assertNotIn("issues: write", job)
 
-    def test_supply_secret_is_scoped_only_to_three_main_only_environment_jobs(self):
+    def test_supply_secret_is_scoped_only_to_four_main_only_environment_jobs(self):
         # This is a source contract check; GitHub's main-only environment
         # branch policy and secret inventory require independent API readback.
         sections = re.split(r"\n  ([a-z][a-z0-9-]*):\n", "\n" + self.text)[1:]
@@ -143,9 +143,10 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             "publish",
             "catalog-maintenance-publish",
             "catalog-maintenance-complete",
+            "supply-credential-check",
         }
 
-        self.assertEqual(3, self.text.count(secret_reference))
+        self.assertEqual(4, self.text.count(secret_reference))
         for name, source in jobs.items():
             with self.subTest(job=name):
                 if name in protected_jobs:
@@ -157,6 +158,37 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
                 else:
                     self.assertNotIn(secret_reference, source)
                     self.assertNotIn("name: maintenance-supply", source)
+
+    def test_supply_credential_check_is_main_only_environment_read_only(self):
+        self.assertIn("- supply-credential-check", self.text)
+        job = self.text.split("\n  supply-credential-check:\n", 1)[1]
+        self.assertIn("inputs.mode == 'supply-credential-check'", job)
+        self.assertIn("github.ref == 'refs/heads/main'", job)
+        self.assertIn(
+            "    environment:\n      name: maintenance-supply\n      deployment: false", job,
+        )
+        self.assertIn("MAINTENANCE_SUPPLY_TOKEN: ${{ secrets.MAINTENANCE_SUPPLY_TOKEN }}", job)
+        self.assertIn('"https://api.github.com/user"', job)
+        self.assertIn('method="GET"', job)
+        self.assertIn('"Authorization": f"Bearer {token}"', job)
+        self.assertIn('VALID_AUTHENTICATED_IDENTITY', job)
+        self.assertIn('NOT_PROVEN_WRITE_PERMISSION_OR_EXPIRY_DATE', job)
+        self.assertNotIn("--apply", job)
+        self.assertNotIn("issues: write", job)
+        self.assertNotIn('method="POST"', job)
+        self.assertNotIn('method="PATCH"', job)
+        self.assertNotIn('method="DELETE"', job)
+        self.assertNotIn("schedule:", job)
+
+    def test_other_workflows_do_not_reference_supply_secret(self):
+        for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
+            if workflow == WORKFLOW:
+                continue
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn(
+                    "MAINTENANCE_SUPPLY_TOKEN",
+                    workflow.read_text(encoding="utf-8"),
+                )
 
     def test_manual_publish_and_withdraw_cannot_be_selected_on_non_main_refs(self):
         self.assertIn(

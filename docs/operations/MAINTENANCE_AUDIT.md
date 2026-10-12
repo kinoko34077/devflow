@@ -208,6 +208,32 @@ while the security-sensitive workflow/settings migration still requires a
 different reviewer and proper provenance. The underlying supply/claim
 semantics, data schemas and third PILOT acceptance are unchanged.
 
+### Owner-approved read-only credential validation (devflow#463)
+
+The explicit `workflow_dispatch` mode `supply-credential-check` is a bounded
+main-only Environment job intended for post-rotation credential validation.
+It references the existing `maintenance-supply` Environment and reads its
+`MAINTENANCE_SUPPLY_TOKEN`, but makes only a fixed HTTPS **GET**
+`https://api.github.com/user`. It requires an authenticated identity of
+`kinoko34077` and prints only deterministic PASS/FAIL labels or numeric
+HTTP error status, never response bodies, token text, request headers or
+credential scopes. Do not set `ACTIONS_STEP_DEBUG` or equivalent verbose
+wire logging for a credential-bearing run.
+
+This probe **proves only that GitHub accepted the actual Environment Secret
+as an authenticated token for `GET /user` at test time**. It does not prove
+token `Issues:write`, cross-repository access or future expiry. Audit the
+fine-grained PAT's repository selection, permissions and expiration
+independently in the owner's GitHub token settings; avoid posting values or
+identifying credentials in public logs/Issues. There is no authorized
+automated publish/withdraw/complete exercise just to verify permissions.
+
+A non-`main` `supply-credential-check` dispatch must **SKIP** the credential
+job; GitHub's protected Environment branch policy is the actual barrier.
+Neither this additional read-only mode nor successful `GET /user`
+changes publication eligibility, third-PILOT limits, 3C producer/consumer
+separation, runtime claim authority or credential permissions.
+
 ## Credentials
 
 Credential creation, rotation, storage, permission changes, and GitHub App/PAT setup are Human/security-gated.
