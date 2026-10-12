@@ -170,11 +170,18 @@ another persisted table or secondary classifier:
   a current source, including review/blocked/open-DONE; it reports unresolved
   open Issue count. If source unavailable/noncurrent, `tasks=null` and
   unresolved count is `null`, **never empty or zero**.
-- `link_crosscheck` compares **only exact current-repo Issue URLs** embedded
-  in manual `Active Work` to the known machine TASK URLs. It is a navigation
-  clue: manual prose may refer to closed/history, non-TASK parents or just one
-  representative. This does **not prove semantic equivalence** and is **never
-  a promotion gate**.
+- `link_crosscheck` compares *explicit same-repository Issue references* in
+  manual `Active Work` (exact GitHub URLs and qualified `repo#123` or
+  `owner/repo#123` shorthand) with current verified machine TASK URLs.
+  `manual_refs_not_known_machine_tasks` and
+  `known_machine_tasks_not_manually_referenced` are **navigation clues**,
+  not automatically confirmed missing/extra work. The manual side may mention
+  closed/history/parent Issues while the machine side may include TASKs absent
+  from manual summary. Malformed partial URLs, cross-repository refs and
+  unrelated prose are not used to fabricate matching tasks.
+  A missing/noncurrent source yields `null` difference arrays, never a
+  misleading zero or parity. This **does not prove semantic equivalence** and
+  is **never a promotion gate**.
 
 Every `parallel_read` result is `DUAL_READ_OBSERVATION`, with manual Control
 authority retained, `can_replace_manual_active_work=false`, and
