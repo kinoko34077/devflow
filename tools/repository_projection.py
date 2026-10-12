@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 from typing import Any
 
@@ -240,6 +241,56 @@ def parse_issue_metadata(body: str) -> IssueMetadata | None:
     if payload is None:
         return None
     return _validate_payload(payload)
+
+
+
+def render_issue_metadata_v1(payload: dict[str, Any]) -> str:
+    """Render a *validated* V1 role declaration; never infer a TASK from title.
+
+    This pure helper creates no Issue and grants no action authority. The caller
+    is responsible for verifying author/owner and matching the real Issue facts.
+    """
+    if not isinstance(payload, dict):
+        raise ProjectionContractError("repository Issue metadata must be an object")
+    _validate_payload(payload)
+    return (
+        ISSUE_METADATA_MARKER_BEGIN + "\n"
+        + json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False)
+        + "\n" + ISSUE_METADATA_MARKER_END
+    )
+
+
+def upsert_issue_metadata_v1(body: str, payload: dict[str, Any]) -> str:
+    """Bounded creation/material-edit normalization; no GitHub write is issued.
+
+    Protect adjacent human prose and reject malformed, duplicate or mixed
+    machine markers rather than overwriting evidence with a guessed role.
+    """
+    if not isinstance(body, str):
+        raise ProjectionContractError("Issue body must be a string")
+    rendered = render_issue_metadata_v1(payload)
+    # Future metadata versions must never be silently overwritten by V1.
+    if (
+        "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->" in body
+        or "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->" in body
+    ):
+        raise ProjectionContractError("mixed Issue metadata versions are not supported")
+    try:
+        bounds = marker_json.marker_bounds(
+            body,
+            ISSUE_METADATA_MARKER_BEGIN,
+            ISSUE_METADATA_MARKER_END,
+            label="repository Issue metadata",
+        )
+    except marker_json.MarkerJSONError as exc:
+        raise ProjectionContractError(str(exc)) from exc
+    if bounds is None:
+        sep = "" if not body else ("\n" if body.endswith("\n") else "\n\n")
+        return body + sep + rendered + "\n"
+    # A malformed existing block may indicate a contested edit. Fail closed.
+    parse_issue_metadata(body)
+    begin, end = bounds
+    return body[:begin] + rendered + body[end + len(ISSUE_METADATA_MARKER_END):]
 
 
 def _issue_number(issue: dict[str, Any]) -> int:
