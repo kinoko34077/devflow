@@ -175,9 +175,9 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertIn('NOT_PROVEN_WRITE_PERMISSION_OR_EXPIRY_DATE', job)
         self.assertNotIn("--apply", job)
         self.assertNotIn("issues: write", job)
-        self.assertNotIn("method="POST"", job)
-        self.assertNotIn("method="PATCH"", job)
-        self.assertNotIn("method="DELETE"", job)
+        self.assertNotIn('method="POST"', job)
+        self.assertNotIn('method="PATCH"', job)
+        self.assertNotIn('method="DELETE"', job)
         self.assertNotIn("schedule:", job)
 
     def test_other_workflows_do_not_reference_supply_secret(self):
