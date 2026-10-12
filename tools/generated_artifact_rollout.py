@@ -138,8 +138,9 @@ def producer_admission(
     independently against GitHub REST in a future privileged writer.
     """
     p = _policy(dict(policy))
-    if p["repository"] != _IDS.repository or p["recipe"]["id"] != _IDS.recipe_id:
-        raise ArtifactRejected("unexpected static policy")
+    workflow_sha_for_policy = _sha(runner.get("GITHUB_WORKFLOW_SHA"), "workflow_sha")
+    if dict(p) != fixed_policy(_IDS.repository, _IDS.recipe_id, workflow_sha_for_policy):
+        raise ArtifactRejected("producer policy differs from the reviewed static recipe")
     if _sha(devflow_sha, "devflow_sha") != _sha(devflow_checkout_sha, "devflow checkout"):
         raise ArtifactRejected("helper checkout does not match pinned devflow SHA")
     if _sha(expected_head, "expected_head") != _sha(source_head, "source_head"):
