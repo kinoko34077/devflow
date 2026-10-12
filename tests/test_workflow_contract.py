@@ -131,7 +131,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("bootstrap_repository", source)
         self.assertIn("MACHINE_COMPLETE_SHADOW", agents)
         self.assertIn("manual Control fallback", agents)
-        self.assertIn("cannot grant runtime claims", mcp)
+        self.assertIn("cannot replace Control authority or create runtime claims", mcp)
         self.assertIn("does **not** retire manual Active Work", manual)
 
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
