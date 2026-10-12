@@ -384,6 +384,15 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(view["view_mode"], "MACHINE_COMPLETE_SHADOW")
         self.assertEqual(view["coverage_status"], "COMPLETE")
         self.assertEqual(view["machine_task_count"], 24)
+        self.assertEqual(view["observed_task_view"], {
+            "status": "COMPLETE_READ",
+            "known_task_count": 24,
+            "unresolved_open_issue_count": 0,
+            "open_issue_count": 24,
+            "is_complete_read": True,
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+        })
         self.assertEqual(len(view["task_records"]), 24)
         self.assertEqual(view["task_records"][22]["work_status"], "AWAITING_REVIEW")
         self.assertEqual(view["task_records"][23]["work_status"], "BLOCKED")
@@ -405,6 +414,15 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(view["coverage_status"], "INCOMPLETE")
         self.assertEqual(view["machine_task_count"], 1)
         self.assertEqual(view["untrusted_metadata_count"], 1)
+        self.assertEqual(view["observed_task_view"], {
+            "status": "OBSERVED_PARTIAL",
+            "known_task_count": 1,
+            "unresolved_open_issue_count": 1,
+            "open_issue_count": 2,
+            "is_complete_read": False,
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+        })
         self.assertEqual(len(view["task_records"]), 1)
         self.assertFalse(view["can_replace_manual_active_work"])
 
@@ -424,6 +442,15 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         ).get_repository_work_view("demo")
         self.assertEqual(view["coverage_status"], "UNAVAILABLE")
         self.assertEqual(view["source_error"], "source unavailable")
+        self.assertEqual(view["observed_task_view"], {
+            "status": "SOURCE_UNAVAILABLE",
+            "known_task_count": None,
+            "unresolved_open_issue_count": None,
+            "open_issue_count": None,
+            "is_complete_read": False,
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+        })
         self.assertEqual(view["view_mode"], "MANUAL_CONTROL_FALLBACK")
         self.assertEqual(view["task_records"], [])
         self.assertFalse(view["can_replace_manual_active_work"])

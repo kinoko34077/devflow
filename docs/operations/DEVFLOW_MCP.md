@@ -145,6 +145,19 @@ consumer of the existing live M1 Repository Projection. It returns **all**
 trusted open machine TASKs, including `AWAITING_REVIEW` and `BLOCKED`, rather
 than treating M2's first 20 READY/IMPLEMENTING summaries as a complete task list.
 
+The additive `observed_task_view` describes **read-only observation**, independently
+of the older `view_mode` (which still controls manual *authority* fallback).
+For an AVAILABLE/CURRENT source: `COMPLETE_READ` means all open Issues are
+classified, and `OBSERVED_PARTIAL` means only trusted known TASKs are shown
+with `unresolved_open_issue_count` (legacy + unclassified + invalid + untrusted).
+The full `task_records` list remains available in both cases; a partial list
+must never be called all active work. On missing/stale sources the status is
+`SOURCE_UNAVAILABLE` and counts are `null`, **not zero**. In every case
+`can_replace_manual_active_work=false` and `can_authorize_execution=false`
+inside this diagnostic. This is accepted approach C under
+[the A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md), not M3.1
+activation or a second task classifier.
+
 The response always includes a separately named `manual_control` fallback
 (`active_work`, `next_action`, `canonical_entry_points`) from the verified
 Control. `view_mode=MACHINE_COMPLETE_SHADOW` only when the live source is
