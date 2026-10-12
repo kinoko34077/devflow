@@ -68,6 +68,12 @@ def get_repository_projection(repository: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_repository_work_view(repository: str) -> dict[str, Any]:
+    """Read current all-status owner TASKs with explicit legacy Control fallback; never grant claims."""
+    return _service().get_repository_work_view(repository)
+
+
+@mcp.tool()
 def get_portfolio_projection() -> dict[str, Any]:
     """Return a read-only summary projection across all currently managed repositories."""
     return _service().get_portfolio_projection()
