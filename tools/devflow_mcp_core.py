@@ -758,6 +758,26 @@ class DevflowService:
             else "UNAVAILABLE" if projection.source_status == "UNAVAILABLE"
             else "INCOMPLETE"
         )
+        source_is_current = (
+            projection.source_status == "AVAILABLE"
+            and projection.source_freshness == "CURRENT"
+        )
+        # Display/observation may use verified known TASKs without claiming that
+        # unclassified/legacy Issues contain no other work. In particular an
+        # unavailable source MUST NOT masquerade as an empty task list.
+        observed_task_view = {
+            "status": (
+                "SOURCE_UNAVAILABLE" if not source_is_current
+                else "COMPLETE_READ" if complete
+                else "OBSERVED_PARTIAL"
+            ),
+            "known_task_count": projection.machine_task_count if source_is_current else None,
+            "unresolved_open_issue_count": unresolved if source_is_current else None,
+            "open_issue_count": projection.open_issue_count if source_is_current else None,
+            "is_complete_read": complete,
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+        }
         return {
             "repository": normalized,
             "control_ref": control["url"],
@@ -766,6 +786,7 @@ class DevflowService:
             "source_freshness": projection.source_freshness,
             "source_error": projection.source_error,
             "coverage_status": coverage,
+            "observed_task_view": observed_task_view,
             "machine_task_count": projection.machine_task_count,
             "legacy_hint_count": projection.legacy_hint_count,
             "unclassified_count": projection.unclassified_count,
