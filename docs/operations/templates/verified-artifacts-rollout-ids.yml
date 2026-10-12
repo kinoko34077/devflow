@@ -1,0 +1,41 @@
+# Review-only template for devflow#465 R1.
+# NO TARGET CALLER IS INSTALLED, ENABLED OR AUTHORIZED BY THIS TEMPLATE.
+# Only the exact bytes produced by substituting <DEVFLOW_SHA> are acceptable.
+name: Verified artifacts rollout (IDS only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Existing same-repository PR branch under artifact/writeback-ids/
+        type: string
+        required: true
+      expected_head:
+        description: Exact current SHA for target_branch
+        type: string
+        required: true
+      mode:
+        type: choice
+        options: [dry-run, write]
+        default: dry-run
+
+permissions: {}
+
+concurrency:
+  group: verified-artifacts-ids-${{ inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  writeback:
+    if: ${{ inputs.mode == 'dry-run' || inputs.mode == 'write' }}
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    uses: kinoko34077/devflow/.github/workflows/generated-artifact-rollout.yml@<DEVFLOW_SHA>
+    with:
+      devflow_sha: <DEVFLOW_SHA>
+      recipe_id: ids-known-merge-v0.2
+      target_branch: ${{ inputs.target_branch }}
+      expected_head: ${{ inputs.expected_head }}
+      mode: ${{ inputs.mode }}
