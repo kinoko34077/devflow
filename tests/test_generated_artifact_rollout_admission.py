@@ -45,7 +45,7 @@ class FakeGitHubReader:
         self.calls.append(path)
         if path == "/actions/runs/501":
             return self.run
-        if path == "/actions/workflows/89":
+        if path.startswith("/actions/workflows/"):
             return self.workflow
         if path == f"/contents/{auth.CALLER_PATH}?ref={CALLER_SHA}":
             return {
