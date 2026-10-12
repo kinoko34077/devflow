@@ -36,12 +36,17 @@ class SameReceiptWorkflowTests(unittest.TestCase):
 
     def test_replay_is_asserted_not_merely_logged(self):
         self.assertIn('replay.get("status") == "NO_OP_REPLAY"', self.writer)
-        self.assertIn('replay.get("target_head") == first.get("new_head")', self.writer)
-        self.assertIn('replay.get("writes_performed") is False', self.writer)
-        self.assertIn('first.get("producer_run_id") == replay.get("producer_run_id")', self.writer)
-        self.assertIn('replay.get("file_count") == 1', self.writer)
+        self.assertIn('replay["target_head"] == first["new_head"]', self.writer)
+        self.assertIn('replay["writes_performed"] is False', self.writer)
+        self.assertIn('first["producer_run_id"] == replay["producer_run_id"]', self.writer)
+        self.assertIn('replay["file_count"] == 1', self.writer)
         self.assertIn('elif first.get("status") == "NO_OP"', self.writer)
         self.assertIn("ACCEPTED: exact same-receipt idempotence", self.writer)
+        first_step = self.writer.split(
+            "      - name: Independently authenticate and write only the testapp scratch file", 1
+        )[1].split("      - name: Verify exact same-receipt replay", 1)[0]
+        self.assertIn("set -euo pipefail", first_step)
+        self.assertIn('tee "$RUNNER_TEMP/writeback-first.json"', first_step)
 
 
 if __name__ == "__main__":
