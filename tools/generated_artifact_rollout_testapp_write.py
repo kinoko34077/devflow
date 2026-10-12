@@ -79,6 +79,21 @@ class NarrowTestappWriteApi:
         return self._transport.patch(path, dict(payload))
 
 
+def _require_main_protection(api: Any) -> None:
+    """Fail closed before *any* Git mutation when default main is not protected.
+
+    This is a necessary baseline, not proof of a PR-only protection rule.
+    The separate live admission gate must confirm that rule independently.
+    """
+    branch = api.get("/branches/main")
+    if (
+        not isinstance(branch, dict)
+        or branch.get("name") != "main"
+        or branch.get("protected") is not True
+    ):
+        raise ArtifactRejected("testapp main protection not independently verified")
+
+
 def execute_testapp_scoped_write(
     api: Any, env: Mapping[str, str], artifact_dir: pathlib.Path, *,
     target_branch: str, expected_head: str, devflow_sha: str,
@@ -114,6 +129,10 @@ def execute_testapp_scoped_write(
         artifact_dir / ARCHIVE_NAME, policy["limits"]["max_archive_bytes"],
     )
     scoped = NarrowTestappWriteApi(api, target_branch)
+    # The GitHub token has repository-wide contents:write, so a verified
+    # protected default branch is a precondition for this scratch-only write.
+    # Branch protection visibility alone is NOT enough for final live approval.
+    _require_main_protection(scoped)
     result = verified_writeback(
         scoped, policy, auth["admission"], manifest, archive, dry_run=False,
     )
