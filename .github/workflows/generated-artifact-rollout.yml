@@ -196,4 +196,37 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
           cd devflow
-          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_testapp_write import main;raise SystemExit(main(sys.argv[1:]))' --artifact ../artifact --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD" --devflow-sha "$DEVFLOW_SHA"
+          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_testapp_write import main;raise SystemExit(main(sys.argv[1:]))' --artifact ../artifact --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD" --devflow-sha "$DEVFLOW_SHA" | tee "$RUNNER_TEMP/writeback-first.json"
+
+      - name: Verify exact same-receipt replay creates no second commit
+        shell: bash
+        env:
+          WRITER_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "kinoko34077/testapp"
+          test "$GITHUB_REF" = "refs/heads/main"
+          export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
+          cd devflow
+          # Same Actions run ID/attempt, same immutable package, exact same source HEAD.
+          # This is NOT a new workflow_dispatch and cannot be a fabricated receipt.
+          python3 -I -c 'import sys;sys.path.insert(0,".");from tools.generated_artifact_rollout_testapp_write import main;raise SystemExit(main(sys.argv[1:]))' --artifact ../artifact --target-branch "$TARGET_BRANCH" --expected-head "$EXPECTED_HEAD" --devflow-sha "$DEVFLOW_SHA" | tee "$RUNNER_TEMP/writeback-replay.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          first = json.loads((Path(os.environ["RUNNER_TEMP"]) / "writeback-first.json").read_text())
+          replay = json.loads((Path(os.environ["RUNNER_TEMP"]) / "writeback-replay.json").read_text())
+          if first.get("status") == "COMMITTED":
+              assert replay.get("status") == "NO_OP_REPLAY", "exact receipt was not recognized"
+              assert replay.get("target_head") == first.get("new_head"), "replay changed HEAD"
+          elif first.get("status") == "NO_OP":
+              assert replay.get("status") == "NO_OP", "fresh no-op changed behavior"
+              assert replay.get("target_head") == first.get("target_head"), "no-op moved HEAD"
+          else:
+              raise AssertionError("first result was not an accepted write/no-op outcome")
+          assert replay.get("writes_performed") is False, "replay issued a second write"
+          assert replay.get("file_count") == 1, "replay exceeded one-file scope"
+          assert first.get("producer_run_id") == replay.get("producer_run_id"), "run receipt changed"
+          print("ACCEPTED: exact same-receipt idempotence", replay.get("status"))
+          PY
