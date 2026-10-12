@@ -63,7 +63,21 @@ _IDS = FixedRecipe(
     max_archive_bytes=32 * 1024 * 1024,
 )
 
-_RECIPES: tuple[FixedRecipe, ...] = (_IDS,)
+_TESTAPP = FixedRecipe(
+    repository="kinoko34077/testapp",
+    recipe_id="testapp-public-fixture-v1",
+    version="1",
+    branch_prefix="artifact/writeback-testapp/",
+    outputs=("data/writeback-e2e/generated.json",),
+    node_version="26.10.0",
+    generate_npm_script="generate:writeback-e2e",
+    verify_npm_script="verify:writeback-e2e",
+    max_file_bytes=64 * 1024,
+    max_total_bytes=64 * 1024,
+    max_archive_bytes=128 * 1024,
+)
+
+_RECIPES: tuple[FixedRecipe, ...] = (_IDS, _TESTAPP)
 
 
 def select_fixed_recipe(repository: str, recipe_id: str) -> FixedRecipe:
@@ -138,8 +152,9 @@ def producer_admission(
     independently against GitHub REST in a future privileged writer.
     """
     p = _policy(dict(policy))
+    recipe = select_fixed_recipe(p["repository"], p["recipe"]["id"])
     workflow_sha_for_policy = _sha(runner.get("GITHUB_WORKFLOW_SHA"), "workflow_sha")
-    if dict(p) != fixed_policy(_IDS.repository, _IDS.recipe_id, workflow_sha_for_policy):
+    if dict(p) != fixed_policy(recipe.repository, recipe.recipe_id, workflow_sha_for_policy):
         raise ArtifactRejected("producer policy differs from the reviewed static recipe")
     if _sha(devflow_sha, "devflow_sha") != _sha(devflow_checkout_sha, "devflow checkout"):
         raise ArtifactRejected("helper checkout does not match pinned devflow SHA")
@@ -147,16 +162,16 @@ def producer_admission(
         raise ArtifactRejected("source checkout differs from expected head")
     if (
         not isinstance(target_branch, str)
-        or not target_branch.startswith(_IDS.branch_prefix)
-        or not _SUFFIX.fullmatch(target_branch[len(_IDS.branch_prefix):])
+        or not target_branch.startswith(recipe.branch_prefix)
+        or not _SUFFIX.fullmatch(target_branch[len(recipe.branch_prefix):])
         or len(target_branch) > 200
     ):
         raise ArtifactRejected("target branch outside the fixed recipe prefix")
     required = {
-        "GITHUB_REPOSITORY": _IDS.repository,
+        "GITHUB_REPOSITORY": recipe.repository,
         "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_REF": "refs/heads/main",
-        "GITHUB_WORKFLOW_REF": f"{_IDS.repository}/{CALLER_PATH}@refs/heads/main",
+        "GITHUB_WORKFLOW_REF": f"{recipe.repository}/{CALLER_PATH}@refs/heads/main",
     }
     for field, expected in required.items():
         if runner.get(field) != expected:
@@ -165,7 +180,7 @@ def producer_admission(
     if actor != "kinoko34077" or runner.get("GITHUB_TRIGGERING_ACTOR") != actor:
         raise ArtifactRejected("untrusted or re-run actor")
     workflow_sha = _sha(runner.get("GITHUB_WORKFLOW_SHA"), "workflow_sha")
-    if p["producer_workflow_ref"] != f"{_IDS.repository}/{CALLER_PATH}@{workflow_sha}":
+    if p["producer_workflow_ref"] != f"{recipe.repository}/{CALLER_PATH}@{workflow_sha}":
         raise ArtifactRejected("policy/caller workflow SHA mismatch")
     def positive(field: str) -> int:
         raw = runner.get(field)
@@ -177,13 +192,13 @@ def producer_admission(
         return number
 
     return dict(_provenance({
-        "repository": _IDS.repository,
+        "repository": recipe.repository,
         "actor": actor,
         "branch": target_branch,
         "expected_head": expected_head,
         "source_sha": source_head,
-        "recipe_id": _IDS.recipe_id,
-        "recipe_version": _IDS.version,
+        "recipe_id": recipe.recipe_id,
+        "recipe_version": recipe.version,
         "producer_run_id": positive("GITHUB_RUN_ID"),
         "producer_run_attempt": positive("GITHUB_RUN_ATTEMPT"),
         "producer_workflow_ref": p["producer_workflow_ref"],
