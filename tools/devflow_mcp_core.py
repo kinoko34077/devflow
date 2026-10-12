@@ -850,7 +850,7 @@ class DevflowService:
                 ),
             },
             "link_crosscheck": {
-                "basis": "EXPLICIT_LOCAL_ISSUE_URLS_ONLY_NOT_SEMANTIC_PARITY",
+                "basis": "EXPLICIT_SAME_REPOSITORY_ISSUE_REFERENCES_NOT_SEMANTIC_PARITY",
                 "manual_linked_local_issues": manual_links,
                 "manual_qualified_local_issue_refs": manual_qualified_links,
                 "manual_candidate_local_issue_refs": referenced_links,
