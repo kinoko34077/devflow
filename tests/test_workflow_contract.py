@@ -121,6 +121,19 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("publication_requires_new_execution_attempt: true", workflow)
         self.assertNotIn("MAINTENANCE_WORK", contract.work_states)
 
+    def test_m3_read_order_uses_live_all_state_work_view_without_claim_authority(self):
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        manual = (ROOT / "docs" / "operations" / "AGENT_OPERATING_MANUAL.md").read_text(encoding="utf-8")
+        mcp = (ROOT / "docs" / "operations" / "DEVFLOW_MCP.md").read_text(encoding="utf-8")
+        spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(encoding="utf-8")
+        for source in (agents, manual, mcp, spec):
+            self.assertIn("get_repository_work_view", source)
+            self.assertIn("bootstrap_repository", source)
+        self.assertIn("MACHINE_COMPLETE_SHADOW", agents)
+        self.assertIn("manual Control fallback", agents)
+        self.assertIn("cannot grant runtime claims", mcp)
+        self.assertIn("does **not** retire manual Active Work", manual)
+
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
         spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(
             encoding="utf-8"
