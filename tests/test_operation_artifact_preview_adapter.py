@@ -1,7 +1,6 @@
 """A3 acceptance: actual #465 preview -> shared A2 report; no effect rights."""
 from __future__ import annotations
 
-import copy
 import json
 import pathlib
 import tempfile
@@ -10,7 +9,7 @@ from unittest.mock import patch
 
 from tests.test_generated_artifact_rollout import REPO, RECIPE, SHA, BRANCH
 from tests.test_generated_artifact_rollout_admission import FakeGitHubReader
-from tests.test_generated_artifact_rollout_dryrun import make_bundle, source_files, args
+from tests.test_generated_artifact_rollout_dryrun import make_bundle, args
 from tools.generated_artifact_contract import ArtifactRejected
 from tools.operation_artifact_preview_adapter import (
     BUNDLE_SCHEMA, preview_and_project_authenticated,
@@ -53,7 +52,7 @@ class OperationArtifactPreviewAdapterTests(unittest.TestCase):
             report = execute(call_parameters(artifact, reader))
         self.assertEqual(reader.calls, [
             "/actions/runs/501",
-            "/actions/workflows/33",
+            "/actions/workflows/89",
             "/contents/.github/workflows/verified-artifacts-rollout.yml?ref=" + "b"*40,
         ])
         self.assertEqual(report["schema"], BUNDLE_SCHEMA)
