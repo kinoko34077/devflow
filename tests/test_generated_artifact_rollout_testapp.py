@@ -43,6 +43,7 @@ class TestappReader:
             "status": "in_progress", "head_sha": CALLER_SHA,
             "head_branch": "main", "path": rollout.CALLER_PATH,
             "actor": {"login": "kinoko34077"},
+            "triggering_actor": {"login": "kinoko34077"},
             "repository": {"full_name": REPO}, "workflow_id": 34,
         }
         self.run.update(run_change or {})
@@ -116,6 +117,12 @@ class TestappStaticAdmissionTests(unittest.TestCase):
             attest(context=env(GITHUB_REPOSITORY="kinoko34077/IDS-Composit"))
         with self.assertRaises(ArtifactRejected):
             attest(api=TestappReader(run_change={"repository": {"full_name": "other/repo"}}))
+
+    def test_rest_rerun_actor_missing_or_forged_rejected(self):
+        with self.assertRaises(ArtifactRejected):
+            attest(api=TestappReader(run_change={"triggering_actor": None}))
+        with self.assertRaises(ArtifactRejected):
+            attest(api=TestappReader(run_change={"triggering_actor": {"login": "other"}}))
 
     def test_static_low_trust_one_output_package(self):
         with tempfile.TemporaryDirectory() as tmp:
