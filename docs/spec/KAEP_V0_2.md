@@ -1,6 +1,6 @@
 # KAEP v0.2 — issue mailbox first, direct Claude wake optional
 
-**Status: PROPOSED / non-operative reference.** Owner: [devflow #503](https://github.com/kinoko34077/devflow/issues/503). This document does not authorize a provider launch, a new credential, or a scheduled ChatGPT task.
+**Status: ACCEPTED v0.2 wire contract / opt-in Issue mailbox utilities on main; live Claude transport and sender identity unverified.** Owner: [devflow #503](https://github.com/kinoko34077/devflow/issues/503). This document does not authorize a provider launch, a new credential, or a scheduled ChatGPT task.
 
 ## Three independent planes
 
@@ -49,7 +49,7 @@ A separately approved resident Codex/agent can consume and produce the same enve
 
 - GPT→GitHub→GPT inert readback: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146479428).
 - One **pending** Claude-targeted, READ_ONLY M1 PING: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146522783), `exchange_id=ex_claudeecho20261013`, `message_id=msg_claudem1ping20261013`.
-- When the user starts a supported Claude worker, it reads this comment and posts actual correlated KAEP `ACK` then `ANSWER` (or `BLOCKED`) on #503. **Do not fabricate ACK or dispatch a provider test.**
+- When the user starts a supported Claude worker, it reads this comment and posts actual correlated KAEP `ACK` then `ANSWER` (or `BLOCKED`) on #503 using the accepted reply sender. Reply routing is explicit: the parent recipient must match the stored request and reply recipient is chosen independently. **Do not fabricate ACK or dispatch a provider test.**
 - After actual sender+reply verification: design a receiver-adapter Work Order; do not infer #87/#135 provider E2E acceptance.
 
-No credential/IAM/permission change, new GitHub Action, scheduled ChatGPT task, external service, production dispatch or fleet rollout is authorized by this proposal.
+The optional senders require explicit `--send` for an ordinary GitHub Issue comment, with an existing authorized `gh` session; no automatic send, runtime dispatch or permission acquisition. The shared post-readback boundary checks exact comment ID/content **and the expected GitHub actor**, which is not a model/session signature. No credential/IAM/permission change, new GitHub Action, scheduled ChatGPT task, external service, production dispatch or fleet rollout is authorized by this contract.

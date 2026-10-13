@@ -31,6 +31,8 @@ This only previews a deterministic reply. Append `--send` when the real Claude e
 python -m tools.kaep_reply_sender --repository kinoko34077/devflow --issue 503 --parent-message-id msg_claudem1ping20261013 --kind ANSWER --text-file answer.txt --expect-actor kinoko34077 --send
 ```
 
+**Reverse and Codex routes:** the reply sender defaults to the original `claude-code → chatgpt` M1 handshake for backward compatibility. To reply to a request *addressed to GPT* and send the reply *to Claude*, explicitly add `--parent-recipient chatgpt --reply-recipient claude-code` to the same reply command. For a Codex-addressed request, set `--parent-recipient codex` and choose a different supported reply recipient (`chatgpt` or `claude-code`). The parent recipient is checked against the actual stored message; the reply recipient is explicit routing metadata, **not proof of who authored the reply**. The sender also checks the expected GitHub posting login for an existing reply and on post-readback. Use `--expect-reply-actor <login>` only when the reply is posted through a different authorized GitHub account; neither login constitutes a distinct model/session identity. Never infer the authenticated agent from a shared GitHub account.
+
 Re-running an identical response returns `ALREADY_SENT`; incompatible rewrites of the same response identity fail closed. An unknown/missing write result must be read back before retry. GitHub does not supply atomic compare-and-swap insertion of Issue comments, so simultaneous writers may cause duplicates; use one sender per request/kind, and receiver deduplication.
 
 ## Initiate a new READ_ONLY exchange (GPT/Claude/Codex)

@@ -24,6 +24,8 @@ python -m tools.kaep_inbox_reader --repository kinoko34077/devflow --issue 503 -
 python -m tools.kaep_reply_sender --repository kinoko34077/devflow --issue 503 --parent-message-id msg_claudem1ping20261013 --kind ACK --expect-actor kinoko34077
 ```
 
+For a request *addressed to GPT*, include `--parent-recipient chatgpt --reply-recipient claude-code`; for a Codex-addressed request include `--parent-recipient codex` and an appropriate **different** reply recipient. The original Claude→GPT route is the compatible default. When the expected GitHub actor posting the reply differs from the original parent's actor, set `--expect-reply-actor <GitHub-login>` explicitly; this checks GitHub transport provenance, **not** AI model identity.
+
 For `ANSWER` or `BLOCKED`, prepare a **non-secret**, bounded UTF-8 text file, for example `reply.txt`, that explicitly states what actually occurred:
 
 ```sh
@@ -36,7 +38,7 @@ The dry-run result gives deterministic message identity and `PREPARED`; it is **
 
 Append `--send` to the same command for `ACK`, then `ANSWER` (or `BLOCKED`) **only from a genuinely running and authorized Claude environment**. The implementation makes a single GitHub REST Issue-comment POST using existing `gh` auth, then GETs the entire mailbox again and requires an exact stored ID/content readback. No new permissions, token acquisition, GitHub Actions invocation or task Claim is introduced.
 
-The tool checks complete paginated history and strictly correlates an existing parent message, exchange/task, expected GitHub author and READ_ONLY intent. It deterministically keys the reply by parent+kind and refuses conflicting alternate content. If it finds the identical durable comment, it returns `ALREADY_SENT` with the original comment ID and does not repost. If GitHub POST is ambiguous, timeout occurs or readback cannot confirm, output is a fixed `BLOCKED` reason: **inspect GitHub and read again before retrying**. Avoid two senders concurrently on the same parent: GitHub create-comment has no atomic compare-and-swap, so this is at-least-once, not physically exactly-once.
+The tool checks complete paginated history and strictly correlates an existing parent message, exchange/task, expected GitHub author and READ_ONLY intent. A pre-existing duplicate reply from an unexpected GitHub actor is rejected; after a new post the exact stored comment and expected poster login are verified. A shared login remains insufficient to prove whether Claude or GPT actually authored the message. It deterministically keys the reply by parent+kind and refuses conflicting alternate content. If it finds the identical durable comment, it returns `ALREADY_SENT` with the original comment ID and does not repost. If GitHub POST is ambiguous, timeout occurs or readback cannot confirm, output is a fixed `BLOCKED` reason: **inspect GitHub and read again before retrying**. Avoid two senders concurrently on the same parent: GitHub create-comment has no atomic compare-and-swap, so this is at-least-once, not physically exactly-once.
 
 ## Integration and safety
 
