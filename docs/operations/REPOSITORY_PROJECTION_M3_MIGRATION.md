@@ -42,6 +42,39 @@ Evaluate one repository independently from the others. Require **all** applicabl
 
 A zero-open-task repository can still have complete machine coverage, but **zero work is not evidence of an active TASK lifecycle**. If any of the above are unproven, keep the manual Control sections and record the bounded missing proof.
 
+### R5 bounded all-state **display preview** (additive M2 transport)
+
+The canonical M1 Projection is the single Issue classifier and supplies `task_records`
+for every known open TASK. The existing M2 Control's `tasks.ready` and
+`tasks.implementing` stay intentionally limited to 20 items each and **must
+not** be promoted to an all-state task source.
+
+An additive optional `all_state_tasks` within the existing **machine-owned M2
+cache marker** carries a *bounded preview* of M1 `task_records` with explicit:
+`status=COMPLETE|TRUNCATED|INCOMPLETE|UNAVAILABLE`,
+`total` machine TASK count, and `records` (at most 20, retaining
+AWAITING_REVIEW/BLOCKED/DONE-open/etc). The producer uses the **same live source,
+timestamp, SHA-256 generation ID, digest fencing and exact Control trust**;
+it does not create an additional task database or per-repo workflow.
+
+- **COMPLETE** asserts all open known TASKs are represented only when the
+  canonical Issue coverage/source are verified and all task record counts match.
+  It does **not** authorize execution or retirement of manual local-work state.
+- **TRUNCATED** when more than 20 TASK records exist; consumers must display
+  partial status and never infer missing statuses are no work.
+- **INCOMPLETE** on source count/coverage mismatch or stale/unknown source.
+  **UNAVAILABLE** on unavailable source. Both must preserve manual fallback.
+- Existing historical cache payloads **without** the optional field remain
+  valid for current M2 consumers, but new all-state consumers must treat the
+  missing preview as **unknown**, never as an empty/complete task list.
+- `coverage.can_replace_manual_active_work=false` remains mandatory. Neither
+  this field nor the Human Portfolio serves as SMC/runtime supply.
+
+Full cross-repository R5 acceptance requires Consumer-side parsing, exact
+Issue-ref parity, source/truncation/missing-field fallbacks and live readback.
+This additive producer field alone is a devflow implementation slice, **not**
+M3.1 or a full Repo Monitor all-state UI deployment.
+
 ## 4. Consumer and producer change map
 
 | Existing surface | Current relevant reliance | M3 change/admission boundary |

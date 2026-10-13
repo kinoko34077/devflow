@@ -17,9 +17,12 @@ CACHE_SCHEMA_VERSION = "repository-projection-cache.v1"
 CONTROL_TRUST_SOURCE = "DEVFLOW_SHARED_CONTROL_VERIFIER"
 CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_TASK_SUMMARIES = 20
+MAX_ALL_STATE_TASK_RECORDS = 20
 
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_OPTIONAL_TOP_LEVEL_FIELDS = frozenset({"all_state_tasks"})
+_ALL_STATE_FIELDS = frozenset({"status", "total", "records"})
 _TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
@@ -218,6 +221,81 @@ def _compact_task_list(value: object, field: str) -> list[dict[str, Any]]:
             raise RepositoryProjectionCacheError(f"{field} entries must be issue objects")
         compact.append(ref)
     return compact
+
+
+def _all_state_task_records(
+    live: dict[str, Any], coverage: dict[str, Any], count: int
+) -> dict[str, Any]:
+    """Bounded all-work-state M1 read projection, never an authority grant."""
+    if live.get("source_status") != "AVAILABLE":
+        return {"status": "UNAVAILABLE", "total": count, "records": []}
+    source_records = live.get("task_records")
+    if not isinstance(source_records, list):
+        raise RepositoryProjectionCacheError("live task_records must be an array")
+    seen: set[int] = set()
+    records: list[dict[str, Any]] = []
+    for item in source_records[:MAX_ALL_STATE_TASK_RECORDS]:
+        record = _compact_issue_ref(item)
+        if record is None or (
+            record["source_kind"] != "MACHINE"
+            or record["record_role"] != "TASK"
+            or record["work_status"] is None
+            or record["url"] is None
+        ):
+            raise RepositoryProjectionCacheError("all-state records must be verified TASKs")
+        number = record["issue_number"]
+        if number in seen:
+            raise RepositoryProjectionCacheError("duplicate all-state TASK")
+        seen.add(number)
+        records.append(record)
+    status = (
+        "TRUNCATED" if len(source_records) > MAX_ALL_STATE_TASK_RECORDS
+        else "COMPLETE" if len(source_records) == count and coverage["status"] == "COMPLETE"
+        else "INCOMPLETE"
+    )
+    return {"status": status, "total": count, "records": records}
+
+
+def _validate_all_state_tasks(
+    payload: object, counts: dict[str, int], coverage: dict[str, Any], source: dict[str, Any]
+) -> None:
+    state = _require_mapping(payload, "all_state_tasks")
+    _require_exact_fields(state, _ALL_STATE_FIELDS, "all_state_tasks")
+    status = state["status"]
+    if status not in {"COMPLETE", "TRUNCATED", "INCOMPLETE", "UNAVAILABLE"}:
+        raise RepositoryProjectionCacheError("invalid all_state_tasks.status")
+    total = _require_nonnegative_int(state["total"], "all_state_tasks.total")
+    if total != counts["machine_tasks"]:
+        raise RepositoryProjectionCacheError("all_state_tasks.total must match machine task count")
+    entries = state["records"]
+    if not isinstance(entries, list) or len(entries) > MAX_ALL_STATE_TASK_RECORDS:
+        raise RepositoryProjectionCacheError("all_state_tasks.records exceed bounded array")
+    seen: set[int] = set()
+    for item in entries:
+        ref = _compact_issue_ref(item)
+        if ref is None or (
+            ref["source_kind"] != "MACHINE"
+            or ref["record_role"] != "TASK"
+            or ref["work_status"] is None
+            or ref["url"] is None
+        ):
+            raise RepositoryProjectionCacheError("all_state_tasks record is not verified TASK")
+        if ref["issue_number"] in seen:
+            raise RepositoryProjectionCacheError("duplicate cached all-state TASK")
+        seen.add(ref["issue_number"])
+    if status == "COMPLETE" and (
+        len(entries) != total
+        or coverage["status"] != "COMPLETE"
+        or source["status"] != "AVAILABLE"
+        or source["freshness"] != "CURRENT"
+    ):
+        raise RepositoryProjectionCacheError("all_state_tasks cannot claim unverified completeness")
+    if status == "TRUNCATED" and (
+        total <= MAX_ALL_STATE_TASK_RECORDS or len(entries) != MAX_ALL_STATE_TASK_RECORDS
+    ):
+        raise RepositoryProjectionCacheError("all_state_tasks TRUNCATED count mismatch")
+    if status == "UNAVAILABLE" and (source["status"] != "UNAVAILABLE" or entries):
+        raise RepositoryProjectionCacheError("all_state_tasks unavailable source mismatch")
 
 
 def _validate_type_counts(value: object, field: str) -> dict[str, int]:
@@ -455,6 +533,7 @@ def build_cached_projection(
                 "implementing_tasks",
             ),
         },
+        "all_state_tasks": _all_state_task_records(live, coverage, counts["machine_tasks"]),
         "references": {
             "newest_open_issue": _compact_issue_ref(
                 live.get("newest_open_issue")
@@ -472,7 +551,11 @@ def _validate_cached_payload(
     payload: dict[str, Any],
     repository: str,
 ) -> dict[str, Any]:
-    _require_exact_fields(payload, _TOP_LEVEL_FIELDS, "repository projection cache")
+    _require_exact_fields(
+        {key: value for key, value in payload.items() if key not in _OPTIONAL_TOP_LEVEL_FIELDS},
+        _TOP_LEVEL_FIELDS,
+        "repository projection cache",
+    )
     if payload.get("schema_version") != CACHE_SCHEMA_VERSION:
         raise RepositoryProjectionCacheError(
             f"unsupported schema_version: {payload.get('schema_version')!r}"
@@ -582,6 +665,8 @@ def _validate_cached_payload(
     _compact_issue_ref(references["recently_active_issue"])
 
     _validate_control_trust(payload.get("control_trust"))
+    if "all_state_tasks" in payload:
+        _validate_all_state_tasks(payload["all_state_tasks"], normalized_counts, coverage, source)
 
     expected_generation_id = _canonical_digest(_generation_material(payload))
     if generation_id != expected_generation_id:
