@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/blob/main/docs/spec/kaep_message_v02.schema.json",
+  "title": "KAEP v0.2 bounded issue-mailbox envelope, not execution authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "exchange_id",
+    "message_id",
+    "in_reply_to",
+    "task_ref",
+    "recipient",
+    "kind",
+    "intent",
+    "idempotency_key",
+    "scope",
+    "payload",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "kaep.message.v0.2"
+    },
+    "exchange_id": {
+      "type": "string",
+      "pattern": "^ex_[A-Za-z0-9_-]{1,72}$"
+    },
+    "message_id": {
+      "type": "string",
+      "pattern": "^msg_[A-Za-z0-9_-]{1,72}$"
+    },
+    "in_reply_to": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^msg_[A-Za-z0-9_-]{1,72}$"
+        }
+      ]
+    },
+    "task_ref": {
+      "type": "string",
+      "pattern": "^kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+    },
+    "recipient": {
+      "enum": [
+        "claude-code",
+        "chatgpt",
+        "codex",
+        "coordinator"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "REQUEST",
+        "ACK",
+        "QUESTION",
+        "ANSWER",
+        "PROGRESS",
+        "RESULT",
+        "REVIEW_REQUEST",
+        "REVIEW_FEEDBACK",
+        "CANCEL_REQUEST",
+        "CANCEL_ACK",
+        "ERROR",
+        "BLOCKED"
+      ]
+    },
+    "intent": {
+      "enum": [
+        "PING",
+        "ANALYZE",
+        "IMPLEMENT",
+        "TEST",
+        "REVIEW",
+        "REVISE",
+        "REPORT",
+        "CANCEL"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{8,128}$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "expected_head",
+        "effect"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^kinoko34077/[A-Za-z0-9_.-]+$"
+        },
+        "expected_head": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            }
+          ]
+        },
+        "effect": {
+          "enum": [
+            "READ_ONLY",
+            "WRITE_INTENT"
+          ]
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^https://github\\.com/kinoko34077/[A-Za-z0-9_.-]+/(issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*)$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "ACK",
+              "ANSWER",
+              "PROGRESS",
+              "RESULT",
+              "REVIEW_FEEDBACK",
+              "CANCEL_ACK",
+              "ERROR",
+              "BLOCKED"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "in_reply_to": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "scope": {
+            "properties": {
+              "effect": {
+                "const": "READ_ONLY"
+              }
+            },
+            "required": [
+              "effect"
+            ]
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "intent": {
+            "not": {
+              "enum": [
+                "IMPLEMENT",
+                "REVISE"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}
