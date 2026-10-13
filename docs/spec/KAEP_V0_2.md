@@ -1,0 +1,55 @@
+# KAEP v0.2 — issue mailbox first, direct Claude wake optional
+
+**Status: PROPOSED / non-operative reference.** Owner: [devflow #503](https://github.com/kinoko34077/devflow/issues/503). This document does not authorize a provider launch, a new credential, or a scheduled ChatGPT task.
+
+## Three independent planes
+
+1. **Authority:** devflow Control + owning Issue/PR; execution-coordinator #3 serialized Claim/generation/lease; real PR Review/CI and Human gates.
+2. **Exchange:** bounded communication with correlated replies and replay protection; no work or approval authority.
+3. **Provider:** existing execution-coordinator `ExecutionRequest/DispatchOutcome`; a real runner or Claude Code Channel only after separate verification.
+
+## G / GitHub mailbox (default)
+
+Every message is a GitHub **comment on the owning Issue**, with the **entire** body equal to:
+
+```text
+<!-- kaep:message:v0.2 -->
+```json
+{ ... schema-conforming JSON ... }
+```
+```
+
+The reference JSON schema is `docs/spec/kaep_message_v02.schema.json` (Draft 2020-12). Max UTF-8 comment 8192 bytes; payload text max 4000 characters. Exact `task_ref` matches Issue; GitHub comment ID is the immutable read cursor. Independently authenticate actual GitHub comment actor: no sender field in the message is trusted. No free-form issue comment grants work authority.
+
+Envelope: `schema_version, exchange_id, message_id, in_reply_to, task_ref, recipient, kind, intent, idempotency_key, scope{repository,expected_head,effect}, payload{text}, evidence_refs`. `READ_ONLY / WRITE_INTENT` is **intent only**; it cannot authorize a write.
+
+Kinds: `REQUEST, ACK, QUESTION, ANSWER, PROGRESS, RESULT, REVIEW_REQUEST, REVIEW_FEEDBACK, CANCEL_REQUEST, CANCEL_ACK, ERROR, BLOCKED`.
+
+An ACK proves **receipt only**, never execution Claim or provider RUNNING. A RESULT or REVIEW_FEEDBACK is not Task DONE, a passed CI or an actual formal GitHub Review.
+
+### Delivery and recovery
+
+- Before sending, read the owning Issue's complete mailbox for the stable idempotency key. On an ambiguous write result, **read before retry** to prevent duplicate posts. Identical replay is deduplicated; conflicting reuse is rejected.
+- For each response, require the matching `exchange_id`, `task_ref`, and known prior `in_reply_to`, independently check its GitHub actor and actual head/authority. Cursor is an optimization; pagination gaps or incomplete history fail closed.
+- Malformed wrappers, duplicate JSON keys, unknown fields, forged actors, missing owner evidence and stale heads fail closed. Do not echo untrusted raw text into logs.
+- Cancellation is cooperative messaging only; Claim is changed only by the existing serialized runtime path.
+- No automatic ChatGPT wakeup from a GitHub comment. GPT reads/replies while a user-initiated chat is running, or through a *separately* authorized future Codex/GPT API worker.
+
+## P / optional low-latency wake
+
+If a supported Claude Code Channel, MCP/CPL adapter or permitted one-off launcher is available, it **only signals the message ID and owning Issue URL**. Claude then reads GitHub G as the durable payload. Dispatch acceptance alone is not proof of delivery/processing. If P fails, no duplicate work request is posted: the existing G message is retained.
+
+The user may start Claude by their own timer or manually; this is **not** a ChatGPT schedule. The term `CPL` remains unverified; do not assume a specific integration exists merely from its name.
+
+## R / future resident Codex
+
+A separately approved resident Codex/agent can consume and produce the same envelopes event-driven when interactive ChatGPT is offline; no change in KAEP wire semantics, claim authority, or review safety.
+
+## Current M0/M1 evidence and next acceptance gate
+
+- GPT→GitHub→GPT inert readback: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146479428).
+- One **pending** Claude-targeted, READ_ONLY M1 PING: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146522783), `exchange_id=ex_claudeecho20261013`, `message_id=msg_claudem1ping20261013`.
+- When the user starts a supported Claude worker, it reads this comment and posts actual correlated KAEP `ACK` then `ANSWER` (or `BLOCKED`) on #503. **Do not fabricate ACK or dispatch a provider test.**
+- After actual sender+reply verification: design a receiver-adapter Work Order; do not infer #87/#135 provider E2E acceptance.
+
+No credential/IAM/permission change, new GitHub Action, scheduled ChatGPT task, external service, production dispatch or fleet rollout is authorized by this proposal.
