@@ -629,6 +629,55 @@ Do not convert the repository to Base merely because it is managed.
 
 ## 11. Tool/access limitations
 
+### Failure-scope triage and bounded normal-path retry (user clarified 2026-10-13)
+
+A rejected tool invocation, failing CI, missing permission, and an actual unsafe change
+are **different observations**. One refusal is evidence about **that operation in
+that context**, not proof that the approved task or every subsequent action is
+unsafe, permanently disallowed or blocked by GitHub/devflow. Never misattribute
+an OpenAI platform safety error to a GitHub permission, repository policy or
+code defect without an independently supported diagnostic.
+
+Before deciding to HOLD an entire work stream:
+
+1. **Classify the observed failure precisely**: syntax/arguments/precondition,
+   runtime/CI defect, API transport, GitHub authorization/branch rule,
+   platform safety denial, or unknown. Record the exact action and reliable
+   evidence without exposing credentials.
+2. **Separate authorizations and outcomes**: user approval, actual changed-surface
+   safety, GitHub review/CI, one write attempt, merge and publication are
+   independent facts. A failed merge does not cancel previously verified CI,
+   User approval, or safely independent work; a successful retry does not waive
+   missing native checks.
+3. **Reassess risk and recovery** under §4.1/#439: what is the concrete
+   privileged/real-data effect, plausible harm and safe revert? If a normal,
+   user-authorized reversible action remains appropriate, a **bounded,
+   evidence-based retry** is permissible after correcting an input, observing
+   a meaningful context/precondition change or fresh authorization. Use the
+   normal supported tool path; do not blindly loop or repeatedly submit
+   identical denied calls.
+4. **Respect enforced boundaries**: do not hide the requested operation,
+   deliberately reframe payloads/tools/network routes, switch credentials or
+   bypass a platform safeguard. If the action itself has credible
+   secret-exposure, exploit, unauthorized privilege, irreversible/destructive
+   impact or a genuine security gate, HOLD that specific effect and apply
+   existing Human/review requirements regardless of retry history.
+5. **Continue what is independent**: after a few unproductive attempts or
+   repeated denials without new evidence, stop that operation and document
+   the blocker; choose `CHANGE_PATH`, `SPLIT` or `HOLD` for the smallest
+   affected scope while preserving safe independent implementation/review.
+   Do not present manual user intervention as mandatory merely because one
+   agent tool call failed. Also do not invent a numeric attempt quota or
+   continue tens of blind attempts.
+
+Concrete distinctions: Repo Monitor #65 and devflow #483 had earlier denied
+merges but later succeeded by a guarded, **normal native retry** after renewed
+user instruction and unchanged reviewed-head verification. Repo Monitor #66
+had an ordinary Windows browser *test failure* caused by a test fixture's
+wrong repository selection; the fixture was corrected and exact-head reruns
+passed. Neither case authorizes circumventing a future safety denial or
+skipping CI/review/release approval.
+
 When an agent cannot perform a required operation:
 - continue every independent read/write/verification step it can perform;
 - record the exact remaining operation and required authority in the active durable Issue;
