@@ -1,0 +1,132 @@
+"""KAEP v0.2 inert issue-comment codec; NOT an authorization or launcher.
+
+Caller must verify actual authenticated GitHub actor and live Issue/PR/Claim state.
+No sender field, GitHub calls, agent process invocation or authority changes.
+"""
+from __future__ import annotations
+import hashlib
+import json
+import re
+from typing import Any, Mapping, Sequence
+
+MARKER = "<!-- kaep:message:v0.2 -->"
+FENCE = chr(96) * 3
+FIELDS = set("schema_version exchange_id message_id in_reply_to task_ref recipient kind intent idempotency_key scope payload evidence_refs".split())
+KINDS = set("REQUEST ACK QUESTION ANSWER PROGRESS RESULT REVIEW_REQUEST REVIEW_FEEDBACK CANCEL_REQUEST CANCEL_ACK ERROR BLOCKED".split())
+REPLIES = set("ACK ANSWER PROGRESS RESULT REVIEW_FEEDBACK CANCEL_ACK ERROR BLOCKED".split())
+INTENTS = set("PING ANALYZE IMPLEMENT TEST REVIEW REVISE REPORT CANCEL".split())
+RECIPIENTS = set("claude-code chatgpt codex coordinator".split())
+
+class InvalidMessage(ValueError):
+    """Only fixed reason codes, not untrusted content."""
+
+def fail(code: str) -> None:
+    raise InvalidMessage(code)
+
+def matches(pattern: str, value: object) -> bool:
+    return type(value) is str and re.fullmatch(pattern, value) is not None
+
+def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for k, v in pairs:
+        if k in out: fail("DUPLICATE_JSON_KEY")
+        out[k] = v
+    return out
+
+def reject_constant(_: str) -> None:
+    fail("NONFINITE_NUMBER")
+
+def validate(raw: object, *, task_ref: str | None = None) -> dict[str, Any]:
+    if type(raw) is not dict or set(raw) != FIELDS: fail("INVALID_FIELDS")
+    d: dict[str, Any] = raw
+    if d["schema_version"] != "kaep.message.v0.2": fail("UNSUPPORTED_VERSION")
+    if not matches(r"ex_[A-Za-z0-9_-]{1,72}", d["exchange_id"]): fail("INVALID_EXCHANGE_ID")
+    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", d["message_id"]): fail("INVALID_MESSAGE_ID")
+    parent = d["in_reply_to"]
+    if parent is not None and not matches(r"msg_[A-Za-z0-9_-]{1,72}", parent): fail("INVALID_PARENT")
+    if type(d["kind"]) is not str or d["kind"] not in KINDS: fail("INVALID_KIND")
+    if parent is None and d["kind"] in REPLIES: fail("MISSING_PARENT")
+    if parent == d["message_id"]: fail("SELF_REPLY")
+    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*", d["task_ref"]): fail("INVALID_TASK")
+    if task_ref is not None and task_ref != d["task_ref"]: fail("TASK_MISMATCH")
+    if type(d["recipient"]) is not str or d["recipient"] not in RECIPIENTS: fail("INVALID_RECIPIENT")
+    if type(d["intent"]) is not str or d["intent"] not in INTENTS: fail("INVALID_INTENT")
+    if not matches(r"[A-Za-z0-9_.:-]{8,128}", d["idempotency_key"]): fail("INVALID_IDEMPOTENCY")
+    s = d["scope"]
+    if type(s) is not dict or set(s) != {"repository", "expected_head", "effect"}: fail("INVALID_SCOPE")
+    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+", s["repository"]): fail("INVALID_REPOSITORY")
+    if d["task_ref"].partition("#")[0] != s["repository"]: fail("REPOSITORY_TASK_MISMATCH")
+    if s["expected_head"] is not None and not matches(r"[0-9a-f]{40}", s["expected_head"]): fail("INVALID_HEAD")
+    if type(s["effect"]) is not str or s["effect"] not in ("READ_ONLY", "WRITE_INTENT"): fail("INVALID_EFFECT")
+    if s["effect"] == "READ_ONLY" and d["intent"] in ("IMPLEMENT", "REVISE"): fail("READ_ONLY_WRITE_CONFLICT")
+    p = d["payload"]
+    if type(p) is not dict or set(p) != {"text"}: fail("INVALID_PAYLOAD")
+    t = p["text"]
+    if type(t) is not str or not 1 <= len(t) <= 4000: fail("INVALID_TEXT")
+    if any(ord(c) < 32 and c not in "\n\t" for c in t): fail("INVALID_CONTROL")
+    refs = d["evidence_refs"]
+    if type(refs) is not list or len(refs) > 8: fail("INVALID_REFS")
+    pattern = r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/(?:issues/[1-9][0-9]*(?:#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*)"
+    for ref in refs:
+        if not matches(pattern, ref): fail("INVALID_REF")
+    if len(refs) != len(set(refs)): fail("DUPLICATE_REFS")
+    return d
+
+def encode_comment(data: dict[str, Any]) -> str:
+    validate(data)
+    body = MARKER + "\n" + FENCE + "json\n" + json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n" + FENCE
+    if len(body.encode("utf-8")) > 8192: fail("COMMENT_TOO_LARGE")
+    return body
+
+def decode_comment(body: str, *, task_ref: str | None = None) -> dict[str, Any]:
+    if type(body) is not str or len(body.encode("utf-8")) > 8192: fail("COMMENT_TOO_LARGE")
+    prefix, suffix = MARKER + "\n" + FENCE + "json\n", "\n" + FENCE
+    if not body.startswith(prefix) or not body.endswith(suffix): fail("INVALID_WRAPPER")
+    try:
+        data = json.loads(body[len(prefix):-len(suffix)], object_pairs_hook=unique_pairs, parse_constant=reject_constant)
+    except (json.JSONDecodeError, UnicodeError, RecursionError, ValueError) as exc:
+        if isinstance(exc, InvalidMessage): raise
+        fail("MALFORMED_JSON")
+    return validate(data, task_ref=task_ref)
+
+def fingerprint(data: dict[str, Any]) -> str:
+    validate(data)
+    blob = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+def read_mailbox(comments: Sequence[Mapping[str, Any]], *, task_ref: str, after_id: int = 0, recipient: str | None = None) -> list[tuple[int, dict[str, Any]]]:
+    """Syntactic mail only. Require complete history and verify GitHub actor separately."""
+    if type(after_id) is not int or after_id < 0: fail("INVALID_CURSOR")
+    if recipient is not None and recipient not in RECIPIENTS: fail("INVALID_RECIPIENT")
+    for c in comments:
+        if type(c.get("id")) is not int or c["id"] <= 0: fail("INVALID_COMMENT_ID")
+    seen_ids: dict[str, str] = {}
+    seen_keys: dict[str, str] = {}
+    out: list[tuple[int, dict[str, Any]]] = []
+    for c in sorted(comments, key=lambda x: x["id"]):
+        body = c.get("body")
+        if type(body) is not str or not body.startswith(MARKER): continue
+        d = decode_comment(body, task_ref=task_ref)
+        h = fingerprint(d)
+        mid, key = d["message_id"], d["idempotency_key"]
+        if mid in seen_ids and seen_ids[mid] != h: fail("MESSAGE_ID_COLLISION")
+        if key in seen_keys and seen_keys[key] != h: fail("IDEMPOTENCY_CONFLICT")
+        if mid in seen_ids or key in seen_keys: continue
+        seen_ids[mid] = seen_keys[key] = h
+        if c["id"] > after_id and (recipient is None or recipient == d["recipient"]):
+            out.append((c["id"], d))
+    return out
+
+def verify_reply_chain(messages: Sequence[Mapping[str, Any]]) -> None:
+    """Reference matching only: no auth, actor, Review or Claim proof."""
+    known: dict[str, dict[str, Any]] = {}
+    for msg in messages:
+        d = validate(msg)
+        mid, parent_id = d["message_id"], d["in_reply_to"]
+        if mid in known: fail("DUPLICATE_MESSAGE_ID")
+        if parent_id is not None:
+            parent = known.get(parent_id)
+            if parent is None: fail("UNKNOWN_PARENT")
+            if d["exchange_id"] != parent["exchange_id"] or d["task_ref"] != parent["task_ref"]:
+                fail("CROSS_EXCHANGE_REPLY")
+        known[mid] = d
