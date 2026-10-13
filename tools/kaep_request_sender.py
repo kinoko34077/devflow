@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
-from tools.kaep_reply_sender import _mailbox, post_comment, ACTOR
+from tools.kaep_reply_sender import _mailbox, post_comment, post_and_verify, ACTOR
 from tools.kaep_mailbox_codec import encode_comment, fingerprint
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
@@ -101,16 +101,10 @@ def send_request(
     }
     if existing_id is not None or not do_send:
         return output
-    cid = post_comment(repository=repository, issue=issue, body=encode_comment(req))
-    after = fetch_gh_pages(repository, issue)
-    _, msgs = _mailbox(after, repository=repository, issue=issue)
-    actual = [
-        c for c, msg in msgs
-        if c == cid and msg["message_id"] == req["message_id"]
-        and fingerprint(msg) == fingerprint(req)
-    ]
-    if len(actual) != 1:
-        _fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
+    cid = post_and_verify(
+        repository=repository, issue=issue, message=req,
+        post_func=post_comment, fetch_func=fetch_gh_pages,
+    )
     output["status"] = "SENT_AND_READ_BACK"
     output["posted_comment_id"] = cid
     return output
