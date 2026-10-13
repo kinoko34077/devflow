@@ -55,7 +55,17 @@ A `schema_version=2` role-only snippet is **not automatically admitted** as COMP
 1. Minimal role plus an explicit reviewed gate/attention declaration (e.g. reviewed `attention=NONE|NEEDS_HUMAN|WAIT_EXTERNAL|NEEDS_EVIDENCE`), preserving truthful explicit gates; **or**
 2. Minimal role alone marked `gate_status=UNKNOWN`, only a partial classification, **not** eligible for automatic COMPLETE/local-authority admission until the unknown is resolved.
 
-Both require backward-compatible V1 parsing, duplicate/mixed-marker rejection, strict TASK fields, correct source-author trust, and Human Portfolio evidence tests. Never silently default unknown gate fields to `false`. Contract selection belongs to R3 evidence and review.
+**R3 chosen implementation contract (proposed in the bounded PR, not yet accepted until gates):** V2 is strictly non-TASK and requires **all three** keys `schema_version=2`, `record_role=TRACKER|REFERENCE|SYSTEM`, `attention=NONE|NEEDS_HUMAN|WAIT_EXTERNAL|NEEDS_EVIDENCE` inside a distinct `DEVFLOW_REPOSITORY_ISSUE_METADATA_V2` marker. There is **no role-only/UNKNOWN default** and no V2 TASK. The trusted source author explicitly asserts the current Human/external/evidence attention or NONE, not an implied false. V1 TASK/other roles remain valid and strict. Mixed V1/V2, duplicate/malformed/unknown keys, untrusted author and task-in-V2 all fail closed. This light declaration does **not** attest task readiness, unblock a security-sensitive action, or let a Consumer claim executable work.
+
+Example for a genuinely non-actionable reference after reviewing its current gates:
+
+```text
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->
+{"schema_version":2,"record_role":"REFERENCE","attention":"NONE"}
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->
+```
+
+Replace `NONE` with the correct disposition when actionable; if the gate cannot be responsibly determined, **leave the Issue unclassified or in V1** rather than asserting NONE. No legacy bulk rewrite. The light declaration is accepted as role classification only, not runtime authority. Exact PR regression must prove this in the existing Human Portfolio before R3 DONE.
 
 ## 4A. Explicit user-approved dual-read transition (2026-10-12 JST)
 
