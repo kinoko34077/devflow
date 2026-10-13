@@ -163,6 +163,90 @@ class ReplyContractTests(unittest.TestCase):
                        repository=REPO, issue=503, parent_message_id=PARENT,
                        kind="ACK", response_text=FIXED_ACK, expect_actor="bad login")
 
+    def test_gpt_targeted_request_can_reply_to_claude(self):
+        src = pages([comment(11, parent(recipient="chatgpt"), actor="kinoko34077")])
+        reply, previous = make_reply(
+            src, repository=REPO, issue=503, parent_message_id=PARENT,
+            kind="ANSWER", response_text="GPT response prepared",
+            expect_actor="kinoko34077",
+            parent_recipient="chatgpt", reply_recipient="claude-code",
+        )
+        self.assertIsNone(previous)
+        self.assertEqual(reply["recipient"], "claude-code")
+        self.assertEqual(reply["in_reply_to"], PARENT)
+        self.assertEqual(reply["scope"]["effect"], "READ_ONLY")
+
+    def test_codex_targeted_request_can_reply_to_gpt(self):
+        src = pages([comment(11, parent(recipient="codex"))])
+        reply, _ = make_reply(
+            src, repository=REPO, issue=503, parent_message_id=PARENT,
+            kind="ACK", response_text=FIXED_ACK, expect_actor="kinoko34077",
+            parent_recipient="codex", reply_recipient="chatgpt",
+        )
+        self.assertEqual(reply["recipient"], "chatgpt")
+
+    def test_route_must_not_reply_to_same_recipient(self):
+        src = pages([comment(11, parent(recipient="chatgpt"))])
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_REPLY_ROUTE"):
+            make_reply(
+                src, repository=REPO, issue=503, parent_message_id=PARENT,
+                kind="ANSWER", response_text="same agent",
+                expect_actor="kinoko34077",
+                parent_recipient="chatgpt", reply_recipient="chatgpt",
+            )
+
+    def test_expected_parent_recipient_must_match_message(self):
+        src = pages([comment(11, parent(recipient="chatgpt"))])
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_PARENT_INTENT"):
+            make_reply(
+                src, repository=REPO, issue=503, parent_message_id=PARENT,
+                kind="ANSWER", response_text="wrong route",
+                expect_actor="kinoko34077",
+                parent_recipient="claude-code", reply_recipient="chatgpt",
+            )
+
+    def test_reverse_route_send_readback(self):
+        src = pages([comment(11, parent(recipient="chatgpt"))])
+        reply, _ = make_reply(
+            src, repository=REPO, issue=503, parent_message_id=PARENT,
+            kind="ANSWER", response_text="verified via readback",
+            expect_actor="kinoko34077", parent_recipient="chatgpt",
+            reply_recipient="claude-code",
+        )
+        after = pages([comment(11, parent(recipient="chatgpt")), comment(12, reply)])
+        with patch("tools.kaep_reply_sender.fetch_gh_pages", side_effect=[src, after]):
+            with patch("tools.kaep_reply_sender.post_comment", return_value=12) as post:
+                result = send_reply(
+                    repository=REPO, issue=503, parent_message_id=PARENT,
+                    kind="ANSWER", response_text="verified via readback",
+                    expect_actor="kinoko34077", do_send=True,
+                    parent_recipient="chatgpt", reply_recipient="claude-code",
+                )
+        post.assert_called_once()
+        self.assertEqual(result["status"], "SENT_AND_READ_BACK")
+
+    def test_cli_reverse_route_dry_run_does_not_post(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "pages.json"
+            t = Path(d) / "answer.txt"
+            p.write_text(pages([comment(11, parent(recipient="chatgpt"))]),
+                         encoding="utf-8")
+            t.write_text("non-secret reply", encoding="utf-8")
+            with patch("tools.kaep_reply_sender.subprocess.run") as network:
+                with patch("builtins.print") as output:
+                    exitcode = main([
+                        "--repository", REPO, "--issue", "503",
+                        "--parent-message-id", PARENT, "--kind", "ANSWER",
+                        "--text-file", str(t), "--expect-actor", "kinoko34077",
+                        "--parent-recipient", "chatgpt",
+                        "--reply-recipient", "claude-code",
+                        "--offline-pages", str(p),
+                    ])
+            self.assertEqual(exitcode, 0)
+            network.assert_not_called()
+            self.assertEqual(json.loads(output.call_args.args[0])["status"],
+                             "PREPARED")
+
     def test_reply_cannot_be_offline_sent(self):
         with self.assertRaisesRegex(InvalidMessage, "OFFLINE_POST_FORBIDDEN"):
             send_reply(repository=REPO, issue=503, parent_message_id=PARENT,
