@@ -165,6 +165,23 @@ class RequestSenderTests(unittest.TestCase):
         self.assertEqual(result["status"],"SENT_AND_READ_BACK")
         self.assertEqual(result["posted_comment_id"],99)
 
+    def test_request_post_readback_wrong_actor_is_rejected(self):
+        src = pages([])
+        msg, _ = prepare()
+        after = pages([comment(99, msg, actor="unrelated-user")])
+        with patch("tools.kaep_request_sender.fetch_gh_pages",
+                   side_effect=[src, after]):
+            with patch("tools.kaep_request_sender.post_comment",
+                       return_value=99):
+                with self.assertRaisesRegex(InvalidMessage, "READBACK_ACTOR_MISMATCH"):
+                    send_request(
+                        repository=REPO, issue=503, recipient="claude-code",
+                        intent="ANALYZE", request_key=KEY,
+                        request_text="safe analysis only",
+                        expect_existing_actor="kinoko34077",
+                        do_send=True,
+                    )
+
     def test_post_readback_failure(self):
         with patch("tools.kaep_request_sender.fetch_gh_pages",side_effect=[pages([]),pages([])]):
             with patch("tools.kaep_request_sender.post_comment",return_value=99):
