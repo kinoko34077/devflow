@@ -454,6 +454,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
             "## Active Work\n\nHuman-owned prose.\n"
         )
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy = cache.recompute_generation_id(legacy)
         legacy_block = (
@@ -480,6 +482,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
 
     def test_replacement_rejects_corrupt_legacy_v1_generation(self):
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy = cache.recompute_generation_id(legacy)
         legacy["generation_id"] = "sha256:" + ("0" * 64)
@@ -505,6 +509,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
 
     def test_replacement_rejects_legacy_v1_with_additional_missing_field(self):
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy.pop("coverage")
         legacy = cache.recompute_generation_id(legacy)
