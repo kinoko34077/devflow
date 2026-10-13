@@ -104,6 +104,7 @@ def send_request(
     cid = post_and_verify(
         repository=repository, issue=issue, message=req,
         post_func=post_comment, fetch_func=fetch_gh_pages,
+        expected_post_actor=expect_existing_actor,
     )
     output["status"] = "SENT_AND_READ_BACK"
     output["posted_comment_id"] = cid
