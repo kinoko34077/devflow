@@ -103,7 +103,9 @@ class ReadOnlyInboxTests(unittest.TestCase):
 
     def test_cursor_does_not_hide_conflicting_history(self):
         first = encode_comment(envelope())
-        conflicting = encode_comment(envelope(text="mutated", message_id="msg_alt002"))
+        collision = envelope(text="mutated", message_id="msg_alt002")
+        collision["idempotency_key"] = "kaep.test.msg_msg001"
+        conflicting = encode_comment(collision)
         self.assert_blocked(pages([comment(11, first), comment(12, conflicting)]),
                             "IDEMPOTENCY_CONFLICT")
 
