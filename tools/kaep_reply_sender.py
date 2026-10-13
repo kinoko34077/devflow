@@ -47,6 +47,7 @@ def make_reply(
     text: str, *, repository: str, issue: int, parent_message_id: str,
     kind: str, response_text: str, expect_actor: str,
     parent_recipient: str = "claude-code", reply_recipient: str = "chatgpt",
+    reply_actor: str | None = None,
 ) -> tuple[dict[str, Any], int | None]:
     """Return expected reply and existing comment ID, if already sent.
 
@@ -62,6 +63,9 @@ def make_reply(
     if (parent_recipient not in ROLES or reply_recipient not in ROLES
             or parent_recipient == reply_recipient):
         _fail("INVALID_REPLY_ROUTE")
+    effective_reply_actor = expect_actor if reply_actor is None else reply_actor
+    if type(effective_reply_actor) is not str or not ACTOR.fullmatch(effective_reply_actor):
+        _fail("INVALID_REPLY_ACTOR")
     comments, items = _mailbox(text, repository=repository, issue=issue)
     actor_map = {item["id"]: item["actor_login"] for item in comments}
     matching = [(cid, msg) for cid, msg in items if msg["message_id"] == parent_message_id]
@@ -104,7 +108,10 @@ def make_reply(
         existing_id, existing_msg = existing[0]
         if fingerprint(existing_msg) != fingerprint(reply):
             _fail("REPLY_COLLISION")
-        # Identical reply is already durable. Do not POST again.
+        if actor_map[existing_id].casefold() != effective_reply_actor.casefold():
+            _fail("EXISTING_REPLY_ACTOR_MISMATCH")
+        # Identical reply is already durable from the expected transport actor.
+        # Shared GitHub login is still not model/session identity.
         return reply, existing_id
     return reply, None
 
@@ -140,22 +147,27 @@ def post_comment(*, repository: str, issue: int, body: str) -> int:
 
 def post_and_verify(
     *, repository: str, issue: int, message: dict[str, Any],
-    post_func, fetch_func,
+    post_func, fetch_func, expected_post_actor: str,
 ) -> int:
     """Single shared post/readback boundary; callable injection is for offline tests.
 
     An Issue comment is only transport evidence, never provider identity,
     task authorization, runtime Claim or formal GitHub Review.
     """
+    if type(expected_post_actor) is not str or not ACTOR.fullmatch(expected_post_actor):
+        _fail("INVALID_POST_ACTOR")
     posted_id = post_func(repository=repository, issue=issue,
                           body=encode_comment(message))
     after = fetch_func(repository, issue)
-    _, observed = _mailbox(after, repository=repository, issue=issue)
+    comments, observed = _mailbox(after, repository=repository, issue=issue)
     exact = [(cid, msg) for cid, msg in observed if cid == posted_id and
              msg["message_id"] == message["message_id"] and
              fingerprint(msg) == fingerprint(message)]
     if len(exact) != 1:
         _fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
+    actors = {c["id"]: c["actor_login"] for c in comments}
+    if actors[posted_id].casefold() != expected_post_actor.casefold():
+        _fail("READBACK_ACTOR_MISMATCH")
     return posted_id
 
 
@@ -164,6 +176,7 @@ def send_reply(
     response_text: str, expect_actor: str, do_send: bool = False,
     offline_pages: str | None = None,
     parent_recipient: str = "claude-code", reply_recipient: str = "chatgpt",
+    reply_actor: str | None = None,
 ) -> dict[str, Any]:
     if do_send and offline_pages is not None:
         _fail("OFFLINE_POST_FORBIDDEN")
@@ -173,6 +186,7 @@ def send_reply(
         parent_message_id=parent_message_id, kind=kind,
         response_text=response_text, expect_actor=expect_actor,
         parent_recipient=parent_recipient, reply_recipient=reply_recipient,
+        reply_actor=reply_actor,
     )
     result = {
         "status": "ALREADY_SENT" if existing_id is not None else
@@ -192,6 +206,7 @@ def send_reply(
     posted_id = post_and_verify(
         repository=repository, issue=issue, message=reply,
         post_func=post_comment, fetch_func=fetch_gh_pages,
+        expected_post_actor=expect_actor if reply_actor is None else reply_actor,
     )
     result["status"] = "SENT_AND_READ_BACK"
     result["posted_comment_id"] = posted_id
@@ -210,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="The intended recipient of the original request")
     parser.add_argument("--reply-recipient", choices=sorted(ROLES), default="chatgpt",
                         help="Explicit recipient of the reply, not an authenticated sender")
+    parser.add_argument("--expect-reply-actor",
+                        help="Expected GitHub login for the reply post; defaults to --expect-actor. Not model identity.")
     parser.add_argument("--text-file", type=Path,
                         help="UTF-8 non-secret reply text; required for ANSWER/BLOCKED")
     parser.add_argument("--send", action="store_true",
@@ -233,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             parent_message_id=args.parent_message_id, kind=args.kind,
             response_text=answer, expect_actor=args.expect_actor,
             parent_recipient=args.parent_recipient, reply_recipient=args.reply_recipient,
+            reply_actor=args.expect_reply_actor,
             do_send=args.send, offline_pages=offline,
         )
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
