@@ -247,6 +247,52 @@ class ReplyContractTests(unittest.TestCase):
             self.assertEqual(json.loads(output.call_args.args[0])["status"],
                              "PREPARED")
 
+    def test_existing_reply_actor_mismatch_is_not_acknowledged(self):
+        src = pages([comment(11, parent())])
+        reply, _ = build(src)
+        hostile = pages([comment(11, parent()),
+                         comment(12, reply, actor="unrelated-user")])
+        with self.assertRaisesRegex(InvalidMessage, "EXISTING_REPLY_ACTOR_MISMATCH"):
+            make_reply(
+                hostile, repository=REPO, issue=503,
+                parent_message_id=PARENT, kind="ACK",
+                response_text=FIXED_ACK, expect_actor="kinoko34077",
+            )
+
+    def test_post_readback_requires_expected_reply_actor(self):
+        before = pages([comment(11, parent())])
+        reply, _ = build(before)
+        after = pages([comment(11, parent()),
+                       comment(12, reply, actor="unrelated-user")])
+        with patch("tools.kaep_reply_sender.fetch_gh_pages",
+                   side_effect=[before, after]):
+            with patch("tools.kaep_reply_sender.post_comment",
+                       return_value=12):
+                with self.assertRaisesRegex(InvalidMessage, "READBACK_ACTOR_MISMATCH"):
+                    send_reply(
+                        repository=REPO, issue=503, parent_message_id=PARENT,
+                        kind="ACK", response_text=FIXED_ACK,
+                        expect_actor="kinoko34077", do_send=True,
+                    )
+
+    def test_distinct_reply_actor_can_be_explicit(self):
+        before = pages([comment(11, parent())])
+        reply, _ = make_reply(
+            before, repository=REPO, issue=503,
+            parent_message_id=PARENT, kind="ACK",
+            response_text=FIXED_ACK, expect_actor="kinoko34077",
+            reply_actor="claude-transport",
+        )
+        after = pages([comment(11, parent()),
+                       comment(12, reply, actor="claude-transport")])
+        result = send_reply(
+            repository=REPO, issue=503, parent_message_id=PARENT,
+            kind="ACK", response_text=FIXED_ACK,
+            expect_actor="kinoko34077", reply_actor="claude-transport",
+            offline_pages=after,
+        )
+        self.assertEqual(result["status"], "ALREADY_SENT")
+
     def test_reply_cannot_be_offline_sent(self):
         with self.assertRaisesRegex(InvalidMessage, "OFFLINE_POST_FORBIDDEN"):
             send_reply(repository=REPO, issue=503, parent_message_id=PARENT,
