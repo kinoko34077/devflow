@@ -495,6 +495,50 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertFalse(comparison["semantic_equivalence_proven"])
         self.assertFalse(view["parallel_read"]["can_replace_manual_active_work"])
 
+    def test_m3_complete_nonempty_matching_manual_refs_never_grants_authority(self):
+        # A trusted, complete, nonempty live TASK view may match every explicit
+        # manual Issue reference. That proves neither semantic parity nor a
+        # local-work authority cutover, and cannot grant runtime execution.
+        control = self._control("demo", 70)
+        control["body"] += (
+            "\n## Active Work\n\n"
+            "demo#1 and https://github.com/kinoko34077/demo/issues/2\n"
+            "\n## Next Action\n\nHuman review still required.\n"
+        )
+        ready = self._task_issue(1)
+        review = self._task_issue(2)
+        review["body"] = review["body"].replace(
+            '"work_status": "READY_FOR_IMPLEMENTATION"',
+            '"work_status": "AWAITING_REVIEW"',
+        )
+        view = devflow_mcp_core.DevflowService(
+            FakeReader([], issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                "kinoko34077/demo": [ready, review],
+            })
+        ).get_repository_work_view("demo")
+        self.assertEqual(view["coverage_status"], "COMPLETE")
+        self.assertEqual(view["machine_task_count"], 2)
+        self.assertEqual(view["observed_task_view"]["status"], "COMPLETE_READ")
+        self.assertTrue(view["observed_task_view"]["is_complete_read"])
+        self.assertEqual(view["view_mode"], "MACHINE_COMPLETE_SHADOW")
+        self.assertEqual(
+            {record["work_status"] for record in view["task_records"]},
+            {"READY_FOR_IMPLEMENTATION", "AWAITING_REVIEW"},
+        )
+        parallel = view["parallel_read"]
+        self.assertEqual(parallel["manual"]["next_action"], "Human review still required.")
+        self.assertEqual(parallel["manual"]["authority"], "MANUAL_CONTROL_UNTIL_COHORT_ADMISSION")
+        self.assertEqual(len(parallel["link_crosscheck"]["linked_known_machine_tasks"]), 2)
+        self.assertEqual(parallel["link_crosscheck"]["manual_refs_not_known_machine_tasks"], [])
+        self.assertEqual(parallel["link_crosscheck"]["known_machine_tasks_not_manually_referenced"], [])
+        self.assertFalse(parallel["link_crosscheck"]["semantic_equivalence_proven"])
+        self.assertFalse(parallel["can_replace_manual_active_work"])
+        self.assertFalse(parallel["can_authorize_execution"])
+        self.assertFalse(view["can_replace_manual_active_work"])
+        self.assertFalse(view["observed_task_view"]["can_replace_manual_active_work"])
+        self.assertFalse(view["observed_task_view"]["can_authorize_execution"])
+
     def test_m3_parallel_unavailable_is_unknown_not_empty(self):
         control = self._control("demo", 70)
         class Unavailable(FakeReader):
