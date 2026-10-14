@@ -175,7 +175,7 @@ def build_agent_inbox(
         "schema_version": "kaep.agent-inbox.read.v0.1",
         "issues": issues,
         "errors": errors,
-        "has_unknown_work": not selection["is_full_work_inventory"] or bool(errors),
+        "has_unknown_work": not selection["is_full_work_inventory"] or selection["truncated"] or bool(errors),
         "is_authoritative_assignment": False,
         "is_live_agent_delivery": False,
     }
