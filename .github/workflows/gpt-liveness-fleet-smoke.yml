@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - tools/gpt_liveness_fleet_plan.py
+      - tools/gpt_liveness_dispatch_preview.py
       - .github/workflows/gpt-liveness-fleet-smoke.yml
 
 permissions:
