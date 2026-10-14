@@ -1,0 +1,31 @@
+name: GPT liveness opt-in pilot
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gpt-liveness-pilot-519
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    # This is not a ChatGPT wakeup. Missing or expired issue registration => no POST.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Plan and optionally post one opt-in KAEP PING
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 -m tools.gpt_liveness_pilot --repository kinoko34077/devflow --issue 519 --send
