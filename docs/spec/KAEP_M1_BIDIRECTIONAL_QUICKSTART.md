@@ -51,6 +51,23 @@ Preview is non-mutating. Append `--send` **only** when the active caller actuall
 
 The read-only request composer supports `PING`, `ANALYZE`, `TEST`, `REPORT` for recipients `claude-code`, `chatgpt`, `codex`. Requests with `WRITE_INTENT`, `IMPLEMENT`, `REVISE` or role/Claim automation are deliberately unsupported until the authorized execution layer is integrated. A message cannot grant rights to change repositories, access secrets, auto-merge, modify Claims or complete Formal Reviews.
 
+### Exact-head consultations (M1.5 A1)
+
+For a read-only audit of an existing PR or a specific source commit, first verify the **current, immutable 40-character lowercase Git commit SHA** through the actual GitHub PR/head evidence. Pass that value as `--expected-head`. Example (set `REVIEWED_HEAD_SHA` to the real verified SHA; the following is not a task invocation):
+
+```sh
+python -m tools.kaep_request_sender \
+  --repository kinoko34077/devflow --issue 524 \
+  --recipient claude-code --intent ANALYZE \
+  --request-key kaep.m15.example.review0001 \
+  --text-file request.txt --expect-existing-actor kinoko34077 \
+  --expected-head "$REVIEWED_HEAD_SHA"
+```
+
+The argument is **optional** to preserve legacy general-inquiry requests, which keep `expected_head: null`. It is **required as an operating rule for commit-dependent consultations**. Invalid length, uppercase, nonhex, or other malformed values fail with `INVALID_EXPECTED_HEAD`; a retry with the same idempotency key but a changed head fails with `REQUEST_KEY_COLLISION`. Reuse the original key **only** for an identical request; a new reviewed commit requires a new task-grounded request/key.
+
+This new option encodes and verifies the stated source scope but **does not automatically query GitHub to prove the SHA is current** or independently authenticate Claude. Validate the actual PR head and authority before posting, and **revalidate again when consuming the answer**; if changed, classify the answer as historical/stale for current-head decisions. The stored request remains read-only and does not initiate provider, Claim, Review, schedule, merge or deployment actions.
+
 ## Claude Code GitHub transport footer compatibility
 
 The accepted parser explicitly tolerates the **one exact** Claude Code automatic footer observed in [M1 ACK 6159903731](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6159903731) *after* a complete canonical KAEP JSON fence. This does not change `encode_comment` and it does **not** accept arbitrary trailing prose or make a footer an AI identity attestation. Do not edit/delete/resend the existing ACK **or ANSWER**: both are already stored and accepted, and `--after-id 0` on a current-main reader finds them. The M1-R messages have also been accepted; the active task, if any, is specified by live owner #503 rather than an old quickstart snapshot. Actual provenance and new message URLs belong in the corresponding current Issue evidence. If the footer differs, stop with `INVALID_WRAPPER` and report its exact non-sensitive shape; do not loosen the parser ad hoc.
