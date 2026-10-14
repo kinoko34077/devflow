@@ -172,6 +172,7 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
     # An Answer is NOT automatically proof; evaluate only a challenge-bound
     # answer with exact session/turn/nonce/expiry, never an ACK or sidecar PONG.
     valid_answered: set[str] = set()
+    latest_answer: tuple[int, dict[str, Any] | None] = (-1, None)
     times = {c["id"]: c.get("created_at") for c in comments}
     for root in existing:
         c = challenge(root["payload"]["text"])
@@ -184,10 +185,21 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
                 observed_at = utc(times[cid])
                 if observed_at > now + timedelta(seconds=30):
                     continue
-                answer(msg["payload"]["text"], ping=c, now=observed_at)
+                proven = answer(msg["payload"]["text"], ping=c, now=observed_at)
             except InvalidMessage:
                 continue
             valid_answered.add(root["message_id"])
+            if cid > latest_answer[0]:
+                latest_answer = (cid, proven)
+    if latest_answer[1] is not None:
+        mode = latest_answer[1]["mode"]
+        if mode in ("FINISHED", "IDLE", "NEED_USER"):
+            return {"status": mode, "claim_authority": False}
+        if mode == "LONG_RUNNING":
+            until = latest_answer[1]["expected_until"]
+            if until is not None and now < utc(until):
+                return {"status": "LONG_RUNNING", "expected_until": until,
+                        "claim_authority": False}
     pending = [r for r in existing if r["message_id"] not in valid_answered]
     slot = int(now.timestamp()) // PING_INTERVAL
     keyhash = hashlib.sha256(f"{repo}#{issue}:{en['session_id']}:{en['turn_id']}".encode()).hexdigest()[:20]
