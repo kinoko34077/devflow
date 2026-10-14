@@ -5,7 +5,7 @@
 ## What exists / what does not
 
 - The Python pilot uses existing KAEP v0.2 `send_request`, `fetch_gh_pages`, `read_mailbox`, `verify_reply_chain` and GitHub Issue comment readback. It does not define an independent messaging transport or Claim authority.
-- Scheduled GitHub Actions tries every five minutes, but without an exact active opt-in enrollment in owning Issue #519 it exits `NO_ACTIVE_ENROLLMENT` without any POST. A queued/delayed Actions run is not a precise timer or model liveness.
+- Scheduled GitHub Actions tries every five minutes. The workflow also runs once on first merge of the workflow file (`push`) for a no-enrollment smoke and when owning Issue #519 is intentionally edited (`issues.edited`); other Issue edits do not send PINGs. Without an exact active opt-in enrollment in owning Issue #519 it exits `NO_ACTIVE_ENROLLMENT` without any POST. A queued/delayed Actions run is not a precise timer or model liveness.
 - Only a GPT-initiated/authorized tool invocation consuming a PING and authoring an `ANSWER` can support the weaker label *model-mediated answer observed*. The comment actor proves GitHub transport identity, not which model authored the text. `ACK` and sidecar auto-PONG prove neither.
 - This pilot does not autonomously start a ChatGPT turn, execute arbitrary text from comments, touch credentials, change Claims or shorten Manual 1-hour stale policy. The prototype only runs against #519; fleet rollout is out of scope.
 
@@ -17,11 +17,11 @@ On Issue #519 only, an authorized owner may add exactly one machine block **to t
 <!-- gpt-liveness:enrollment:v0.1 {"schema":"gpt.liveness.v0.1","session_id":"session_example123","turn_id":"turn_example123","started_at":"2026-10-14T04:30:00Z","expires_at":"2026-10-14T05:00:00Z","expected_actor":"kinoko34077","enabled":true} -->
 ```
 
-The lifetime is at most 2 hours. Before a long blocking operation the worker may edit the same enrollment to include `"long_running_until":"<UTC ISO deadline>"` (must not exceed `expires_at`); the scheduled job then records `LONG_RUNNING` without issuing more PINGs until the deadline. Remove/set null on return. This is a declaration only, not runtime Lease renewal. Deleting the block, setting `enabled:false`, or allowing it to expire disables further PINGs. The action's `GH_TOKEN` uses the GitHub-provided token; no new PAT required. Because the enrollment is made in the Issue body, comments cannot enroll arbitrary sessions.
+The lifetime is at most 2 hours. **Recovery/rearm:** After the three-unanswered limit, GPT must first confirm that the old session is not authoritative, then register a **new `turn_id`** (and, when appropriate, new `session_id`) on Issue #519 before further PINGs can be scheduled. Old TURN messages are ignored for the new registration; incrementing the turn ID is an observation reset, **not** an execution-coordinator Claim renewal or a grant of resumed write authority. Do not auto-rearm from a process-only PONG. Before a long blocking operation the worker may edit the same enrollment to include `"long_running_until":"<UTC ISO deadline>"` (must not exceed `expires_at`); the scheduled job then records `LONG_RUNNING` without issuing more PINGs until the deadline. Remove/set null on return. This is a declaration only, not runtime Lease renewal. Deleting the block, setting `enabled:false`, or allowing it to expire disables further PINGs. The action's `GH_TOKEN` uses the GitHub-provided token; no new PAT required. Because the enrollment is made in the Issue body, comments cannot enroll arbitrary sessions.
 
 ## Processing / proof
 
-1. The scheduled runner reads live Issue #519; fail closed for a missing, malformed, expired, disabled or wrong-identity enrollment.
+1. The scheduled / one-off pilot runner reads live Issue #519; fail closed for a missing, malformed, expired, disabled or wrong-identity enrollment.
 2. It reads the complete KAEP mailbox. A unique 5-minute bucket key suppresses ordinary duplicate runs. Up to 3 unacknowledged challenges are allowed, after which it reports `SUSPECT_NO_REPLY` without more POST or runtime change.
 3. A new `REQUEST/PING` addressed to `chatgpt` is posted using the **existing KAEP sender**; the payload contains bounded JSON `schema, session_id, turn_id, nonce, issued_at, expires_at, purpose`. A random 128-bit nonce is generated only for a new message. The server GitHub comment time is trusted for reply timing only after verified readback.
 4. The GPT worker in a user-started live turn reads the mailbox using the existing connected GitHub tools or `python -m tools.kaep_inbox_reader --repository kinoko34077/devflow --issue 519 --recipient chatgpt --include-text` in a supported authorized CLI environment.
@@ -46,6 +46,10 @@ python3 -m tools.gpt_liveness_mailbox --repository kinoko34077/devflow --issue 5
 ```
 
 For blocking operations, declare `long_running_until` in the enrollment before starting; for an existing PING, `--mode LONG_RUNNING --expected-until <UTC-ISO>` provides the same bounded notification. To stop at the end of the current turn, use an explicit `FINISHED` / `IDLE` / `NEED_USER` answer when a valid PING exists, or disable/expire the enrollment. The receiver/answer tool cannot prove model identity from GitHub credentials and cannot run without an active GPT-invoked tool operation.
+
+## Cost and rollout boundary
+
+The GitHub `schedule` job still starts without an active enrollment (up to 288 invocations/day); only the **comment mutation** is dormant. Treat this as a **single-repository limited pilot**, measure overhead first and remove/consolidate the scheduler before fleet rollout. Do not assume no-enrollment means no Actions consumption. Delay or missing Actions execution is not proof of GPT death.
 
 ## Verification
 
