@@ -97,6 +97,15 @@ class FleetAdmissionTests(unittest.TestCase):
                 with self.assertRaises(InvalidMessage):
                     parse_manifest(manifest(*targets))
 
+    def test_rejects_duplicate_manifest_json_fields_and_snapshot_repo_type(self):
+        raw = '{"schema":"' + SCHEMA + '","targets":[],"targets":["' + REF + '"]}'
+        with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_MANIFEST_FIELD"):
+            parse_manifest(raw)
+        wrong_type = snapshot(body=registration())
+        wrong_type["repository"] = []
+        with self.assertRaisesRegex(InvalidMessage, "ISSUE_IDENTITY_MISMATCH"):
+            plan(manifest=manifest(REF), snapshots={REF: wrong_type}, now=NOW)
+
     def test_scope_and_missing_snapshot_refused(self):
         with self.assertRaisesRegex(InvalidMessage, "SNAPSHOT_SET_MISMATCH"):
             plan(manifest=manifest(REF), snapshots={}, now=NOW)
