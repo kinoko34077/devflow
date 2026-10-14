@@ -46,6 +46,14 @@ def fixtures():
     return root, hint, pointer
 
 
+def other_notice(text: str, key: str):
+    msg, _ = make_request(
+        pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+        recipient="claude-code", intent="REPORT", request_key=key,
+        request_text=text, expect_existing_actor=ACTOR)
+    return msg
+
+
 def read(index, source, *, after_id=0, notice_actor=ACTOR, source_actor=ACTOR):
     return discover(index, expected_notice_actor=notice_actor,
                     expected_source_actor=source_actor,
@@ -134,8 +142,8 @@ class DiscoveryReaderTests(unittest.TestCase):
 
     def test_benign_report_mentions_pointer_version(self):
         root, hint, _ = fixtures()
-        prose = dict(hint)
-        prose["payload"] = {"text": "Please explain kaep.discovery-pointer.v1 in prose"}
+        prose = other_notice("Please explain kaep.discovery-pointer.v1 in prose",
+                             "kaep.discovery.prose0001")
         result = discover_batch(pages([comment(87, prose), comment(88, hint)]),
                                 expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
                                 fetch_source=lambda r, i: pages([comment(77, root)]))
@@ -206,8 +214,8 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertIsNone(parse_pointer("Ordinary mention of kaep.discovery-pointer.v1"))
         with self.assertRaisesRegex(InvalidMessage, "INVALID_DISCOVERY_POINTER"):
             parse_pointer('{"type":"kaep.discovery-pointer.v1",')
-        invalid = dict(hint)
-        invalid["payload"] = {"text": '{"type":"kaep.discovery-pointer.v1",'}
+        invalid = other_notice('{"type":"kaep.discovery-pointer.v1",',
+                               "kaep.discovery.invalid0001")
         out = discover_batch(pages([comment(87, invalid), comment(88, hint)]),
                              expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
                              fetch_source=lambda r, i: pages([comment(77, root)]))
