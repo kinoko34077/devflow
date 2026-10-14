@@ -53,7 +53,7 @@ def reply(req, *, mode="ACTIVE", nonce=NONCE, checkpoint="checkpoint-1", expecte
                       "user": {"login": BOT}}]]),
         repository=REPO, issue=ISSUE, parent_message_id=req["message_id"],
         kind="ANSWER", response_text=json.dumps(payload), expect_actor=BOT,
-        parent_recipient="chatgpt", reply_recipient="claude-code",
+        parent_recipient="chatgpt", reply_recipient="coordinator",
         reply_actor="kinoko34077",
     )
     return rep
@@ -88,7 +88,7 @@ class LivenessContractTests(unittest.TestCase):
 
     def test_existing_bucket_is_idempotent(self):
         _, req = first_ping()
-        out = plan(body=body(), comments=[page_msg(req, 10)],
+        out = plan(body=body(), comments=[page_msg(req, 10, actor=BOT)],
                    repo=REPO, issue=ISSUE, now=NOW, nonce="1" * 32)
         self.assertEqual(out["status"], "ALREADY_PINGED")
 
@@ -97,7 +97,7 @@ class LivenessContractTests(unittest.TestCase):
         for i in range(3):
             at = NOW + timedelta(minutes=i * 5)
             _, request = first_ping(at)
-            comments.append(page_msg(request, 10 + i, at=at))
+            comments.append(page_msg(request, 10 + i, at=at, actor=BOT))
         result = plan(body=body(minutes=100), comments=comments,
                       repo=REPO, issue=ISSUE, now=NOW + timedelta(minutes=15),
                       nonce=NONCE)
@@ -110,7 +110,7 @@ class LivenessContractTests(unittest.TestCase):
         ack = dict(req, message_id="msg_ack001", in_reply_to=req["message_id"],
                    idempotency_key="kaep.liveness.ack001", recipient="claude-code",
                    kind="ACK", payload={"text": "transport only"})
-        out = plan(body=body(), comments=[page_msg(req, 1), page_msg(ack, 2)],
+        out = plan(body=body(), comments=[page_msg(req, 1, actor=BOT), page_msg(ack, 2)],
                    repo=REPO, issue=ISSUE, now=NOW + timedelta(minutes=5), nonce="a" * 32)
         self.assertEqual(out["unanswered"], 1)
 
@@ -159,6 +159,12 @@ class LivenessContractTests(unittest.TestCase):
         payload["expected_until"] = None
         with self.assertRaisesRegex(InvalidMessage, "LONG_RUNNING_MISSING_DEADLINE"):
             answer(json.dumps(payload), ping=ping, now=NOW)
+
+    def test_untrusted_ping_cannot_suppress_real_probe(self):
+        _, req = first_ping()
+        result = plan(body=body(), comments=[page_msg(req, 1, actor="untrusted")],
+                      repo=REPO, issue=ISSUE, now=NOW, nonce="a"*32)
+        self.assertEqual(result["status"], "READY")
 
     def test_wrong_actor_not_accepted(self):
         _, req = first_ping()
