@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,26 @@ POINTER_VERSION = "kaep.discovery-pointer.v1"
 
 def _fail(code: str) -> None:
     raise InvalidMessage(code)
+
+
+def verify_public_source(repository: str) -> None:
+    """Fail closed: never publish a private task locator into public #503."""
+    if not REPOSITORY.fullmatch(repository):
+        _fail("INVALID_TARGET")
+    try:
+        run = subprocess.run(
+            ["gh", "api", f"repos/{repository}", "--method", "GET"],
+            capture_output=True, text=True, timeout=20, check=False)
+        if run.returncode != 0 or len(run.stdout.encode("utf-8")) > 65536:
+            _fail("SOURCE_VISIBILITY_UNVERIFIED")
+        meta = json.loads(run.stdout)
+    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired) as exc:
+        raise InvalidMessage("SOURCE_VISIBILITY_UNVERIFIED") from exc
+    if (type(meta) is not dict or meta.get("full_name") != repository
+            or type(meta.get("private")) is not bool):
+        _fail("SOURCE_VISIBILITY_UNVERIFIED")
+    if meta["private"] is not False:
+        _fail("SOURCE_NOT_PUBLIC")
 
 
 def verify_source_request(
@@ -69,6 +90,8 @@ def route_request(
         _fail("OFFLINE_POST_FORBIDDEN")
     if (offline_source_pages is None) != (offline_discovery_pages is None):
         _fail("INCOMPLETE_OFFLINE_FIXTURE")
+    if do_send:
+        verify_public_source(repository)
     source = (offline_source_pages if offline_source_pages is not None
               else fetch_gh_pages(repository, issue))
     pointer = verify_source_request(
