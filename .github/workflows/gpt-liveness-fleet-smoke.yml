@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - tools/gpt_liveness_fleet_plan.py
+      - tools/gpt_liveness_dispatch_preview.py
+      - tests/test_gpt_liveness_dispatch_preview.py
       - tests/test_gpt_liveness_fleet_plan.py
       - .github/workflows/gpt-liveness-fleet-smoke.yml
   push:
@@ -43,4 +45,20 @@ jobs:
           assert data["deployment_authorized"] is False
           assert data["idle_cost_model"]["nominal_ticks_per_30_days_per_workflow"] == 8640
           print("F6_REAL_READONLY_ISSUE_ADMISSION_PASS")
+          PY
+          # F7 uses the same temporary explicit allowlist, and never posts.
+          python3 -m tools.gpt_liveness_dispatch_preview --manifest "$RUNNER_TEMP/manifest.json" --live > "$RUNNER_TEMP/f7-report.json"
+          python3 - "$RUNNER_TEMP/f7-report.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              r = json.load(handle)
+          assert r["simulation_only"] is True
+          assert r["deployment_authorized"] is False
+          assert r["claim_authority"] is False
+          assert r["any_current_gpt_alive_proven"] is False
+          assert r["target_count"] == 1
+          assert r["targets"][0]["dispatch_state"] == "CLOSED_OR_NO_ENROLLMENT"
+          assert r["targets"][0]["would_ping_if_authorized"] is False
+          assert r["targets"][0]["may_send"] is False
+          print("F7_REAL_READONLY_KAEP_DISPATCH_DRYRUN_PASS")
           PY
