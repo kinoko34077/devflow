@@ -80,7 +80,8 @@ def enrollment(body: str, *, now: datetime) -> dict[str, Any] | None:
     if END not in raw or len(raw.split(END, 1)[0]) > 1500:
         _fail("INVALID_ENROLLMENT")
     data = strict_json(raw.split(END, 1)[0])
-    if set(data) != {"schema", "session_id", "turn_id", "started_at", "expires_at", "expected_actor", "enabled"}:
+    fields = {"schema", "session_id", "turn_id", "started_at", "expires_at", "expected_actor", "enabled"}
+    if set(data) not in (fields, fields | {"long_running_until"}):
         _fail("INVALID_ENROLLMENT_FIELDS")
     if data["schema"] != SCHEMA or type(data["enabled"]) is not bool:
         _fail("INVALID_ENROLLMENT")
@@ -93,6 +94,11 @@ def enrollment(body: str, *, now: datetime) -> dict[str, Any] | None:
         _fail("INVALID_ENROLLMENT_DURATION")
     if start > now + timedelta(minutes=5):
         _fail("ENROLLMENT_IN_FUTURE")
+    long_until = data.get("long_running_until")
+    if long_until is not None:
+        deadline = utc(long_until)
+        if deadline <= start or deadline > end:
+            _fail("INVALID_LONG_RUNNING_DEADLINE")
     if not data["enabled"] or now < start or now >= end:
         return None
     return data
@@ -149,6 +155,9 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
     en = enrollment(body, now=now)
     if en is None:
         return {"status": "NO_ACTIVE_ENROLLMENT"}
+    if en.get("long_running_until") is not None and utc(en["long_running_until"]) > now:
+        return {"status": "LONG_RUNNING", "expected_until": en["long_running_until"],
+                "claim_authority": False}
     items = extract(comments, repo=repo, issue=issue)
     existing: list[dict[str, Any]] = []
     for _, msg, actor in items:
