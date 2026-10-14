@@ -29,7 +29,7 @@ python -m tools.kaep_route_notice \
   --expect-notice-actor kinoko34077
 ```
 
-The default is **preview/no post**. Append `--send` only when explicitly applying the ordinary authorized GitHub-comment transport to that existing root. The publisher fetches the full owning Issue mailbox, checks exact root ID, author, recipient, READ_ONLY scope and allowed intent, and refuses root loops or unsupported messages. It subsequently uses existing `kaep_request_sender` for #503. If the original write is ambiguous, read back before attempting a retry; the stable key prevents known duplicate notices.
+The default is **preview/no post**. Append `--send` only when explicitly applying the ordinary authorized GitHub-comment transport to that existing root. **Before any public #503 pointer publication**, the sender fetches native GitHub repository metadata via read-only `gh api repos/<owner/repo>` and requires an exact repository name plus `private: false`; private or unverifiable sources fail closed, avoiding disclosure of private Issue locators on public #503. This does not prove individual Issue contents are safe to publicize; caller must ensure no secrets or sensitive metadata are exposed. The publisher fetches the full owning Issue mailbox, checks exact root ID, author, recipient, READ_ONLY scope and allowed intent, and refuses root loops or unsupported messages. It subsequently uses existing `kaep_request_sender` for #503. If the original write is ambiguous, read back before attempting a retry; the stable key prevents known duplicate notices.
 
 ## Native discovery reader (read-only)
 
