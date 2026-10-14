@@ -26,8 +26,8 @@ from tools.kaep_mailbox_codec import (
 )
 
 KINDS = {"ACK", "ANSWER", "BLOCKED"}
-ROLES = {"claude-code", "chatgpt", "codex"}
-ACTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
+ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
+ACTOR = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}|github-actions\[bot\])\Z")
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
 
