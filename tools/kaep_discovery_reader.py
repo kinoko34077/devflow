@@ -83,6 +83,8 @@ def _source_context(
         if msg["in_reply_to"] == message_id
         and msg["exchange_id"] == root["exchange_id"]
         and msg["recipient"] == "chatgpt"
+        and msg["intent"] == root["intent"]
+        and msg["scope"] == root["scope"]
         and msg["kind"] in REPLY_KINDS
         and actors[cid].casefold() == expected_actor.casefold()
     })
