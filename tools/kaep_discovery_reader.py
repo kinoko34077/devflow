@@ -119,6 +119,7 @@ def discover_batch(
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for comment in subset:
+        source_validation = False
         cid = comment["id"]
         body = comment["body"]
         if not body.startswith(MARKER):
@@ -148,6 +149,7 @@ def discover_batch(
             assert match is not None
             repo, issue = match.group(1), int(match.group(2))
             key = (repo, issue)
+            source_validation = True
             if key not in source_cache:
                 # A failed provider/source fetch is not a malformed index item:
                 # fail the entire scan so a cursor is NEVER advanced past it.
@@ -174,13 +176,12 @@ def discover_batch(
             # Invalid index content/actor cannot starve later entries. Never
             # claim the invalid item is a verified task. Owning-Issue transport
             # corruption or unavailable reads are still globally fatal.
-            if str(exc) in {
-                "INCOMPLETE_PAGE", "MISSING_PAGES", "MAILBOX_TOO_LARGE",
-                "INVALID_GITHUB_JSON", "INVALID_PAGES", "INVALID_PAGE",
-                "GITHUB_READ_FAILED", "GITHUB_READ_UNAVAILABLE",
-                "DUPLICATE_GITHUB_FIELD", "INVALID_COMMENT_ID",
-                "COMMENT_ID_ORDER", "INVALID_ACTOR_LOGIN",
+            if source_validation and str(exc) not in {
+                "SOURCE_MESSAGE_NOT_UNIQUE", "SOURCE_ACTOR_MISMATCH",
+                "SOURCE_NOT_SUPPORTED_REQUEST", "DISCOVERY_SOURCE_MISMATCH",
             }:
+                # Source fetch/pagination/wrapper/correlation failures, unlike
+                # invalid index notices, MUST NOT silently advance the cursor.
                 raise
             result["rejected"].append({
                 "index_comment_id": cid, "reason_code": str(exc)})
