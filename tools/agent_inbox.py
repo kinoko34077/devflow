@@ -7,15 +7,27 @@ GET-side read model; it cannot schedule, claim, dispatch or approve work.
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
+import re
 
 try:
-    from .kaep_mailbox_codec import InvalidMessage, RECIPIENTS, read_mailbox
+    from .kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
 except ImportError:  # direct stdio script from the tools directory
-    from kaep_mailbox_codec import InvalidMessage, RECIPIENTS, read_mailbox
+    from kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
 
 MAX_INBOX_TASKS = 20
 MAX_ISSUE_COMMENTS = 500
 KNOWN_REPLY_KINDS = frozenset({"ACK", "ANSWER", "BLOCKED", "ERROR", "RESULT"})
+MAX_TITLE_CHARS = 120
+
+
+def _safe_untrusted_title(value: object) -> str:
+    """Human display hint only. Never carry multiline Issue prose as commands."""
+    if type(value) is not str:
+        return ""
+    # Replace all controls/line separators and collapse layout whitespace.
+    flattened = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", value)
+    return " ".join(flattened.split())[:MAX_TITLE_CHARS]
+
 
 
 def _validate_options(recipient: str, limit: int, offset: int, work_status: str | None) -> None:
@@ -64,7 +76,10 @@ def select_task_records(
         "manual_control": work_view.get("manual_control"),
         "can_authorize_execution": False,
         "can_replace_manual_active_work": False,
-        "is_full_work_inventory": bool(is_current and observed.get("is_complete_read")),
+        "is_full_work_inventory": bool(
+            is_current and observed.get("is_complete_read")
+            and offset == 0 and work_status is None and len(selected) == len(rows)
+        ),
         "task_count_filtered": len(rows) if is_current else None,
         "next_offset": (offset + len(selected)) if is_current and offset + len(selected) < len(rows) else None,
         "truncated": bool(is_current and offset + len(selected) < len(rows)),
@@ -80,8 +95,9 @@ def _issue_messages(
     if len(comments) > MAX_ISSUE_COMMENTS:
         raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
     task_ref = f"{repository}#{issue_number}"
-    parsed = read_mailbox(comments, task_ref=task_ref)
     actors: dict[int, str] = {}
+    trusted_comments: list[Mapping[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     for comment in comments:
         cid, user = comment.get("id"), comment.get("user")
         if type(cid) is not int or type(user) is not dict:
@@ -90,8 +106,17 @@ def _issue_messages(
         if type(login) is not str or not login:
             raise InvalidMessage("INVALID_GITHUB_ACTOR")
         actors[cid] = login
+        body = comment.get("body")
+        if type(body) is not str:
+            raise InvalidMessage("INVALID_GITHUB_COMMENT")
+        if body.startswith(MARKER) and login.casefold() != expected_actor.casefold():
+            # Never let outsider-authored data participate in the global
+            # mailbox collision/codec check, or hide legitimate owner roots.
+            warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_MARKER_COMMENT"})
+            continue
+        trusted_comments.append(comment)
+    parsed = read_mailbox(trusted_comments, task_ref=task_ref)
     roots: dict[str, tuple[int, dict[str, Any]]] = {}
-    warnings: list[dict[str, Any]] = []
     for cid, msg in parsed:
         if msg["kind"] != "REQUEST" or msg["in_reply_to"] is not None:
             continue
@@ -111,7 +136,7 @@ def _issue_messages(
             and msg["scope"] == root["scope"]
             and msg["intent"] == root["intent"]
             and msg["kind"] in KNOWN_REPLY_KINDS
-            and msg["recipient"] != recipient
+            and msg["recipient"] == "chatgpt"
             and actors[reply_id].casefold() == expected_actor.casefold()
         })
         out.append({
@@ -151,7 +176,9 @@ def build_agent_inbox(
             number = record["issue_number"]
             item = {
                 "issue_number": number, "url": record["url"],
-                "title": record["title"], "work_status": record["work_status"],
+                "title": _safe_untrusted_title(record.get("title")),
+                "title_is_untrusted": True,
+                "work_status": record["work_status"],
                 "record_role": "TASK", "recipient_assignment_inferred": False,
                 "requests": None, "source_state": "UNAVAILABLE",
             }
@@ -175,7 +202,7 @@ def build_agent_inbox(
         "schema_version": "kaep.agent-inbox.read.v0.1",
         "issues": issues,
         "errors": errors,
-        "has_unknown_work": not selection["is_full_work_inventory"] or selection["truncated"] or bool(errors),
+        "has_unknown_work": not selection["is_full_work_inventory"] or bool(errors),
         "is_authoritative_assignment": False,
         "is_live_agent_delivery": False,
     }
