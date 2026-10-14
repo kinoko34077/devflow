@@ -66,7 +66,7 @@ class LivenessContractTests(unittest.TestCase):
 
     def test_disabled_expired(self):
         self.assertIsNone(enrollment(body(enabled=False), now=NOW))
-        self.assertIsNone(enrollment(body(minutes=-1), now=NOW))
+        self.assertIsNone(enrollment(body(started_at=iso(NOW - timedelta(minutes=20)),\n                                          expires_at=iso(NOW - timedelta(minutes=10))), now=NOW))
 
     def test_registration_rejects_wrong_fields_and_overlong(self):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_ENROLLMENT_FIELDS"):
