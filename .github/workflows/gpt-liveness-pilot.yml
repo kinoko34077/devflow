@@ -13,7 +13,8 @@ concurrency:
 
 jobs:
   ping:
-    # Archived: no automatic schedule. Closed owning Issue #519 => NO_ACTIVE_ENROLLMENT.\n    # A future fleet rollout requires its own admitted scheduler/owner.
+    # Archived: no automatic schedule. Closed owning Issue #519 => NO_ACTIVE_ENROLLMENT.
+    # A future fleet rollout requires its own admitted scheduler/owner.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 3
