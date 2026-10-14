@@ -159,17 +159,50 @@ class DiscoveryNoticeTests(unittest.TestCase):
                 pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
                 message_id=root["message_id"], expected_actor=ACTOR)
 
+    def test_private_source_blocks_send_before_any_post(self):
+        root = root_request()
+        with patch("tools.kaep_route_notice.verify_public_source",
+                   side_effect=InvalidMessage("SOURCE_NOT_PUBLIC")):
+            with patch("tools.kaep_route_notice.send_request") as post:
+                with self.assertRaisesRegex(InvalidMessage, "SOURCE_NOT_PUBLIC"):
+                    route_request(
+                        repository=REPO, issue=ISSUE,
+                        message_id=root["message_id"],
+                        expected_source_actor=ACTOR,
+                        expected_notice_actor=ACTOR, do_send=True)
+                post.assert_not_called()
+
+    def test_live_public_visibility_requires_verified_github_metadata(self):
+        import subprocess
+        from tools.kaep_route_notice import verify_public_source
+        def proc(meta, rc=0):
+            return subprocess.CompletedProcess(args=[], returncode=rc,
+                                               stdout=json.dumps(meta), stderr="")
+        with patch("tools.kaep_route_notice.subprocess.run",
+                   return_value=proc({"full_name": REPO, "private": False})):
+            self.assertIsNone(verify_public_source(REPO))
+        for meta in ({"full_name": REPO, "private": True},
+                     {"full_name": REPO},
+                     {"full_name": "kinoko34077/other", "private": False}):
+            with self.subTest(meta=meta):
+                with patch("tools.kaep_route_notice.subprocess.run",
+                           return_value=proc(meta)):
+                    with self.assertRaises(InvalidMessage):
+                        verify_public_source(REPO)
+
     def test_live_send_needs_genuine_source_read(self):
         root = root_request()
         source = pages([comment(67, root)])
-        with patch("tools.kaep_route_notice.fetch_gh_pages", return_value=source) as read:
-            with patch("tools.kaep_route_notice.send_request",
-                       return_value={"status": "SENT_AND_READ_BACK",
-                                     "posted_comment_id": 90}) as send:
-                result = route_request(
-                    repository=REPO, issue=ISSUE, message_id=root["message_id"],
-                    expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
-                    do_send=True)
+        with patch("tools.kaep_route_notice.verify_public_source") as visibility:
+            with patch("tools.kaep_route_notice.fetch_gh_pages", return_value=source) as read:
+                with patch("tools.kaep_route_notice.send_request",
+                           return_value={"status": "SENT_AND_READ_BACK",
+                                         "posted_comment_id": 90}) as send:
+                    result = route_request(
+                        repository=REPO, issue=ISSUE, message_id=root["message_id"],
+                        expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
+                        do_send=True)
+        visibility.assert_called_once_with(REPO)
         read.assert_called_once_with(REPO, ISSUE)
         self.assertTrue(send.call_args.kwargs["do_send"])
         self.assertEqual(result["status"], "SENT_AND_READ_BACK")
