@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+  # Bounded pilot bootstrap: a deliberate opt-in edit to the single owning
+  # Issue triggers the first run without waiting for a schedule tick.
+  issues:
+    types: [edited]
+  push:
+    paths:
+      - .github/workflows/gpt-liveness-pilot.yml
 
 permissions:
   contents: read
@@ -16,7 +23,7 @@ concurrency:
 jobs:
   ping:
     # This is not a ChatGPT wakeup. Missing or expired issue registration => no POST.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'issues' || github.event.issue.number == 519)
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
