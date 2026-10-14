@@ -7,7 +7,9 @@ from unittest.mock import patch
 
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
 from tools.kaep_request_sender import make_request
-from tools.kaep_discovery_reader import discover, parse_pointer, POINTER_VERSION
+from tools.kaep_discovery_reader import (
+    discover, discover_batch, parse_pointer, POINTER_VERSION, MAX_INDEX_BATCH,
+)
 from tools.kaep_route_notice import DISCOVERY_REPOSITORY, DISCOVERY_ISSUE
 
 SOURCE_REPO = "kinoko34077/UniverseGenome"
@@ -65,24 +67,35 @@ class DiscoveryReaderTests(unittest.TestCase):
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]), after_id=88)
         self.assertEqual(x, [])
 
-    def test_unverified_notice_actor_rejected(self):
+    def test_unverified_notice_actor_is_quarantined_not_a_global_abort(self):
         root, hint, _ = fixtures()
-        with self.assertRaisesRegex(InvalidMessage, "UNTRUSTED_DISCOVERY_ACTOR"):
-            read(pages([comment(88, hint, actor="attacker")]),
-                 pages([comment(77, root)]))
+        index = pages([comment(87, hint, actor="attacker"), comment(88, hint)])
+        result = discover_batch(index, expected_notice_actor=ACTOR,
+                                expected_source_actor=ACTOR,
+                                fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual([x["index_comment_id"] for x in result["hints"]], [88])
+        self.assertEqual(result["rejected"], [
+            {"index_comment_id": 87, "reason_code": "UNTRUSTED_DISCOVERY_ACTOR"}])
+        self.assertEqual(result["next_after_id"], 88)
 
-    def test_source_mismatch_fail_closed(self):
+    def test_source_mismatch_is_quarantined(self):
         root, hint, _ = fixtures()
-        with self.assertRaisesRegex(InvalidMessage, "SOURCE_MESSAGE_NOT_UNIQUE"):
-            read(pages([comment(88, hint)]), pages([]))
+        result = discover_batch(pages([comment(88, hint)]),
+                                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                                fetch_source=lambda r, i: pages([]))
+        self.assertEqual(result["hints"], [])
+        self.assertEqual(result["rejected"][0]["reason_code"], "SOURCE_MESSAGE_NOT_UNIQUE")
 
     def test_fake_source_comment_id_rejected(self):
         root, hint, pointer = fixtures()
         new_pointer = dict(pointer, comment_id=999)
         tampered = dict(hint)
         tampered["payload"] = {"text": json.dumps(new_pointer)}
-        with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_SOURCE_MISMATCH"):
-            read(pages([comment(88, tampered)]), pages([comment(77, root)]))
+        result = discover_batch(pages([comment(88, tampered)]),
+                                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                                fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual(result["hints"], [])
+        self.assertEqual(result["rejected"][0]["reason_code"], "DISCOVERY_SOURCE_MISMATCH")
 
     def test_non_pointer_report_is_ignored(self):
         root, hint, _ = fixtures()
@@ -108,6 +121,110 @@ class DiscoveryReaderTests(unittest.TestCase):
                 with self.assertRaises(InvalidMessage):
                     parse_pointer(json.dumps(bad))
 
+    def test_malformed_marker_cannot_hide_later_valid_pointer(self):
+        root, hint, _ = fixtures()
+        malformed = {"id": 86, "body": "<!-- kaep:message:v0.2 -->malformed",
+                     "user": {"login": ACTOR}}
+        result = discover_batch(pages([malformed, comment(88, hint)]),
+                                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                                fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual(result["hints"][0]["index_comment_id"], 88)
+        self.assertEqual(result["rejected"], [
+            {"index_comment_id": 86, "reason_code": "INVALID_WRAPPER"}])
+
+    def test_benign_report_mentions_pointer_version(self):
+        root, hint, _ = fixtures()
+        prose = dict(hint)
+        prose["payload"] = {"text": "Please explain kaep.discovery-pointer.v1 in prose"}
+        result = discover_batch(pages([comment(87, prose), comment(88, hint)]),
+                                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                                fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual(len(result["hints"]), 1)
+        self.assertEqual(result["rejected"], [])
+        self.assertEqual(result["hints"][0]["index_comment_id"], 88)
+
+    def test_bounded_scan_has_explicit_cursor_and_continuation(self):
+        root, hint, _ = fixtures()
+        boring = [{"id": i, "body": "ordinary update", "user": {"login": ACTOR}}
+                  for i in range(100, 100 + MAX_INDEX_BATCH)]
+        index = pages(boring + [comment(100 + MAX_INDEX_BATCH, hint)])
+        fetch = lambda r, i: pages([comment(77, root)])
+        first = discover_batch(index, expected_notice_actor=ACTOR,
+                               expected_source_actor=ACTOR, fetch_source=fetch)
+        self.assertEqual(first["hints"], [])
+        self.assertTrue(first["truncated"])
+        self.assertEqual(first["next_after_id"], 99 + MAX_INDEX_BATCH)
+        later = discover_batch(index, expected_notice_actor=ACTOR,
+                               expected_source_actor=ACTOR, fetch_source=fetch,
+                               after_id=first["next_after_id"])
+        self.assertEqual(later["hints"][0]["index_comment_id"], 100 + MAX_INDEX_BATCH)
+        self.assertFalse(later["truncated"])
+        self.assertEqual(later["next_after_id"], 100 + MAX_INDEX_BATCH)
+
+    def test_source_expected_head_and_replies_are_observations_not_identity(self):
+        root, hint, _ = fixtures()
+        answer = dict(root)
+        answer.update({
+            "message_id": "msg_peer_answer_001",
+            "in_reply_to": root["message_id"],
+            "recipient": "chatgpt",
+            "kind": "ANSWER",
+            "idempotency_key": "kaep.peer.answer.001",
+            "payload": {"text": "technical analysis only"},
+        })
+        out = discover_batch(pages([comment(88, hint)]),
+                             expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                             fetch_source=lambda r, i: pages([comment(77, root), comment(80, answer)]))
+        self.assertEqual(out["hints"][0]["expected_head"], "a" * 40)
+        self.assertEqual(out["hints"][0]["observed_reply_kinds"], ["ANSWER"])
+        self.assertFalse(out["peer_identity_verified"])
+        self.assertEqual(out["hints"][0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
+
+    def test_malformed_source_wrapper_still_blocks_cursor_advance(self):
+        root, hint, _ = fixtures()
+        malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
+                     "user": {"login": ACTOR}}
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_WRAPPER"):
+            discover_batch(pages([comment(88, hint)]),
+                           expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                           fetch_source=lambda r, i: pages([malformed, comment(77, root)]))
+
+    def test_untrusted_source_actor_is_not_answer_evidence(self):
+        root, hint, _ = fixtures()
+        reply = dict(root)
+        reply.update({"message_id": "msg_reply_other_user_01",
+                      "in_reply_to": root["message_id"], "recipient": "chatgpt",
+                      "kind": "ANSWER", "idempotency_key": "kaep.answer.alien001"})
+        out = discover_batch(pages([comment(88, hint)]),
+                             expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                             fetch_source=lambda r, i: pages([
+                                 comment(77, root), comment(80, reply, actor="unauthorized")]))
+        self.assertEqual(out["hints"][0]["observed_reply_kinds"], [])
+
+    def test_malformed_typed_pointer_is_rejected_but_prose_is_skipped(self):
+        root, hint, _ = fixtures()
+        self.assertIsNone(parse_pointer("Ordinary mention of kaep.discovery-pointer.v1"))
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DISCOVERY_POINTER"):
+            parse_pointer('{"type":"kaep.discovery-pointer.v1",')
+        invalid = dict(hint)
+        invalid["payload"] = {"text": '{"type":"kaep.discovery-pointer.v1",'}
+        out = discover_batch(pages([comment(87, invalid), comment(88, hint)]),
+                             expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                             fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual(out["rejected"][0]["reason_code"], "INVALID_DISCOVERY_POINTER")
+        self.assertEqual(len(out["hints"]), 1)
+
+    def test_conflicting_index_replay_is_isolated(self):
+        root, hint, _ = fixtures()
+        altered = dict(hint)
+        altered["payload"] = {"text": '{"type":"kaep.discovery-pointer.v1","comment_id":99}'}
+        out = discover_batch(pages([
+            comment(87, hint), comment(88, altered), comment(89, hint)]),
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual([x["index_comment_id"] for x in out["hints"]], [87, 89])
+        self.assertEqual(out["rejected"][0]["reason_code"], "CONFLICTING_INDEX_REPLAY")
+
     def test_invalid_cursor(self):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_CURSOR"):
             discover(pages([]), expected_notice_actor=ACTOR,
@@ -117,8 +234,8 @@ class DiscoveryReaderTests(unittest.TestCase):
     def test_source_fetch_failure_blocks_all_results(self):
         root, hint, _ = fixtures()
         def unavailable(repo, issue):
-            raise InvalidMessage("SOURCE_UNAVAILABLE")
-        with self.assertRaisesRegex(InvalidMessage, "SOURCE_UNAVAILABLE"):
+            raise InvalidMessage("GITHUB_READ_UNAVAILABLE")
+        with self.assertRaisesRegex(InvalidMessage, "GITHUB_READ_UNAVAILABLE"):
             discover(pages([comment(88, hint)]),
                      expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
                      fetch_source=unavailable)
