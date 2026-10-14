@@ -36,6 +36,8 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
         return None
     try:
         obj = json.loads(text, object_pairs_hook=unique_pairs)
+    except InvalidMessage:
+        raise
     except (ValueError, RecursionError, TypeError) as exc:
         raise InvalidMessage("INVALID_DISCOVERY_POINTER") from exc
     if type(obj) is not dict or set(obj) != POINTER_FIELDS or obj["type"] != POINTER_VERSION:
