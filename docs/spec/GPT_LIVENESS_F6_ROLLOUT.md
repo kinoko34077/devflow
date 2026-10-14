@@ -4,7 +4,7 @@
 
 ## Purpose and separation
 
-The existing pilot has a best-effort 5-minute GitHub Actions `schedule`, **even when no target is enrolled**. It never POSTs without live Issue enrollment, but the scheduler can still execute. Copying the workflow independently into every repository would multiply idle execution events, while no schedule can force a paused interactive ChatGPT to answer.
+Historical rationale: the original F4 pilot had a best-effort 5-minute GitHub Actions `schedule`, **even when no target was enrolled**. It did not POST without enrollment but could consume idle runner invocations. **Current state:** [devflow #544](https://github.com/kinoko34077/devflow/issues/544) / merged PR #546 archived that pilot and removed its recurring schedule and Issue-edit fanout; the workflow is now **manual `workflow_dispatch` only**. Replicating a future independently scheduled workflow into every repository would multiply idle executions; scheduled GitHub Actions cannot force a paused interactive ChatGPT to answer.
 
 F6 first provides a **purely advisory allowlisted fleet planning layer**. No fleet sender, Issue POST, duplicate KAEP decoder, runtime Claim/Lease mutation, permission change, cloud service, browser/ChatGPT wake, or persistent task database is created. The authoritative Session/Turn enrollment remains in the **owning Issue body**, parsed by existing `gpt_liveness_pilot.enrollment()`. The allowlist is owner-supplied *observation scope only*, not authorization to send. The upstream producer remains `tools/gpt_liveness_evidence.py`; coordinator `get_liveness` remains a read-only consumer.
 
