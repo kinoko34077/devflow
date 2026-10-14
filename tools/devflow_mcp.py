@@ -74,6 +74,17 @@ def get_repository_work_view(repository: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_agent_inbox(
+    repository: str, recipient: str = "claude-code",
+    limit: int = 20, offset: int = 0, work_status: str | None = None,
+) -> dict[str, Any]:
+    """Read bounded trusted TASKs and their KAEP requests; never authorize execution."""
+    return _service().get_agent_inbox(
+        repository, recipient, limit=limit, offset=offset,
+        work_status=work_status)
+
+
+@mcp.tool()
 def get_portfolio_projection() -> dict[str, Any]:
     """Return a read-only summary projection across all currently managed repositories."""
     return _service().get_portfolio_projection()
