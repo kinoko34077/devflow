@@ -184,6 +184,51 @@ class LivenessContractTests(unittest.TestCase):
                       nonce="f"*32)
         self.assertEqual(result["unanswered"], 1)
 
+
+    def test_mailbox_receives_only_fresh_valid_bot_ping(self):
+        from tools.gpt_liveness_mailbox import pending_pings
+        _, req = first_ping()
+        result = pending_pings(body=body(),
+            comments=[page_msg(req, 1, at=NOW, actor=BOT)],
+            repo=REPO, issue=ISSUE, now=NOW)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["parent_message_id"], req["message_id"])
+        self.assertEqual(pending_pings(body=body(),
+            comments=[page_msg(req, 1, at=NOW, actor="unknown")],
+            repo=REPO, issue=ISSUE, now=NOW), [])
+
+    def test_mailbox_accepts_only_timed_authenticated_matching_answer(self):
+        from tools.gpt_liveness_mailbox import pending_pings
+        _, req = first_ping()
+        rep = reply(req)
+        root = page_msg(req, 1, at=NOW, actor=BOT)
+        valid = page_msg(rep, 2, at=NOW + timedelta(seconds=30))
+        self.assertEqual(pending_pings(body=body(), comments=[root, valid],
+                                       repo=REPO, issue=ISSUE, now=NOW + timedelta(minutes=5)), [])
+        attacker = page_msg(rep, 2, at=NOW + timedelta(seconds=30), actor="attacker")
+        self.assertEqual(len(pending_pings(body=body(), comments=[root, attacker],
+                           repo=REPO, issue=ISSUE, now=NOW + timedelta(minutes=5))), 1)
+        late = page_msg(rep, 2, at=NOW + timedelta(minutes=16))
+        self.assertEqual(len(pending_pings(body=body(), comments=[root, late],
+                           repo=REPO, issue=ISSUE, now=NOW + timedelta(minutes=18))), 0)
+        # At 18 min the root challenge itself has expired and must not reappear.
+
+    def test_explicit_respond_gate(self):
+        from tools.gpt_liveness_mailbox import main as mailbox_main
+        with patch("tools.gpt_liveness_mailbox.fetch_issue") as f:
+            self.assertEqual(mailbox_main(["--send"]), 2)
+            f.assert_not_called()
+
+    def test_model_answer_composer_validates_deadline(self):
+        from tools.gpt_liveness_mailbox import create_answer
+        _, req = first_ping()
+        ping = challenge(req["payload"]["text"])
+        res = create_answer(ping=ping, mode="ACTIVE", checkpoint="F1", expected_until=None, now=NOW)
+        self.assertEqual(json.loads(res)["nonce"], NONCE)
+        with self.assertRaises(InvalidMessage):
+            create_answer(ping=ping, mode="LONG_RUNNING", checkpoint="F1",
+                          expected_until=None, now=NOW)
+
     def test_cli_without_enrollment_does_not_fetch_mailbox(self):
         with patch("tools.gpt_liveness_pilot.fetch_issue", return_value="no enrollment"), \
              patch("tools.gpt_liveness_pilot.fetch_gh_pages") as fetch:
