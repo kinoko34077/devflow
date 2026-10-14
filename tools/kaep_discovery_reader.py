@@ -112,15 +112,19 @@ def discover_batch(
         "status": "READ_ONLY",
         "hints": [],
         "rejected": [],
+        "blocked": [],
         "truncated": len(remaining) > len(subset),
+        # Commit cursor stops at the first failed source; scan cursor is only
+        # for traversing subsequent batches in this active check-in.
         "next_after_id": subset[-1]["id"] if subset else after_id,
+        "next_scan_after_id": subset[-1]["id"] if subset else after_id,
         "read_only": True,
         "peer_identity_verified": False,
     }
     source_cache: dict[tuple[str, int], str] = {}
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
-    for comment in subset:
+    for position, comment in enumerate(subset):
         source_validation = False
         cid = comment["id"]
         body = comment["body"]
@@ -138,6 +142,10 @@ def discover_batch(
             if (old_msg is not None and old_msg != identity
                     or old_key is not None and old_key != identity):
                 _fail("CONFLICTING_INDEX_REPLAY")
+            if old_msg == identity or old_key == identity:
+                # Identical repeated stored comments are transport replays,
+                # not two separately actionable task hints.
+                continue
             seen_msg[msg["message_id"]] = identity
             seen_keys[msg["idempotency_key"]] = identity
             if (msg["recipient"] != "claude-code" or msg["kind"] != "REQUEST"
@@ -182,11 +190,19 @@ def discover_batch(
                 "SOURCE_MESSAGE_NOT_UNIQUE", "SOURCE_ACTOR_MISMATCH",
                 "SOURCE_NOT_SUPPORTED_REQUEST", "DISCOVERY_SOURCE_MISMATCH",
             }:
-                # Source fetch/pagination/wrapper/correlation failures, unlike
-                # invalid index notices, MUST NOT silently advance the cursor.
-                raise
+                # Preserve source fail-closed: no results from this pointer.
+                # Other independent sources can still be checked in this run,
+                # but a durable cursor may NEVER skip the first blocked item.
+                if not result["blocked"]:
+                    result["next_after_id"] = (
+                        subset[position - 1]["id"] if position else after_id)
+                result["blocked"].append({
+                    "index_comment_id": cid, "reason_code": str(exc)})
+                continue
             result["rejected"].append({
                 "index_comment_id": cid, "reason_code": str(exc)})
+    if result["blocked"]:
+        result["status"] = "PARTIAL_BLOCKED"
     return result
 
 
@@ -196,10 +212,15 @@ def discover(
     after_id: int = 0,
 ) -> list[dict[str, Any]]:
     """Backward-compatible list projection; use discover_batch for cursor."""
-    return discover_batch(
+    batch = discover_batch(
         index_pages, expected_notice_actor=expected_notice_actor,
         expected_source_actor=expected_source_actor,
-        fetch_source=fetch_source, after_id=after_id)["hints"]
+        fetch_source=fetch_source, after_id=after_id)
+    # Legacy consumers cannot receive blocked/cursor metadata. Preserve their
+    # previous strict failure semantics instead of silently accepting partial.
+    if batch["blocked"]:
+        _fail("DISCOVERY_SOURCE_BLOCKED")
+    return batch["hints"]
 
 
 def main(argv: list[str] | None = None) -> int:
