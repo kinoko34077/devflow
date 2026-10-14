@@ -151,7 +151,6 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
         return {"status": "NO_ACTIVE_ENROLLMENT"}
     items = extract(comments, repo=repo, issue=issue)
     existing: list[dict[str, Any]] = []
-    answered: set[str] = set()
     for _, msg, actor in items:
         if msg["kind"] == "REQUEST" and msg["intent"] == "PING" and msg["recipient"] == "chatgpt":
             try:
@@ -160,22 +159,22 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
                 continue  # Another KAEP PING is not a liveness probe.
             if c["session_id"] == en["session_id"] and c["turn_id"] == en["turn_id"]:
                 existing.append(msg)
-        elif msg["kind"] == "ANSWER" and msg["in_reply_to"] is not None and actor.casefold() == en["expected_actor"].casefold():
-            answered.add(msg["in_reply_to"])
     # An Answer is NOT automatically proof; evaluate only a challenge-bound
     # answer with exact session/turn/nonce/expiry, never an ACK or sidecar PONG.
     valid_answered: set[str] = set()
+    times = {c["id"]: c.get("created_at") for c in comments}
     for root in existing:
         c = challenge(root["payload"]["text"])
-        for _, msg, actor in items:
+        for cid, msg, actor in items:
             if (msg["kind"] != "ANSWER" or msg["in_reply_to"] != root["message_id"]
                     or msg["exchange_id"] != root["exchange_id"]
                     or actor.casefold() != en["expected_actor"].casefold()):
                 continue
             try:
-                # Use the GitHub reply comment timestamp in a future runtime
-                # adapter; here now is conservative and disallows expired replay.
-                answer(msg["payload"]["text"], ping=c, now=now)
+                observed_at = utc(times[cid])
+                if observed_at > now + timedelta(seconds=30):
+                    continue
+                answer(msg["payload"]["text"], ping=c, now=observed_at)
             except InvalidMessage:
                 continue
             valid_answered.add(root["message_id"])
@@ -234,7 +233,13 @@ def main(argv: list[str] | None = None) -> int:
         if enrollment(body, now=now) is None:
             print(json.dumps({"status": "NO_ACTIVE_ENROLLMENT"}))
             return 0
-        comments = parse_pages(fetch_gh_pages(args.repository, args.issue), repository=args.repository, issue=args.issue)
+        pages_text = fetch_gh_pages(args.repository, args.issue)
+        comments = parse_pages(pages_text, repository=args.repository, issue=args.issue)
+        raw_pages = json.loads(pages_text)
+        for parsed, original in zip(comments, (x for page in raw_pages for x in page)):
+            if parsed["id"] != original["id"]:
+                _fail("COMMENT_SEQUENCE_MISMATCH")
+            parsed["created_at"] = original.get("created_at")
         result = plan(body=body, comments=comments, repo=args.repository, issue=args.issue,
                       now=now.replace(microsecond=0), nonce=secrets.token_hex(16))
         if args.send and result["status"] == "READY":
