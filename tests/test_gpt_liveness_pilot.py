@@ -254,6 +254,16 @@ class LivenessContractTests(unittest.TestCase):
             create_answer(ping=ping, mode="LONG_RUNNING", checkpoint="F1",
                           expected_until=None, now=NOW)
 
+    def test_disable_between_read_and_post_fails_closed(self):
+        now = datetime.now(timezone.utc)
+        registered = body(started_at=iso(now - timedelta(minutes=1)),
+                          expires_at=iso(now + timedelta(minutes=30)))
+        with patch("tools.gpt_liveness_pilot.fetch_issue", side_effect=[registered, "disabled"]), \
+             patch("tools.gpt_liveness_pilot.fetch_gh_pages", return_value=json.dumps([[]])), \
+             patch("tools.gpt_liveness_pilot.send_request") as send:
+            self.assertEqual(main(["--issue", str(ISSUE), "--send"]), 2)
+            send.assert_not_called()
+
     def test_cli_without_enrollment_does_not_fetch_mailbox(self):
         with patch("tools.gpt_liveness_pilot.fetch_issue", return_value="no enrollment"), \
              patch("tools.gpt_liveness_pilot.fetch_gh_pages") as fetch:
