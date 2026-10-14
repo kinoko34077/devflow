@@ -7,7 +7,7 @@ The caller-maintained allowlist is NOT enrollment and never grants Claim rights.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -35,8 +35,15 @@ def parse_manifest(raw: str) -> list[str]:
     """Return exact allowlisted targets. No implicit fleet membership."""
     if type(raw) is not str or len(raw) > 3_000:
         _fail("MANIFEST_TOO_LARGE")
+    def strict_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        output: dict[str, Any] = {}
+        for key, value in items:
+            if key in output:
+                _fail("DUPLICATE_MANIFEST_FIELD")
+            output[key] = value
+        return output
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=strict_pairs)
     except (ValueError, TypeError):
         _fail("INVALID_MANIFEST_JSON")
     if type(data) is not dict or set(data) != {"schema", "targets"}:
@@ -63,7 +70,8 @@ def validate_snapshot(record: dict[str, Any], *, target: str) -> tuple[str, str]
         _fail("INVALID_TARGET")
     if type(record) is not dict or set(record) != {"repository", "number", "state", "body"}:
         _fail("INVALID_ISSUE_SNAPSHOT")
-    if (record["repository"].casefold() != match.group(1).casefold()
+    if (type(record["repository"]) is not str
+            or record["repository"].casefold() != match.group(1).casefold()
             or type(record["number"]) is not int
             or record["number"] != int(match.group(2))):
         _fail("ISSUE_IDENTITY_MISMATCH")
@@ -75,7 +83,7 @@ def validate_snapshot(record: dict[str, Any], *, target: str) -> tuple[str, str]
 
 
 def plan(*, manifest: str, snapshots: dict[str, Any], now: datetime) -> dict[str, Any]:
-    if now.tzinfo is None or now.utcoffset().total_seconds() != 0:
+    if now.tzinfo is None or now.utcoffset() != timedelta(0):
         _fail("INVALID_PLAN_TIME")
     targets = parse_manifest(manifest)
     if type(snapshots) is not dict:
