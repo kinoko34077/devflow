@@ -150,6 +150,30 @@ class LivenessContractTests(unittest.TestCase):
         self.assertEqual(out["status"], "READY")
         self.assertEqual(out["unanswered"], 0)
 
+    def test_terminal_answer_stops_more_pings(self):
+        _, req = first_ping()
+        for mode in ("FINISHED", "IDLE", "NEED_USER"):
+            rep = reply(req, mode=mode)
+            items = [page_msg(req, 1, at=NOW, actor=BOT),
+                     page_msg(rep, 2, at=NOW + timedelta(seconds=20))]
+            out = plan(body=body(), comments=items, repo=REPO,
+                       issue=ISSUE, now=NOW + timedelta(minutes=5), nonce="a"*32)
+            self.assertEqual(out["status"], mode)
+            self.assertFalse(out["claim_authority"])
+
+    def test_accepted_long_running_reply_stops_new_ping_until_deadline(self):
+        _, req = first_ping()
+        deadline = iso(NOW + timedelta(minutes=35))
+        rep = reply(req, mode="LONG_RUNNING", expected_until=deadline)
+        items = [page_msg(req, 1, at=NOW, actor=BOT),
+                 page_msg(rep, 2, at=NOW + timedelta(seconds=20))]
+        out = plan(body=body(), comments=items, repo=REPO, issue=ISSUE,
+                   now=NOW + timedelta(minutes=20), nonce="a"*32)
+        self.assertEqual(out["status"], "LONG_RUNNING")
+        later = plan(body=body(), comments=items, repo=REPO, issue=ISSUE,
+                     now=NOW + timedelta(minutes=40), nonce="a"*32)
+        self.assertEqual(later["status"], "READY")
+
     def test_late_answer_not_proof(self):
         _, req = first_ping()
         rep = reply(req)
