@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from .kaep_mailbox_codec import InvalidMessage, RECIPIENTS, read_mailbox
+try:
+    from .kaep_mailbox_codec import InvalidMessage, RECIPIENTS, read_mailbox
+except ImportError:  # direct stdio script from the tools directory
+    from kaep_mailbox_codec import InvalidMessage, RECIPIENTS, read_mailbox
 
 MAX_INBOX_TASKS = 20
 MAX_ISSUE_COMMENTS = 500
