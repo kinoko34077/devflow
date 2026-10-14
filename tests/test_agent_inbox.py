@@ -50,7 +50,7 @@ def control():
 
 def message(issue=21):
     root, _ = make_request(
-        "[]", repository=REPO, issue=issue, recipient="claude-code",
+        "[[]]", repository=REPO, issue=issue, recipient="claude-code",
         intent="ANALYZE", request_key=f"kaep.agentinbox.tests.{issue}",
         request_text="review this real work", expected_head="a" * 40,
         expect_existing_actor=OWNER)
