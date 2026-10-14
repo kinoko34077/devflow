@@ -232,8 +232,14 @@ def fetch_issue(repo: str, issue: int) -> str:
     if proc.returncode != 0 or len(proc.stdout) > 2_000_000:
         _fail("ISSUE_READ_FAILED")
     data = strict_json(proc.stdout)
-    if data.get("number") != issue or data.get("repository_url") != f"https://api.github.com/repos/{repo}" or data.get("state") != "open":
+    if data.get("number") != issue or data.get("repository_url") != f"https://api.github.com/repos/{repo}":
         _fail("ISSUE_IDENTITY_MISMATCH")
+    if data.get("state") == "closed":
+        # A completed owning Issue must never be scheduled or mutated again.
+        # Keep a closed historical pilot inert, without repeated failed Actions.
+        return ""
+    if data.get("state") != "open":
+        _fail("ISSUE_STATE_INVALID")
     if not isinstance(data.get("body"), str):
         _fail("MISSING_ISSUE_BODY")
     return data["body"]
