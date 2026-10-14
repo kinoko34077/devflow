@@ -152,7 +152,8 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
     items = extract(comments, repo=repo, issue=issue)
     existing: list[dict[str, Any]] = []
     for _, msg, actor in items:
-        if msg["kind"] == "REQUEST" and msg["intent"] == "PING" and msg["recipient"] == "chatgpt":
+        if (msg["kind"] == "REQUEST" and msg["intent"] == "PING" and
+                msg["recipient"] == "chatgpt" and actor.casefold() == "github-actions[bot]"):
             try:
                 c = challenge(msg["payload"]["text"])
             except InvalidMessage:
