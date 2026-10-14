@@ -32,3 +32,17 @@ Only one repository per call. `recipient` is explicit and must match v0.2 recipi
 
 ## Further acceptance before more rollout
 Claude #532–#535 independent technical consultation, real source/actor failures, negative tests, PR Required CI and read-only MCP entry verification, followed by one genuine check-in B3. No new scheduler, credentials, deployment or Claim authority.
+## CLI fallback for an existing Claude check-in without Devflow MCP registration
+
+Claude #533 verified that its current session could read devflow via native Python/GitHub CLI but had no Devflow MCP tool registered. The following GET-only command therefore requires no new MCP registration or timer changes, and can be called **as one step inside** the user-managed check-in:
+
+```sh
+python -m tools.kaep_agent_inbox_cli --repository kinoko34077/devflow --recipient claude-code --work-status AWAITING_REVIEW --pending-only
+```
+
+The CLI calls the accepted DevflowService.get_agent_inbox in a **single already-authorized local process**, prints redacted/bounded JSON and exits. Add up to five explicit `--repository owner/name` flags, `--limit 1..20` and `--offset` to page; it does not scan all managed repositories by default. The report always includes an explicit false `can_authorize_execution` and `can_modify_checkin_schedule`. `--pending-only` filters out already answered records, but keeps unreadable Issue records as unknown diagnostics; partial/incomplete means NOT empty success. Even a pending request is an instruction to READ THE SOURCE and verify current authority, not a Claim or permission to write.
+
+Using the CLI **manually** in Claude establishes native read capability, not an independently authenticated automatic trigger. Updating the actual user-managed check-in script or proving autonomous pickup belongs to B3; this PR does neither. #503 pointer-only routing remains a backward-compatible fallback. Existing idle 5→10→20→40→80→... cadence is untouched.
+
+## Evidence
+Initial native MCP API: [PR #536](https://github.com/kinoko34077/devflow/pull/536); truncated page safety: [PR #538](https://github.com/kinoko34077/devflow/pull/538); native CLI integration tracked under owner [#531](https://github.com/kinoko34077/devflow/issues/531).
