@@ -58,3 +58,10 @@ The GitHub `schedule` job still starts without an active enrollment (up to 288 i
 Regression covers: absence/expiry opt-in, registration strictness, KAEP envelope interoperability, 5-min bucket idempotency, three unanswered bound, delivery ACK exclusion, nonce/turn/expiry matching, long-running deadline, GitHub actor mismatch, offline/no-POST behavior.
 
 **Live E2E limitation:** PR CI runs offline tests. A real five-minute cron cannot fire from an unmerged PR; a real interactive ChatGPT reply requires a live GPT tool call and explicit opt-in. Do not equate offline fixture passage or an Actions tick to observed GPT liveness. Production adoption, runner credentials and cross-repo rollout require separate evidence and appropriate approval.
+
+
+## Archived pilot disposition (2026-10-15)
+
+The original owning [Issue #519](https://github.com/kinoko34077/devflow/issues/519) is **CLOSED / F0–F4 ACCEPTED**. The automatic 5-minute `schedule` and repository-wide `issues.edited` events are removed from `.github/workflows/gpt-liveness-pilot.yml`, leaving `workflow_dispatch` only. A verified closed Issue returns `NO_ACTIVE_ENROLLMENT` rather than a recurring job failure. No PING posts are permitted for closed historical sessions.
+
+The earlier lines in this document describe the original pilot setup/history, not an enabled current schedule. Future F6 multi-repo monitoring must choose a new bounded live owner, cost-aware central scheduler, and explicit activation gates. This archival change does not retract the real PING/ANSWER evidence and does not change Claim/Lease or KAEP wire contracts.

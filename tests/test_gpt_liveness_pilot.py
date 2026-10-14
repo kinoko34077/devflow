@@ -290,6 +290,46 @@ class LivenessContractTests(unittest.TestCase):
             self.assertEqual(main(["--issue", str(ISSUE), "--send"]), 2)
             send.assert_not_called()
 
+    def test_verified_closed_owner_is_inert_without_mailbox_fetch(self):
+        from tools.gpt_liveness_pilot import fetch_issue
+        from unittest.mock import Mock
+        payload = {
+            "number": ISSUE,
+            "repository_url": f"https://api.github.com/repos/{REPO}",
+            "state": "closed",
+            "body": body(),
+        }
+        mock = Mock(returncode=0, stdout=json.dumps(payload))
+        with patch("tools.gpt_liveness_pilot.subprocess.run", return_value=mock):
+            self.assertEqual(fetch_issue(REPO, ISSUE), "")
+        with patch("tools.gpt_liveness_pilot.fetch_issue", return_value=""), \
+             patch("tools.gpt_liveness_pilot.fetch_gh_pages") as fetch:
+            self.assertEqual(main(["--issue", str(ISSUE), "--send"]), 0)
+            fetch.assert_not_called()
+
+    def test_closed_wrong_identity_still_fails_closed(self):
+        from tools.gpt_liveness_pilot import fetch_issue
+        from unittest.mock import Mock
+        payload = {
+            "number": ISSUE + 1,
+            "repository_url": f"https://api.github.com/repos/{REPO}",
+            "state": "closed",
+            "body": body(),
+        }
+        with patch("tools.gpt_liveness_pilot.subprocess.run",
+                   return_value=Mock(returncode=0, stdout=json.dumps(payload))):
+            with self.assertRaisesRegex(InvalidMessage, "ISSUE_IDENTITY_MISMATCH"):
+                fetch_issue(REPO, ISSUE)
+
+    def test_archived_pilot_workflow_has_no_automatic_triggers(self):
+        from pathlib import Path
+        content = Path(".github/workflows/gpt-liveness-pilot.yml").read_text(encoding="utf-8")
+        triggers = content.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("  workflow_dispatch:", triggers)
+        self.assertNotIn("  schedule:", triggers)
+        self.assertNotIn("  issues:", triggers)
+        self.assertNotIn("  push:", triggers)
+
     def test_cli_without_enrollment_does_not_fetch_mailbox(self):
         with patch("tools.gpt_liveness_pilot.fetch_issue", return_value="no enrollment"), \
              patch("tools.gpt_liveness_pilot.fetch_gh_pages") as fetch:
