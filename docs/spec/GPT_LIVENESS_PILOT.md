@@ -17,7 +17,7 @@ On Issue #519 only, an authorized owner may add exactly one machine block **to t
 <!-- gpt-liveness:enrollment:v0.1 {"schema":"gpt.liveness.v0.1","session_id":"session_example123","turn_id":"turn_example123","started_at":"2026-10-14T04:30:00Z","expires_at":"2026-10-14T05:00:00Z","expected_actor":"kinoko34077","enabled":true} -->
 ```
 
-The lifetime is at most 2 hours. Deleting the block, setting `enabled:false`, or allowing it to expire disables further PINGs. The action's `GH_TOKEN` uses the GitHub-provided token; no new PAT required. Because the enrollment is made in the Issue body, comments cannot enroll arbitrary sessions.
+The lifetime is at most 2 hours. Before a long blocking operation the worker may edit the same enrollment to include `"long_running_until":"<UTC ISO deadline>"` (must not exceed `expires_at`); the scheduled job then records `LONG_RUNNING` without issuing more PINGs until the deadline. Remove/set null on return. This is a declaration only, not runtime Lease renewal. Deleting the block, setting `enabled:false`, or allowing it to expire disables further PINGs. The action's `GH_TOKEN` uses the GitHub-provided token; no new PAT required. Because the enrollment is made in the Issue body, comments cannot enroll arbitrary sessions.
 
 ## Processing / proof
 
