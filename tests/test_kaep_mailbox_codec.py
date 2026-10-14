@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 from tools.kaep_mailbox_codec import (
-    InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
+    CLAUDE_CODE_FOOTER, InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
     read_mailbox, validate, verify_reply_chain,
 )
 
@@ -86,6 +86,54 @@ class KAEPMailboxContract(unittest.TestCase):
         body = encode_comment(envelope())
         with self.assertRaises(InvalidMessage): decode_comment("extra\n" + body)
         with self.assertRaises(InvalidMessage): decode_comment(body + "\nextra")
+
+    def test_known_claude_code_footer_is_untrusted_decoration(self):
+        d = envelope()
+        body = encode_comment(d)
+        self.assertEqual(decode_comment(body + CLAUDE_CODE_FOOTER, task_ref=TASK), d)
+        self.assertEqual(fingerprint(decode_comment(body + CLAUDE_CODE_FOOTER)), fingerprint(d))
+
+    def test_footer_variants_rejected(self):
+        body = encode_comment(envelope())
+        bad = [
+            body + CLAUDE_CODE_FOOTER + CLAUDE_CODE_FOOTER,
+            body + CLAUDE_CODE_FOOTER + "\n",
+            body + CLAUDE_CODE_FOOTER + " ",
+            body + CLAUDE_CODE_FOOTER.replace("Claude Code", "Claude Codex"),
+            body + CLAUDE_CODE_FOOTER.replace("https://claude.ai/code", "https://example.invalid/"),
+            body + CLAUDE_CODE_FOOTER.replace("\n\n---", "\n---"),
+            body + "\n" + CLAUDE_CODE_FOOTER,
+            body + "extra" + CLAUDE_CODE_FOOTER,
+            CLAUDE_CODE_FOOTER,
+            "extra\n" + body + CLAUDE_CODE_FOOTER,
+        ]
+        for b in bad:
+            with self.subTest(b=b[-60:]), self.assertRaises(InvalidMessage):
+                decode_comment(b)
+
+    def test_footer_counts_toward_size_limit(self):
+        body = encode_comment(envelope(payload={"text": "x" * 4000}))
+        pad = 8192 - len((body + CLAUDE_CODE_FOOTER).encode())
+        self.assertGreaterEqual(pad, 0)
+        # exactly at the limit incl. footer is accepted (footer bytes are counted, not exempt)
+        self.assertEqual(decode_comment(body + CLAUDE_CODE_FOOTER)["payload"]["text"], "x" * 4000)
+        with self.assertRaisesRegex(InvalidMessage, "COMMENT_TOO_LARGE"):
+            decode_comment(body + "y" * (pad + 1) + CLAUDE_CODE_FOOTER)
+
+    def test_mailbox_with_decorated_ack(self):
+        ping = envelope(message_id="msg_ping001", exchange_id="ex_ping001", idempotency_key="kaep.test.ping")
+        ack = envelope(message_id="msg_ack001", exchange_id="ex_ping001", idempotency_key="kaep.test.ack",
+                       in_reply_to="msg_ping001", recipient="chatgpt", kind="ACK")
+        comments = [
+            {"id": 11, "body": encode_comment(ping)},
+            {"id": 12, "body": encode_comment(ack) + CLAUDE_CODE_FOOTER},
+        ]
+        got = read_mailbox(comments, task_ref=TASK)
+        self.assertEqual([i for i, _ in got], [11, 12])
+        self.assertEqual(got[1][1]["kind"], "ACK")
+
+    def test_encoder_never_emits_footer(self):
+        self.assertFalse(encode_comment(envelope()).endswith(CLAUDE_CODE_FOOTER))
 
     def test_duplicate_json_keys(self):
         body = encode_comment(envelope())
