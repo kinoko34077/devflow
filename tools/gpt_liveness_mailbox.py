@@ -24,12 +24,8 @@ def pending_pings(*, body: str, comments: list[dict], repo: str, issue: int,
     active = enrollment(body, now=now)
     if active is None:
         return []
-    seen_replies = set()
     entries = extract(comments, repo=repo, issue=issue)
-    for _, msg, _ in entries:
-        if msg["kind"] == "ANSWER":
-            seen_replies.add(msg["in_reply_to"])
-    result = []
+    roots = []
     for cid, msg, actor in entries:
         if msg["kind"] != "REQUEST" or msg["intent"] != "PING" or msg["recipient"] != "chatgpt":
             continue
@@ -41,10 +37,28 @@ def pending_pings(*, body: str, comments: list[dict], repo: str, issue: int,
             continue
         if data["session_id"] != active["session_id"] or data["turn_id"] != active["turn_id"]:
             continue
-        if now >= utc(data["expires_at"]) or msg["message_id"] in seen_replies:
+        if now >= utc(data["expires_at"]):
             continue
-        result.append({"comment_id": cid, "parent_message_id": msg["message_id"],
-                       "exchange_id": msg["exchange_id"], "ping": data})
+        roots.append({"comment_id": cid, "parent_message_id": msg["message_id"],
+                      "exchange_id": msg["exchange_id"], "ping": data})
+    result = []
+    timestamps = {c["id"]: c.get("created_at") for c in comments}
+    for root in roots:
+        valid_reply = False
+        for cid, msg, actor in entries:
+            if (msg["kind"] != "ANSWER" or msg["in_reply_to"] != root["parent_message_id"]
+                    or msg["exchange_id"] != root["exchange_id"]
+                    or actor.casefold() != active["expected_actor"].casefold()):
+                continue
+            try:
+                observed_at = utc(timestamps[cid])
+                answer(msg["payload"]["text"], ping=root["ping"], now=observed_at)
+                valid_reply = True
+                break
+            except InvalidMessage:
+                continue
+        if not valid_reply:
+            result.append(root)
     return result
 
 
