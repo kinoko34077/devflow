@@ -265,6 +265,11 @@ def main(argv: list[str] | None = None) -> int:
         result = plan(body=body, comments=comments, repo=args.repository, issue=args.issue,
                       now=now.replace(microsecond=0), nonce=secrets.token_hex(16))
         if args.send and result["status"] == "READY":
+            # Re-read the owning Issue before effect, to catch a disabled or
+            # replaced enrollment while paginated mailbox inspection was running.
+            latest_body = fetch_issue(args.repository, args.issue)
+            if latest_body != body or enrollment(latest_body, now=datetime.now(timezone.utc)) is None:
+                _fail("ENROLLMENT_CHANGED_BEFORE_POST")
             # Existing KAEP sender owns idempotency + complete mailbox preflight
             # + GitHub actor readback; never introduce another transport.
             sent = send_request(repository=args.repository, issue=args.issue,
