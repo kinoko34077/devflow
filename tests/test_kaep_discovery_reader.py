@@ -188,14 +188,23 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertFalse(out["peer_identity_verified"])
         self.assertEqual(out["hints"][0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
 
-    def test_malformed_source_wrapper_still_blocks_cursor_advance(self):
+    def test_malformed_source_wrapper_blocks_safe_cursor_not_other_sources(self):
         root, hint, _ = fixtures()
         malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
                      "user": {"login": ACTOR}}
-        with self.assertRaisesRegex(InvalidMessage, "INVALID_WRAPPER"):
-            discover_batch(pages([comment(88, hint)]),
-                           expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
-                           fetch_source=lambda r, i: pages([malformed, comment(77, root)]))
+        corrupt_source = pages([malformed, comment(77, root)])
+        index = pages([comment(88, hint)])
+        out = discover_batch(index, expected_notice_actor=ACTOR,
+                             expected_source_actor=ACTOR,
+                             fetch_source=lambda r, i: corrupt_source)
+        self.assertEqual(out["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(out["hints"], [])
+        self.assertEqual(out["blocked"], [
+            {"index_comment_id": 88, "reason_code": "INVALID_WRAPPER"}])
+        self.assertEqual(out["next_after_id"], 0)
+        self.assertEqual(out["next_scan_after_id"], 88)
+        with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_SOURCE_BLOCKED"):
+            read(index, corrupt_source)
 
     def test_untrusted_source_actor_is_not_answer_evidence(self):
         root, hint, _ = fixtures()
@@ -230,8 +239,65 @@ class DiscoveryReaderTests(unittest.TestCase):
             comment(87, hint), comment(88, altered), comment(89, hint)]),
             expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
             fetch_source=lambda r, i: pages([comment(77, root)]))
-        self.assertEqual([x["index_comment_id"] for x in out["hints"]], [87, 89])
+        self.assertEqual([x["index_comment_id"] for x in out["hints"]], [87])
         self.assertEqual(out["rejected"][0]["reason_code"], "CONFLICTING_INDEX_REPLAY")
+
+    def test_identical_index_replay_returns_single_actionable_hint(self):
+        root, hint, _ = fixtures()
+        index = pages([comment(88, hint), comment(89, hint)])
+        out = discover_batch(index, expected_notice_actor=ACTOR,
+                             expected_source_actor=ACTOR,
+                             fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual([x["index_comment_id"] for x in out["hints"]], [88])
+        self.assertEqual(out["blocked"], [])
+        self.assertEqual(out["rejected"], [])
+        self.assertEqual(out["next_after_id"], 89)
+
+    def test_corrupt_source_pins_commit_cursor_but_allows_later_valid_pointer(self):
+        root, hint, _ = fixtures()
+        other_root, _ = make_request(
+            pages([]), repository=SOURCE_REPO, issue=337,
+            recipient="claude-code", intent="ANALYZE",
+            expected_head="b" * 40,
+            request_key="kaep.discovery.other.source0001",
+            request_text="second independent source", expect_existing_actor=ACTOR)
+        other_ptr = {
+            "type": POINTER_VERSION,
+            "owning_issue": f"https://github.com/{SOURCE_REPO}/issues/337",
+            "message_id": other_root["message_id"],
+            "comment_id": 78,
+        }
+        second = other_notice(json.dumps(other_ptr), "kaep.discovery.secondindex0001")
+        malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
+                     "user": {"login": ACTOR}}
+        index = pages([
+            {"id": 85, "body": "ordinary", "user": {"login": ACTOR}},
+            comment(88, hint), comment(89, second),
+        ])
+        def fetch(repo, issue):
+            if issue == SOURCE_ISSUE:
+                return pages([malformed, comment(77, root)])
+            self.assertEqual(issue, 337)
+            return pages([comment(78, other_root)])
+        out = discover_batch(index, expected_notice_actor=ACTOR,
+                             expected_source_actor=ACTOR, fetch_source=fetch)
+        self.assertEqual(out["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(out["blocked"], [
+            {"index_comment_id": 88, "reason_code": "INVALID_WRAPPER"}])
+        self.assertEqual([x["index_comment_id"] for x in out["hints"]], [89])
+        self.assertEqual(out["next_after_id"], 85)  # cannot commit over poison
+        self.assertEqual(out["next_scan_after_id"], 89)  # can scan beyond poison
+        self.assertFalse(out["truncated"])
+
+    def test_bad_index_pagination_still_fatal_and_no_cursor_returned(self):
+        bad = json.dumps([[{"id": 2, "body": "ordinary",
+                            "user": {"login": ACTOR}},
+                           {"id": 1, "body": "ordinary",
+                            "user": {"login": ACTOR}}]])
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_COMMENT_SEQUENCE"):
+            discover_batch(bad, expected_notice_actor=ACTOR,
+                           expected_source_actor=ACTOR,
+                           fetch_source=lambda r, i: pages([]))
 
     def test_invalid_cursor(self):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_CURSOR"):
@@ -243,10 +309,14 @@ class DiscoveryReaderTests(unittest.TestCase):
         root, hint, _ = fixtures()
         def unavailable(repo, issue):
             raise InvalidMessage("GITHUB_READ_UNAVAILABLE")
-        with self.assertRaisesRegex(InvalidMessage, "GITHUB_READ_UNAVAILABLE"):
-            discover(pages([comment(88, hint)]),
-                     expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
-                     fetch_source=unavailable)
+        index = pages([comment(88, hint)])
+        batch = discover_batch(index, expected_notice_actor=ACTOR,
+                               expected_source_actor=ACTOR, fetch_source=unavailable)
+        self.assertEqual(batch["blocked"][0]["reason_code"], "GITHUB_READ_UNAVAILABLE")
+        self.assertEqual(batch["next_after_id"], 0)
+        with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_SOURCE_BLOCKED"):
+            discover(index, expected_notice_actor=ACTOR,
+                     expected_source_actor=ACTOR, fetch_source=unavailable)
 
 
 if __name__ == "__main__":
