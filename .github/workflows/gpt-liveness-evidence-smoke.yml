@@ -1,0 +1,66 @@
+name: GPT liveness evidence cross-repository read-only smoke
+
+on:
+  pull_request:
+    paths:
+      - tools/gpt_liveness_evidence.py
+      - tests/test_gpt_liveness_evidence.py
+      - .github/workflows/gpt-liveness-evidence-smoke.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/gpt_liveness_evidence.py
+      - tests/test_gpt_liveness_evidence.py
+      - .github/workflows/gpt-liveness-evidence-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  live-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout devflow producer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Checkout pinned execution-coordinator consumer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: kinoko34077/execution-coordinator
+          ref: 000527017c045c4f2b5c8bd814ad933443394be4
+          path: consumer
+          persist-credentials: false
+      - name: Read actual GitHub KAEP comments and project without mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: kinoko34077/devflow
+        run: |
+          python3 -m tools.gpt_liveness_evidence \
+            --repository kinoko34077/devflow --issue 519 \
+            --session-id session_pilot20261014_1755 \
+            --turn-id turn_pilot20261014_1755 \
+            --expected-reply-actor kinoko34077 > "$RUNNER_TEMP/liveness.json"
+          PYTHONPATH=consumer/src python3 -m execution_coordinator.query get_liveness \
+            --evidence-json "$RUNNER_TEMP/liveness.json" \
+            --expected-mailbox 'kinoko34077/devflow#519' > "$RUNNER_TEMP/projection.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import os
+          folder = Path(os.environ['RUNNER_TEMP'])
+          upstream = json.loads((folder / 'liveness.json').read_text())
+          downstream = json.loads((folder / 'projection.json').read_text())
+          assert upstream['event'] == 'MODEL_TOOL_RESPONSE_OBSERVED'
+          assert upstream['evidence_url'].endswith('issuecomment-6174861252')
+          assert downstream['classification'] == 'HISTORICAL_EVIDENCE'
+          assert downstream['provenance'] == 'UNATTESTED_UPSTREAM_REPORT'
+          assert downstream['agent_identity_verified'] is False
+          assert downstream['gpt_currently_alive_proven'] is False
+          assert downstream['claim_authority'] is False
+          assert downstream['runtime_state_mutated'] is False
+          print('LIVE_READONLY_KAEP_TO_COORDINATOR_E2E_PASS')
+          PY
