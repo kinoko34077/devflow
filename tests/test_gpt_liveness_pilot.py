@@ -324,10 +324,11 @@ class LivenessContractTests(unittest.TestCase):
     def test_archived_pilot_workflow_has_no_automatic_triggers(self):
         from pathlib import Path
         content = Path(".github/workflows/gpt-liveness-pilot.yml").read_text(encoding="utf-8")
-        self.assertIn("on:\n  workflow_dispatch:", content)
-        self.assertNotIn("\n  schedule:", content)
-        self.assertNotIn("\n  issues:", content)
-        self.assertNotIn("\n  push:", content)
+        triggers = content.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("  workflow_dispatch:", triggers)
+        self.assertNotIn("  schedule:", triggers)
+        self.assertNotIn("  issues:", triggers)
+        self.assertNotIn("  push:", triggers)
 
     def test_cli_without_enrollment_does_not_fetch_mailbox(self):
         with patch("tools.gpt_liveness_pilot.fetch_issue", return_value="no enrollment"), \
