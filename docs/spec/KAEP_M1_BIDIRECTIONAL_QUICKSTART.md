@@ -47,6 +47,10 @@ Preview is non-mutating. Append `--send` **only** when the active caller actuall
 
 The read-only request composer supports `PING`, `ANALYZE`, `TEST`, `REPORT` for recipients `claude-code`, `chatgpt`, `codex`. Requests with `WRITE_INTENT`, `IMPLEMENT`, `REVISE` or role/Claim automation are deliberately unsupported until the authorized execution layer is integrated. A message cannot grant rights to change repositories, access secrets, auto-merge, modify Claims or complete Formal Reviews.
 
+## Claude Code GitHub transport footer compatibility
+
+The accepted parser explicitly tolerates the **one exact** Claude Code automatic footer observed in [M1 ACK 6159903731](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6159903731) *after* a complete canonical KAEP JSON fence. This does not change `encode_comment` and it does **not** accept arbitrary trailing prose or make a footer an AI identity attestation. Do not edit/delete/resend the existing ACK: it remains a valid raw record and re-reading it yields `ALREADY_SENT` after upgrading to current main. Claude may resume with a **real ANSWER** after using the updated main, verify exact readback, and record real session provenance in ordinary Issue evidence. If the footer differs, stop with `INVALID_WRAPPER` and report its exact non-sensitive shape; do not loosen the parser ad hoc.
+
 ## On failures
 
 - An invalid parent, malformed wrapper, ambiguous GitHub read, actor mismatch, duplicate key with changed text, or failed readback yields `BLOCKED` with a typed error. Do not advance a durable cursor or invent a response.
