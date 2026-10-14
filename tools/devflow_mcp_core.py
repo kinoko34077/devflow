@@ -22,6 +22,7 @@ try:
     from . import (
         github_issue_trust,
         human_portfolio,
+        agent_inbox,
         maintenance_sync_check,
         reconciliation_publication,
         repository_projection,
@@ -43,6 +44,7 @@ except ImportError:  # direct script execution
     )
     import github_issue_trust
     import human_portfolio
+    import agent_inbox
     import maintenance_sync_check
     import reconciliation_publication
     import repository_projection
@@ -897,6 +899,37 @@ class DevflowService:
             # An empty but complete repository cannot prove a live task cycle.
             "can_replace_manual_active_work": False,
         }
+
+    def get_agent_inbox(
+        self, repository: str, recipient: str = "claude-code",
+        *, limit: int = 20, offset: int = 0,
+        work_status: str | None = None,
+    ) -> dict[str, Any]:
+        """Read-only TASK + KAEP per-issue observation for a single managed repo.
+
+        Reuses exactly the existing M3 all-status work-view classifier.
+        No extra Issue role classification, Project read, task assignment,
+        provider launch or execution authority. Partial/unknown remain visible.
+        """
+        view = self.get_repository_work_view(repository)
+        selected = agent_inbox.select_task_records(
+            view, recipient=recipient, limit=limit,
+            offset=offset, work_status=work_status)
+        comments_by_issue: dict[int, list[dict[str, Any]]] = {}
+        errors_by_issue: dict[int, str] = {}
+        if (selected["source_status"] == "AVAILABLE"
+                and selected["source_freshness"] == "CURRENT"):
+            for record in selected["selected"]:
+                number = record["issue_number"]
+                try:
+                    comments_by_issue[number] = self.reader.list_issue_comments(
+                        selected["repository"], number)
+                except DevflowMCPError:
+                    errors_by_issue[number] = "GITHUB_COMMENT_READ_FAILED"
+        return agent_inbox.build_agent_inbox(
+            view, recipient=recipient, comments_by_issue=comments_by_issue,
+            errors_by_issue=errors_by_issue, limit=limit, offset=offset,
+            work_status=work_status)
 
     @staticmethod
     def _human_portfolio_entry_dict(
