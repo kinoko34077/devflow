@@ -115,6 +115,32 @@ class LivenessContractTests(unittest.TestCase):
         self.assertEqual(result["unanswered"], 3)
         self.assertFalse(result["claim_authority"])
 
+    def test_explicit_new_turn_rearms_after_three_unanswered(self):
+        old_turn = TURN
+        comments = []
+        for n in range(3):
+            at = NOW + timedelta(minutes=n * 5)
+            _, req = first_ping(at)
+            comments.append(page_msg(req, 30 + n, at=at, actor=BOT))
+        blocked = plan(body=body(minutes=90), comments=comments, repo=REPO, issue=ISSUE,
+                       now=NOW + timedelta(minutes=15), nonce="f"*32)
+        self.assertEqual(blocked["status"], "SUSPECT_NO_REPLY")
+        restarted = body(minutes=90, turn_id="turn_20261014y")
+        rearmed = plan(body=restarted, comments=comments, repo=REPO, issue=ISSUE,
+                       now=NOW + timedelta(minutes=15), nonce="f"*32)
+        self.assertEqual(rearmed["status"], "READY")
+        self.assertEqual(rearmed["unanswered"], 0)
+        self.assertNotEqual(old_turn, "turn_20261014y")
+
+    def test_restart_cannot_reuse_expired_original_nonce(self):
+        _, req = first_ping()
+        ping = challenge(req["payload"]["text"])
+        bad = {"schema": SCHEMA, "session_id": SESSION, "turn_id": "turn_20261014y",
+               "nonce": ping["nonce"], "mode": "ACTIVE", "checkpoint": "resumed",
+               "expected_until": None}
+        with self.assertRaisesRegex(InvalidMessage, "ANSWER_CHALLENGE_MISMATCH"):
+            answer(json.dumps(bad), ping=ping, now=NOW + timedelta(minutes=1))
+
     def test_ack_does_not_count_as_gpt_answer(self):
         _, req = first_ping()
         ack = dict(req, message_id="msg_ack001", in_reply_to=req["message_id"],
