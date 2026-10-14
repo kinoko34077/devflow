@@ -14,7 +14,7 @@ from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
 from tools.kaep_reply_sender import _mailbox, post_comment, post_and_verify, ACTOR
-from tools.kaep_mailbox_codec import encode_comment, fingerprint
+from tools.kaep_mailbox_codec import encode_comment, fingerprint, matches
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
 RECIPIENTS = {"claude-code", "chatgpt", "codex"}
@@ -27,7 +27,7 @@ def _fail(code: str) -> None:
 def make_request(
     text: str, *, repository: str, issue: int, recipient: str,
     intent: str, request_key: str, request_text: str,
-    expect_existing_actor: str,
+    expect_existing_actor: str, expected_head: str | None = None,
 ) -> tuple[dict[str, Any], int | None]:
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
         _fail("INVALID_TARGET")
@@ -37,6 +37,8 @@ def make_request(
         _fail("INVALID_REQUEST_TEXT")
     if type(expect_existing_actor) is not str or not ACTOR.fullmatch(expect_existing_actor):
         _fail("INVALID_ACTOR")
+    if expected_head is not None and not matches(r"[0-9a-f]{40}", expected_head):
+        _fail("INVALID_EXPECTED_HEAD")
     # Codec owns exact syntax validation for request_key and bounded content.
     digest = hashlib.sha256((f"{repository}#{issue}\n" + request_key).encode("utf-8")).hexdigest()[:32] \
              if type(request_key) is str else ""
@@ -51,7 +53,7 @@ def make_request(
         "kind": "REQUEST",
         "intent": intent,
         "idempotency_key": request_key,
-        "scope": {"repository": repository, "expected_head": None,
+        "scope": {"repository": repository, "expected_head": expected_head,
                   "effect": "READ_ONLY"},
         "payload": {"text": request_text},
         "evidence_refs": [],
@@ -76,6 +78,7 @@ def make_request(
 def send_request(
     *, repository: str, issue: int, recipient: str, intent: str,
     request_key: str, request_text: str, expect_existing_actor: str,
+    expected_head: str | None = None,
     do_send: bool = False, offline_pages: str | None = None,
 ) -> dict[str, Any]:
     if do_send and offline_pages is not None:
@@ -85,6 +88,7 @@ def send_request(
         source, repository=repository, issue=issue, recipient=recipient,
         intent=intent, request_key=request_key, request_text=request_text,
         expect_existing_actor=expect_existing_actor,
+        expected_head=expected_head,
     )
     output = {
         "status": "ALREADY_SENT" if existing_id is not None else
@@ -94,6 +98,7 @@ def send_request(
         "exchange_id": req["exchange_id"],
         "recipient": recipient,
         "intent": intent,
+        "expected_head": req["scope"]["expected_head"],
         "posted_comment_id": existing_id,
         "read_only_request": True,
         "agent_woken": False,
@@ -123,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Non-secret UTF-8 text to send; never put secrets in Issue comments")
     parser.add_argument("--expect-existing-actor", required=True,
                         help="Expected GitHub login for any already-posted request; not model identity")
+    parser.add_argument("--expected-head",
+                        help="Optional exact 40-character lowercase SHA for source-specific consultation")
     parser.add_argument("--offline-pages", type=Path,
                         help="Fixture for dry-run only")
     parser.add_argument("--send", action="store_true",
@@ -136,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             intent=args.intent, request_key=args.request_key,
             request_text=args.text_file.read_text(encoding="utf-8"),
             expect_existing_actor=args.expect_existing_actor,
+            expected_head=args.expected_head,
             do_send=args.send,
             offline_pages=args.offline_pages.read_text(encoding="utf-8")
             if args.offline_pages is not None else None,
