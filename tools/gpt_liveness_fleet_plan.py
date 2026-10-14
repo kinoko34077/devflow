@@ -44,6 +44,8 @@ def parse_manifest(raw: str) -> list[str]:
         return output
     try:
         data = json.loads(raw, object_pairs_hook=strict_pairs)
+    except InvalidMessage:
+        raise
     except (ValueError, TypeError):
         _fail("INVALID_MANIFEST_JSON")
     if type(data) is not dict or set(data) != {"schema", "targets"}:
