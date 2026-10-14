@@ -13,6 +13,8 @@ from tools.kaep_request_sender import make_request, send_request, main
 REPO = "kinoko34077/devflow"
 KEY = "kaep.request.sample0001"
 TASK = REPO + "#503"
+HEAD = "a" * 40
+OTHER_HEAD = "b" * 40
 
 
 def pages(*groups):
@@ -39,6 +41,81 @@ class RequestSenderTests(unittest.TestCase):
         self.assertIsNone(message["in_reply_to"])
         self.assertEqual(message["scope"]["effect"], "READ_ONLY")
         self.assertEqual(message["task_ref"], TASK)
+        self.assertIsNone(message["scope"]["expected_head"])
+
+    def test_exact_head_is_preserved_in_request(self):
+        message, existing = prepare(expected_head=HEAD)
+        self.assertIsNone(existing)
+        self.assertEqual(message["scope"]["expected_head"], HEAD)
+        self.assertEqual(message["scope"]["effect"], "READ_ONLY")
+        self.assertEqual(message["task_ref"], TASK)
+
+    def test_expected_head_is_strictly_validated(self):
+        invalid = ["", "a" * 39, "a" * 41, "A" * 40,
+                   "g" * 40, "a" * 39 + " ", True, 123]
+        for head in invalid:
+            with self.subTest(head=head):
+                with self.assertRaisesRegex(InvalidMessage, "INVALID_EXPECTED_HEAD"):
+                    prepare(expected_head=head)
+
+    def test_same_head_request_reuses_existing_message(self):
+        original, _ = prepare(expected_head=HEAD)
+        duplicate, existing = prepare(
+            pages([comment(11, original)]), expected_head=HEAD)
+        self.assertEqual(original, duplicate)
+        self.assertEqual(existing, 11)
+
+    def test_changed_head_cannot_reuse_request_identity(self):
+        original, _ = prepare(expected_head=HEAD)
+        with self.assertRaisesRegex(InvalidMessage, "REQUEST_KEY_COLLISION"):
+            prepare(pages([comment(11, original)]), expected_head=OTHER_HEAD)
+        with self.assertRaisesRegex(InvalidMessage, "REQUEST_KEY_COLLISION"):
+            prepare(pages([comment(11, original)]), expected_head=None)
+
+    def test_head_is_in_dry_run_output_and_post_readback(self):
+        with patch("tools.kaep_request_sender.post_comment") as post:
+            prepared = send_request(
+                repository=REPO, issue=503, recipient="claude-code",
+                intent="ANALYZE", request_key=KEY, request_text="review",
+                expect_existing_actor="kinoko34077",
+                expected_head=HEAD, offline_pages=pages([]))
+        self.assertEqual(prepared["expected_head"], HEAD)
+        post.assert_not_called()
+        message, _ = prepare(expected_head=HEAD)
+        with patch("tools.kaep_request_sender.fetch_gh_pages",
+                   side_effect=[pages([]), pages([comment(99, message)])]):
+            with patch("tools.kaep_request_sender.post_comment",
+                       return_value=99):
+                result = send_request(
+                    repository=REPO, issue=503, recipient="claude-code",
+                    intent="ANALYZE", request_key=KEY, request_text="safe analysis only",
+                    expect_existing_actor="kinoko34077", expected_head=HEAD,
+                    do_send=True)
+        self.assertEqual(result["status"], "SENT_AND_READ_BACK")
+        self.assertEqual(result["expected_head"], HEAD)
+
+    def test_cli_exact_head_offline_and_malformed_rejection(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "pages.json"
+            t = Path(td) / "text.txt"
+            p.write_text(pages([]), encoding="utf-8")
+            t.write_text("read-only audit", encoding="utf-8")
+            args = [
+                "--repository", REPO, "--issue", "503",
+                "--recipient", "claude-code", "--intent", "ANALYZE",
+                "--request-key", KEY, "--text-file", str(t),
+                "--expect-existing-actor", "kinoko34077",
+                "--offline-pages", str(p),
+            ]
+            with patch("builtins.print") as out:
+                code = main(args + ["--expected-head", HEAD])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out.call_args.args[0])["expected_head"], HEAD)
+            with patch("builtins.print") as out:
+                code = main(args + ["--expected-head", "wrong"])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(out.call_args.args[0])["reason_code"],
+                             "INVALID_EXPECTED_HEAD")
 
     def test_stable_idempotency(self):
         a, _=prepare()
