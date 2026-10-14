@@ -171,6 +171,19 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertIsNone(second["next_offset"])
         self.assertEqual(second["selected"][-1]["issue_number"], 25)
 
+    def test_complete_source_with_limited_page_never_claims_no_more_work(self):
+        tasks = [task(i) for i in range(1, 26)]
+        # All 25 machine TASKs exist; only 20 selected Issues were fetched.
+        comments = {i: [] for i in range(1, 21)}
+        result = agent_inbox.build_agent_inbox(
+            fake_work_view(tasks), recipient="claude-code",
+            comments_by_issue=comments, limit=20)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["next_offset"], 20)
+        self.assertEqual(len(result["issues"]), 20)
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["has_unknown_work"])
+
     def test_invalid_options_rejected_before_comment_reads(self):
         view = fake_work_view([task()])
         for options in [
