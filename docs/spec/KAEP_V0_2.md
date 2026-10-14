@@ -47,11 +47,14 @@ The user may start Claude by their own timer or manually; this is **not** a Chat
 
 A separately approved resident Codex/agent can consume and produce the same envelopes event-driven when interactive ChatGPT is offline; no change in KAEP wire semantics, claim authority, or review safety.
 
-## Current M0/M1 evidence and next acceptance gate
+## Current M1 acceptance and pending M1-R reverse-origin test
 
-- GPT→GitHub→GPT inert readback: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146479428).
-- One **pending** Claude-targeted, READ_ONLY M1 PING: [message](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146522783), `exchange_id=ex_claudeecho20261013`, `message_id=msg_claudem1ping20261013`.
-- When the user starts a supported Claude worker, it reads this comment and posts actual correlated KAEP `ACK` then `ANSWER` (or `BLOCKED`) on #503 using the accepted reply sender. Reply routing is explicit: the parent recipient must match the stored request and reply recipient is chosen independently. **Do not fabricate ACK or dispatch a provider test.**
-- After actual sender+reply verification: design a receiver-adapter Work Order; do not infer #87/#135 provider E2E acceptance.
+**M1 GitHub Issue-message transport: ACCEPTED.** The original [READ_ONLY PING comment 6146522783](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146522783), the user-invoked Claude Code [ACK 6159903731](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6159903731) and [ANSWER 6160045500](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6160045500) have been read back from the same owning Issue with matching exchange/parent/task and accepted exact-footer compatibility. The original inert GPT self-readback [M0](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6146479428) is separate historical evidence. **Do not re-send the accepted M1 PING, ACK or ANSWER.**
+
+**Boundary:** this establishes a real GitHub mailbox exchange with a user-started Claude Code session, *not* cryptographically independent Claude model/session attestation, an automatic ChatGPT wake, an execution-coordinator provider E2E, a Claim or an authorization to execute code. The GitHub actor and Claude Code footer are not proof of model identity; the session provenance is self-reported.
+
+**M1-R reverse-origin live test: PENDING.** On [new GPT request #6160447408](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6160447408), `exchange_id=ex_m1reverse20261014a`, `message_id=msg_m1reverse20261014a`, `kind=REQUEST`, `intent=TEST`, `recipient=claude-code`, `scope.effect=READ_ONLY`: an already user-started Claude session should (if available) post **one** new Claude-originated READ_ONLY root REQUEST addressed to `chatgpt`, stable `idempotency_key=kaep.m1.reverse.claude.20261014a`, then correlate its ACK and ANSWER to the new GPT parent and include the actual root comment URL. The new Claude root should ask GPT only to assess native notification/wake options, not to launch a provider. GPT reads the Claude-origin root and replies only in a user-initiated chat. If no active Claude session exists, this is merely a durable pending message, not real-time delivery.
+
+Future authenticated runtime, direct wake, and executable intents remain separately gated by live devflow authority; no change to execution-coordinator #87/#135 or any provider authorization.
 
 The optional senders require explicit `--send` for an ordinary GitHub Issue comment, with an existing authorized `gh` session; no automatic send, runtime dispatch or permission acquisition. The shared post-readback boundary checks exact comment ID/content **and the expected GitHub actor**, which is not a model/session signature. No credential/IAM/permission change, new GitHub Action, scheduled ChatGPT task, external service, production dispatch or fleet rollout is authorized by this contract.
