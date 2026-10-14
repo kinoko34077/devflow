@@ -44,6 +44,10 @@ Choose between:
 
 F6A–C implement the **non-effectful planning side only**. No fleet-side PING is activated, no new repo token is registered and no existing scheduler is disabled by this plan. Before moving to F6E actual deployment, require measurable idle/active actions accounting, least-privilege cross-repo access, Source identity and correct stale/no-response semantics, rollback plan, and explicit approval of any credential/service/release changes.
 
+## Live read-only historical Issue smoke (no fleet deployment)
+
+`.github/workflows/gpt-liveness-fleet-smoke.yml` runs **only** for PR changes to the F6 planner/test/workflow files and for the workflow/planner's initial main push. It has `contents:read` and `issues:read` permissions only, a 3-minute upper job bound, and **no schedule, POST, Issue edit, or Claim operation**. It reads the real already-closed historical devflow #519 Issue with an explicit one-target ephemeral allowlist and verifies `CLOSED_OR_NO_ENROLLMENT`, `deployment_authorized=false`, `gpt_alive_proven=false` and the nominal 8,640 opportunities/30-day arithmetic. This is **a real GitHub GET smoke**, not a successful active-worker monitoring trial or a credential/rollout approval.
+
 ## Tests
 
 ```sh
