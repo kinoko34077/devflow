@@ -113,13 +113,23 @@ class DiscoveryNoticeTests(unittest.TestCase):
                 repository=REPO, issue=ISSUE,
                 message_id=root["message_id"], expected_actor=ACTOR)
 
-    def test_duplicate_message_ids_fail_closed(self):
+    def test_conflicting_duplicate_message_ids_fail_closed(self):
         root = root_request()
+        modified = dict(root)
+        modified["payload"] = {"text": "different original request content"}
         with self.assertRaises(InvalidMessage):
             verify_source_request(
-                pages([comment(67, root), comment(68, root)]),
+                pages([comment(67, root), comment(68, modified)]),
                 repository=REPO, issue=ISSUE,
                 message_id=root["message_id"], expected_actor=ACTOR)
+
+    def test_identical_replay_is_deduplicated_by_existing_codec(self):
+        root = root_request()
+        verified = verify_source_request(
+            pages([comment(67, root), comment(68, root)]),
+            repository=REPO, issue=ISSUE,
+            message_id=root["message_id"], expected_actor=ACTOR)
+        self.assertEqual(verified["message_id"], root["message_id"])
 
     def test_reject_wrong_recipient_or_write_intent(self):
         root = root_request()
