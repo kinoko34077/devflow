@@ -76,6 +76,15 @@ class LivenessContractTests(unittest.TestCase):
         with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_ENROLLMENT"):
             enrollment(body() + "\n" + body(), now=NOW)
 
+    def test_declared_long_running_suppresses_ping_until_deadline(self):
+        extended = body(long_running_until=iso(NOW + timedelta(minutes=35)))
+        self.assertEqual(plan(body=extended, comments=[], repo=REPO, issue=ISSUE,
+                              now=NOW, nonce=NONCE)["status"], "LONG_RUNNING")
+        self.assertEqual(plan(body=extended, comments=[], repo=REPO, issue=ISSUE,
+                              now=NOW + timedelta(minutes=40), nonce=NONCE)["status"], "READY")
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_LONG_RUNNING_DEADLINE"):
+            enrollment(body(long_running_until=iso(NOW + timedelta(hours=3))), now=NOW)
+
     def test_first_ping_kaep_roundtrip(self):
         result, req = first_ping()
         self.assertEqual(result["status"], "READY")
