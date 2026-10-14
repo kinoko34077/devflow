@@ -31,6 +31,22 @@ The lifetime is at most 2 hours. Before a long blocking operation the worker may
 7. The pilot checks KAEP correlation, actor, exact session/turn/nonce and reply comment timestamp. A transport ACK does not count. `GPT_ANSWERED` is an *observed model-mediated reply claim*, **not** a cryptographic model identity attestation.
 8. Expiry, missing monitoring, or failure yields `UNOBSERVED/SUSPECT` evidence, never an automatic Claim mutation or takeover. The Manual 1-hour rule remains in force.
 
+## GPT tool-side mailbox commands (explicit invocation only)
+
+The worker can open/read the inbox at the start of an active ChatGPT turn and again at meaningful tool checkpoints using an authorized environment with the existing `gh` session:
+
+```sh
+python3 -m tools.gpt_liveness_mailbox --repository kinoko34077/devflow --issue 519
+```
+
+This is a **read** operation; it does not keep ChatGPT awake or send any automatic PONG. Once the GPT worker has personally processed a listed PING, it can explicitly submit a correlated answer:
+
+```sh
+python3 -m tools.gpt_liveness_mailbox --repository kinoko34077/devflow --issue 519 --respond --checkpoint F1-checked --mode ACTIVE --send
+```
+
+For blocking operations, declare `long_running_until` in the enrollment before starting; for an existing PING, `--mode LONG_RUNNING --expected-until <UTC-ISO>` provides the same bounded notification. To stop at the end of the current turn, use an explicit `FINISHED` / `IDLE` / `NEED_USER` answer when a valid PING exists, or disable/expire the enrollment. The receiver/answer tool cannot prove model identity from GitHub credentials and cannot run without an active GPT-invoked tool operation.
+
 ## Verification
 
 `python3 -m unittest tests.test_gpt_liveness_pilot -v`
