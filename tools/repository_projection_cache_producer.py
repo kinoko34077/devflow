@@ -7,10 +7,7 @@ from typing import Any
 from tools import devflow_mcp_core
 from tools import human_portfolio_cache
 from tools import maintenance_sync_check
-from tools.operation_issue_metadata_preflight import (
-    MetadataPreflightRejected,
-    snapshot_issue,
-)
+from tools.operation_issue_metadata_preflight import snapshot_issue
 from tools import repository_projection_cache
 
 
