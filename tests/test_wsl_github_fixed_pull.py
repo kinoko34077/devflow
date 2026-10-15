@@ -74,6 +74,54 @@ class GitHubWslPullTests(unittest.TestCase):
                 reserve.assert_not_called()
                 worker.assert_not_called()
 
+
+    def test_shared_projection_rejects_duplicate_keys_before_sqlite_and_worker(self):
+        original = comment()
+        for suffix in (
+            ',"effect":"READ_ONLY"}',
+            ',"nonce":"f3c-0123456789abcdefghij"}',
+            ',"injected":{"a":1,"a":2}}',
+        ):
+            with self.subTest(suffix=suffix):
+                bad = dict(original)
+                bad["body"] = original["body"][:-1] + suffix
+                with patch.object(pull, "_fetch_comment", return_value=bad), \
+                     patch.object(pull, "_reserve") as reserve, \
+                     patch.object(pull, "run_fixed_public") as worker:
+                    result = pull.execute_comment(original["id"], execute=True)
+                self.assertEqual(result.status, "HOLD")
+                self.assertEqual(result.reason, "REQUEST_UNTRUSTED_OR_UNAVAILABLE")
+                reserve.assert_not_called()
+                worker.assert_not_called()
+
+    def test_shared_projection_preserves_existing_nonce_identity_and_replay(self):
+        from hashlib import sha256
+        c = comment()
+        expected_digest = sha256(
+            b"f3c-0123456789abcdefghij"
+        ).hexdigest()
+        proof = Mock(
+            status="WSL_FIXED_PUBLIC_PROOF", public_source_blob_verified=True,
+            authenticated=False, isolated_host_verified=False,
+            claim_authority=False, github_check_authority=False,
+        )
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "run_fixed_public", return_value=proof) as worker:
+            ledger = Path(root) / "existing-ledger.sqlite3"
+            first = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
+            second = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
+            with closing(sqlite3.connect(str(ledger))) as con:
+                row = con.execute(
+                    "SELECT nonce_sha256,status FROM public_job_attempts"
+                ).fetchone()
+        self.assertEqual(first.status, "PUBLIC_READONLY_EXECUTED")
+        self.assertEqual(first.nonce_sha256, expected_digest)
+        self.assertEqual(second.reason, "REPLAY_DENIED")
+        self.assertEqual(row, (expected_digest, "SUCCEEDED"))
+        self.assertEqual(worker.call_count, 1)
+        self.assertFalse(first.authenticated)
+
     def test_bad_numeric_identity_denied_without_fetch(self):
         for candidate in (0, -1, True, "6199", 10**20):
             with self.subTest(candidate=candidate), patch.object(pull, "_fetch_comment") as fetch:
