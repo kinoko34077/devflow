@@ -472,6 +472,7 @@ def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, 
     evidence: list[str] = []
     seen: set[str] = set()
     in_evidence = False
+    evidence_inline_empty = False
     notes: list[str] = []
     for line in lines[start + 1 : end]:
         if not line.strip():
@@ -480,7 +481,7 @@ def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, 
             raise CursorFormatError("invalid layout")
         list_match = _COMPAT_LIST_RE.fullmatch(line)
         if list_match:
-            if not in_evidence:
+            if not in_evidence or evidence_inline_empty:
                 raise CursorFormatError("unexpected list item")
             item = list_match.group(1)
             if not item or SENTINEL in item or item.startswith("\x60\x60\x60"):
@@ -502,6 +503,7 @@ def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, 
         if key == "evidence":
             if value not in ("", "[]"):
                 raise CursorFormatError("evidence requires a simple list")
+            evidence_inline_empty = value == "[]"
         elif key in _ALLOWED_KEYS:
             if not value:
                 raise CursorFormatError("missing value: " + key)
