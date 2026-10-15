@@ -1,7 +1,7 @@
 """Snapshot-only, pagination-complete audit tests for #576."""
 import unittest
 from tools.task_checkpoint_cursor import CursorState, render_cursor_comment
-from tools.task_checkpoint_cursor_audit import classify_cursor, audit_issue_ids
+from tools.task_checkpoint_cursor_audit import classify_cursor, audit_issue_ids, discover_open_issue_ids
 
 REPO = "kinoko34077/devflow"
 TASK = REPO + "#576"
@@ -69,6 +69,23 @@ class CursorAuditTests(unittest.TestCase):
         r = classify_cursor(TASK, [c(body,False)], eligible=True)
         self.assertEqual(r["status"], "MISSING_ELIGIBLE")
         self.assertIn("WARN_UNTRUSTED_MARKER", r["warnings"])
+
+
+    def test_discovery_coverage_and_pr_filter(self):
+        class Discovery:
+            def get_paginated(self, path):
+                self.path = path
+                return [
+                    {"number": 10, "html_url": "https://github.com/example/issues/10"},
+                    {"number": 11, "pull_request": {"url": "https://api.github.com"}},
+                    {"number": 12},
+                ]
+        d = Discovery()
+        self.assertEqual(discover_open_issue_ids(d, REPO), [10, 12])
+        self.assertIn("state=open", d.path)
+        with self.assertRaises(ValueError):
+            discover_open_issue_ids(d, REPO, max_issues=1)
+
 
 
 if __name__ == "__main__":
