@@ -185,6 +185,20 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             "https://github.com/kinoko34077/demo/issues/2",
         ])
         self.assertEqual(active["next_action"], "Human approval required")
+        canonical_urls = tuple(active["active_work"])
+        parity = exercise(payload, test_admission=True, consumers_agree=True,
+                          consumer_task_urls=canonical_urls, **params)
+        self.assertEqual(parity["authority"], "MACHINE_TEST_ONLY")
+        for consumer_urls in (
+            canonical_urls[:1],
+            canonical_urls + ("https://github.com/kinoko34077/demo/issues/999",),
+            canonical_urls + canonical_urls[:1],
+        ):
+            mismatch = exercise(payload, test_admission=True, consumers_agree=True,
+                                consumer_task_urls=consumer_urls, **params)
+            self.assertEqual(mismatch["authority"], "MANUAL")
+            self.assertEqual(mismatch["reason"], "CONSUMER_ISSUE_REFS_DISAGREE")
+            self.assertEqual(mismatch["active_work"], list(manual))
         self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
         self.assertEqual(exercise(payload, test_admission=True, **params)["authority"], "MANUAL")
         for unavailable in (None, {}, {"repository": REPOSITORY}):

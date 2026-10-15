@@ -719,6 +719,7 @@ def simulate_m3_authority_transition(
     manual_next_action: str,
     test_admission: bool = False,
     consumers_agree: bool = False,
+    consumer_task_urls: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Isolated, non-effectful M3 authority exercise; never grants production admission.
 
@@ -766,6 +767,13 @@ def simulate_m3_authority_transition(
             return result
     except (RepositoryProjectionCacheError, AttributeError, TypeError, ValueError):
         result["reason"] = "MACHINE_SOURCE_INVALID"
+        return result
+    expected_urls = [item["url"] for item in records]
+    if consumer_task_urls is not None and (
+        len(set(consumer_task_urls)) != len(consumer_task_urls)
+        or set(consumer_task_urls) != set(expected_urls)
+    ):
+        result["reason"] = "CONSUMER_ISSUE_REFS_DISAGREE"
         return result
     result["authority"] = "MACHINE_TEST_ONLY"
     result["active_work"] = [item["url"] for item in records]
