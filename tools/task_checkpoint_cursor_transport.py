@@ -66,6 +66,15 @@ def apply_cursor_write(
     body = render_cursor_comment(proposed)
     comments = list(transport.list_comments(task))
     inspected = inspect_cursor_comments(comments, task)
+    # Do not automatically create or update authoritative state in the
+    # presence of an untrusted competing marker. The trusted reader may
+    # still expose the canonical marker for read-only recovery, but an
+    # effectful caller must explicitly reconcile the suspicious signal.
+    if "WARN_UNTRUSTED_MARKER" in inspected.warnings:
+        return CursorResult(
+            code="WARN_UNTRUSTED_MARKER", live=inspected.live,
+            warnings=inspected.warnings,
+        )
     if inspected.code == "NO_MARKER":
         if expected_revision is not None or proposed.revision != 1 or reconcile_reason:
             return CursorResult(code="WARN_REVISION_DRIFT")
