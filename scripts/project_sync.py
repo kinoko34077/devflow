@@ -1183,14 +1183,68 @@ def sync_one_issue(
     return {"issue_number": issue.get("number"), "membership": membership, "fields": statuses, "mutations": mutations}
 
 
+def _closed_health_revision(issue: Any, number: int) -> tuple[str, str]:
+    """Check the actual closed machine Health target, not a Control Issue.
+
+    This is an observation check, NOT GitHub Issue PATCH atomic CAS or a
+    permission grant. All returned errors are fixed strings without secrets.
+    """
+    if (
+        not isinstance(issue, dict)
+        or type(issue.get("number")) is not int
+        or issue["number"] != number
+        or issue.get("title") != HEALTH_TITLE
+        or issue.get("state") != "closed"
+        or not isinstance(issue.get("body"), str)
+        or not isinstance(issue.get("updated_at"), str)
+        or re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+            issue["updated_at"],
+        ) is None
+    ):
+        raise APIError("Project Sync Health target/revision is not trusted")
+    return issue["body"], issue["updated_at"]
+
+
 def upsert_health_issue(rest: Any, body: str) -> dict[str, Any]:
-    issue = rest.find_issue_by_title(HEALTH_TITLE)
-    if issue is None:
-        issue = rest.create_issue(HEALTH_TITLE, body)
-        number = int(issue["number"])
+    """Fresh-GET, bounded existing writer, independent result readback.
+
+    The established Actions project-sync queue is separate from native direct
+    API callers; a GET immediately before PATCH cannot make PATCH atomic.
+    """
+    if not isinstance(body, str):
+        raise APIError("Project Sync Health desired body is invalid")
+    discovered = rest.find_issue_by_title(HEALTH_TITLE)
+    created = discovered is None
+    if created:
+        opened = rest.create_issue(HEALTH_TITLE, body)
+        if type(opened.get("number")) is not int or opened.get("title") != HEALTH_TITLE:
+            raise APIError("Project Sync Health creation identity mismatch")
+        number = opened["number"]
         rest.update_issue(number, state="closed")
-        return rest.update_issue(number, body=body)
-    return rest.update_issue(int(issue["number"]), body=body)
+        # The close transition changes the revision; only the *newly*
+        # observed closed issue is a valid baseline for a later body write.
+        observed = rest.get_issue(number)
+        old_body, old_revision = _closed_health_revision(observed, number)
+    else:
+        if type(discovered.get("number")) is not int:
+            raise APIError("Project Sync Health discovery identity mismatch")
+        number = discovered["number"]
+        old_body, old_revision = _closed_health_revision(discovered, number)
+        observed = rest.get_issue(number)
+        fresh_body, fresh_revision = _closed_health_revision(observed, number)
+        if (fresh_body, fresh_revision) != (old_body, old_revision):
+            raise APIError("Project Sync Health changed after discovery")
+    if old_body == body:
+        return observed  # Confirmed current desired state: NO_OP.
+
+    # Existing normal authenticated native PATCH; no blind retry on error.
+    rest.update_issue(number, body=body)
+    readback = rest.get_issue(number)
+    verified_body, _ = _closed_health_revision(readback, number)
+    if verified_body != body:
+        raise APIError("Project Sync Health postwrite verification failed")
+    return readback
 
 
 def _validate_project_options(snapshot: ProjectSnapshot) -> None:
