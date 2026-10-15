@@ -119,7 +119,7 @@ def collect_maintenance_coverage(
     current_fingerprints = {
         f"{slot.repository}::{slot.slot_id}": (
             fingerprint
-            if external_state is not None
+            if bool(external_state)
             or (slot.external_freshness_class != "FAST" and slot.scope.kind != "external_system")
             else ""
         )
