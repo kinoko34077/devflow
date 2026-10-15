@@ -1,0 +1,11 @@
+{
+  "name": "KiNoTch. Actions Control — Mobile",
+  "short_name": "Actions Control",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "ja",
+  "background_color": "#f3f6fb",
+  "theme_color": "#111b2d",
+  "description": "Read-only GitHub Actions status dashboard and official authenticated manual workflow launch."
+}
