@@ -19,7 +19,7 @@ The user clarified **「各ターン中で各者が識別出来ればいい」**
 2. \`route\` returns the unique current inbox/outbox Issue for a participant. \`UNOBSERVED\`, \`ISSUE_CLOSED\`, disabled, expired and ambiguous participants cannot route.
 3. \`verify_pair\` demands exact mailbox/turn/session, KAEP READ_ONLY PING/reply chain, fresh nonce and REST-attributed actor/server times. It proves only \`MODEL_TOOL_RESPONSE_OBSERVED\` **at that observed timestamp**. Another chat's same-account ANSWER is not accepted merely because the actor name matches.
 4. Offline multi-turn tests simulate two concurrent actors with separate target Issues, deliberately crossed nonce/session/turn/Issue, duplicate participant IDs, closed/expired/disabled targets, corrupted KAEP chains, late replies, and no write API.
-5. Existing [F8 manual workflow](../..//.github/workflows/gpt-liveness-f8-manual.yml) is **still pinned to #554**. It is NOT a multi-target sender and must not be generalized by code-only tests or speculative authority.
+5. Existing [F8 manual workflow](../../.github/workflows/gpt-liveness-f8-manual.yml) is **still pinned to #554**. It is NOT a multi-target sender and must not be generalized by code-only tests or speculative authority.
 
 ## Remaining actual-runtime lifecycle / gate
 
