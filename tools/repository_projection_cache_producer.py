@@ -7,6 +7,10 @@ from typing import Any
 from tools import devflow_mcp_core
 from tools import human_portfolio_cache
 from tools import maintenance_sync_check
+from tools.operation_issue_metadata_preflight import (
+    MetadataPreflightRejected,
+    snapshot_issue,
+)
 from tools import repository_projection_cache
 
 
@@ -210,9 +214,26 @@ def prepare_target(
     )
 
 
-def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
+def apply_plan(writer: Any, plan: CacheWritePlan, *, service: Any) -> dict[str, Any]:
     repository = plan.repository
     devflow_repository = devflow_mcp_core.DEVFLOW_REPOSITORY
+
+    # The original plan was verified, but canonicality and trust must be
+    # checked again at effect time. This does not grant authorization.
+    try:
+        canonical_control = service.get_repository_control(repository)
+        canonical_number = canonical_control.get("issue_number")
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write canonical Control lookup unavailable"
+        ) from exc
+    if (
+        type(canonical_number) is not int
+        or canonical_number != plan.control_issue_number
+    ):
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write canonical Control number changed"
+        )
 
     try:
         current = writer.get_issue(
@@ -232,8 +253,30 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
         raise RepositoryProjectionCacheProducerError(
             "pre-write Control body is unavailable"
         )
+    try:
+        observation = snapshot_issue(
+            {
+                "repository": devflow_repository,
+                "number": current.get("number"),
+                "updated_at": current.get("updated_at"),
+                "state": current.get("state"),
+                "body": current_body,
+            },
+            repository=devflow_repository,
+            number=plan.control_issue_number,
+        )
+        expected_title = "[REPO] " + repository.rsplit("/", 1)[-1]
+        trusted = service.is_repository_control_trusted(current, repository)
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write Control trust/observation unavailable"
+        ) from exc
+    if current.get("title") != expected_title or trusted is not True:
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write Control identity or shared trust changed"
+        )
     if (
-        maintenance_sync_check.canonical_body_sha256(current_body)
+        maintenance_sync_check.canonical_body_sha256(observation.body)
         != plan.expected_body_sha256
     ):
         raise RepositoryProjectionCacheProducerError(
@@ -257,6 +300,9 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
             devflow_repository,
             plan.control_issue_number,
             plan.desired_body,
+            expected_body_sha256=plan.expected_body_sha256,
+            expected_control_repository=repository,
+            trust_checker=service.is_repository_control_trusted,
         )
     except Exception as exc:
         raise RepositoryProjectionCacheProducerError(
@@ -363,7 +409,7 @@ def run_fleet(
                 generated_at=generated_at,
             )
             if apply:
-                item = apply_plan(writer, plan)
+                item = apply_plan(writer, plan, service=service)
             else:
                 item = {
                     "status": "PREVIEW",
