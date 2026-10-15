@@ -191,7 +191,7 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
             self.assertEqual(exercise(unavailable, test_admission=True,
                                       consumers_agree=True, **params)["authority"], "MANUAL")
         incomplete = cache.build_cached_projection(
-            REPOSITORY, live_projection(machine_task_count=2, coverage_complete=False),
+            REPOSITORY, live_projection(machine_task_count=1, coverage_complete=False),
             generated_at=GENERATED_AT, control_trust=verified_control_trust(),
         )
         self.assertEqual(exercise(incomplete, test_admission=True,
