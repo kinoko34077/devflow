@@ -5,6 +5,8 @@ claim. GitHub-authored comment metadata is NOT a cryptographic job issuer.
 """
 from __future__ import annotations
 
+from contextlib import closing
+
 import argparse
 import hashlib
 import json
@@ -100,7 +102,7 @@ def _ledger_path() -> Path | None:
 def _reserve(path: Path, comment_id: int, nonce_sha256: str) -> str:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(path), timeout=5, isolation_level=None) as conn:
+        with closing(sqlite3.connect(str(path), timeout=5, isolation_level=None)) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS public_job_attempts "
                 "(comment_id INTEGER PRIMARY KEY, nonce_sha256 TEXT NOT NULL UNIQUE, "
@@ -123,11 +125,12 @@ def _reserve(path: Path, comment_id: int, nonce_sha256: str) -> str:
 
 def _complete(path: Path, comment_id: int, status: str) -> None:
     try:
-        with sqlite3.connect(str(path), timeout=5) as conn:
+        with closing(sqlite3.connect(str(path), timeout=5)) as conn:
             conn.execute(
                 "UPDATE public_job_attempts SET status=? "
                 "WHERE comment_id=? AND status='RESERVED'", (status, comment_id)
             )
+            conn.commit()
     except (OSError, sqlite3.Error):
         # Fail closed: original reservation remains; never auto-retry.
         return
