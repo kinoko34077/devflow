@@ -24,6 +24,22 @@ python scripts/maintenance_coverage_report.py \
   --format markdown --output smc-coverage.md
 ```
 
+For an **offline visual audit table** from the same trusted read-only
+PILOT observation, choose `--format html --output smc-coverage.html` instead
+of `--format markdown`. Open that **local file** in a browser.
+It includes repository/status filters, keyboard-labelled controls, semantic
+tables and a small-screen scrollable layout. Its HTML has an explicit
+no-network Content Security Policy and no third-party assets. No JavaScript
+or local storage is required to see the complete table; filtering is optional.
+HTML-escaped source text is never interpreted as code and only exact
+owning-Ledger evidence URLs become links. Keep the output private when
+catalog or Ledger data should not be publicly disclosed.
+
+**Not a hosted UI:** this does not deploy Pages, populate Project/Repo Monitor
+or run a live audit. A local HTML report is a derived snapshot of the exact
+source observed by the CLI; reread GitHub to refresh it. A matching v2
+attestation is only scope-binding evidence, not proof of an inspected check.
+
 For a machine-readable derived report use `--format json`. The script
 does not POST, PATCH, PUT, dispatch Actions, create PRs, claim tasks or change
 a Project. It refuses any repository outside those three accepted PILOTs and
