@@ -128,11 +128,11 @@ class SMCOfflineHtmlTests(unittest.TestCase):
         with (patch.dict("os.environ", {"GITHUB_TOKEN": "dummy"}, clear=True),
               patch.object(cli, "GitHubReadTransport", return_value=object()),
               patch.object(cli, "build_live_report", return_value=value),
-              patch("sys.stdout.write") as write):
+              patch("builtins.print") as printed):
             code = cli.main(["--repo-ledger", REPO + "#367", "--format", "html"])
         self.assertEqual(0, code)
-        self.assertEqual(1, write.call_count)
-        html = write.call_args.args[0]
+        self.assertEqual(1, printed.call_count)
+        html = printed.call_args.args[0]
         self.assertIn("<!doctype html>", html)
         self.assertIn('id="coverage-rows"', html)
 
