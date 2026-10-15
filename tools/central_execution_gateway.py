@@ -12,6 +12,8 @@ import hmac
 import json
 import re
 from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Mapping
 
 _SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -51,7 +53,7 @@ class RecipePolicy:
     recipe_sha256: str
     task_owners: frozenset[str]
     actors: frozenset[str]
-    input_schema: dict[str, str]
+    input_schema: Mapping[str, str]
     backends: frozenset[str]
 
 
@@ -63,7 +65,7 @@ class Job:
     recipe_id: str
     recipe_sha256: str
     attempt_id: str
-    inputs: dict[str, object]
+    inputs: Mapping[str, object]
 
 
 @dataclass(frozen=True)
@@ -158,7 +160,7 @@ class FakeBackend:
             raise RuntimeError("SIMULATED_UNKNOWN_OUTCOME")
         # Both candidate backends produce equivalent fixed-contract fake output.
         result = _bytes({"recipe": job.recipe_sha256, "source": job.source_sha,
-                         "inputs": job.inputs})
+                         "inputs": dict(job.inputs)})
         return Receipt(digest, backend, epoch, hashlib.sha256(result).hexdigest())
 
 
@@ -187,12 +189,13 @@ def _job_shape(job: Job, policy: RecipePolicy) -> bool:
             and all(type(x) is str and _TOKEN.fullmatch(x) for x in policy.actors)
             and type(policy.backends) is frozenset
             and bool(policy.backends) and policy.backends <= _BACKENDS
-            and type(policy.input_schema) is dict and len(policy.input_schema) <= 16
+            and type(policy.input_schema) in (dict, MappingProxyType)
+            and len(policy.input_schema) <= 16
             and all(type(k) is str and _ID.fullmatch(k) and
                     type(t) is str and t in {"str", "int", "bool"}
                     for k, t in policy.input_schema.items())):
         return False
-    if type(job.inputs) is not dict or job.inputs.keys() != policy.input_schema.keys():
+    if type(job.inputs) not in (dict, MappingProxyType) or job.inputs.keys() != policy.input_schema.keys():
         return False
     for k, t in policy.input_schema.items():
         x = job.inputs[k]
@@ -214,7 +217,7 @@ def request_digest(job: Job) -> str:
         "repository": job.repository, "task_ref": job.task_ref,
         "source_sha": job.source_sha, "recipe_id": job.recipe_id,
         "recipe_sha256": job.recipe_sha256, "attempt_id": job.attempt_id,
-        "inputs": job.inputs,
+        "inputs": dict(job.inputs),
     })).hexdigest()
 
 
@@ -263,7 +266,7 @@ class OfflineGateway:
             key = (p.repository, p.recipe_id)
             _require(key not in self.catalog, "DUPLICATE_CATALOG_ENTRY")
             # Defensive snapshots: frozen dataclasses can still contain mutable dicts.
-            self.catalog[key] = replace(p, input_schema=dict(p.input_schema))
+            self.catalog[key] = replace(p, input_schema=MappingProxyType(dict(p.input_schema)))
         self._key = hmac_key
         self.store, self.claims, self.health, self.backend = (
             store, claims, health, backend
@@ -290,7 +293,7 @@ class OfflineGateway:
         _require(policy is not None and _job_shape(job, policy), "CATALOG_DENIED")
         # Snapshot validated scalar inputs before digest and persistence. Caller
         # mutations after enqueue cannot alter the signed/claimed job payload.
-        job = replace(job, inputs=dict(job.inputs))
+        job = replace(job, inputs=MappingProxyType(dict(job.inputs)))
         _require(type(proof) is SignedIngress and type(proof.actor) is str
                  and proof.actor in policy.actors and type(proof.nonce) is str
                  and _TOKEN.fullmatch(proof.nonce)
