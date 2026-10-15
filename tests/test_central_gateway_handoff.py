@@ -160,6 +160,7 @@ class HandoffSafetyTests(unittest.TestCase):
             ("-owner/repo",), ("kinoko34077/.github",),
             ("kinoko34077/repo.git",),
             ("kinoko34077/repo",) * 33,
+            (["malformed"],),
         ):
             with self.subTest(repos=repos):
                 self.assertEqual(
