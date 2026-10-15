@@ -104,9 +104,16 @@ class MembershipReadbackTests(unittest.TestCase):
             return {
                 "number": 41, "title": title, "state": "closed",
                 "body": self.previous_health_body,
+                "updated_at": "2026-10-16T00:00:00Z",
             }
 
         def get_issue(self, number):
+            if number == 41:
+                return {
+                    "number": 41, "title": project_sync.HEALTH_TITLE,
+                    "state": "closed", "updated_at": "2026-10-16T00:00:00Z",
+                    "body": self.previous_health_body if self.body is None else self.body,
+                }
             if number != self.issue["number"]:
                 raise AssertionError("wrong issue")
             return self.issue
