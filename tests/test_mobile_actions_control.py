@@ -67,7 +67,8 @@ class MobileActionsContractTests(unittest.TestCase):
     def test_explicit_manual_refresh_no_polling(self):
         self.assertIn('addEventListener("click", refresh)', self.js)
         self.assertNotIn("setInterval(", self.js)
-        self.assertNotIn("workflow_dispatch", self.js)
+        self.assertNotIn("/dispatches", self.js)
+        self.assertIn('run.event === "workflow_dispatch" ? "手動" : "その他"', self.js)
         self.assertNotIn("run_workflow", self.js)
         self.assertIn("未確認は停止状態を意味しません", self.js)
 
