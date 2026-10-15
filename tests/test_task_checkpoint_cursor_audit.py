@@ -88,6 +88,16 @@ class CursorAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "NORMALIZABLE")
         self.assertFalse(result["frontier_verified"])
 
+    def test_provenance_conflict_is_not_hidden_by_stale_frontier(self):
+        body = render_cursor_comment(STATE)
+        result = classify_cursor(
+            TASK, [c(body), c(body, False)],
+            verified_first_unfinished="M3",
+        )
+        self.assertEqual(result["status"], "TRUST_CONFLICT")
+        self.assertIn("WARN_CHECKPOINT_DRIFT", result["warnings"])
+        self.assertIn("WARN_UNTRUSTED_MARKER", result["warnings"])
+
 
     def test_discovery_coverage_and_pr_filter(self):
         class Discovery:
