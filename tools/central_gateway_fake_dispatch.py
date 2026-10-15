@@ -184,14 +184,22 @@ class FakeIntegratedDispatch:
         except LedgerDenied as exc:
             raise FakeDispatchDenied("ALREADY_OR_NOT_DISPATCHABLE") from exc
         try:
+            # SQLite CAS is not a Claim: re-observe the fake authority before
+            # the simulated effect. Real runners must ALSO fence at the resource.
+            pre_effect = self.gateway._claim(record.job, digest, now)
+            _check(pre_effect.fence_epoch == record.epoch,
+                   "FAKE_AUTHORITY_EPOCH_CHANGED")
             receipt = self.gateway.backend.run(
                 record.job, digest, backend, record.epoch,
             )
             checked = self.gateway._claim(record.job, digest, now)
             _check(checked.fence_epoch == record.epoch,
                    "FAKE_AUTHORITY_EPOCH_CHANGED")
-            _check(type(receipt) is Receipt and receipt.simulated is True,
-                   "NOT_SIMULATED_RECEIPT")
+            _check(type(receipt) is Receipt and receipt.simulated is True
+                   and receipt.request_digest == digest
+                   and receipt.backend == backend
+                   and receipt.fence_epoch == record.epoch,
+                   "UNBOUND_FAKE_RECEIPT")
             return self.ledger.complete_fake(receipt)
         except Exception:
             # The remote outcome could be unknown in a future implementation;
