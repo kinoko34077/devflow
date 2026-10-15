@@ -17,9 +17,9 @@ Unlike GitHub Self-hosted Actions, a separately invoked local Python subprocess 
 
 ## Focused verification
 
-    python -m pytest tests/test_local_worker_fixed_readonly.py -q
+    python -m unittest tests.test_local_worker_fixed_readonly -v
 
-This test suite exercises one real local process plus fail-closed inputs, fixed argv, timeout, output overflow, error and secret redaction. The actual host PC has NOT been modified by this code-only candidate.
+The standard-library unittest suite exercises one real local process and nine fail-closed input subcases plus, fixed argv, timeout, output overflow, error and secret redaction. The actual host PC has NOT been modified by this code-only candidate.
 
 ## First unfinished after accepted F3-B
 
