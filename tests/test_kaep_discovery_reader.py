@@ -9,7 +9,8 @@ from tools import agent_inbox
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import (
-    discover, discover_batch, parse_pointer, POINTER_VERSION, MAX_INDEX_BATCH,
+    discover, discover_batch, discover_index_shadow, parse_pointer,
+    POINTER_VERSION, MAX_INDEX_BATCH, MAX_SHADOW_BATCHES,
 )
 from tools.kaep_route_notice import DISCOVERY_REPOSITORY, DISCOVERY_ISSUE
 
@@ -148,6 +149,120 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertTrue(discovered["read_only"])
         self.assertFalse(discovered["peer_identity_verified"])
         self.assertNotIn("redacted public source", json.dumps(discovered))
+    def test_shadow_bounded_full_65_comment_index_with_21_strict_roots(self):
+        """Index-only completeness: 21 verified roots / 65 comments / 4 batches."""
+        sources = {}
+        hints = {}
+        for n in range(21):
+            issue = 400 + n
+            root, _ = make_request(
+                pages([]), repository=SOURCE_REPO, issue=issue,
+                recipient="claude-code", intent="ANALYZE",
+                expected_head="a" * 40,
+                request_key=f"kaep.shadow.root.{n:03d}",
+                request_text="hidden source payload",
+                expect_existing_actor=ACTOR,
+            )
+            source_id = 500 + n
+            sources[(SOURCE_REPO, issue)] = pages([comment(source_id, root)])
+            pointer = {
+                "type": POINTER_VERSION,
+                "owning_issue": f"https://github.com/{SOURCE_REPO}/issues/{issue}",
+                "message_id": root["message_id"], "comment_id": source_id,
+            }
+            hint = other_notice(json.dumps(pointer), f"kaep.shadow.notice.{n:03d}")
+            hints[2 + n * 3] = hint
+        index = pages([
+            comment(1000 + n, hints[n]) if n in hints
+            else {"id": 1000 + n, "body": "operator note",
+                  "user": {"login": ACTOR}}
+            for n in range(65)
+        ])
+        reads = []
+        def get_source(repo, issue):
+            reads.append((repo, issue))
+            return sources[(repo, issue)]
+        out = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=get_source)
+        self.assertEqual(out["status"], "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY")
+        self.assertEqual(len(out["hints"]), 21)
+        self.assertEqual(out["scanned_batches"], 4)
+        self.assertEqual(out["distinct_source_issue_count"], 21)
+        self.assertEqual(len(reads), 21)
+        self.assertEqual(out["next_after_id"], 1064)
+        self.assertEqual(out["rejected"], [])
+        self.assertEqual(out["blocked"], [])
+        self.assertFalse(out["truncated"])
+        self.assertTrue(out["read_only"])
+        self.assertFalse(out["peer_identity_verified"])
+        self.assertFalse(out["complete_work_inventory"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+        self.assertNotIn("hidden source payload", json.dumps(out))
+
+    def test_shadow_cross_batch_replay_and_explicit_limit_are_not_new_work(self):
+        root, hint, _ = fixtures()
+        index = pages([
+            comment(1000 + n, hint) if n in (0, 35)
+            else {"id": 1000 + n, "body": "operator note",
+                  "user": {"login": ACTOR}}
+            for n in range(42)
+        ])
+        read = lambda repo, issue: pages([comment(77, root)])
+        out = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=read)
+        self.assertEqual(len(out["hints"]), 1)
+        self.assertEqual(out["duplicate_verified_pointers"], 1)
+        self.assertEqual(out["distinct_source_issue_count"], 1)
+        self.assertEqual(out["scanned_batches"], 3)
+        cut = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=read, max_batches=1)
+        self.assertEqual(cut["status"], "BOUNDED_TRUNCATED")
+        self.assertTrue(cut["truncated"])
+        self.assertEqual(cut["next_after_id"], 1019)
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_SHADOW_LIMIT"):
+            discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=read,
+                max_batches=MAX_SHADOW_BATCHES + 1)
+
+    def test_shadow_blocked_original_pins_safe_cursor_not_full_index(self):
+        root, hint, _ = fixtures()
+        index = pages([
+            comment(1021, hint) if n == 21
+            else {"id": 1000 + n, "body": "operator note",
+                  "user": {"login": ACTOR}}
+            for n in range(42)
+        ])
+        bad_source = pages([
+            {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
+             "user": {"login": ACTOR}},
+            comment(77, root)
+        ])
+        out = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR,
+            fetch_source=lambda r, i: bad_source)
+        self.assertEqual(out["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(out["scanned_batches"], 2)
+        self.assertEqual(out["next_after_id"], 1020)
+        self.assertTrue(out["truncated"])
+        self.assertEqual(out["blocked"][0]["index_comment_id"], 1021)
+        self.assertEqual(out["hints"], [])
+        self.assertFalse(out["fallback_retirement_authorized"])
+
+    def test_shadow_rejects_untrusted_actor_without_clean_status(self):
+        root, hint, _ = fixtures()
+        out = discover_index_shadow(
+            pages([comment(88, hint, actor="intruder")]),
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            fetch_source=lambda r, i: pages([comment(77, root)]))
+        self.assertEqual(out["status"], "INDEX_EXHAUSTED_WITH_REJECTIONS")
+        self.assertEqual(out["rejected"][0]["reason_code"],
+                         "UNTRUSTED_DISCOVERY_ACTOR")
+        self.assertFalse(out["complete_work_inventory"])
     def test_cursor_skips_old_hints(self):
         root, hint, _ = fixtures()
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]), after_id=88)
