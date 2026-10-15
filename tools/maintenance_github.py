@@ -26,6 +26,9 @@ try:
         next_generation,
         parse_run_comment,
     )
+    from tools.maintenance_run_attestation import (
+        ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
+    )
     from tools.maintenance_selector import (
         RunEvidence,
         SelectionContext,
@@ -47,6 +50,9 @@ except ImportError:  # direct module execution
         RunRecord,
         next_generation,
         parse_run_comment,
+    )
+    from maintenance_run_attestation import (
+        ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
     )
     from maintenance_selector import (
         RunEvidence,
@@ -1247,18 +1253,33 @@ def collect_maintenance_history(
             continue
         if str(comment.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
             continue
-        try:
-            record = parse_run_comment(body)
-        except MaintenanceLedgerError as exc:
-            raise GitHubReadError(
-                f"trusted maintenance Ledger comment is malformed: {exc}"
-            ) from exc
+        # Every completion format is one authoritative generation: a trusted
+        # malformed or dual-sentinel record is not safely ignorable.
+        if ATTESTATION_SENTINEL in body:
+            if "<!-- devflow-maintenance-run:v1 -->" in body:
+                raise GitHubReadError("ambiguous v1/v2 Ledger completion comment")
+            try:
+                attested = parse_attested_run_comment(body)
+            except RunAttestationError as exc:
+                raise GitHubReadError("trusted v2 Ledger comment malformed") from exc
+            if attested is None:
+                raise GitHubReadError("v2 Ledger comment did not parse")
+            record = attested.record
+        else:
+            try:
+                record = parse_run_comment(body)
+            except MaintenanceLedgerError as exc:
+                raise GitHubReadError(
+                    f"trusted maintenance Ledger comment is malformed: {exc}"
+                ) from exc
         if record is None:
             continue
         if record.repository != repository:
             raise GitHubReadError(
                 "maintenance Ledger run repository identity mismatch"
             )
+        if any(previous.run_id == record.run_id for previous in records):
+            raise GitHubReadError("duplicate trusted Ledger run ID")
         records.append(record)
     records.sort(key=lambda item: (item.completed_at, item.run_id))
     return tuple(records)
