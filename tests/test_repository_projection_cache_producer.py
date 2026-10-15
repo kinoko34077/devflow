@@ -138,10 +138,21 @@ class FakeWriter:
             "number": number,
             "title": "[REPO] demo",
             "state": "open",
+            "updated_at": "2026-10-04T05:49:00Z",
+            "author_association": "OWNER",
             "body": self.body,
         }
 
-    def update_issue_body(self, repository, number, body):
+    def update_issue_body(
+        self, repository, number, body, *,
+        expected_body_sha256, expected_updated_at,
+        expected_control_repository, trust_checker,
+    ):
+        if (
+            maintenance_sync_check.canonical_body_sha256(self.body) != expected_body_sha256
+            or expected_updated_at != "2026-10-04T05:49:00Z"
+        ):
+            return False
         self.update_calls.append((repository, number, body))
         if self.persist:
             self.body = body
@@ -155,6 +166,7 @@ def control_issue(*, association="OWNER"):
         "state": "open",
         "body": CONTROL_BODY,
         "author_association": association,
+        "updated_at": "2026-10-04T05:49:00Z",
     }
 
 
@@ -299,13 +311,13 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
             producer.RepositoryProjectionCacheProducerError,
             "pre-write",
         ):
-            producer.apply_plan(writer, plan)
+            producer.apply_plan(writer, plan, service=FakeService(control_issue()))
         self.assertEqual(writer.update_calls, [])
 
     def test_apply_updates_marker_only_and_confirms_readback(self):
         plan = self._plan()
         writer = FakeWriter()
-        result = producer.apply_plan(writer, plan)
+        result = producer.apply_plan(writer, plan, service=FakeService(control_issue()))
         self.assertEqual(result["status"], "UPDATED")
         self.assertEqual(result["generation_id"], plan.generation_id)
         self.assertEqual(len(writer.update_calls), 1)
@@ -329,7 +341,70 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
             producer.RepositoryProjectionCacheProducerError,
             "post-write",
         ):
-            producer.apply_plan(writer, plan)
+            producer.apply_plan(writer, plan, service=FakeService(control_issue()))
+
+
+    def test_prewrite_metadata_only_change_denies_without_patch(self):
+        plan = self._plan()
+        for drift in (
+            {"title": "[REPO] other"},
+            {"state": "closed"},
+            {"number": 8},
+            {"updated_at": "2026-10-04T05:50:00Z"},
+        ):
+            with self.subTest(drift=drift):
+                class DriftWriter(FakeWriter):
+                    def get_issue(self, repository, number):
+                        issue = super().get_issue(repository, number)
+                        issue.update(drift)
+                        return issue
+
+                writer = DriftWriter()
+                with self.assertRaisesRegex(
+                    producer.RepositoryProjectionCacheProducerError,
+                    "pre-write",
+                ):
+                    producer.apply_plan(
+                        writer, plan, service=FakeService(control_issue())
+                    )
+                self.assertEqual(writer.update_calls, [])
+
+    def test_prewrite_canonical_number_and_verifier_drift_denies(self):
+        plan = self._plan()
+        for kwargs in (
+            {"control_number": 999},
+            {"trusted": False},
+        ):
+            with self.subTest(kwargs=kwargs):
+                writer = FakeWriter()
+                with self.assertRaisesRegex(
+                    producer.RepositoryProjectionCacheProducerError,
+                    "pre-write",
+                ):
+                    producer.apply_plan(
+                        writer,
+                        plan,
+                        service=FakeService(control_issue(), **kwargs),
+                    )
+                self.assertEqual(writer.update_calls, [])
+
+    def test_bootstrap_provenance_trust_is_shared_not_author_only(self):
+        plan = self._plan()
+        writer = FakeWriter()
+        # Verified bootstrap provenance may be acceptable even when the
+        # original issue author is not directly OWNER/MEMBER/COLLABORATOR.
+        class ProvenanceWriter(FakeWriter):
+            def get_issue(self, repository, number):
+                issue = super().get_issue(repository, number)
+                issue["author_association"] = "NONE"
+                return issue
+
+        writer = ProvenanceWriter()
+        result = producer.apply_plan(
+            writer, plan, service=FakeService(control_issue(), trusted=True)
+        )
+        self.assertEqual(result["status"], "UPDATED")
+        self.assertEqual(len(writer.update_calls), 1)
 
 
 class FakeFleetService:
@@ -345,6 +420,7 @@ class FakeFleetService:
                 "state": "open",
                 "body": CONTROL_BODY,
                 "author_association": "OWNER",
+                "updated_at": "2026-10-04T05:49:00Z",
             },
             8: {
                 "number": 8,
@@ -352,6 +428,7 @@ class FakeFleetService:
                 "state": "open",
                 "body": "## Repository\n\nkinoko34077/broken\n",
                 "author_association": "OWNER",
+                "updated_at": "2026-10-04T05:49:00Z",
             },
         }
 
@@ -383,18 +460,27 @@ class FakeFleetService:
 
 class FakeFleetWriter:
     def __init__(self, issues):
+        self.issues = issues
         self.bodies = {number: str(issue["body"]) for number, issue in issues.items()}
         self.update_calls = []
 
     def get_issue(self, repository, number):
         return {
-            "number": number,
-            "title": f"[REPO] {number}",
-            "state": "open",
+            **self.issues[number],
+            "updated_at": "2026-10-04T05:49:00Z",
             "body": self.bodies[number],
         }
 
-    def update_issue_body(self, repository, number, body):
+    def update_issue_body(
+        self, repository, number, body, *,
+        expected_body_sha256, expected_updated_at,
+        expected_control_repository, trust_checker,
+    ):
+        if (
+            maintenance_sync_check.canonical_body_sha256(self.bodies[number]) != expected_body_sha256
+            or expected_updated_at != "2026-10-04T05:49:00Z"
+        ):
+            return False
         self.update_calls.append((repository, number, body))
         self.bodies[number] = body
         return True
