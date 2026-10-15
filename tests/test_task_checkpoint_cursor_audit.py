@@ -45,7 +45,9 @@ class CursorAuditTests(unittest.TestCase):
         r = classify_cursor(TASK, [c(render_cursor_comment(STATE))],
                             verified_first_unfinished="M3")
         self.assertEqual(r["status"], "STALE_FRONTIER")
-        self.assertEqual(classify_cursor(TASK, [c(render_cursor_comment(STATE))])["status"], "PASS")
+        plain = classify_cursor(TASK, [c(render_cursor_comment(STATE))])
+        self.assertEqual(plain["status"], "PASS")
+        self.assertFalse(plain["frontier_verified"])
 
     def test_duplicate_or_malformed_rejects_auto_decision(self):
         body = render_cursor_comment(STATE)
@@ -56,6 +58,8 @@ class CursorAuditTests(unittest.TestCase):
         fake = Fake([c(render_cursor_comment(STATE))])
         report = audit_issue_ids(fake, REPO, [576], expected={576:"M1"}, eligible={576:True})
         self.assertTrue(report["coverage_complete_for_explicit_set"])
+        self.assertEqual(report["frontiers_independently_verified"], 1)
+        self.assertTrue(report["semantic_coverage_complete"])
         self.assertFalse(report["mutation"])
         self.assertEqual(report["counts"]["PASS"], 1)
         self.assertEqual(len(fake.calls), 2)
@@ -64,11 +68,25 @@ class CursorAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit_issue_ids(fake, REPO, list(range(1,103)))
 
-    def test_untrusted_only_never_becomes_valid(self):
+    def test_untrusted_only_never_becomes_valid_or_missing_repair(self):
         body = render_cursor_comment(STATE)
-        r = classify_cursor(TASK, [c(body,False)], eligible=True)
-        self.assertEqual(r["status"], "MISSING_ELIGIBLE")
+        r = classify_cursor(TASK, [c(body, False)], eligible=True)
+        self.assertEqual(r["status"], "TRUST_CONFLICT")
         self.assertIn("WARN_UNTRUSTED_MARKER", r["warnings"])
+
+    def test_trusted_cursor_plus_untrusted_copy_is_not_format_only(self):
+        body = render_cursor_comment(STATE)
+        result = classify_cursor(TASK, [c(body), c(body, False)], eligible=True)
+        self.assertEqual(result["cursor_code"], "OK_CURSOR")
+        self.assertEqual(result["status"], "TRUST_CONFLICT")
+        self.assertIn("WARN_UNTRUSTED_MARKER", result["warnings"])
+
+    def test_format_diagnostics_remain_distinct_from_trust(self):
+        body = render_cursor_comment(STATE)
+        fractional = body.replace("2026-10-15T13:40:00Z", "2026-10-15T13:40:00.123Z")
+        result = classify_cursor(TASK, [c(fractional)])
+        self.assertEqual(result["status"], "NORMALIZABLE")
+        self.assertFalse(result["frontier_verified"])
 
 
     def test_discovery_coverage_and_pr_filter(self):
