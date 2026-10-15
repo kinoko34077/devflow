@@ -372,6 +372,12 @@ task_checkpoint_cursor:
   first_unfinished_projection: true
   single_frontier_only: true
   mandatory_when_eligible_single_frontier: true
+  safe_format_compatibility: bounded_read_only_normalization
+  canonical_writer_required: true
+  inspect_identity_and_trust_before_format_normalization: true
+  tolerated_auxiliary_metadata_authority: none
+  post_write_readback_required: true
+  audit_coverage_unknown_is_not_success: true
   mandatory_for_all_durable_progress: false
   dedicated_progress_issue_allowed: true
   cursor_evidence_should_reference_progress_surface_when_practical: true
