@@ -404,6 +404,14 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "test_admission": True,
             "consumers_agree": True,
         }
+        # Human Portfolio is a selective operator/attention queue, NOT an
+        # all-status work inventory. Review/blocked tasks remain in Work View.
+        portfolio = service.get_human_portfolio("demo")
+        self.assertTrue(portfolio["complete"])
+        self.assertEqual(portfolio["entries"], [])
+        self.assertEqual([task["work_status"] for task in view["task_records"]],
+                         ["AWAITING_REVIEW", "BLOCKED"])
+
         consumer_urls = tuple(
             task["url"] for task in view["parallel_read"]["machine"]["tasks"]
         )
@@ -413,6 +421,20 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(accepted["authority"], "MACHINE_TEST_ONLY")
         self.assertEqual(accepted["active_work"], list(consumer_urls))
         self.assertEqual(accepted["next_action"], "Human review required.")
+        # Treating the compact operator queue as all machine TASKs must
+        # fail closed, even though that queue's own fetch is complete.
+        portfolio_urls = tuple(
+            entry["entry_ref"] for entry in portfolio["entries"]
+            if entry["role"] == "TASK"
+        )
+        omitted = cache.simulate_m3_authority_transition(
+            payload, consumer_task_urls=portfolio_urls, **kwargs
+        )
+        self.assertEqual(omitted["authority"], "MANUAL")
+        self.assertEqual(omitted["reason"], "CONSUMER_ISSUE_REFS_DISAGREE")
+        self.assertEqual(omitted["active_work"], [manual["active_work"]])
+        self.assertEqual(omitted["next_action"], "Human review required.")
+
         for mismatch in (consumer_urls[:1], consumer_urls + consumer_urls[:1]):
             fallback = cache.simulate_m3_authority_transition(
                 payload, consumer_task_urls=mismatch, **kwargs
