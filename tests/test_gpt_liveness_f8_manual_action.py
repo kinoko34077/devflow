@@ -32,10 +32,10 @@ class F8ManualWorkflowContractTests(unittest.TestCase):
     def test_both_manual_jobs_require_owner_for_original_and_rerun(self):
         # github.actor is retained from the first run on GitHub Actions reruns.
         # github.triggering_actor identifies the actual rerun initiator.
-        _, body = self.text.split("\\njobs:\\n", 1)
-        preview, send = body.split("\\n  send:\\n", 1)
+        _, body = self.text.split("\njobs:\n", 1)
+        preview, send = body.split("\n  send:\n", 1)
         for job in (preview, send):
-            guard = job.split("\\n    runs-on:", 1)[0]
+            guard = job.split("\n    runs-on:", 1)[0]
             self.assertIn("github.event_name == 'workflow_dispatch'", guard)
             self.assertIn("github.ref == 'refs/heads/main'", guard)
             self.assertIn("github.repository == 'kinoko34077/devflow'", guard)
