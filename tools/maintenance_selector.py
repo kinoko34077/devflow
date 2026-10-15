@@ -106,7 +106,7 @@ def _slot_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> list[
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.slot_id == slot.slot_id
+        if item.evidence_complete and item.repository == slot.repository and item.slot_id == slot.slot_id
     ]
 
 
@@ -114,7 +114,7 @@ def _lens_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> list[
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.lens == slot.lens
+        if item.evidence_complete and item.repository == slot.repository and item.lens == slot.lens
     ]
 
 
@@ -122,7 +122,7 @@ def _similar_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> li
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.coverage_key == slot.coverage_key
+        if item.evidence_complete and item.repository == slot.repository and item.coverage_key == slot.coverage_key
     ]
 
 
@@ -133,7 +133,8 @@ def _exact_equivalent(
     item: RunEvidence,
 ) -> bool:
     return (
-        item.repository == slot.repository
+        item.evidence_complete
+        and item.repository == slot.repository
         and item.scope_kind == slot.scope.kind
         and item.scope_selector == slot.scope.selector
         and item.lens == slot.lens
@@ -287,7 +288,8 @@ def _equivalent_age_seconds(
 def _never_depth(slot: ResolvedSlot, depth: str, history: tuple[RunEvidence, ...]) -> int:
     return int(
         not any(
-            item.repository == slot.repository
+            item.evidence_complete
+            and item.repository == slot.repository
             and item.slot_id == slot.slot_id
             and item.depth == depth
             for item in history
