@@ -262,7 +262,8 @@ class OfflineGateway:
                      and _ID.fullmatch(p.recipe_id), "INVALID_CATALOG")
             key = (p.repository, p.recipe_id)
             _require(key not in self.catalog, "DUPLICATE_CATALOG_ENTRY")
-            self.catalog[key] = p
+            # Defensive snapshots: frozen dataclasses can still contain mutable dicts.
+            self.catalog[key] = replace(p, input_schema=dict(p.input_schema))
         self._key = hmac_key
         self.store, self.claims, self.health, self.backend = (
             store, claims, health, backend
@@ -283,8 +284,13 @@ class OfflineGateway:
     def submit(self, job: Job, proof: SignedIngress, *, now: int) -> Record:
         _require(type(now) is int and now >= 0, "INVALID_TIME")
         _require(type(job) is Job, "INVALID_REQUEST")
+        _require(type(job.repository) is str and type(job.recipe_id) is str,
+                 "INVALID_REQUEST")
         policy = self.catalog.get((job.repository, job.recipe_id))
         _require(policy is not None and _job_shape(job, policy), "CATALOG_DENIED")
+        # Snapshot validated scalar inputs before digest and persistence. Caller
+        # mutations after enqueue cannot alter the signed/claimed job payload.
+        job = replace(job, inputs=dict(job.inputs))
         _require(type(proof) is SignedIngress and type(proof.actor) is str
                  and proof.actor in policy.actors and type(proof.nonce) is str
                  and _TOKEN.fullmatch(proof.nonce)
