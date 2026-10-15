@@ -79,7 +79,6 @@ class CompatibleCursorTests(unittest.TestCase):
         candidates = [
             base.replace("first_unfinished: M1", "first_unfinished: OTHER TASK"),
             base.replace("revision: 7", "revision: 1_0"),
-            base.replace("revision: 7", "revision: +7"),
             base.replace(stamp, "updated_at: 2026-13-15T10:43:10Z"),
             base.replace(stamp, "updated_at: 2026-10-15T10:43:10"),
             base.replace(stamp, "blocker: !!python/object\n" + stamp),
@@ -93,6 +92,23 @@ class CompatibleCursorTests(unittest.TestCase):
             with self.subTest(body=body[-140:]):
                 with self.assertRaises(CursorFormatError):
                     parse_cursor_comment_compatible(body)
+
+
+    def test_safe_numeric_and_case_spelling_normalization(self):
+        body = (render_cursor_comment(STATE)
+                .replace("schema_version: 1", "SCHEMA_VERSION: 01")
+                .replace("revision: 7", "Revision: +0007"))
+        parsed, warnings = parse_cursor_comment_compatible(body)
+        self.assertEqual(parsed, STATE)
+        self.assertIn("WARN_NORMALIZED", warnings)
+        with self.assertRaises(CursorFormatError):
+            parse_cursor_comment_compatible(body.replace("Revision: +0007", "revision: 7\nRevision: +0007"))
+
+    def test_nested_unknown_key_does_not_slip_into_scalar_parse(self):
+        body = render_cursor_comment(STATE).replace(
+            "updated_at: " + STAMP, "  note: semantic-smuggling\nupdated_at: " + STAMP)
+        with self.assertRaises(CursorFormatError):
+            parse_cursor_comment_compatible(body)
 
     def test_bounded_comment(self):
         with self.assertRaises(CursorFormatError):
