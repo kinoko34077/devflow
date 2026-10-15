@@ -29,6 +29,22 @@ class F8ManualWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("${{ inputs.", self.text)
         self.assertNotIn("execution-coordinator", self.text)
 
+    def test_both_manual_jobs_require_owner_for_original_and_rerun(self):
+        # github.actor is retained from the first run on GitHub Actions reruns.
+        # github.triggering_actor identifies the actual rerun initiator.
+        _, body = self.text.split("\\njobs:\\n", 1)
+        preview, send = body.split("\\n  send:\\n", 1)
+        for job in (preview, send):
+            guard = job.split("\\n    runs-on:", 1)[0]
+            self.assertIn("github.event_name == 'workflow_dispatch'", guard)
+            self.assertIn("github.ref == 'refs/heads/main'", guard)
+            self.assertIn("github.repository == 'kinoko34077/devflow'", guard)
+            self.assertIn("github.actor == 'kinoko34077'", guard)
+            self.assertIn("github.triggering_actor == 'kinoko34077'", guard)
+        self.assertEqual(self.text.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(self.text.count("github.triggering_actor == 'kinoko34077'"), 2)
+        self.assertNotIn("github.actor_id", self.text)
+
     def test_preview_cannot_write_send_receives_narrow_issue_rights(self):
         top, body = self.text.split("\njobs:\n", 1)
         self.assertIn("permissions:\n  contents: read", top)
