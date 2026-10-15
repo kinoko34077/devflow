@@ -5,9 +5,10 @@ on:
     branches: [main]
     paths:
       - 'docs/mobile-actions/**'
+      - 'tools/mobile_actions_snapshot.py'
       - '.github/workflows/mobile-actions-pages.yml'
 
-# Dedicated Pages artifact contains ONLY the four public UI files.
+# Dedicated Pages artifact contains ONLY the four UI files plus sanitized status.json.
 # No Workflow Dispatch, repository write, credential or liveness enrollment.
 permissions:
   contents: read
@@ -23,6 +24,8 @@ jobs:
     permissions:
       contents: read
       pages: read
+      issues: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -46,6 +49,21 @@ jobs:
           done
           test "$(find "$out" -type f | wc -l)" -eq 4
           test "$(find "$out" -type l | wc -l)" -eq 0
+      - name: Generate sanitized, timestamped first-party status snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m tools.mobile_actions_snapshot --out "$RUNNER_TEMP/mobile-actions-public/status.json"
+          python - "$RUNNER_TEMP/mobile-actions-public/status.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          assert report["schema"] == "devflow.mobile-actions-snapshot.v1"
+          assert report["source"] == "github-actions-build"
+          assert "token" not in report and "body" not in report
+          PY
+          test "$(find "$RUNNER_TEMP/mobile-actions-public" -type f | wc -l)" -eq 5
+          test "$(find "$RUNNER_TEMP/mobile-actions-public" -type l | wc -l)" -eq 0
       - name: Upload exact isolated artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
