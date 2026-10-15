@@ -5,6 +5,7 @@ import json
 import unittest
 from unittest.mock import patch
 
+from tools import agent_inbox
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import (
@@ -70,6 +71,83 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertEqual(x[0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
         self.assertNotIn("source payload private", json.dumps(x))
 
+    def test_b5_real_unclassified_576_root_needs_pointer_not_task_selection(self):
+        """Sanitized replay of verified #576/#503 source IDs, never live task admission.
+
+        Source: devflow #576 comment 6198495044 and #503 comment 6198497020.
+        The original read-only REQUEST payload is intentionally not copied.
+        """
+        repo, issue = "kinoko34077/devflow", 576
+        root_id = "msg_cursor576_claude_delta_review_20261016d"
+        head = "eef92defe34d5dadbde79c3c379581769ea3a6fe"
+        root, _ = make_request(
+            pages([]), repository=repo, issue=issue,
+            recipient="claude-code", intent="ANALYZE", expected_head=head,
+            request_key="kaep.cursor576.delta.eef92defe34d5dadbde79c3c",
+            request_text="redacted public source; read-only audit",
+            expect_existing_actor=ACTOR,
+        )
+        root.update(
+            exchange_id="ex_cursor576_claude_delta_review_20261016d",
+            message_id=root_id,
+        )
+        pointer = {
+            "type": POINTER_VERSION,
+            "owning_issue": f"https://github.com/{repo}/issues/{issue}",
+            "message_id": root_id,
+            "comment_id": 6198495044,
+        }
+        notice, _ = make_request(
+            pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+            recipient="claude-code", intent="REPORT",
+            request_key="kaep.discovery.cursor576.delta.eef92defe34d5dadbde79c3c",
+            request_text=json.dumps(pointer, sort_keys=True, separators=(",", ":")),
+            expect_existing_actor=ACTOR,
+        )
+
+        # The real #576 is open but lacks a trusted TASK metadata marker.
+        # The M3-derived Inbox must not pretend it is a complete work inventory.
+        task_view = {
+            "repository": repo, "source_status": "AVAILABLE",
+            "source_freshness": "CURRENT", "coverage_status": "INCOMPLETE",
+            "task_records": [],
+            "observed_task_view": {
+                "status": "INCOMPLETE", "known_task_count": 0,
+                "unresolved_open_issue_count": 1, "is_complete_read": False,
+            },
+            "manual_control": {"active_work": "retain original Issue/#503 pointer"},
+        }
+        selected = agent_inbox.select_task_records(task_view, recipient="claude-code")
+        self.assertEqual(selected["selected"], [])
+        self.assertEqual(selected["coverage_status"], "INCOMPLETE")
+        self.assertEqual(selected["unresolved_open_issue_count"], 1)
+        self.assertFalse(selected["is_full_work_inventory"])
+        self.assertFalse(selected["can_authorize_execution"])
+
+        fetched = []
+        def fetch_source(repository, issue_number):
+            fetched.append((repository, issue_number))
+            return pages([comment(6198495044, root)])
+
+        discovered = discover_batch(
+            pages([comment(6198497020, notice)]),
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            fetch_source=fetch_source,
+        )
+        self.assertEqual(fetched, [(repo, issue)])
+        self.assertEqual(discovered["status"], "READ_ONLY")
+        self.assertEqual(discovered["rejected"], [])
+        self.assertEqual(discovered["blocked"], [])
+        self.assertFalse(discovered["truncated"])
+        self.assertEqual(len(discovered["hints"]), 1)
+        self.assertEqual(discovered["hints"][0]["owning_issue"], pointer["owning_issue"])
+        self.assertEqual(discovered["hints"][0]["source_comment_id"], 6198495044)
+        self.assertEqual(discovered["hints"][0]["source_message_id"], root_id)
+        self.assertEqual(discovered["hints"][0]["expected_head"], head)
+        self.assertEqual(discovered["hints"][0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
+        self.assertTrue(discovered["read_only"])
+        self.assertFalse(discovered["peer_identity_verified"])
+        self.assertNotIn("redacted public source", json.dumps(discovered))
     def test_cursor_skips_old_hints(self):
         root, hint, _ = fixtures()
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]), after_id=88)
