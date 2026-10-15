@@ -734,6 +734,20 @@ wrong repository selection; the fixture was corrected and exact-head reruns
 passed. Neither case authorizes circumventing a future safety denial or
 skipping CI/review/release approval.
 
+### Deferred safety-check refusal re-audit before task-end (user clarified 2026-10-16; devflow #590)
+
+A platform/tool safety-check refusal is **not a determination that the underlying requested action is substantively unsafe**. Treat it as a refusal of the exact attempt in the observed context; classify it separately from source-code risk, actual permissions, CI/Review gates, and any explicit prohibition. Do not infer permanent task-level HOLD, but do not assume a self-audit overrides the provider's enforced control either.
+
+For ordinary ongoing development, use this order without an unnecessary user-confirmation stop:
+
+1. **Record and isolate now.** Preserve the exact refused operation, trusted source/target/HEAD, error class, input/preconditions and any attempt identifiers on the owning Issue/Session Record. Mark **only that action** pending re-audit; do not describe a rejected call as completed.
+2. **Continue independent safe work.** Execute other permitted design, implementation, review and checks. Keep the deferred action in the unfinished inventory and do not quietly drop it when the rest succeeds.
+3. **Near completion, double-check the deferred items two or three times** using materially distinct checks, such as (a) independently verify the actual requested side effect, authorization, exposed resources and reversibility; (b) compare current permissions, reviewed HEAD, CI/review, inputs and already-committed effects against the original denial; and (c) inspect an existing normal supported tool route and independently confirm stale/duplicate/uncertain-result risks. These are **2–3 assessments**, not a blanket rule to submit two or three tool calls against the same refusal.
+4. **Retry when justified by evidence.** Where the review identifies a real input mistake, missing-but-now-satisfied prerequisite, changed observable conditions, or newly authorized normal route, and the operation remains permissible under the actual change-surface/Human/security gates, make a **bounded normal-path retry** without making the user stop solely to reconfirm already granted authority. Independently verify the result by the appropriate GitHub/API/CI/readback evidence. If denied again, record the new observation and reassess; no identical blind loop.
+5. **Preserve genuinely enforced boundaries.** Repeating a rejected unsafe operation, disguising its meaning, splitting a prohibited request into superficially benign calls, switching credentials/tools solely to defeat controls, overriding a security/permission/Human gate or presuming that review itself confers authorization are **not** acceptable recovery. If the platform continues to refuse the particular operation, keep that effect HOLD and report the next genuinely authorized recovery route, actor and exit condition; independent work and previously accepted checks remain valid.
+
+A double-checked **safe** operation can still be unavailable to the current tool/identity. Report that precise limitation, rather than asserting the user's objective was proven unsafe or attempting to force acceptance. At the final handoff, list each refused item as `COMPLETED / SAFELY_RETRIED / HOLD_WITH_NEXT_ACTION` (or equivalent actual state), citing independent evidence. This policy does not replace Section 11's actionable blocker packet or allow skipping exact-head CI, formal review, actual approval and deployment gates.
+
 When an agent cannot perform a required operation:
 - continue every independent read/write/verification step it can perform;
 - record the exact remaining operation and required authority in the active durable Issue;
