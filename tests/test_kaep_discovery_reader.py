@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from tools import agent_inbox
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
+from tools.kaep_inbox_reader import inspect_pages
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import (
     discover, discover_batch, discover_index_shadow, parse_pointer,
@@ -149,6 +150,76 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertTrue(discovered["read_only"])
         self.assertFalse(discovered["peer_identity_verified"])
         self.assertNotIn("redacted public source", json.dumps(discovered))
+    def test_b5_unindexed_576_root_visible_only_in_original_issue_reader(self):
+        """Sanitized reencoding of real #576 old root absent from #503.
+
+        Immutable source/comment IDs match the read-only public evidence, but
+        no original prompt prose is copied. This is not a live provider read.
+        A clean index scan never certifies complete original-root coverage.
+        """
+        repo, issue = "kinoko34077/devflow", 576
+        old_id = "msg_cursor576_readonly_audit_20261015a"
+        new_id = "msg_cursor576_claude_delta_review_20261016d"
+        old, _ = make_request(
+            pages([]), repository=repo, issue=issue,
+            recipient="claude-code", intent="ANALYZE",
+            expected_head="60cf73abd166e14d34d73e8821589fc6cb412c57",
+            request_key="kaep.cursor576.oldroot.20261015a",
+            request_text="sanitized historical read-only request",
+            expect_existing_actor=ACTOR,
+        )
+        old.update(exchange_id="ex_cursor576_readonly_audit_20261015a",
+                   message_id=old_id)
+        new, _ = make_request(
+            pages([]), repository=repo, issue=issue,
+            recipient="claude-code", intent="ANALYZE",
+            expected_head="eef92defe34d5dadbde79c3c379581769ea3a6fe",
+            request_key="kaep.cursor576.newroot.20261016d",
+            request_text="sanitized newer read-only request",
+            expect_existing_actor=ACTOR,
+        )
+        new.update(exchange_id="ex_cursor576_claude_delta_review_20261016d",
+                   message_id=new_id)
+        source_pages = pages([comment(6193914061, old),
+                              comment(6198495044, new)])
+        pointer = {
+            "type": POINTER_VERSION,
+            "owning_issue": f"https://github.com/{repo}/issues/{issue}",
+            "message_id": new_id, "comment_id": 6198495044,
+        }
+        hint, _ = make_request(
+            pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+            recipient="claude-code", intent="REPORT",
+            request_key="kaep.discovery.cursor576.newroot.20261016d",
+            request_text=json.dumps(pointer, sort_keys=True, separators=(",", ":")),
+            expect_existing_actor=ACTOR,
+        )
+        # Pointer path completes cleanly: it sees only the newer specific root.
+        shadow = discover_index_shadow(
+            pages([comment(6198497020, hint)]),
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            fetch_source=lambda r, n: source_pages,
+        )
+        self.assertEqual(shadow["status"], "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY")
+        self.assertEqual(len(shadow["hints"]), 1)
+        self.assertEqual(shadow["hints"][0]["source_message_id"], new_id)
+        self.assertFalse(shadow["complete_work_inventory"])
+        self.assertFalse(shadow["fallback_retirement_authorized"])
+
+        # The already-accepted direct original-Issue reader sees BOTH roots.
+        direct = inspect_pages(
+            source_pages, repository=repo, issue=issue, recipient="claude-code")
+        self.assertEqual(
+            [(row["comment_id"], row["message_id"]) for row in direct["messages"]],
+            [(6193914061, old_id), (6198495044, new_id)])
+        indexed_ids = {item["source_message_id"] for item in shadow["hints"]}
+        self.assertEqual({row["message_id"] for row in direct["messages"]} - indexed_ids,
+                         {old_id})
+        self.assertNotIn("sanitized historical", json.dumps(shadow))
+        self.assertNotIn("sanitized historical", json.dumps(direct))
+        # This test does not create or infer a TASK, an actionable live HEAD,
+        # provider pickup, source-universe completeness, or recipient authority.
+
     def test_shadow_bounded_full_65_comment_index_with_21_strict_roots(self):
         """Index-only completeness: 21 verified roots / 65 comments / 4 batches."""
         sources = {}
