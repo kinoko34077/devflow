@@ -80,6 +80,31 @@ class TransportTests(unittest.TestCase):
                                reconcile_reason="accepted new durable evidence on #576")
         self.assertEqual(r.code, "OK_ADVANCED")
 
+    def test_untrusted_marker_never_triggers_automatic_create(self):
+        alien = saved(state())
+        alien["author_association"] = "CONTRIBUTOR"
+        alien["user"] = {"login": "untrusted"}
+        t = MemoryTransport([alien])
+        outcome = apply_cursor_write(
+            t, task=TASK, proposed=state(),
+            expected_revision=None, expected_first_unfinished=None,
+        )
+        self.assertEqual(outcome.code, "WARN_UNTRUSTED_MARKER")
+        self.assertEqual(t.calls, [])
+
+    def test_untrusted_competing_marker_blocks_effectful_update(self):
+        trusted = saved(state())
+        alien = dict(saved(state()), id=20)
+        alien["author_association"] = "CONTRIBUTOR"
+        alien["user"] = {"login": "untrusted"}
+        t = MemoryTransport([trusted, alien])
+        outcome = apply_cursor_write(
+            t, task=TASK, proposed=state(2, "M1", "M2"),
+            expected_revision=1, expected_first_unfinished="M1",
+        )
+        self.assertEqual(outcome.code, "WARN_UNTRUSTED_MARKER")
+        self.assertEqual(t.calls, [])
+
     def test_wrong_task_never_written(self):
         t = MemoryTransport()
         other = CursorState(1, "kinoko34077/devflow#999", 1, None, "M1", None, (), STAMP)
