@@ -146,9 +146,19 @@ class FakeIntegratedDispatchTests(unittest.TestCase):
 
     def test_claim_generation_or_source_stale_before_dispatch(self):
         digest = request_digest(self.job)
-        self.claims.views[digest] = replace(
-            self.claims.views[digest], fence_epoch=8,
-        )
+        original_claim = self.gateway._claim
+        calls = [0]
+
+        def change_after_admission(*args):
+            observed = original_claim(*args)
+            calls[0] += 1
+            if calls[0] == 1:
+                self.claims.views[digest] = replace(
+                    self.claims.views[digest], fence_epoch=8,
+                )
+            return observed
+
+        self.gateway._claim = change_after_admission
         self.denied("FAKE_PRE_DISPATCH_HOLD", self.execute)
         self.assertEqual(self.backend.calls, [])
         self.assertEqual(self.ledger.observe(digest).state, "QUEUED")
