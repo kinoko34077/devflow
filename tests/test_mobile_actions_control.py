@@ -60,7 +60,7 @@ class MobileActionsContractTests(unittest.TestCase):
         self.assertNotIn("<input", self.html)
         self.assertNotIn("<form", self.html)
         self.assertIn("default-src 'none'", self.html)
-        self.assertIn("connect-src https://api.github.com", self.html)
+        self.assertIn("connect-src 'self' https://api.github.com", self.html)
         self.assertIn("form-action 'none'", self.html)
         self.assertIn('target="_blank" rel="noopener noreferrer"', self.html)
 
