@@ -136,6 +136,36 @@ class FakeIntegratedDispatchTests(unittest.TestCase):
         self.assertEqual(original, replay)
         self.assertEqual(fresh_backend.calls, [])
 
+    def test_fake_receipt_cannot_complete_another_job(self):
+        class WrongReceiptBackend(FakeBackend):
+            def run(self, job, digest, backend, epoch):
+                receipt = super().run(job, digest, backend, epoch)
+                return replace(receipt, request_digest="f" * 64)
+        fake = WrongReceiptBackend()
+        self.gateway.backend = fake
+        row = self.execute()
+        self.assertEqual(row.state, "UNCERTAIN")
+        self.assertEqual(self.ledger.observe(request_digest(self.job)).state,
+                         "UNCERTAIN")
+        self.assertIsNone(self.ledger.observe("f" * 64))
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_epoch_change_after_sqlite_cas_prevents_fake_backend_call(self):
+        observed = self.gateway._claim
+        count = [0]
+        def change_at_second_observation(*args):
+            value = observed(*args)
+            count[0] += 1
+            if count[0] == 2:
+                digest = request_digest(self.job)
+                self.claims.views[digest] = replace(
+                    self.claims.views[digest], fence_epoch=8)
+            return value
+        self.gateway._claim = change_at_second_observation
+        row = self.execute()
+        self.assertEqual(row.state, "UNCERTAIN")
+        self.assertEqual(self.backend.calls, [])
+
     def test_fake_crash_leaves_durable_uncertain_and_no_second_run(self):
         self.backend.fail_next = True
         row = self.execute()
