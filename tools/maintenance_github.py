@@ -1394,7 +1394,7 @@ def collect_maintenance_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=record.result in {"CLEAN", "FINDINGS", "RECONCILED"},
             )
         )
 
@@ -1627,7 +1627,7 @@ def collect_maintenance_portfolio_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=record.result in {"CLEAN", "FINDINGS", "RECONCILED"},
             )
             converted_history.append(item)
             if not item.evidence_complete:
