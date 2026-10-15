@@ -108,6 +108,7 @@ class Receipt:
 @dataclass(frozen=True)
 class Record:
     job: Job
+    actor: str
     nonce: str
     ingress_expires: int
     digest: str
@@ -314,12 +315,13 @@ class OfflineGateway:
         _require(recorded_digest is None or recorded_digest == digest, "NONCE_REPLAY")
         old = self.store.records.get(digest)
         if old is not None:
-            _require(old.nonce == proof.nonce and old.job == job, "ATTEMPT_COLLISION")
+            _require(old.actor == proof.actor and old.nonce == proof.nonce and old.job == job, "ATTEMPT_COLLISION")
             return old  # Idempotent read, never requeue a completed/unknown attempt.
         _require(len(self.store.records) < _MAX_JOBS, "SIMULATOR_CAPACITY")
         view = self._claim(job, digest, now)
         _require(_route(policy, self.health.observe()) is not None, "BACKEND_UNAVAILABLE")
-        rec = Record(job, proof.nonce, proof.expires_at, digest, view.fence_epoch, "QUEUED")
+        rec = Record(job, proof.actor, proof.nonce, proof.expires_at, digest,
+                     view.fence_epoch, "QUEUED")
         self.store.nonces[nonce_key] = digest
         self.store.records[digest] = rec
         return rec
