@@ -25,8 +25,8 @@ python scripts/maintenance_coverage_report.py \
 ```
 
 For an **offline visual audit table** from the same trusted read-only
-PILOT observation, choose \`--format html --output smc-coverage.html\` instead
-of \`--format markdown\`. Open that **local file** in a browser.
+PILOT observation, choose `--format html --output smc-coverage.html` instead
+of `--format markdown`. Open that **local file** in a browser.
 It includes repository/status filters, keyboard-labelled controls, semantic
 tables and a small-screen scrollable layout. Its HTML has an explicit
 no-network Content Security Policy and no third-party assets. No JavaScript
