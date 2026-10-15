@@ -177,12 +177,14 @@ def evaluate_handoff(
 
 def project_writer_observation(
     *,
-    old_writer_active: bool,
-    central_writer_active: bool,
+    old_writer_active: bool | None,
+    central_writer_active: bool | None,
     old_epoch: int,
     central_epoch: int,
 ) -> HandoffAssessment:
     """Observe possible split brain. NEVER select/grant a live writer."""
+    if (old_writer_active is None or central_writer_active is None):
+        return _assessment("UNOBSERVABLE_WRITER")
     if (type(old_writer_active) is not bool or
             type(central_writer_active) is not bool or
             not _valid_positive(old_epoch) or
