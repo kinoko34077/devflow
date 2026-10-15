@@ -135,5 +135,45 @@ class ExistingControlWriterIntegrationTests(unittest.TestCase):
         self.assertEqual(len(t.patches), 1)
 
 
+    def test_external_direct_writer_after_final_get_is_overwritten(self):
+        """Deterministic *negative* proof, not a global safe-CAS test.
+
+        Authenticated writer A passed its last GET against BEFORE.
+        An independent direct API writer B commits different Control text
+        just before A's (unconditional) REST PATCH is processed.
+        """
+        other = BEFORE.replace("- old candidate", "- external independent edit")
+
+        class InterleavingNativeTransport(Transport):
+            def _respond(self, request, timeout=0):
+                # B has its own authorization and full-body GitHub API update.
+                # B is outside A's Actions queue and acts AFTER A's GET.
+                self.issue["body"] = other
+                self.issue["updated_at"] = "2026-10-16T00:00:01Z"
+                self.external_committed = True
+                # GitHub Issue PATCH body has no expected-old-body CAS here;
+                # it can overwrite B even when A's read-first check passed.
+                payload = json.loads(request.data.decode("utf-8"))
+                self.patches.append(request)
+                self.issue["body"] = payload["body"]
+                self.issue["updated_at"] = "2026-10-16T00:00:02Z"
+                return Response({"body": self.issue["body"]})
+
+        t = InterleavingNativeTransport()
+        self.assertTrue(t.run_update(expected_body=BEFORE, after=AFTER))
+        self.assertTrue(t.external_committed)
+        self.assertEqual(len(t.patches), 1)
+        self.assertEqual(t.get_issue(CONTROL_REPOSITORY, 7)["body"], AFTER)
+        self.assertNotEqual(t.issue["body"], other)
+        # A later exact-desired-body postread alone also misses lost edit B.
+
+    def test_external_direct_writer_before_last_get_is_refused(self):
+        t = Transport()
+        t.issue["body"] = BEFORE.replace("- old candidate", "- earlier edit")
+        t.issue["updated_at"] = "2026-10-16T00:00:01Z"
+        self.assertFalse(t.run_update(expected_body=BEFORE, after=AFTER))
+        self.assertEqual(t.patches, [])
+
+
 if __name__ == "__main__":
     unittest.main()
