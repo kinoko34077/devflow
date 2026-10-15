@@ -104,6 +104,23 @@ class CompatibleCursorTests(unittest.TestCase):
         with self.assertRaises(CursorFormatError):
             parse_cursor_comment_compatible(body.replace("Revision: +0007", "revision: 7\nRevision: +0007"))
 
+    def test_empty_evidence_list_cannot_be_followed_by_items(self):
+        body = render_cursor_comment(STATE)
+        self.assertIn("evidence:\n  - ", body)
+        invalid = body.replace("evidence:\n", "evidence: []\n", 1)
+        with self.assertRaises(CursorFormatError):
+            parse_cursor_comment_compatible(invalid)
+        canonical_empty = render_cursor_comment(
+            CursorState(
+                schema_version=STATE.schema_version, task=STATE.task,
+                revision=STATE.revision, last_completed=STATE.last_completed,
+                first_unfinished=STATE.first_unfinished, head=STATE.head,
+                evidence=(), updated_at=STATE.updated_at,
+            )
+        )
+        parsed, _ = parse_cursor_comment_compatible(canonical_empty)
+        self.assertEqual(parsed.evidence, ())
+
     def test_nested_unknown_key_does_not_slip_into_scalar_parse(self):
         body = render_cursor_comment(STATE).replace(
             "updated_at: " + STAMP, "  note: semantic-smuggling\nupdated_at: " + STAMP)
