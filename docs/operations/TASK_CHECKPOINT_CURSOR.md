@@ -198,6 +198,45 @@ Other clients (ChatGPT GitHub connector, Claude, Codex) may perform the
 same operations natively, but **must not hand-craft inconsistent payloads
 or omit re-read verification** merely because a Python adapter is not exposed.
 
+### Single-writer precondition and untrusted-marker recovery
+
+`apply_cursor_write()` **does not provide atomic compare-and-swap (CAS)**. Its
+read-before-update/readback operation can miss an interleaved competing write
+that advances to the same revision; a successful readback is not proof that
+no third-party update was overwritten. **Before any effectful invocation**,
+the caller must separately establish and recheck the genuine owning task's
+authorized single-writer coordination/Claim for that operation, under live
+devflow and repository authority. An Issue comment, Cursor, or self-declared
+`Claim-holder` string is not such proof. Without verifiable exclusive
+writing authority, do not run the effectful helper: HOLD and reconcile the
+owner, or use only read-only inspection. This is a precondition, **not an
+assertion that this library implements fencing/locking**.
+
+A non-collaborator may intentionally leave a comment beginning with the
+Cursor sentinel; the compatible inspector emits `WARN_UNTRUSTED_MARKER`,
+and the writer refuses creation, advance and even explicit reconciliation.
+This is an intentional **integrity-over-availability** decision. On public
+repos a forged comment can cause a denial-of-service of Cursor *writes*
+without gaining control of trusted Cursor data. Recovery is performed by
+a repository maintainer with actual GitHub comment-moderation authority:
+inspect exact comment ID/author, confirm the comment is untrusted, remove
+the malicious duplicate through normal authorized moderation, then read
+the entire relevant Issue comment history afresh to establish one trusted
+marker and revalidate owner/frontier evidence before retrying a bounded
+normal write. Never grant the outsider author authority, automatically
+delete external comments from this helper, or treat the refusal itself as
+proof of legitimate revision/readiness. If moderation is not available,
+keep the write HOLD and record the exact actor, comment ID and required
+approval on the owning Issue; read-only planning can continue.
+
+Compatibility normalization does not assert timestamp freshness: valid
+far-future timestamps are syntactically parseable, but cannot be used as
+evidence of current authorization, verified progress, or any security
+time window. `PASS` / `NORMALIZABLE` on the GET-only scanner remains
+**format/provenance only** until the owner frontier has been independently
+verified; inspect `semantic_coverage_complete` before reporting the
+whole task state healthy.
+
 ### Scoped read-only audit
 
 `tools/task_checkpoint_cursor_audit.py` is GET-only and can inspect a
