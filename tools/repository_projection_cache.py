@@ -710,6 +710,69 @@ def effective_cache_freshness(
     return "CURRENT"
 
 
+
+def simulate_m3_authority_transition(
+    payload: dict[str, Any] | None,
+    *,
+    now: str,
+    manual_active_work: tuple[str, ...],
+    manual_next_action: str,
+    test_admission: bool = False,
+    consumers_agree: bool = False,
+) -> dict[str, Any]:
+    """Isolated, non-effectful M3 authority exercise; never grants production admission.
+
+    The existing manual fields remain intact, including Human/policy Next Action.
+    An absent or invalid machine source always selects manual authority.
+    """
+    result: dict[str, Any] = {
+        "authority": "MANUAL",
+        "active_work": list(manual_active_work),
+        "next_action": manual_next_action,
+        "reason": "TEST_ADMISSION_NOT_GRANTED",
+    }
+    if not test_admission or not consumers_agree:
+        if test_admission:
+            result["reason"] = "CONSUMER_PARITY_UNPROVEN"
+        return result
+    if payload is None:
+        result["reason"] = "MACHINE_SOURCE_MISSING"
+        return result
+    try:
+        validated = _validate_cached_payload(
+            copy.deepcopy(payload), _require_repository(payload.get("repository"))
+        )
+        if effective_cache_freshness(validated, now=now) != "CURRENT":
+            result["reason"] = "MACHINE_SOURCE_NOT_CURRENT"
+            return result
+        all_state = validated.get("all_state_tasks")
+        if (
+            validated["coverage"]["status"] != "COMPLETE"
+            or not isinstance(all_state, dict)
+            or all_state["status"] != "COMPLETE"
+            or len(all_state["records"]) != all_state["total"]
+            or all_state["total"] == 0
+        ):
+            result["reason"] = "MACHINE_COVERAGE_NOT_ADMISSIBLE"
+            return result
+        records = all_state["records"]
+        if any(
+            item.get("record_role") != "TASK"
+            or item.get("source_kind") != "MACHINE"
+            or item.get("work_status") is None
+            for item in records
+        ):
+            result["reason"] = "MACHINE_TASK_INVALID"
+            return result
+    except (RepositoryProjectionCacheError, AttributeError, TypeError, ValueError):
+        result["reason"] = "MACHINE_SOURCE_INVALID"
+        return result
+    result["authority"] = "MACHINE_TEST_ONLY"
+    result["active_work"] = [item["url"] for item in records]
+    result["reason"] = "ISOLATED_ADMISSION"
+    return result
+
+
 def render_cached_projection(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
         payload,
