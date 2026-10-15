@@ -1,6 +1,6 @@
 # R2 Decision — Cross-entrypoint GitHub Issue metadata concurrency
 
-**Status:** NEGATIVE COUNTEREXAMPLE ACCEPTANCE PENDING PR/CI; global serializable Issue writes **NOT established**.  
+**Status:** BOUNDED NEGATIVE PROOF AND DECISION CONTRACT; global serializable Issue writes **NOT established**. Hosted acceptance is recorded in the owning Work Order.  
 Owner: [devflow #487](https://github.com/kinoko34077/devflow/issues/487) / [R2 Work Order #632](https://github.com/kinoko34077/devflow/issues/632).  
 Scope: existing Public devflow GitHub Issue body writers, not a new permission, active dispatcher, credential or workflow.
 
