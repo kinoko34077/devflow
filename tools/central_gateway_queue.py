@@ -151,15 +151,11 @@ class SQLiteFakeJobLedger:
         def act():
             old = self._get(rec.digest)
             if old is not None:
-                _require(old[:9] == expected[:9] if False else (
-                    (old.digest, old.repository, old.task_ref, old.source_sha,
-                     old.recipe_sha256, old.attempt_id, old.actor, old.nonce,
-                     old.epoch)
-                    ==
-                    (expected.digest, expected.repository, expected.task_ref,
-                     expected.source_sha, expected.recipe_sha256,
-                     expected.attempt_id, expected.actor, expected.nonce,
-                     expected.epoch)), "ATTEMPT_COLLISION")
+                _require(
+                    tuple(getattr(old, key) for key in _COLS[:9])
+                    == tuple(getattr(expected, key) for key in _COLS[:9]),
+                    "ATTEMPT_COLLISION",
+                )
                 return old  # Never reset IN_FLIGHT / UNCERTAIN / completed.
             count = self._db.execute(
                 "SELECT COUNT(*) FROM gateway_sim_jobs"
