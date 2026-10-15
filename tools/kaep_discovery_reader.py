@@ -206,6 +206,81 @@ def discover_batch(
     return result
 
 
+MAX_SHADOW_BATCHES = 10
+
+
+def discover_index_shadow(
+    index_pages: str, *, expected_notice_actor: str,
+    expected_source_actor: str, fetch_source: Callable[[str, int], str],
+    after_id: int = 0, max_batches: int = MAX_SHADOW_BATCHES,
+) -> dict[str, Any]:
+    """Opt-in bounded #503 index shadow, using the unchanged strict reader.
+
+    Exhausting this *index* does not prove complete original-Issue discovery,
+    active requests, peer identity, current HEAD, or M3/Agent Inbox authority.
+    """
+    if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
+        _fail("INVALID_SHADOW_LIMIT")
+    # Preserve fail-closed provider transport/page validation in discover_batch.
+    cursor = after_id
+    source_cache: dict[tuple[str, int], str] = {}
+    hints: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    seen_roots: set[tuple[str, str, int]] = set()
+    duplicate_verified_pointers = 0
+    batches = 0
+
+    def cached_source(repository: str, issue: int) -> str:
+        key = (repository, issue)
+        if key not in source_cache:
+            source_cache[key] = fetch_source(repository, issue)
+        return source_cache[key]
+
+    for _ in range(max_batches):
+        batch = discover_batch(
+            index_pages, expected_notice_actor=expected_notice_actor,
+            expected_source_actor=expected_source_actor,
+            fetch_source=cached_source, after_id=cursor,
+        )
+        batches += 1
+        for hint in batch["hints"]:
+            root_key = (hint["owning_issue"], hint["source_message_id"],
+                        hint["source_comment_id"])
+            if root_key in seen_roots:
+                duplicate_verified_pointers += 1
+                continue
+            seen_roots.add(root_key)
+            hints.append(hint)
+        rejected.extend(batch["rejected"])
+        blocked.extend(batch["blocked"])
+        if blocked:
+            # Do not advance a durable cursor past an unreadable original.
+            cursor = batch["next_after_id"]
+            status = "PARTIAL_BLOCKED"
+            truncated = True
+            break
+        cursor = batch["next_after_id"]
+        if not batch["truncated"]:
+            status = "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY"
+            truncated = False
+            break
+    else:
+        status = "BOUNDED_TRUNCATED"
+        truncated = True
+
+    if rejected and status == "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY":
+        status = "INDEX_EXHAUSTED_WITH_REJECTIONS"
+    return {
+        "status": status, "hints": hints, "rejected": rejected,
+        "blocked": blocked, "next_after_id": cursor,
+        "truncated": truncated, "scanned_batches": batches,
+        "distinct_source_issue_count": len(source_cache),
+        "duplicate_verified_pointers": duplicate_verified_pointers,
+        "read_only": True, "peer_identity_verified": False,
+        "complete_work_inventory": False, "fallback_retirement_authorized": False,
+    }
+
 def discover(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
@@ -226,13 +301,22 @@ def discover(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--after-id", type=int, default=0)
+    parser.add_argument("--shadow-all", action="store_true",
+                        help="GET-only bounded #503 index shadow; never promotes authority")
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--expect-source-actor", required=True)
     args = parser.parse_args(argv)
     try:
+        index_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
+        if args.shadow_all:
+            result = discover_index_shadow(
+                index_pages, expected_notice_actor=args.expect_notice_actor,
+                expected_source_actor=args.expect_source_actor,
+                fetch_source=fetch_gh_pages, after_id=args.after_id)
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            return 0 if result["status"] == "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY" else 2
         result = discover_batch(
-            fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE),
-            expected_notice_actor=args.expect_notice_actor,
+            index_pages, expected_notice_actor=args.expect_notice_actor,
             expected_source_actor=args.expect_source_actor,
             fetch_source=fetch_gh_pages, after_id=args.after_id)
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
