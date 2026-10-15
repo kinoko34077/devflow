@@ -209,6 +209,8 @@ class SQLiteFakeJobLedger:
             row = self._get(receipt.request_digest)
             _require(row is not None, "UNKNOWN_ATTEMPT")
             _require(row.epoch == receipt.fence_epoch, "STALE_FENCE_EPOCH")
+            _require(row.state in {"IN_FLIGHT", "SIMULATED_RESULT"},
+                     "NOT_IN_FLIGHT")
             _require(row.backend == receipt.backend, "BACKEND_MISMATCH")
             if row.state == "SIMULATED_RESULT":
                 _require(row.output_sha256 == receipt.output_sha256,
