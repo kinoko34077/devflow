@@ -31,6 +31,7 @@ def snap(page):
         loadMs:Math.round(nav.loadEventEnd||0),
         firstPaintMs:fcp?Math.round(fcp.startTime):null,
         requests:assets.length,
+        editorModuleRequests:assets.filter(x=>x.name.includes('/visual-editor-platform/')).length,
         transferKB:Math.round(sum(assets,'transferSize')/1024),
         decodedKB:Math.round(sum(assets,'decodedBodySize')/1024),
         jsDecodedKB:Math.round(sum(assets.filter(x=>/\\.m?js(?:[?#]|$)/.test(x.name)),'decodedBodySize')/1024)
@@ -74,6 +75,13 @@ def run():
                 assert page.locator('[data-ve-model-pilot="1"]').count()==0
               page.wait_for_timeout(120)
               record=snap(page)
+              if site["ready"]=="dom":
+                if mode=="normal" and record["editorModuleRequests"]!=0:
+                  raise AssertionError(site["name"]+" normal page unexpectedly fetched editor runtime")
+                if mode=="editor" and record["editorModuleRequests"]<3:
+                  raise AssertionError(site["name"]+" editor did not load expected shared modules")
+              if failures:
+                raise AssertionError(site["name"]+" public page errors: "+repr(failures[:4]))
               metrics={v["name"]:v["value"] for v in cdp.send("Performance.getMetrics")["metrics"]}
               record["heapKB"]=round(metrics.get("JSHeapUsedSize",0)/1024)
               record["taskMs"]=round(metrics.get("TaskDuration",0)*1000,1)
@@ -84,7 +92,7 @@ def run():
               samples.append(record)
               context.close()
             keys=["readyMs","domMs","loadMs","firstPaintMs","requests",
-                  "transferKB","decodedKB","jsDecodedKB","heapKB","taskMs","scriptMs","layoutMs"]
+                  "transferKB","decodedKB","jsDecodedKB","editorModuleRequests","heapKB","taskMs","scriptMs","layoutMs"]
             result={"site":site["name"],"width":width,"mode":mode,"samples":RUNS}
             for k in keys:
               nums=[s[k] for s in samples if s[k] is not None]
