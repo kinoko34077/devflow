@@ -20,6 +20,7 @@ class CacheWritePlan:
     repository: str
     control_issue_number: int
     expected_body_sha256: str
+    expected_updated_at: str
     desired_body: str
     generation_id: str
     human_portfolio_generation_id: str
@@ -125,6 +126,22 @@ def prepare_target(
         raise RepositoryProjectionCacheProducerError(
             "Repository Control body is unavailable"
         )
+    try:
+        original_snapshot = snapshot_issue(
+            {
+                "repository": devflow_repository,
+                "number": issue.get("number"),
+                "updated_at": issue.get("updated_at"),
+                "state": issue.get("state"),
+                "body": body,
+            },
+            repository=devflow_repository,
+            number=control_issue_number,
+        )
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "Repository Control initial snapshot is incomplete"
+        ) from exc
 
     try:
         live_projection = service.get_repository_projection(repository)
@@ -201,6 +218,7 @@ def prepare_target(
         repository=repository,
         control_issue_number=control_issue_number,
         expected_body_sha256=expected_body_sha256,
+        expected_updated_at=original_snapshot.updated_at,
         desired_body=desired_body,
         generation_id=str(payload["generation_id"]),
         human_portfolio_generation_id=str(human_payload["generation_id"]),
@@ -268,9 +286,13 @@ def apply_plan(writer: Any, plan: CacheWritePlan, *, service: Any) -> dict[str, 
         raise RepositoryProjectionCacheProducerError(
             "pre-write Control trust/observation unavailable"
         ) from exc
-    if current.get("title") != expected_title or trusted is not True:
+    if (
+        current.get("title") != expected_title
+        or trusted is not True
+        or observation.updated_at != plan.expected_updated_at
+    ):
         raise RepositoryProjectionCacheProducerError(
-            "pre-write Control identity or shared trust changed"
+            "pre-write Control identity, revision or shared trust changed"
         )
     if (
         maintenance_sync_check.canonical_body_sha256(observation.body)
@@ -298,6 +320,7 @@ def apply_plan(writer: Any, plan: CacheWritePlan, *, service: Any) -> dict[str, 
             plan.control_issue_number,
             plan.desired_body,
             expected_body_sha256=plan.expected_body_sha256,
+            expected_updated_at=plan.expected_updated_at,
             expected_control_repository=repository,
             trust_checker=service.is_repository_control_trusted,
         )
