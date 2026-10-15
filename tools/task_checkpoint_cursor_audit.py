@@ -85,17 +85,49 @@ def audit_issue_ids(
             "mutation": False}
 
 
+
+def discover_open_issue_ids(read_transport: object, repository: str, *, max_issues: int = 100) -> list[int]:
+    """Discover *all* open owner Issues within a hard bounded limit.
+
+    No silent truncated-pool PASS: oversized fleets need repository-scoped
+    partitioning or an explicitly larger reviewed budget.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("invalid repository")
+    if not 1 <= max_issues <= 100:
+        raise ValueError("max_issues must be 1..100")
+    rows = read_transport.get_paginated(f"/repos/{repository}/issues?state=open&per_page=100")
+    if not isinstance(rows, list):
+        raise ValueError("incomplete issue discovery")
+    owners = [row for row in rows if isinstance(row, dict) and "pull_request" not in row]
+    if len(owners) > max_issues:
+        raise ValueError("issue set exceeds capped coverage; no partial PASS")
+    ids = []
+    for row in owners:
+        n = row.get("number")
+        if type(n) is not int or n < 1:
+            raise ValueError("invalid discovered issue identity")
+        ids.append(n)
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate discovered issue identities")
+    return ids
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="GET-only bounded Cursor inventory")
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--issue", type=int, action="append", required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--issue", type=int, action="append")
+    group.add_argument("--discover-open", action="store_true")
+    parser.add_argument("--max-issues", type=int, default=100)
     args = parser.parse_args()
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         parser.error("GITHUB_TOKEN is required for authenticated read-only discovery")
     from tools.maintenance_github import GitHubReadTransport
     transport = GitHubReadTransport(token=token)
-    report = audit_issue_ids(transport, args.repository, args.issue)
+    issue_ids = (discover_open_issue_ids(transport, args.repository, max_issues=args.max_issues)
+                 if args.discover_open else args.issue)
+    report = audit_issue_ids(transport, args.repository, issue_ids)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
     return 0
 
