@@ -23,5 +23,5 @@ jobs:
       - name: Low-impact 3x sequential public Pages benchmark
         env:
           PYTHONUNBUFFERED: '1'
-          INCLUDE_GOMOKU: '0'
+          INCLUDE_GOMOKU: '1'
         run: python3 tools/visual_editor_public_performance.py
