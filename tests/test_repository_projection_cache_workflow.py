@@ -53,7 +53,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
         job = self._cache_job()
         self.assertIn("concurrency:", job)
         self.assertIn(
-            "group: repository-projection-cache-${{ github.repository }}",
+            "group: devflow-control-writes-${{ github.repository }}",
             job,
         )
         self.assertIn("cancel-in-progress: false", job)
