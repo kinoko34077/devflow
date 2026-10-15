@@ -1198,7 +1198,7 @@ def _closed_health_revision(issue: Any, number: int) -> tuple[str, str]:
         or not isinstance(issue.get("body"), str)
         or not isinstance(issue.get("updated_at"), str)
         or re.fullmatch(
-            r"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z",
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
             issue["updated_at"],
         ) is None
     ):
