@@ -203,5 +203,65 @@ class NativeCoverageCollectorTests(unittest.TestCase):
         self.assertEqual("NOT_RUN", deep.status)
 
 
+def v2_comment(*, result="CLEAN", author="OWNER", digest_override=None, scope=None):
+    from tools.maintenance_catalog import (
+        Scope, canonical_catalog_digest, parse_common_baseline_text,
+        parse_repository_catalog_text,
+    )
+    from tools.maintenance_run_attestation import (
+        AttestedRun, render_attested_run_comment,
+    )
+    baseline = parse_common_baseline_text(BASELINE)
+    catalog = parse_repository_catalog_text(CATALOG, baseline)
+    digest = canonical_catalog_digest(baseline, catalog)
+    obj = AttestedRun(
+        record=record(result=result),
+        scope=scope if scope is not None else Scope("repository", "."),
+        coverage_key="common.correctness",
+        catalog_digest=digest_override or digest,
+    )
+    entry = comment(result=result, author=author)
+    entry["body"] = render_attested_run_comment(obj)
+    return entry
+
+
+class DualVersionGitHubCollectorTests(unittest.TestCase):
+    def test_legacy_and_v2_readers_run_without_writing_issues(self):
+        fake = FakeGET([v2_comment()])
+        obs = observe(fake)
+        self.assertEqual(1, obs.attested_records)
+        self.assertEqual(1, obs.substantive_legacy_records)
+        self.assertEqual("ATTESTED_SCOPE_MATCH", correct_row(obs).status)
+        self.assertFalse(any(call[0] in ("write", "post", "patch") for call in fake.calls))
+
+    def test_signed_looking_but_untrusted_v2_is_not_a_completed_audit(self):
+        obs = observe(FakeGET([v2_comment(author="CONTRIBUTOR")]))
+        self.assertEqual("UNTRUSTED", correct_row(obs).status)
+        self.assertEqual(0, obs.substantive_legacy_records)
+        self.assertEqual(1, obs.untrusted_records)
+
+    def test_v2_observed_catalog_digest_mismatch_is_not_scope_coverage(self):
+        obs = observe(FakeGET([v2_comment(digest_override="sha256:" + "f" * 64)]))
+        self.assertEqual("CATALOG_DRIFT", correct_row(obs).status)
+
+    def test_v2_wrong_scope_is_rejected_as_current_scope_proof(self):
+        from tools.maintenance_catalog import Scope
+        obs = observe(FakeGET([v2_comment(scope=Scope("component", "moved"))]))
+        self.assertEqual("SCOPE_DRIFT", correct_row(obs).status)
+
+    def test_mixed_duplicate_run_id_is_ambiguous_not_complete(self):
+        obs = observe(FakeGET([comment(), v2_comment()]))
+        self.assertEqual("AMBIGUOUS_HISTORY", correct_row(obs).status)
+
+    def test_malformed_v2_or_both_sentinels_fail_closed(self):
+        for body in ("<!-- devflow-maintenance-run:v2 --> not-json",
+                     v2_comment()["body"] + "\n<!-- devflow-maintenance-run:v1 -->"):
+            with self.subTest(length=len(body)):
+                item = v2_comment()
+                item["body"] = body
+                with self.assertRaises(CoverageCollectionError):
+                    observe(FakeGET([item]))
+
+
 if __name__ == "__main__":
     unittest.main()

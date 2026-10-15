@@ -11,9 +11,18 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from tools.maintenance_catalog import (
-    parse_common_baseline_text, parse_repository_catalog_text, resolve_catalog,
+    canonical_catalog_digest, parse_common_baseline_text,
+    parse_repository_catalog_text, resolve_catalog,
 )
-from tools.maintenance_coverage import (CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS, derive_coverage)
+from tools.maintenance_coverage import (
+    CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS,
+)
+from tools.maintenance_coverage_v2 import (
+    AttestedLedgerEvidence, derive_dual_version_coverage,
+)
+from tools.maintenance_run_attestation import (
+    ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
+)
 from tools.maintenance_ledger import (
     MaintenanceLedgerError, extract_active_run, parse_run_comment,
 )
@@ -36,6 +45,7 @@ class CoverageObservation:
     catalog_blob_sha: str
     comments_scanned: int
     machine_records: int
+    attested_records: int
     substantive_legacy_records: int
     noncredit_records: int
     untrusted_records: int
@@ -129,15 +139,29 @@ def collect_repository_coverage(
         raise CoverageCollectionError("Ledger comments pagination result invalid")
 
     history: list[LedgerEvidence] = []
+    attested: list[AttestedLedgerEvidence] = []
     for item in comments:
         if not isinstance(item, dict):
             raise CoverageCollectionError("Ledger comment row is invalid")
         body = item.get("body")
         if not isinstance(body, str):
             raise CoverageCollectionError("Ledger comment body unavailable")
-        if RUN_SENTINEL not in body:
+        has_v1 = RUN_SENTINEL in body
+        has_v2 = ATTESTATION_SENTINEL in body
+        if not has_v1 and not has_v2:
             continue
+        if has_v1 and has_v2:
+            raise CoverageCollectionError("ambiguous dual sentinel in one comment")
         url = _comment_origin(item, repository, ledger_issue_number)
+        if has_v2:
+            try:
+                proof = parse_attested_run_comment(body)
+            except RunAttestationError as exc:
+                raise CoverageCollectionError("malformed v2 machine audit run") from exc
+            if proof is None or proof.record.repository != repository:
+                raise CoverageCollectionError("v2 machine record identity invalid")
+            attested.append(AttestedLedgerEvidence(proof, url, item["author_association"]))
+            continue
         try:
             record = parse_run_comment(body)
         except MaintenanceLedgerError as exc:
@@ -146,18 +170,27 @@ def collect_repository_coverage(
             raise CoverageCollectionError("machine record identity invalid")
         history.append(LedgerEvidence(record, url, item["author_association"]))
 
+    all_evidence = history + [
+        LedgerEvidence(item.attestation.record, item.source_url, item.author_association)
+        for item in attested
+    ]
     complete = {"CLEAN", "FINDINGS", "RECONCILED"}
-    trusted_history = [e for e in history if e.author_association in TRUSTED_ASSOCIATIONS]
-    rows = derive_coverage(slots, history, current_fingerprints or {})
+    trusted_history = [e for e in all_evidence if e.author_association in TRUSTED_ASSOCIATIONS]
+    current_digest = canonical_catalog_digest(shared, catalog)
+    rows = derive_dual_version_coverage(
+        slots, history, attested, current_fingerprints or {},
+        {repository: current_digest},
+    )
     return CoverageObservation(
         repository=repository,
         ledger_issue_number=ledger_issue_number,
         catalog_blob_sha=local["sha"],
         comments_scanned=len(comments),
-        machine_records=len(history),
+        machine_records=len(all_evidence),
+        attested_records=len(attested),
         substantive_legacy_records=sum(e.record.result in complete for e in trusted_history),
         noncredit_records=sum(e.record.result not in complete for e in trusted_history),
-        untrusted_records=len(history) - len(trusted_history),
+        untrusted_records=len(all_evidence) - len(trusted_history),
         active_run_id=active.run_id if active else None,
         rows=rows,
     )
