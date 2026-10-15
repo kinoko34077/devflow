@@ -61,12 +61,18 @@ WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 API_BASE = "https://api.github.com"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+SUBSTANTIVE_AUDIT_RESULTS = frozenset({"CLEAN", "FINDINGS", "RECONCILED"})
 CANDIDATE_BEGIN = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
 CANDIDATE_END = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
 _REF_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:(?P<owner>[A-Za-z0-9_.-]+)/)?"
     r"(?P<repo>[A-Za-z0-9_.-]+)#(?P<number>[1-9][0-9]*)"
 )
+
+
+def _completed_audit_evidence(record: RunRecord) -> bool:
+    """Only substantive accepted audit results count toward coverage/score."""
+    return record.result in SUBSTANTIVE_AUDIT_RESULTS
 
 
 class GitHubReadError(RuntimeError):
@@ -1394,7 +1400,7 @@ def collect_maintenance_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=_completed_audit_evidence(record),
             )
         )
 
@@ -1627,7 +1633,7 @@ def collect_maintenance_portfolio_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=_completed_audit_evidence(record),
             )
             converted_history.append(item)
             if not item.evidence_complete:
