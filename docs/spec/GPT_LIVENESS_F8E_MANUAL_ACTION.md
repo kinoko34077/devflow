@@ -2,7 +2,7 @@
 
 Work owner: [devflow #555](https://github.com/kinoko34077/devflow/issues/555), exact target [devflow #554](https://github.com/kinoko34077/devflow/issues/554). Canonical parent [#516](https://github.com/kinoko34077/devflow/issues/516). Native sender F8A–D accepted [PR #557](https://github.com/kinoko34077/devflow/pull/557). **Workflow deployment and verified PING delivery are separate milestones.** This manual-only workflow is already on main, but real F8 bot PING/ChatGPT ANSWER has NOT been demonstrated.
 
-## Staged but not activated
+## Deployed manual-only workflow (no automatic trigger)
 
 `.github/workflows/gpt-liveness-f8-manual.yml` is a new **`workflow_dispatch`-only** entry point. No `push`, `schedule`, `issue_comment`, `issues.edited`, no webhook subscriber, no new PAT and no provider auto-wake. It is already present on main under the earlier user approval; no schedule was added. A later actual send still requires a separately valid enrollment and an explicitly authorized bounded trial.
 
