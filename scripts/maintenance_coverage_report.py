@@ -22,6 +22,7 @@ from tools.maintenance_coverage_github import (  # noqa: E402
 from tools.maintenance_coverage_report import (  # noqa: E402
     build_coverage_report, render_coverage_markdown,
 )
+from tools.maintenance_coverage_html import render_coverage_html  # noqa: E402
 
 ACCEPTED_PILOTS = frozenset({
     "kinoko34077/devflow",
@@ -83,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Exact accepted owner/name#Issue (repeat, maximum 3)")
     parser.add_argument("--token-env", default="GITHUB_TOKEN",
                         help="Preconfigured native GitHub GET token env name")
-    parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    parser.add_argument("--format", choices=("markdown", "json", "html"), default="markdown")
     parser.add_argument("--output", help="Optional local output; no GitHub writes")
     args = parser.parse_args(argv)
     try:
@@ -91,11 +92,12 @@ def main(argv: list[str] | None = None) -> int:
         if not token:
             raise ValueError("existing authorized token is unavailable")
         report = build_live_report(GitHubReadTransport(token), args.repo_ledger)
-        output = (
-            json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-            if args.format == "json"
-            else render_coverage_markdown(report)
-        )
+        if args.format == "json":
+            output = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        elif args.format == "html":
+            output = render_coverage_html(report)
+        else:
+            output = render_coverage_markdown(report)
         if args.output:
             Path(args.output).write_text(output, encoding="utf-8")
         else:
