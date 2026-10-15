@@ -686,3 +686,72 @@ When an agent cannot perform a required operation:
 - do not replace an admin/security action with an unrelated workaround.
 
 Examples include repository rename, secret registration, security permission changes, Project UI-only structural checks, and history rewrite.
+
+### Actionable blocker-to-recovery packet (standing rule; devflow #567, 2026-10-15)
+
+A work status such as \`BLOCKED\`, \`HOLD\`, \`WAITING\`, failed CI, rejected
+API write, safety-tool denial or missing review is **not a complete report**.
+Before reporting the stop, perform every authorized and safely independent
+step available and evaluate \`CONTINUE / CHANGE_PATH / SPLIT / HOLD / STOP\` at
+the original goal/acceptance level. Then record the following *minimum recovery
+packet* on the owning Issue or its designated progress surface, and include a
+short actionable version in the chat:
+
+1. **What is actually complete vs blocked?** Name the exact operation,
+   repository/Issue/PR/current HEAD/check evidence, status and the smallest
+   blocked scope. Separate verified failure from hypothesis. Do not attribute
+   OpenAI/tool safety denial to GitHub permission failures or vice versa.
+2. **What happens next, concretely?** Name the smallest supported, policy-
+   compliant operation to perform, exact entry point/target and prerequisite.
+   The next step must be executable or must state exactly what is missing.
+   Do not merely say "retry", "request review" or "someone must fix it".
+3. **Who executes it?** Prefer this worker and the existing authenticated
+   native/direct interface when actually capable. Otherwise identify a
+   properly authorized independent reviewer/agent or the exact minimal
+   *user* action and explain why user involvement cannot currently be avoided.
+   Do not falsely claim that a different LLM automatically yields a different
+   GitHub reviewer actor.
+4. **What if that fails?** Rank legitimate remedies (correct a demonstrably
+   faulty input/precondition; one bounded normal-path retry with new evidence;
+   authorized independent agent; minimal genuine user action; split off
+   safely independent work). For platform safety denials, no tool/payload/
+   identity change designed to evade the safeguard and no blind retries.
+   Record a support/escalation path when appropriate. If no lawful/executable
+   remedy exists, say so rather than inventing one.
+5. **When does the task resume or terminate?** State exact evidence to
+   verify (Review object, eligible actor, HEAD match, CI, permission or real
+   backend), downstream actions after that evidence, relevant Human/security
+   gates, and the hold/revisit trigger for the remainder. Preserve existing
+   Task Checkpoint Cursor and execution Session transition semantics.
+
+For review failures, distinguish: (a) a GitHub \`422\` caused by the same
+account trying to \`APPROVE\` its own PR; GitHub natively requires another
+actor to submit that kind of approval; (b) a submitted \`COMMENT\` Pull
+Request Review allowed by §4.1/ #111 when ordinary implementer review is
+eligible; (c) a platform safety refusal before any Review submission.
+A bare Issue or PR Conversation comment is not a submitted Formal Review.
+An accepted alternative reviewer still must read the current exact diff/
+HEAD and publish an authentic Review with applicable provenance. Never
+merge by treating CI or an ordinary comment as a missing Review.
+
+**Worked instance:** execution-coordinator #136 / Draft PR #137:
+the verified head \`1aadca5abc5ec7fd7e21570bf1335cf4163ace8f\` passed
+362/362 tests and compile in Required #38580500649. A self-\`APPROVE\`
+attempt got GitHub 422; a normal \`COMMENT\` Review submission was denied
+by the OpenAI tool safety system, so there is **no submitted Review object**.
+Safe next path: use an actually authorized reviewer with a legitimate GitHub
+review channel (distinct account if native \`APPROVE\` is required), or request
+a genuine submitted \`COMMENT\` Review via GitHub's UI by a user/reviewer
+who has actually checked the exact PR head. After the Review object is
+verified, recompute readiness/CI/HEAD, remove Draft status only if
+appropriate, merge under existing rules and verify on main. If this
+current worker's Review route remains denied, keep only that merge gated,
+document a precise reviewer handoff, and continue independent authorized
+work. Do not suggest changing tools, credentials or presentation to defeat
+the provider safety control, nor pretend a user must intervene before all
+ordinary independent work is exhausted.
+
+**Compact user-report contract:** actual state → why this operation is
+blocked → **next action + actor** → legitimate fallback or escalation →
+**resumption evidence + whether user must act** → owning Issue. Skip
+unnecessary filler, but never omit the next action/actor merely for brevity.
