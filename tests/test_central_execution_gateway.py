@@ -256,6 +256,40 @@ class OfflineCentralGatewayTests(unittest.TestCase):
         self.denies("NONCE_REPLAY",
                     lambda: self.submit(job=other, proof=self.proof(other)))
 
+    def test_mutating_original_inputs_cannot_change_enqueued_job(self):
+        self.submit()
+        self.job.inputs["mode"] = "changed-after-admission"
+        self.assertEqual(
+            self.store.records[self.digest].job.inputs["mode"], "audit",
+        )
+        with self.assertRaises(TypeError):
+            self.store.records[self.digest].job.inputs["mode"] = "tamper"
+        result = self.gateway.run_next(now=111)
+        self.assertEqual(result.state, "SIMULATED_RESULT")
+        self.assertEqual(result.receipt.request_digest, self.digest)
+
+    def test_mutating_original_catalog_schema_cannot_bypass_policy(self):
+        self.policy.input_schema["mode"] = "bool"
+        self.assertEqual(self.gateway.catalog[
+            ("kinoko34077/sample", "audit.read")
+        ].input_schema["mode"], "str")
+        with self.assertRaises(TypeError):
+            self.gateway.catalog[("kinoko34077/sample", "audit.read")
+                                 ].input_schema["mode"] = "bool"
+        self.assertEqual(self.submit().state, "QUEUED")
+
+    def test_nonhashable_untrusted_lookup_fields_fail_closed(self):
+        for job in (
+            replace(self.job, repository=[]),
+            replace(self.job, recipe_id=[]),
+            replace(self.job, repository={}),
+        ):
+            with self.subTest(job=repr(job)[:60]):
+                self.denies(
+                    "INVALID_REQUEST",
+                    lambda j=job: self.submit(job=j, proof=self.proof()),
+                )
+
     def test_unapproved_fake_not_replaceable_by_effectful_host(self):
         class PretendBackend:
             def run(self, *args):  # pragma: no cover - must never be called
