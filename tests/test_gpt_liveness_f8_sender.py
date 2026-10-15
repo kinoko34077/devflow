@@ -120,10 +120,12 @@ class F8OneMailboxTests(unittest.TestCase):
                          pages="[[]]", now=NOW)
         calls = []
         result = dispatch(report=report, want_send=True, confirmed_mailbox=ALLOWED_MAILBOX,
-                          sender=lambda args: calls.append(args) or 0)
+                          sender=lambda args: calls.append(args) or {"status": "SENT_AND_READ_BACK", "posted_comment_id": 12345})
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0], ["--repository", REPO, "--issue", "554", "--send"])
-        self.assertEqual(result["status"], "F4_SENDER_EXECUTED")
+        self.assertEqual(result["status"], "SENT_AND_READ_BACK")
+        self.assertTrue(result["readback_confirmed"])
+        self.assertEqual(result["posted_comment_id"], 12345)
         self.assertFalse(result["claim_authority"])
         self.assertFalse(result["gpt_currently_alive_proven"])
 
@@ -132,7 +134,17 @@ class F8OneMailboxTests(unittest.TestCase):
                          pages="[[]]", now=NOW)
         with self.assertRaisesRegex(InvalidMessage, "F4_POST_OR_READBACK_FAILED"):
             dispatch(report=report, want_send=True, confirmed_mailbox=ALLOWED_MAILBOX,
-                     sender=lambda _: 2)
+                     sender=lambda _: {"status": "BLOCKED"})
+
+    def test_f4_early_exit_does_not_become_a_false_post(self):
+        report = preview(raw_manifest=manifest(), snapshot=issue(body=enrolled()),
+                         pages="[[]]", now=NOW)
+        result = dispatch(report=report, want_send=True,
+                          confirmed_mailbox=ALLOWED_MAILBOX,
+                          sender=lambda _: {"status": "NO_ACTIVE_ENROLLMENT"})
+        self.assertEqual(result["status"], "NO_ACTIVE_ENROLLMENT")
+        self.assertFalse(result["readback_confirmed"])
+        self.assertFalse(result["post_attempted"])
 
     def test_forged_preview_authority_never_reaches_sender(self):
         report = preview(raw_manifest=manifest(), snapshot=issue(body=enrolled()),
@@ -149,7 +161,7 @@ class F8OneMailboxTests(unittest.TestCase):
             with patch("tools.gpt_liveness_f8_sender.fetch_owning_issue",
                        return_value=issue(state="open",body="")), \
                  patch("tools.gpt_liveness_f8_sender.fetch_gh_pages") as comments, \
-                 patch("tools.gpt_liveness_f8_sender.single_target_pilot_main") as sender, \
+                 patch("tools.gpt_liveness_f8_sender._invoke_existing_f4") as sender, \
                  redirect_stdout(io.StringIO()) as output:
                 code = main(["--manifest", str(file)])
             self.assertEqual(code, 0)
