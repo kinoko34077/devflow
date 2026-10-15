@@ -101,8 +101,7 @@ class IssueMetadataPreflightTests(unittest.TestCase):
             ORIGINAL.replace(BEGIN, ""),
             ORIGINAL + BEGIN,
             ORIGINAL + END,
-            ORIGINAL.replace(BEGIN, "temporary").replace(END, BEGIN)
-            + END,
+            ORIGINAL.replace(END, "temporary"),
             END + "\n" + ORIGINAL.replace(END, "temporary"),
         ]
         for body in variants:
