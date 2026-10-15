@@ -689,10 +689,10 @@ Examples include repository rename, secret registration, security permission cha
 
 ### Actionable blocker-to-recovery packet (standing rule; devflow #567, 2026-10-15)
 
-A work status such as \`BLOCKED\`, \`HOLD\`, \`WAITING\`, failed CI, rejected
+A work status such as `BLOCKED`, `HOLD`, `WAITING`, failed CI, rejected
 API write, safety-tool denial or missing review is **not a complete report**.
 Before reporting the stop, perform every authorized and safely independent
-step available and evaluate \`CONTINUE / CHANGE_PATH / SPLIT / HOLD / STOP\` at
+step available and evaluate `CONTINUE / CHANGE_PATH / SPLIT / HOLD / STOP` at
 the original goal/acceptance level. Then record the following *minimum recovery
 packet* on the owning Issue or its designated progress surface, and include a
 short actionable version in the chat:
@@ -724,9 +724,9 @@ short actionable version in the chat:
    gates, and the hold/revisit trigger for the remainder. Preserve existing
    Task Checkpoint Cursor and execution Session transition semantics.
 
-For review failures, distinguish: (a) a GitHub \`422\` caused by the same
-account trying to \`APPROVE\` its own PR; GitHub natively requires another
-actor to submit that kind of approval; (b) a submitted \`COMMENT\` Pull
+For review failures, distinguish: (a) a GitHub `422` caused by the same
+account trying to `APPROVE` its own PR; GitHub natively requires another
+actor to submit that kind of approval; (b) a submitted `COMMENT` Pull
 Request Review allowed by §4.1/ #111 when ordinary implementer review is
 eligible; (c) a platform safety refusal before any Review submission.
 A bare Issue or PR Conversation comment is not a submitted Formal Review.
@@ -735,13 +735,13 @@ HEAD and publish an authentic Review with applicable provenance. Never
 merge by treating CI or an ordinary comment as a missing Review.
 
 **Worked instance:** execution-coordinator #136 / Draft PR #137:
-the verified head \`1aadca5abc5ec7fd7e21570bf1335cf4163ace8f\` passed
-362/362 tests and compile in Required #38580500649. A self-\`APPROVE\`
-attempt got GitHub 422; a normal \`COMMENT\` Review submission was denied
+the verified head `1aadca5abc5ec7fd7e21570bf1335cf4163ace8f` passed
+362/362 tests and compile in Required #38580500649. A self-`APPROVE`
+attempt got GitHub 422; a normal `COMMENT` Review submission was denied
 by the OpenAI tool safety system, so there is **no submitted Review object**.
 Safe next path: use an actually authorized reviewer with a legitimate GitHub
-review channel (distinct account if native \`APPROVE\` is required), or request
-a genuine submitted \`COMMENT\` Review via GitHub's UI by a user/reviewer
+review channel (distinct account if native `APPROVE` is required), or request
+a genuine submitted `COMMENT` Review via GitHub's UI by a user/reviewer
 who has actually checked the exact PR head. After the Review object is
 verified, recompute readiness/CI/HEAD, remove Draft status only if
 appropriate, merge under existing rules and verify on main. If this
