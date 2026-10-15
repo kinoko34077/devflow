@@ -164,3 +164,65 @@ The owning Issue / Work Order owns task truth. The durable progress surface owns
 The cursor does not replace the durable progress surface or its evidence. A dead/stale Session does not erase the task frontier; a successor reads the live durable state and cursor, checks collision/readiness, and continues from the current frontier.
 
 Canonical standing policy: `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md`.
+
+
+## 12. Agent-format resilience and audit (Work Order #576)
+
+The original strict `parse_cursor_comment()` and `render_cursor_comment()`
+remain the canonical representation and writer contract. For **reading a
+trusted existing Issue comment**, use `inspect_cursor_comments()`, which
+invokes bounded `parse_cursor_comment_compatible()` and may report
+`WARN_NORMALIZED` or `WARN_IGNORED_ANNOTATION` while keeping `OK_CURSOR`.
+The compatible reader can normalize valid timezone-aware fractional-second or
+offset timestamps, harmless whitespace/order changes and trailing prose, and
+can ignore scalar auxiliary metadata (such as `blocker`). It does **not**
+grant authority to ignored keys: the owning Issue/progress ledger owns blockers,
+readiness, permissions, actor identity, claims, and review gates. Duplicate
+required or auxiliary keys, contradictory/malformed core state, wrong task,
+invalid revision, duplicate trusted markers, untrusted actors, injection-like
+YAML, and unsupported nesting are never silently accepted.
+
+For new writes, call the existing canonical renderer. Optional
+`tools/task_checkpoint_cursor_transport.py::apply_cursor_write()` gives
+Python-capable agents a bounded authenticated-GitHub-adapter protocol for
+the sole owning Issue comment: list current comments, compare expected
+revision+frontier, prepare already-verified canonical state, update same
+trusted comment (or initialize revision 1), and immediately re-read. The
+caller supplies an *already authenticated* GitHub transport; the module does
+not create tokens, authorize a checkpoint, acquire a claim, obtain a lock,
+or implement atomic compare-and-swap. On ambiguity, stale expectations,
+write/readback drift or unsafe eligibility, return a typed warning and
+reconcile from the owning durable surface. Normal advances cannot reopen
+a terminal marker; explicit reconciliation needs reason plus evidence.
+Other clients (ChatGPT GitHub connector, Claude, Codex) may perform the
+same operations natively, but **must not hand-craft inconsistent payloads
+or omit re-read verification** merely because a Python adapter is not exposed.
+
+### Scoped read-only audit
+
+`tools/task_checkpoint_cursor_audit.py` is GET-only and can inspect a
+finite, explicit set of Issue IDs through the existing authenticated
+`tools.maintenance_github.GitHubReadTransport` and fully paginated
+comments. Example (the token is read from a pre-existing environment,
+never written to an Issue):
+
+```sh
+python -m tools.task_checkpoint_cursor_audit --repository kinoko34077/devflow --issue 531 --issue 541 --issue 465 --issue 560
+```
+
+It emits counts + `PASS`, `NORMALIZABLE`, `STALE_FRONTIER`,
+`MISSING_ELIGIBLE`, `EXEMPT`, `NEEDS_EVIDENCE`, or
+`TRUST_CONFLICT`. `MISSING_ELIGIBLE` requires separately proven
+eligibility. `STALE_FRONTIER` requires a separately verified current
+frontier supplied to its library API; textual heuristics do **not**
+promote arbitrary Issue paragraphs into authority. A missing marker on
+an ambiguous parallel umbrella stays `NEEDS_EVIDENCE`, rather than
+inventing a task-level cursor. A valid historical acceptance head
+does not become stale merely because repository main advanced.
+
+This collector is currently **manually invocable** only. A scheduled
+cadence or automatic effectful repair is not implied by deploying
+read-only code. Any cadence rollout first needs actual bounded
+runtime/cost/noise evidence, appropriate ownership and authorization.
+Do not alter credentials, repository security settings, or publish
+private Issue bodies as cross-repository reports.
