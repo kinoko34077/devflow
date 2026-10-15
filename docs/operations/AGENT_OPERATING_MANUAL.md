@@ -629,6 +629,62 @@ Do not convert the repository to Base merely because it is managed.
 
 ## 11. Tool/access limitations
 
+### Actionable blocker-to-recovery reports (2026-10-15; devflow #567)
+
+An operational report must never end at a bare `BLOCKED`, `HOLD`, `WAIT`,
+"the check failed", or "a Review could not be submitted". Each report to
+the owning Issue/Work Order, and its brief user-facing projection, must
+contain a **minimum viable recovery packet**:
+
+1. **Observed state and exact boundary:** cite the most recent trusted
+   commit/PR HEAD, attempt/run/check or error. State precisely what is accepted
+   and what single operation did not complete; separate pre-step runner
+   admission, repository CI, GitHub API permissions, platform safety denial,
+   transport failure, review gate, and Human/real-device evidence.
+2. **Immediate authorized action:** name the smallest concrete UI step,
+   GitHub-native API/workflow, existing owner Issue/PR, or documented command.
+   Include exact target, required prerequisites and scope; do not say only
+   "resolve blocker", "rerun", "contact support" or "wait".
+3. **Actor / ownership:** specify whether the current agent can perform the
+   action with its existing tools, another legitimately authorized reviewer/
+   producer must do it, or a Human must change an account-side setting.
+   Do not make the Human responsible for a reversible authorized action the
+   current agent can safely complete.
+4. **Fallback and safety:** choose the supported native/direct route first,
+   then only an evidence-backed retry after changed arguments, prerequisites
+   or observable conditions; otherwise record a genuinely authorized distinct
+   route or split independently safe work. Never repeat an unchanged rejected
+   operation, disguise a previously denied safety-sensitive request, change
+   actor/credentials solely to evade controls, weaken CI/review, or claim an
+   Issue/PR Conversation comment is a GitHub native Formal Review.
+5. **Verification / exit:** define what independent positive evidence will
+   confirm recovery (exact-head CI with real steps, native Review object,
+   authenticated workflow run ID, device result, etc.); say which owning
+   Issue resumes and which tasks remain HOLD. If no authorized path is
+   available, explain the exact external decision/support escalation or
+   accepted HOLD condition, not a fictitious workaround.
+
+A task's rejected **operation** is not the same as a rejected **goal**.
+Apply the global replanning choices `CONTINUE / CHANGE_PATH / SPLIT / HOLD /
+STOP` to the narrowest affected scope and preserve independent admitted
+work. Report the exact denial separately from verified earlier outcomes.
+
+**Concrete native-Review example (execution-coordinator #136 / PR #137):**
+GitHub `APPROVE` by the PR author returns 422 because self-approval is
+natively disallowed. A platform denial of a `COMMENT` Formal Review is a
+*different* gate; neither failure is a code-test failure, and an Issue comment
+does not satisfy the formal review object. Recovery is a legitimate second
+reviewer (or Human PR **Files changed → Review changes → Comment**) on
+the exact reviewed head, then verify that native Review exists and the
+required checks remain green before integration. Do not bypass the
+platform denial via disguised payload or swapped tools.
+
+This contract adds **reporting and triage specificity**, not permission to
+release, deploy, expose private data, mutate secrets/settings, bypass native
+checks, or perform otherwise prohibited effects. See the durable standing
+reporting authority [devflow #49](https://github.com/kinoko34077/devflow/issues/49)
+and owning policy [#567](https://github.com/kinoko34077/devflow/issues/567).
+
 ### Failure-scope triage and bounded normal-path retry (user clarified 2026-10-13)
 
 A rejected tool invocation, failing CI, missing permission, and an actual unsafe change
