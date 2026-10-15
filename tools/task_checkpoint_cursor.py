@@ -8,7 +8,7 @@ preparation, post-write verification and explicit reconciliation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Mapping, Sequence
 
@@ -286,13 +286,13 @@ def inspect_cursor_comments(
         return CursorResult(code="WARN_DUPLICATE_MARKER", warnings=warnings)
 
     try:
-        cursor = parse_cursor_comment(trusted[0])
+        cursor, normalized_warnings = parse_cursor_comment_compatible(trusted[0])
     except CursorFormatError:
         return CursorResult(code="WARN_MALFORMED_MARKER", warnings=warnings)
 
     if cursor.task != task:
         return CursorResult(code="WARN_MALFORMED_MARKER", warnings=warnings)
-    return CursorResult(code="OK_CURSOR", cursor=cursor, live=cursor, warnings=warnings)
+    return CursorResult(code="OK_CURSOR", cursor=cursor, live=cursor, warnings=warnings + normalized_warnings)
 
 
 def compare_cursor(
@@ -415,3 +415,128 @@ def reconcile_cursor(
         evidence=tuple(evidence),
         updated_at=updated_at,
     )
+
+
+# Read-only, compatibility-focused parser for agent-authored existing comments.
+# Strict parse_cursor_comment/render_cursor_comment remain the canonical wire
+# contract; a tolerant read never changes provenance or task identity.
+_COMPAT_FIELD_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]{0,48})\s*:\s*(.*)$")
+_COMPAT_FENCE_RE = re.compile(r"^[ ]{0,3}\x60{3}(?:yaml|yml)\s*$", re.I)
+_COMPAT_END_RE = re.compile(r"^[ ]{0,3}\x60{3}\s*$")
+_COMPAT_LIST_RE = re.compile(r"^[ ]{1,6}-[ ]+(.+?)\s*$")
+_COMPAT_MAX_CHARS = 65536
+
+
+def _normalize_utc_timestamp(raw: str) -> str:
+    """Recognize timezone-aware ISO/RFC3339 instants, write canonical UTC seconds."""
+    if len(raw) > 64 or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})",
+        raw,
+    ):
+        raise CursorFormatError("invalid updated_at")
+    try:
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError("timestamp has no timezone")
+        canonical = stamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError) as exc:
+        raise CursorFormatError("invalid updated_at") from exc
+    return canonical
+
+
+def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, ...]]:
+    """Read safely-normalizable v1 variants without weakening core validation.
+
+    Unrecognized one-line scalar fields are descriptive data, never executable
+    instructions or authority. Duplicate fields (including unknowns), nested
+    YAML, additional fences, malformed semantics and marker duplication fail.
+    Only the fully validated canonical object is returned.
+    """
+    if not isinstance(body, str) or len(body) > _COMPAT_MAX_CHARS:
+        raise CursorFormatError("invalid or oversized cursor comment")
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    if body.count(SENTINEL) != 1 or body.lstrip().split("\n", 1)[0] != SENTINEL:
+        raise CursorFormatError("cursor sentinel missing, duplicated, or not canonical")
+    lines = body.split("\n")
+    fences = [i for i, line in enumerate(lines) if _COMPAT_FENCE_RE.fullmatch(line)]
+    if len(fences) != 1:
+        raise CursorFormatError("expected one yaml fence")
+    start = fences[0]
+    ends = [i for i in range(start + 1, len(lines)) if _COMPAT_END_RE.fullmatch(lines[i])]
+    if len(ends) != 1 or any(
+        line.lstrip().startswith("\x60\x60\x60") for line in lines[ends[0] + 1 :]
+    ):
+        raise CursorFormatError("unexpected or duplicate fenced block")
+    end = ends[0]
+    found: dict[str, str] = {}
+    evidence: list[str] = []
+    seen: set[str] = set()
+    in_evidence = False
+    evidence_inline_empty = False
+    notes: list[str] = []
+    for line in lines[start + 1 : end]:
+        if not line.strip():
+            continue
+        if "\t" in line or len(line) > 8192:
+            raise CursorFormatError("invalid layout")
+        list_match = _COMPAT_LIST_RE.fullmatch(line)
+        if list_match:
+            if not in_evidence or evidence_inline_empty:
+                raise CursorFormatError("unexpected list item")
+            item = list_match.group(1)
+            if not item or SENTINEL in item or item.startswith("\x60\x60\x60"):
+                raise CursorFormatError("unsafe evidence")
+            evidence.append(item)
+            continue
+        if line[0].isspace() and line.lstrip().startswith("-"):
+            raise CursorFormatError("invalid list item")
+        if len(line) - len(line.lstrip(" ")) > 1:
+            raise CursorFormatError("unsupported nested key")
+        match = _COMPAT_FIELD_RE.fullmatch(line.strip())
+        if not match:
+            raise CursorFormatError("unsupported yaml structure")
+        key, value = match.group(1).lower(), match.group(2).strip()
+        if key in seen:
+            raise CursorFormatError("duplicate key: " + key)
+        seen.add(key)
+        in_evidence = key == "evidence"
+        if key == "evidence":
+            if value not in ("", "[]"):
+                raise CursorFormatError("evidence requires a simple list")
+            evidence_inline_empty = value == "[]"
+        elif key in _ALLOWED_KEYS:
+            if not value:
+                raise CursorFormatError("missing value: " + key)
+            found[key] = value
+        else:
+            # Unknown fields may contain descriptive scalar text only. No
+            # aliases, tags, multiline blocks, inline objects or nesting.
+            if not value or value[0] in "!&*{|[>" or value == "-":
+                raise CursorFormatError("unsupported auxiliary field")
+            notes.append(key)
+    required = tuple(key for key in _ALLOWED_KEYS if key != "evidence")
+    if any(key not in found for key in required) or "evidence" not in seen:
+        raise CursorFormatError("missing required fields")
+    for numeric in ("schema_version", "revision"):
+        # Harmless leading zero / plus are formatting, not different numbers.
+        token = found[numeric]
+        if len(token) > 20 or not re.fullmatch(r"\+?0*[1-9][0-9]*", token):
+            raise CursorFormatError("invalid semantic integer: " + numeric)
+        found[numeric] = str(int(token.lstrip("+")))
+    canonical_stamp = _normalize_utc_timestamp(found["updated_at"])
+    state = CursorState(
+        schema_version=int(found["schema_version"]),
+        task=found["task"],
+        revision=int(found["revision"]),
+        last_completed=_parse_nullable_checkpoint(found["last_completed"], "last_completed"),
+        first_unfinished=_parse_nullable_checkpoint(found["first_unfinished"], "first_unfinished"),
+        head=_parse_nullable_head(found["head"]),
+        evidence=tuple(evidence),
+        updated_at=canonical_stamp,
+    )
+    warnings: list[str] = []
+    if notes:
+        warnings.append("WARN_IGNORED_ANNOTATION")
+    if render_cursor_comment(state).strip() != body.strip():
+        warnings.append("WARN_NORMALIZED")
+    return state, tuple(warnings)
