@@ -157,6 +157,54 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
         self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
         cache._validate_cached_payload(payload, REPOSITORY)
 
+    def test_isolated_m3_authority_switch_and_rollback(self):
+        live = live_projection(machine_task_count=2, coverage_complete=True)
+        live["task_records"] = [
+            {
+                "issue_number": number, "title": f"Task {number}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "FEATURE", "work_status": status,
+                "attention_disposition": None,
+            }
+            for number, status in ((1, "AWAITING_REVIEW"), (2, "BLOCKED"))
+        ]
+        payload = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        manual = ("manual issue #99",)
+        params = dict(now=GENERATED_AT, manual_active_work=manual,
+                      manual_next_action="Human approval required")
+        exercise = cache.simulate_m3_authority_transition
+        self.assertEqual(exercise(payload, **params)["authority"], "MANUAL")
+        active = exercise(payload, test_admission=True, consumers_agree=True, **params)
+        self.assertEqual(active["authority"], "MACHINE_TEST_ONLY")
+        self.assertEqual(active["active_work"], [
+            "https://github.com/kinoko34077/demo/issues/1",
+            "https://github.com/kinoko34077/demo/issues/2",
+        ])
+        self.assertEqual(active["next_action"], "Human approval required")
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
+        self.assertEqual(exercise(payload, test_admission=True, **params)["authority"], "MANUAL")
+        for unavailable in (None, {}, {"repository": REPOSITORY}):
+            self.assertEqual(exercise(unavailable, test_admission=True,
+                                      consumers_agree=True, **params)["authority"], "MANUAL")
+        incomplete = cache.build_cached_projection(
+            REPOSITORY, live_projection(machine_task_count=2, coverage_complete=False),
+            generated_at=GENERATED_AT, control_trust=verified_control_trust(),
+        )
+        self.assertEqual(exercise(incomplete, test_admission=True,
+                                 consumers_agree=True, **params)["authority"], "MANUAL")
+        stale = dict(params, now="2026-10-06T05:50:00Z")
+        self.assertEqual(exercise(payload, test_admission=True,
+                                 consumers_agree=True, **stale)["authority"], "MANUAL")
+        self.assertEqual(exercise(payload, test_admission=True,
+                                 consumers_agree=False, **params)["active_work"], list(manual))
+        recovered = exercise(payload, test_admission=True, consumers_agree=True, **params)
+        self.assertEqual(recovered["authority"], "MACHINE_TEST_ONLY")
+        self.assertEqual(manual, ("manual issue #99",))
+
     def test_all_state_preview_never_silently_truncates_or_forges_completeness(self):
         live = live_projection(machine_task_count=21, coverage_complete=True)
         live["open_issue_count"] = 21
