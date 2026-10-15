@@ -32,6 +32,7 @@ class _IssueWriter(maintenance_github.GitHubReadTransport):
         body: str,
         *,
         expected_body_sha256: str,
+        expected_updated_at: str,
         expected_control_repository: str,
         trust_checker,
     ) -> bool:
@@ -64,6 +65,7 @@ class _IssueWriter(maintenance_github.GitHubReadTransport):
         if (
             live.get("title") != expected_title
             or trust_checker(live, expected_control_repository) is not True
+            or observed.updated_at != expected_updated_at
             or canonical_body_sha256(observed.body) != expected_body_sha256
         ):
             return False
