@@ -27,7 +27,13 @@ concurrency:
 
 jobs:
   preview:
-    if: github.ref == 'refs/heads/main' && github.repository == 'kinoko34077/devflow'
+    # Only the repo owner may initiate or re-run even the read-only preview.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'kinoko34077/devflow' &&
+      github.actor == 'kinoko34077' &&
+      github.triggering_actor == 'kinoko34077'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -69,6 +75,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.repository == 'kinoko34077/devflow' &&
       github.actor == 'kinoko34077' &&
+      github.triggering_actor == 'kinoko34077' &&
       inputs.operation == 'send' &&
       inputs.confirm_mailbox == 'kinoko34077/devflow#554'
     needs: [preview]
