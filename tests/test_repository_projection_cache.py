@@ -205,6 +205,62 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
         self.assertEqual(recovered["authority"], "MACHINE_TEST_ONLY")
         self.assertEqual(manual, ("manual issue #99",))
 
+    def test_isolated_m3_authority_fails_closed_on_truncated_untrusted_unknown(self):
+        live = live_projection(machine_task_count=21, coverage_complete=True)
+        live["open_issue_count"] = 21
+        live["task_records"] = [
+            {
+                "issue_number": number, "title": f"Task {number}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "FEATURE", "work_status": "IMPLEMENTING",
+                "attention_disposition": None,
+            }
+            for number in range(1, 22)
+        ]
+        truncated = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(truncated["coverage"]["status"], "COMPLETE")
+        self.assertEqual(truncated["all_state_tasks"]["status"], "TRUNCATED")
+        self.assertEqual(truncated["all_state_tasks"]["total"], 21)
+
+        base = live_projection(machine_task_count=2, coverage_complete=True)
+        base["task_records"] = live["task_records"][:2]
+        scenarios = [("TRUNCATED", truncated)]
+        for freshness, trust_status in (
+            ("CURRENT", "UNVERIFIED"),
+            ("UNKNOWN", "VERIFIED"),
+        ):
+            trust = verified_control_trust(freshness=freshness)
+            trust["status"] = trust_status
+            value = cache.build_cached_projection(
+                REPOSITORY, base, generated_at=GENERATED_AT,
+                control_trust=trust,
+            )
+            scenarios.append((f"{trust_status}/{freshness}", value))
+
+        missing_source = cache.build_cached_projection(
+            REPOSITORY,
+            live_projection(source_status="UNAVAILABLE", source_freshness="UNKNOWN"),
+            generated_at=GENERATED_AT, control_trust=verified_control_trust(),
+        )
+        scenarios.append(("UNAVAILABLE", missing_source))
+
+        for label, value in scenarios:
+            with self.subTest(source=label):
+                result = cache.simulate_m3_authority_transition(
+                    value, now=GENERATED_AT,
+                    manual_active_work=("Manual #99",),
+                    manual_next_action="Human approval required",
+                    test_admission=True, consumers_agree=True,
+                )
+                self.assertEqual(result["authority"], "MANUAL")
+                self.assertEqual(result["active_work"], ["Manual #99"])
+                self.assertEqual(result["next_action"], "Human approval required")
+                self.assertFalse(value["coverage"]["can_replace_manual_active_work"])
+
     def test_all_state_preview_never_silently_truncates_or_forges_completeness(self):
         live = live_projection(machine_task_count=21, coverage_complete=True)
         live["open_issue_count"] = 21
