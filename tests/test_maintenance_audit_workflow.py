@@ -63,7 +63,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             self.projection_cache,
         )
         self.assertIn(
-            "group: repository-projection-cache-${{ github.repository }}",
+            "group: devflow-control-writes-${{ github.repository }}",
             self.projection_cache,
         )
         self.assertIn("cancel-in-progress: false", self.projection_cache)
@@ -222,7 +222,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertIn('--apply', job)
         self.assertIn('cancel-in-progress: false', job)
         self.assertIn(
-            'group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}',
+            'group: devflow-control-writes-${{ github.repository }}',
             job,
         )
         self.assertIn('maintenance-completion-result.json', job)
