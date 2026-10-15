@@ -13,7 +13,7 @@ from typing import Mapping
 from tools.maintenance_catalog import (
     parse_common_baseline_text, parse_repository_catalog_text, resolve_catalog,
 )
-from tools.maintenance_coverage import CoverageRow, LedgerEvidence, derive_coverage
+from tools.maintenance_coverage import (CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS, derive_coverage)
 from tools.maintenance_ledger import (
     MaintenanceLedgerError, extract_active_run, parse_run_comment,
 )
@@ -38,6 +38,7 @@ class CoverageObservation:
     machine_records: int
     substantive_legacy_records: int
     noncredit_records: int
+    untrusted_records: int
     active_run_id: str | None
     rows: tuple[CoverageRow, ...]
 
@@ -146,6 +147,7 @@ def collect_repository_coverage(
         history.append(LedgerEvidence(record, url, item["author_association"]))
 
     complete = {"CLEAN", "FINDINGS", "RECONCILED"}
+    trusted_history = [e for e in history if e.author_association in TRUSTED_ASSOCIATIONS]
     rows = derive_coverage(slots, history, current_fingerprints or {})
     return CoverageObservation(
         repository=repository,
@@ -153,8 +155,9 @@ def collect_repository_coverage(
         catalog_blob_sha=local["sha"],
         comments_scanned=len(comments),
         machine_records=len(history),
-        substantive_legacy_records=sum(e.record.result in complete for e in history),
-        noncredit_records=sum(e.record.result not in complete for e in history),
+        substantive_legacy_records=sum(e.record.result in complete for e in trusted_history),
+        noncredit_records=sum(e.record.result not in complete for e in trusted_history),
+        untrusted_records=len(history) - len(trusted_history),
         active_run_id=active.run_id if active else None,
         rows=rows,
     )
