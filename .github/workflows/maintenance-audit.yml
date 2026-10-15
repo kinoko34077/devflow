@@ -277,6 +277,14 @@ jobs:
     permissions:
       contents: read
       issues: read
+    # Shares one native Actions job queue with every devflow Control writer.
+    # Fleet projection-cache can touch any managed Control; a per-target
+    # concurrency key cannot fence that writer. Direct API PATCH remains
+    # outside this scheduler's guarantee.
+    concurrency:
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -333,7 +341,8 @@ jobs:
       contents: read
       issues: read
     concurrency:
-      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -383,7 +392,8 @@ jobs:
       contents: read
       issues: read
     concurrency:
-      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -453,7 +463,8 @@ jobs:
       contents: read
       issues: write
     concurrency:
-      group: repository-projection-cache-${{ github.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
