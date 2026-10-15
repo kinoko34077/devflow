@@ -105,12 +105,13 @@ class TwoTurnPreflightTests(unittest.TestCase):
 
     def test_same_issue_twice_and_cross_repo_forbidden(self):
         f = fixture()
-        for raw in (
-            format_manifest([A, A]),
-            format_manifest([A, "someoneelse/devflow#701"]),
-            format_manifest([A]),
-            format_manifest([A, B, "kinoko34077/devflow#702"]),
+        for targets in (
+            [A, A],
+            [A, "someoneelse/devflow#701"],
+            [A],
+            [A, B, "kinoko34077/devflow#702"],
         ):
+            raw = json.dumps({"schema": "gpt-liveness-fleet-plan.v0.1", "targets": targets})
             with self.subTest(raw=raw), self.assertRaises(InvalidMessage):
                 probe.preflight(manifest=raw, snapshots=f["snapshots"],
                                 pages=f["pages"], now=NOW)
@@ -118,7 +119,7 @@ class TwoTurnPreflightTests(unittest.TestCase):
     def test_reading_wrong_mailbox_pages_fails_closed(self):
         with self.assertRaisesRegex(InvalidMessage, "ACTIVE_MAILBOX_SET_MISMATCH"):
             report(pages={A: "[[]]"})
-        with self.assertRaisesRegex(InvalidMessage, "ACTIVE_MAILBOX_SET_MISMATCH"):
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_MAILBOX_PAGES"):
             report(pages={A: "[[]]", B: "[[]]", "kinoko34077/devflow#702": "[[]]"})
 
     def test_foreign_actor_in_enrollment_rejected(self):
