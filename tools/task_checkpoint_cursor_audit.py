@@ -29,20 +29,31 @@ def classify_cursor(
         "warnings": list(observed.warnings),
         "first_unfinished": None,
         "revision": None,
+        "frontier_verified": verified_first_unfinished is not ...,
     }
+    # An untrusted marker is an identity/provenance anomaly, not
+    # presentation drift. Never call it NORMALIZABLE or recommend blind
+    # initialization of a new trusted marker on that evidence.
+    unsafe_marker = "WARN_UNTRUSTED_MARKER" in observed.warnings
     if observed.code == "NO_MARKER":
         result["status"] = (
+            "TRUST_CONFLICT" if unsafe_marker else
             "EXEMPT" if eligible is False else
             "MISSING_ELIGIBLE" if eligible is True else "NEEDS_EVIDENCE"
         )
     elif observed.code != "OK_CURSOR" or observed.cursor is None:
         result["status"] = "TRUST_CONFLICT" if observed.code in (
-            "WARN_DUPLICATE_MARKER", "WARN_MALFORMED_MARKER") else "NEEDS_EVIDENCE"
+            "WARN_DUPLICATE_MARKER", "WARN_MALFORMED_MARKER") or unsafe_marker else "NEEDS_EVIDENCE"
     else:
         c = observed.cursor
         result["revision"] = c.revision
         result["first_unfinished"] = c.first_unfinished
-        result["status"] = "NORMALIZABLE" if observed.warnings else "PASS"
+        result["status"] = (
+            "TRUST_CONFLICT" if unsafe_marker else
+            "NORMALIZABLE" if observed.warnings and all(w in (
+                "WARN_NORMALIZED", "WARN_IGNORED_ANNOTATION") for w in observed.warnings)
+            else "NEEDS_EVIDENCE" if observed.warnings else "PASS"
+        )
         if verified_first_unfinished is not ... and c.first_unfinished != verified_first_unfinished:
             result["status"] = "STALE_FRONTIER"
             result["warnings"] = list(observed.warnings) + ["WARN_CHECKPOINT_DRIFT"]
@@ -76,12 +87,16 @@ def audit_issue_ids(
         row = classify_cursor(f"{repository}#{n}", comments, **kwargs)
         row["url"] = owner.get("html_url")
         results.append(row)
+    semantic_verified = sum(bool(row["frontier_verified"]) for row in results)
     counts = {name: sum(row["status"] == name for row in results) for name in (
         "PASS", "NORMALIZABLE", "STALE_FRONTIER", "MISSING_ELIGIBLE",
         "EXEMPT", "NEEDS_EVIDENCE", "TRUST_CONFLICT")}
     return {"schema": "task-checkpoint-cursor-audit.v1", "repository": repository,
             "scope": "explicit_issue_ids_only", "checked": len(results),
-            "coverage_complete_for_explicit_set": True, "counts": counts, "results": results,
+            "coverage_complete_for_explicit_set": True,
+            "frontiers_independently_verified": semantic_verified,
+            "semantic_coverage_complete": semantic_verified == len(results),
+            "counts": counts, "results": results,
             "mutation": False}
 
 
