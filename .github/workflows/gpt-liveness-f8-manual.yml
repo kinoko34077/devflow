@@ -1,0 +1,114 @@
+name: F8 GPT liveness single-mailbox manual pilot
+
+# Explicit human-run only. No schedule, Issue edit, push or repository dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read-only preview (default), or send one bounded PING"
+        required: true
+        type: choice
+        options:
+          - preview
+          - send
+        default: preview
+      confirm_mailbox:
+        description: "For send only: exactly kinoko34077/devflow#554"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt-liveness-f8-issue554
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main' && github.repository == 'kinoko34077/devflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Check out pinned main source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Read Issue 554 and verify no unexpected POST requirement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"schema":"gpt-liveness-fleet-plan.v0.1","targets":["kinoko34077/devflow#554"]}' > "$RUNNER_TEMP/f8-allowlist.json"
+          python3 -m tools.gpt_liveness_f8_sender --manifest "$RUNNER_TEMP/f8-allowlist.json" > "$RUNNER_TEMP/f8-preview.json"
+          python3 - "$RUNNER_TEMP/f8-preview.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              result = json.load(handle)
+          assert result["status"] == "PREVIEW_ONLY"
+          assert result["post_attempted"] is False
+          assert result["claim_authority"] is False
+          assert result["gpt_currently_alive_proven"] is False
+          p = result["preview"]
+          assert p["simulation_only"] is True
+          assert p["deployment_authorized"] is False
+          assert p["targets"][0]["mailbox_ref"] == "kinoko34077/devflow#554"
+          assert p["targets"][0]["may_send"] is False
+          print("F8_MANUAL_READONLY_PREVIEW_PASS", p["targets"][0]["dispatch_state"])
+          PY
+
+  send:
+    # Activation requires a separate explicitly confirmed user operation.
+    # The operator is pinned to repository owner and the exact mailbox.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'kinoko34077/devflow' &&
+      github.actor == 'kinoko34077' &&
+      inputs.operation == 'send' &&
+      inputs.confirm_mailbox == 'kinoko34077/devflow#554'
+    needs: [preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out pinned main source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Attempt exactly one opt-in PING via existing F8 -> F4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"schema":"gpt-liveness-fleet-plan.v0.1","targets":["kinoko34077/devflow#554"]}' > "$RUNNER_TEMP/f8-allowlist.json"
+          python3 -m tools.gpt_liveness_f8_sender \
+            --manifest "$RUNNER_TEMP/f8-allowlist.json" \
+            --send --confirm-mailbox 'kinoko34077/devflow#554' \
+            > "$RUNNER_TEMP/f8-result.json"
+          python3 - "$RUNNER_TEMP/f8-result.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              result = json.load(handle)
+          assert result["claim_authority"] is False
+          assert result["gpt_currently_alive_proven"] is False
+          assert result["status"] in (
+              "SENT_AND_READ_BACK", "ALREADY_SENT", "NO_ACTIVE_ENROLLMENT",
+              "SUSPECT_NO_REPLY", "ALREADY_PINGED", "LONG_RUNNING",
+              "FINISHED", "IDLE", "NEED_USER", "SUPPRESSED_BY_POLICY",
+          )
+          print("F8_MANUAL_SEND_RESULT", result["status"])
+          if result["status"] == "SENT_AND_READ_BACK":
+              assert result["readback_confirmed"] is True
+              assert type(result["posted_comment_id"]) is int
+              print("F8_MANUAL_KAEP_PING_READBACK", result["posted_comment_id"])
+          else:
+              assert result.get("readback_confirmed") is not True
+              print("F8_MANUAL_NO_NEW_PING")
+          PY
