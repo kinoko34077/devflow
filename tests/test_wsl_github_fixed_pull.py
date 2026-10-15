@@ -1,6 +1,8 @@
 """Tests for on-demand GitHub comment GET -> fixed Public WSL2 with replay ledger."""
 from __future__ import annotations
 
+from contextlib import closing
+
 import json
 import sqlite3
 import subprocess
@@ -107,7 +109,7 @@ class GitHubWslPullTests(unittest.TestCase):
             self.assertEqual(pull._reserve(ledger, 6199999911, "d" * 64), "RESERVED")
             self.assertEqual(pull._reserve(ledger, 6199999911, "d" * 64), "REPLAY_DENIED")
             self.assertEqual(pull._reserve(ledger, 6199999912, "d" * 64), "REPLAY_DENIED")
-            with sqlite3.connect(str(ledger)) as con:
+            with closing(sqlite3.connect(str(ledger))) as con:
                 rows = con.execute("SELECT comment_id,status FROM public_job_attempts").fetchall()
             self.assertEqual(rows, [(6199999911, "RESERVED")])
 
@@ -139,7 +141,7 @@ class GitHubWslPullTests(unittest.TestCase):
             ledger = Path(root) / "replay.sqlite3"
             first = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
             second = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
-            with sqlite3.connect(str(ledger)) as con:
+            with closing(sqlite3.connect(str(ledger))) as con:
                 outcome = con.execute("SELECT status FROM public_job_attempts").fetchone()[0]
         self.assertEqual(first.reason, "WORKER_NOT_VERIFIED")
         self.assertEqual(second.reason, "REPLAY_DENIED")
