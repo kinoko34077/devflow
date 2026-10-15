@@ -354,6 +354,75 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertNotIn(26, compact_refs)
         self.assertFalse(cached["coverage"]["can_replace_manual_active_work"])
 
+    def test_m3_isolated_cutover_consumes_actual_mcp_work_view_and_fails_closed(self):
+        from tools import repository_projection_cache as cache
+
+        control = self._control("demo", 70)
+        control["body"] += (
+            "\n## Active Work\n\nManual #99 remains.\n"
+            "\n## Next Action\n\nHuman review required.\n"
+        )
+        def task(number, status):
+            issue = self._task_issue(number)
+            return {
+                **issue,
+                "body": issue["body"].replace(
+                    '"work_status": "READY_FOR_IMPLEMENTATION"',
+                    f'"work_status": "{status}"',
+                ),
+            }
+        issues = [task(1, "AWAITING_REVIEW"), task(2, "BLOCKED")]
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": issues,
+        })
+        service = devflow_mcp_core.DevflowService(
+            reader, observed_at_factory=lambda: "2026-10-04T05:49:00Z"
+        )
+        view = service.get_repository_work_view("demo")
+        self.assertEqual(view["coverage_status"], "COMPLETE")
+        self.assertEqual(view["parallel_read"]["machine"]["status"], "COMPLETE_READ")
+        self.assertEqual(
+            [item["work_status"] for item in view["parallel_read"]["machine"]["tasks"]],
+            ["AWAITING_REVIEW", "BLOCKED"],
+        )
+        projection = service.get_repository_projection("demo")
+        payload = cache.build_cached_projection(
+            "kinoko34077/demo", projection,
+            generated_at="2026-10-04T05:50:00Z",
+            control_trust={
+                "status": "VERIFIED", "freshness": "CURRENT",
+                "source": cache.CONTROL_TRUST_SOURCE,
+                "observed_at": "2026-10-04T05:49:00Z", "detail": None,
+            },
+        )
+        manual = view["parallel_read"]["manual"]
+        kwargs = {
+            "now": "2026-10-04T05:50:00Z",
+            "manual_active_work": (manual["active_work"],),
+            "manual_next_action": manual["next_action"],
+            "test_admission": True,
+            "consumers_agree": True,
+        }
+        consumer_urls = tuple(
+            task["url"] for task in view["parallel_read"]["machine"]["tasks"]
+        )
+        accepted = cache.simulate_m3_authority_transition(
+            payload, consumer_task_urls=consumer_urls, **kwargs
+        )
+        self.assertEqual(accepted["authority"], "MACHINE_TEST_ONLY")
+        self.assertEqual(accepted["active_work"], list(consumer_urls))
+        self.assertEqual(accepted["next_action"], "Human review required.")
+        for mismatch in (consumer_urls[:1], consumer_urls + consumer_urls[:1]):
+            fallback = cache.simulate_m3_authority_transition(
+                payload, consumer_task_urls=mismatch, **kwargs
+            )
+            self.assertEqual(fallback["authority"], "MANUAL")
+            self.assertEqual(fallback["active_work"], [manual["active_work"]])
+            self.assertEqual(fallback["next_action"], "Human review required.")
+        self.assertFalse(view["can_replace_manual_active_work"])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
+
     def test_m3_local_work_view_all_status_shadow_never_grants_cutover(self):
         control = self._control("demo", 70)
         control["body"] += (
