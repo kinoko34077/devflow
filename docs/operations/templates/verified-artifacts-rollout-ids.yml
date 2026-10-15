@@ -1,5 +1,6 @@
 # Review-only template for devflow#465 R1.
-# NO TARGET CALLER IS INSTALLED, ENABLED OR AUTHORIZED BY THIS TEMPLATE.
+# IDS review-only Caller is dry-run-only and does not enable privileged writes.
+# Installing on main remains a separate Human Pages-publication gate.
 # Only the exact bytes produced by substituting the reviewed SHA marker are acceptable.
 name: Verified artifacts rollout (IDS only)
 
@@ -16,7 +17,7 @@ on:
         required: true
       mode:
         type: choice
-        options: [dry-run, write]
+        options: [dry-run]
         default: dry-run
 
 permissions: {}
@@ -27,9 +28,9 @@ concurrency:
 
 jobs:
   writeback:
-    if: ${{ inputs.mode == 'dry-run' || inputs.mode == 'write' }}
+    if: ${{ inputs.mode == 'dry-run' }}
     permissions:
-      contents: write
+      contents: read
       actions: read
       pull-requests: read
     uses: kinoko34077/devflow/.github/workflows/generated-artifact-rollout.yml@<DEVFLOW_SHA>
