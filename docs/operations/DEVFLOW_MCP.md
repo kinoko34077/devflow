@@ -64,6 +64,8 @@ has run the **new** three-operation adapter; real-task execution remains a
 separate acceptance check. Authentication verification and Cloud tool
 registration are independent of this read-only fallback.
 
+For Cloud **Issue writeback and credentials**, see [Codex Cloud GitHub access](CODEX_CLOUD_GITHUB_ACCESS.md): repository reads, PR publishing and Issue comments require distinct evidence; do not put a write-capable token in source or presume the Cloud client inherits ChatGPT GitHub auth. The supported CLI above remains GET-only.
+
 ## Control Issue trust boundary
 
 devflow is a public repository, so anyone can open an Issue with a canonical-looking title. Repository Control discovery (`get_repository_control`, `bootstrap_repository`, `list_managed_repositories`) accepts directly authored `[REPO] <repo>` Issues only when their `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. A bootstrap-generated Control may be bot-authored, but only through the dedicated derived-trust verifier: the Control must point to the exact devflow `[REPO CREATE]` request, the request must be either open or closed with `state_reason=completed`, must be trusted-authored and contain one valid `repository-bootstrap.v1` payload for the target, the request must have a successful terminal `DONE` comment from the GitHub Actions bootstrap executor naming the same Control, and the target repository's `.github/repository-bootstrap.json` must exactly match the request reference, canonical URL and repository identity. The verifier also requires one exact open Control title and the canonical devflow repository identity.
