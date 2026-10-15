@@ -29,8 +29,8 @@ class HealthRest:
 
     def get_issue(self, number):
         self.calls.append("GET")
-        if number != self.issue["number"]:
-            raise AssertionError("read different issue")
+        if number != 41:
+            raise AssertionError("GET sent to wrong requested Issue URL")
         return dict(self.issue)
 
     def create_issue(self, title, body):
