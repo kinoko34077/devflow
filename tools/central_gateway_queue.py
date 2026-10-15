@@ -11,8 +11,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from types import MappingProxyType
 
-from tools.central_execution_gateway import Record, Receipt, request_digest
+from tools.central_execution_gateway import Job, Record, Receipt, request_digest
 
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _SHA1 = re.compile(r"[0-9a-f]{40}\Z")
@@ -130,8 +131,14 @@ class SQLiteFakeJobLedger:
                  and rec.backend is None and rec.receipt is None
                  and rec.reason is None, "NOT_A_FAKE_QUEUED_RECORD")
         job = rec.job
+        _require(type(job) is Job and type(job.inputs) in
+                 (dict, MappingProxyType), "INVALID_FAKE_RECORD")
+        try:
+            computed_digest = request_digest(job)
+        except (TypeError, ValueError, UnicodeError, OverflowError, AttributeError) as exc:
+            raise LedgerDenied("INVALID_FAKE_RECORD") from exc
         _require(type(rec.digest) is str and _SHA.fullmatch(rec.digest) is not None
-                 and rec.digest == request_digest(job)
+                 and rec.digest == computed_digest
                  and type(rec.epoch) is int and rec.epoch > 0
                  and type(rec.actor) is str and _TOKEN.fullmatch(rec.actor) is not None
                  and type(rec.nonce) is str and _TOKEN.fullmatch(rec.nonce) is not None
