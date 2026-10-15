@@ -27,6 +27,43 @@ This list reflects the **currently exported** ten functions in `tools/devflow_mc
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
+## Codex Cloud fallback when MCP tools are not registered
+
+Codex Cloud tasks may have a usable devflow checkout and GitHub read access without
+exposing any `kinotch_devflow` tool in the task's MCP registry. An empty
+`codex mcp list --json` is a **tool-registration** observation, not evidence
+that the underlying Devflow read methods are unavailable. Do not recreate
+the MCP server just for this client gap.
+
+From the existing devflow checkout, use the read-only CLI that delegates to
+exactly the same `tools.devflow_mcp_core.default_service()` as the stdio MCP:
+
+```sh
+python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
+python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
+python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
+```
+
+`inbox` also accepts `--limit` and `--offset`; honor its `next_offset`,
+`truncated` and source/coverage fields. For an existing scheduled Claude
+check-in, keep using the established `tools.kaep_agent_inbox_cli` and its
+`--pending-only` behavior; this CLI does not start a check-in or manage timers.
+
+Exit code 0 means the read method returned structured data; it does **not**
+mean that every Issue was classified or that any agent was assigned work.
+`INCOMPLETE`, `has_unknown_work=true`, `UNAVAILABLE` and empty filtered
+`issues` must retain the canonical manual Repository Control and KAEP
+[#503 fallback](https://github.com/kinoko34077/devflow/issues/503).
+Exit code 2 with `{"status":"BLOCKED",...}` means a failed read, not an
+empty work inventory. This CLI cannot authorize a Claim, write an Issue or
+prove the Codex MCP registry / GitHub token identity is functional.
+
+Cloud evidence on #531 separately establishes existing Agent Inbox CLI and
+public GitHub GET execution. It does not independently prove a fresh Cloud task
+has run the **new** three-operation adapter; real-task execution remains a
+separate acceptance check. Authentication verification and Cloud tool
+registration are independent of this read-only fallback.
+
 ## Control Issue trust boundary
 
 devflow is a public repository, so anyone can open an Issue with a canonical-looking title. Repository Control discovery (`get_repository_control`, `bootstrap_repository`, `list_managed_repositories`) accepts directly authored `[REPO] <repo>` Issues only when their `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. A bootstrap-generated Control may be bot-authored, but only through the dedicated derived-trust verifier: the Control must point to the exact devflow `[REPO CREATE]` request, the request must be either open or closed with `state_reason=completed`, must be trusted-authored and contain one valid `repository-bootstrap.v1` payload for the target, the request must have a successful terminal `DONE` comment from the GitHub Actions bootstrap executor naming the same Control, and the target repository's `.github/repository-bootstrap.json` must exactly match the request reference, canonical URL and repository identity. The verifier also requires one exact open Control title and the canonical devflow repository identity.

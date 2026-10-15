@@ -34,6 +34,24 @@ If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the tar
 
 The MCP is a read-only access layer to the same live GitHub canon. It does not replace this file, the Control Issue, or repository-local technical truth. Setup and client trigger instructions are in `docs/operations/DEVFLOW_MCP.md`.
 
+### Codex Cloud with no exposed Devflow MCP tools
+
+When the Codex Cloud client does not expose the existing read-only Devflow
+MCP tools but a current devflow checkout and GitHub GET path are available,
+do not classify missing tool registration as failure of the Devflow core.
+From the devflow checkout, use `python -m tools.devflow_read_cli bootstrap
+--repository kinoko34077/<repo>`, then `python -m tools.devflow_read_cli
+work-view --repository kinoko34077/<repo>` for open-work analysis, and
+`python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow
+--recipient codex --work-status AWAITING_REVIEW` for Codex-addressed inbox
+messages. These delegate to the same live GET-only service as MCP. When only
+the older accepted Inbox CLI is available, it remains a valid bounded Inbox
+fallback; direct Control and source Issue inspection remains mandatory if
+coverage is incomplete or unavailable. Preserve #503 pointer fallback.
+Never interpret an empty filtered Inbox as proof of no tasks, and do not
+install tokens, change client tools, create timers, or grant execution
+authority to make a read succeed. See `docs/operations/DEVFLOW_MCP.md`.
+
 ### KAEP Agent Inbox on an already-active Claude check-in
 
 If this session is **already running the user's existing Claude check-in** for KiNoTch managed work (not an ordinary request, and not a reason to start a new process or timer), use the accepted read-only Agent Inbox **before claiming there is no pending work**. With an available up-to-date devflow checkout and its existing read-capable GitHub access, invoke the native CLI:
