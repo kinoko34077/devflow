@@ -489,10 +489,12 @@ def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, 
             continue
         if line[0].isspace() and line.lstrip().startswith("-"):
             raise CursorFormatError("invalid list item")
+        if len(line) - len(line.lstrip(" ")) > 1:
+            raise CursorFormatError("unsupported nested key")
         match = _COMPAT_FIELD_RE.fullmatch(line.strip())
         if not match:
             raise CursorFormatError("unsupported yaml structure")
-        key, value = match.group(1), match.group(2).strip()
+        key, value = match.group(1).lower(), match.group(2).strip()
         if key in seen:
             raise CursorFormatError("duplicate key: " + key)
         seen.add(key)
@@ -514,8 +516,11 @@ def parse_cursor_comment_compatible(body: str) -> tuple[CursorState, tuple[str, 
     if any(key not in found for key in required) or "evidence" not in seen:
         raise CursorFormatError("missing required fields")
     for numeric in ("schema_version", "revision"):
-        if not _CANONICAL_POSITIVE_INT_RE.fullmatch(found[numeric]):
+        # Harmless leading zero / plus are formatting, not different numbers.
+        token = found[numeric]
+        if len(token) > 20 or not re.fullmatch(r"\+?0*[1-9][0-9]*", token):
             raise CursorFormatError("invalid semantic integer: " + numeric)
+        found[numeric] = str(int(token.lstrip("+")))
     canonical_stamp = _normalize_utc_timestamp(found["updated_at"])
     state = CursorState(
         schema_version=int(found["schema_version"]),
