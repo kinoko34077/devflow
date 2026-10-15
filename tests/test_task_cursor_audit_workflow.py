@@ -37,6 +37,7 @@ class TaskCursorAuditWorkflowTests(unittest.TestCase):
     def test_pinned_actions_and_no_untrusted_runner_source(self):
         s = self.source
         self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", s)
+        self.assertIn("        with:\n          persist-credentials: false\n", s)
         self.assertIn("actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97", s)
         self.assertNotIn("curl ", s)
         self.assertNotIn("pip install ", s)
