@@ -15,8 +15,15 @@ The server exposes only read operations:
 - `bootstrap_repository(repository)`
 - `get_repository_control(repository)`
 - `list_managed_repositories()`
+- `get_repository_projection(repository)`
+- `get_repository_work_view(repository)`
+- `get_agent_inbox(repository, recipient="claude-code", limit=20, offset=0, work_status=None)`
+- `get_portfolio_projection()`
+- `get_human_portfolio(repository)`
 - `get_issue(repository, issue_number)`
 - `get_sync_health()`
+
+This list reflects the **currently exported** ten functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
@@ -58,6 +65,12 @@ Token lookup order:
 3. unauthenticated GitHub REST
 
 Use a read-capable token only. Do not commit tokens to this repository, `.mcp.json`, `AGENTS.md`, `CLAUDE.md`, or other shared files.
+
+## KAEP Agent Inbox operational status
+
+As of 2026-10-15, the read-only MCP function `get_agent_inbox` and native CLI `python -m tools.kaep_agent_inbox_cli` are merged on main. A Claude Code session reported its existing idle check-in executed the CLI and discovered a new, non-pointer KAEP root before direct Issue lookup, then stored actual source-correlated [ACK/ANSWER on #553](https://github.com/kinoko34077/devflow/issues/553). This is **functional E2E evidence with a self-reported trigger path**, not an independently authenticated wake or automatic MCP registration. The recurring user-managed prompt had been modified earlier to add generic CLI invocation; connecting this MCP alone does not schedule or cause an agent to read it.
+
+A client may call `get_agent_inbox` with `recipient="codex"` (positive read-contract/negative-routing regression [PR #556](https://github.com/kinoko34077/devflow/pull/556)). Actual Codex check-in pickup is **not** confirmed. With `coverage_status=INCOMPLETE` or `has_unknown_work=true`, preserve canonical manual Control and the KAEP [#503 pointer discovery fallback](https://github.com/kinoko34077/devflow/issues/503); do not treat a filtered empty list as zero work. No new user/agent schedules, session settings, GitHub credentials, provider launch, or Claim authority result from this interface.
 
 ## Required agent trigger
 
