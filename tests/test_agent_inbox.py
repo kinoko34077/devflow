@@ -106,6 +106,66 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertEqual(res["issues"][0]["requests"], [])
         self.assertFalse(res["issues"][0]["recipient_assignment_inferred"])
 
+    def test_codex_read_only_request_round_trip_and_recipient_isolation(self):
+        """B4: Codex root -> GPT reply is observation, never task authority."""
+        root, _ = make_request(
+            "[[]]", repository=REPO, issue=21, recipient="codex",
+            intent="ANALYZE", request_key="kaep.agentinbox.codex.positive21",
+            request_text="Codex read-only audit", expected_head="b" * 40,
+            expect_existing_actor=OWNER)
+        base = [(REPO, 21)]
+        pending_reader = fixture_reader(
+            [task()], {base[0]: [issue_comment(11, root)]})
+        service = devflow_mcp_core.DevflowService(pending_reader)
+        codex = service.get_agent_inbox("demo", recipient="codex")
+        claude = service.get_agent_inbox("demo", recipient="claude-code")
+        self.assertEqual(len(codex["issues"][0]["requests"]), 1)
+        req = codex["issues"][0]["requests"][0]
+        self.assertEqual(req["source_message_id"], root["message_id"])
+        self.assertEqual(req["status"], "PENDING_REPLY")
+        self.assertEqual(req["expected_head"], "b" * 40)
+        self.assertEqual(claude["issues"][0]["requests"], [])
+        self.assertFalse(codex["is_authoritative_assignment"])
+        self.assertFalse(codex["can_authorize_execution"])
+        self.assertFalse(codex["is_live_agent_delivery"])
+
+        wrong = dict(root)
+        wrong.update({
+            "message_id": "msg_codex_wrong_destination21",
+            "in_reply_to": root["message_id"], "kind": "ANSWER",
+            "recipient": "coordinator",
+            "idempotency_key": "kaep.agentinbox.codex.wronganswer21",
+            "payload": {"text": "not a reply to the GPT requester"},
+        })
+        answer = dict(wrong)
+        answer.update({
+            "message_id": "msg_codex_correct_destination21",
+            "recipient": "chatgpt",
+            "idempotency_key": "kaep.agentinbox.codex.goodanswer21",
+            "payload": {"text": "verified, no writes"},
+        })
+        only_wrong = fixture_reader(
+            [task()], {base[0]: [issue_comment(11, root),
+                                  issue_comment(12, wrong)]})
+        wrong_result = devflow_mcp_core.DevflowService(
+            only_wrong).get_agent_inbox("demo", recipient="codex")
+        self.assertEqual(
+            wrong_result["issues"][0]["requests"][0]["status"], "PENDING_REPLY")
+
+        with_answer = fixture_reader(
+            [task()], {base[0]: [issue_comment(11, root),
+                                  issue_comment(12, wrong),
+                                  issue_comment(13, answer)]})
+        result = devflow_mcp_core.DevflowService(
+            with_answer).get_agent_inbox("demo", recipient="codex")
+        observed = result["issues"][0]["requests"][0]
+        self.assertEqual(observed["status"], "ANSWER_OBSERVED")
+        self.assertEqual(observed["reply_kinds_observed"], ["ANSWER"])
+        self.assertEqual(observed["source_message_id"], root["message_id"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["can_replace_manual_active_work"])
+        self.assertNotIn("verified, no writes", json.dumps(result))
+
     def test_unclassified_issue_is_not_made_a_task(self):
         unknown = task(22)
         unknown["body"] = "No machine metadata"
