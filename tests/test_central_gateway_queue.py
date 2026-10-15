@@ -146,7 +146,8 @@ class DurableFakeJobLedgerTests(unittest.TestCase):
     def test_local_db_never_persists_inputs_tokens_or_source_body(self):
         self.first.admit_fake(self.rec)
         self.first.close()
-        data = open(self.db_path, "rb").read()
+        with open(self.db_path, "rb") as db_file:
+            data = db_file.read()
         self.assertNotIn(b"never-store-this-sensitive-plaintext", data)
         self.assertIn(self.digest.encode("ascii"), data)
         # Close can be called repeatedly without mutating any queued row.
