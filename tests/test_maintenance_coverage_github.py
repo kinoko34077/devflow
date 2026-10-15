@@ -121,7 +121,7 @@ class CoverageGitHubReadTests(TestCase):
         val2 = self.collect([comment()], fast, external_state={})
         self.assertEqual("UNKNOWN_FINGERPRINT", val2["rows"][0]["status"])
         val3 = self.collect([comment()], fast, external_state={"observed_at": "2026-10-15T00:00:00Z"})
-        self.assertEqual("LEGACY_SCOPE_UNBOUND", val3["rows"][0]["status"])
+        self.assertEqual("SOURCE_DRIFT", val3["rows"][0]["status"])
 
     def test_unavailable_canonical_control_does_not_return_partial_rows(self):
         with patch.object(gh, "collect_maintenance_control",
