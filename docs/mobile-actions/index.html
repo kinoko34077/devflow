@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="description" content="KiNoTch. Devflow F8Eの監視状態を確認し、GitHub公式画面で手動Actions実行を操作します。">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://api.github.com; script-src 'self'; style-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'self' https://api.github.com; script-src 'self'; style-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <title>KiNoTch. Actions Control — Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./style.css">
@@ -36,7 +36,7 @@
         <div><dt>Issue</dt><dd id="issue-state">未確認</dd></div>
         <div><dt>コメント件数</dt><dd id="issue-comments">未確認</dd></div>
       </dl>
-      <p class="hint" id="enrollment-note" aria-live="polite">GitHubから取得します。</p>
+      <p class="hint" id="enrollment-note" aria-live="polite">GitHub APIを確認します。接続できない場合は公開時点の保存情報を表示します。</p>
       <a href="https://github.com/kinoko34077/devflow/issues/554" target="_blank" rel="noopener noreferrer">Issue #554をGitHubで開く ↗</a>
     </section>
     <section class="panel" aria-labelledby="action-title">
@@ -63,7 +63,7 @@
   </main>
   <footer class="wrap">
     <p id="checked-at" aria-live="polite">取得日時：未確認</p>
-    <p>表示内容はGitHubの公開APIに基づきます。取得できない場合は「未確認」のままにし、稼働中・停止中を推定しません。</p>
+    <p>表示内容はGitHub公開APIまたはPages公開時の保存情報です。保存情報は最新とは限りません。取得できなければ「未確認」と表示し、稼働中・停止中を推定しません。</p>
     <a href="https://github.com/kinoko34077/devflow/issues/562" target="_blank" rel="noopener noreferrer">この画面の開発Issue #562</a>
   </footer>
 </body>
