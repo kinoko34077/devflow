@@ -9,6 +9,8 @@ to the exact hardcoded mailbox, and revalidated by existing F4 sender.
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
+import io
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -57,7 +59,7 @@ def preview(*, raw_manifest: str, snapshot: dict[str, Any],
 
 def dispatch(*, report: dict[str, Any], want_send: bool,
              confirmed_mailbox: str | None,
-             sender: Callable[..., int]) -> dict[str, Any]:
+             sender: Callable[..., dict[str, Any]]) -> dict[str, Any]:
     """Only explicitly confirmed READY may invoke existing F4 sender once.
 
     The supplied sender is the accepted F4 CLI, which re-fetches live Issue
@@ -88,14 +90,42 @@ def dispatch(*, report: dict[str, Any], want_send: bool,
                 "gpt_currently_alive_proven": False}
     # This callback is the existing bounded F4 trusted sender path, not a
     # wrapper around a preview payload. Re-verification remains mandatory.
-    exit_code = sender([
+    result = sender([
         "--repository", ALLOWED_REPO, "--issue", str(ALLOWED_ISSUE),
         "--send",
     ])
+    if type(result) is not dict:
+        raise InvalidMessage("INVALID_F4_RESULT")
+    state = result.get("status")
+    if state not in ("SENT_AND_READ_BACK", "ALREADY_SENT", "NO_ACTIVE_ENROLLMENT",
+                     "SUSPECT_NO_REPLY", "ALREADY_PINGED", "LONG_RUNNING",
+                     "FINISHED", "IDLE", "NEED_USER"):
+        raise InvalidMessage("F4_POST_OR_READBACK_FAILED")
+    return {
+        "status": state,
+        "post_attempted": state == "SENT_AND_READ_BACK",
+        "posted_comment_id": result.get("posted_comment_id") if state in
+            ("SENT_AND_READ_BACK", "ALREADY_SENT") else None,
+        "readback_confirmed": state == "SENT_AND_READ_BACK",
+        "claim_authority": False,
+        "gpt_currently_alive_proven": False,
+    }
+
+
+def _invoke_existing_f4(arguments: list[str]) -> dict[str, Any]:
+    """Capture F4 real result, never treat its exit code alone as POST proof."""
+    output = io.StringIO()
+    with redirect_stdout(output):
+        exit_code = single_target_pilot_main(arguments)
     if exit_code != 0:
         raise InvalidMessage("F4_POST_OR_READBACK_FAILED")
-    return {"status": "F4_SENDER_EXECUTED", "post_attempted": True,
-            "claim_authority": False, "gpt_currently_alive_proven": False}
+    try:
+        result = json.loads(output.getvalue())
+    except ValueError as exc:
+        raise InvalidMessage("INVALID_F4_RESULT") from exc
+    if type(result) is not dict:
+        raise InvalidMessage("INVALID_F4_RESULT")
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         result = preview(raw_manifest=raw, snapshot=own, pages=pages, now=now)
         output = dispatch(report=result, want_send=args.send,
                           confirmed_mailbox=args.confirm_mailbox,
-                          sender=single_target_pilot_main)
+                          sender=_invoke_existing_f4)
         print(json.dumps(output, sort_keys=True, ensure_ascii=False))
         return 0
     except (InvalidMessage, ValueError, TypeError, OSError, UnicodeError) as exc:
