@@ -212,7 +212,13 @@ python -m tools.task_checkpoint_cursor_audit --repository kinoko34077/devflow --
 
 It emits counts + `PASS`, `NORMALIZABLE`, `STALE_FRONTIER`,
 `MISSING_ELIGIBLE`, `EXEMPT`, `NEEDS_EVIDENCE`, or
-`TRUST_CONFLICT`. `MISSING_ELIGIBLE` requires separately proven
+`TRUST_CONFLICT`. `PASS` verifies only the marker's trust/structure unless
+`frontier_verified` is true; full semantic coverage is separately reported by
+`frontiers_independently_verified` / `semantic_coverage_complete`. An
+untrusted competing marker takes priority over harmless format normalization
+and refuses automatic write/initialization; when paired with independently
+observed frontier drift, preserve both warnings instead of hiding the
+provenance conflict. `MISSING_ELIGIBLE` requires separately proven
 eligibility. `STALE_FRONTIER` requires a separately verified current
 frontier supplied to its library API; textual heuristics do **not**
 promote arbitrary Issue paragraphs into authority. A missing marker on
