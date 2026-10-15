@@ -82,6 +82,12 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
             f"/contents/{auth.CALLER_PATH}?ref={CALLER_SHA}",
         ])
 
+    def test_ids_write_mode_is_denied_before_any_api_read(self):
+        api = FakeGitHubReader()
+        with self.assertRaisesRegex(ArtifactRejected, "IDS rollout mode is read-only"):
+            self.check(api=api, environment=env(MODE="write"))
+        self.assertEqual(api.calls, [])
+
     def test_caller_exact_bytes_not_substring_heuristics(self):
         original = auth.exact_caller_text(TEMPLATE, SHA)
         changes = [
