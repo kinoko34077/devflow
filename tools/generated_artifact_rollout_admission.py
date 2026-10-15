@@ -76,6 +76,10 @@ def attest_authenticated_readonly(
     )
     if env.get("MODE") not in ("dry-run", "write"):
         raise ArtifactRejected("writer mode is not in the exact allowlist")
+    # IDS is approved for read-only Caller preparation only. Even if a
+    # forged event supplies mode=write, read-only attestation must reject it.
+    if repository == "kinoko34077/IDS-Composit" and env.get("MODE") != "dry-run":
+        raise ArtifactRejected("IDS rollout mode is read-only until separate admission")
     run = api.get(f"/actions/runs/{admission['producer_run_id']}")
     if not isinstance(run, dict):
         raise ArtifactRejected("GitHub Actions run metadata unavailable")

@@ -82,6 +82,20 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
             f"/contents/{auth.CALLER_PATH}?ref={CALLER_SHA}",
         ])
 
+    def test_ids_reviewed_template_is_dryrun_only_without_write_grant(self):
+        self.assertIn("options: [dry-run]", TEMPLATE)
+        self.assertIn("contents: read", TEMPLATE)
+        self.assertNotIn("contents: write", TEMPLATE)
+        self.assertNotIn("options: [dry-run, write]", TEMPLATE)
+        self.assertNotIn("inputs.mode == 'write'", TEMPLATE)
+        self.assertEqual(TEMPLATE.count("<DEVFLOW_SHA>"), 2)
+
+    def test_ids_write_mode_is_denied_before_any_api_read(self):
+        api = FakeGitHubReader()
+        with self.assertRaisesRegex(ArtifactRejected, "IDS rollout mode is read-only"):
+            self.check(api=api, environment=env(MODE="write"))
+        self.assertEqual(api.calls, [])
+
     def test_caller_exact_bytes_not_substring_heuristics(self):
         original = auth.exact_caller_text(TEMPLATE, SHA)
         changes = [
@@ -91,7 +105,7 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
             original + "  malicious:\n    run: echo hi\n",
             original.replace("workflow_dispatch:", "push:"),
             original.replace("type: choice", "type: string"),
-            original.replace("contents: write", "contents: read"),
+            original.replace("contents: read", "contents: write"),
             original.replace("uses: kinoko34077/devflow", "uses: stranger/devflow"),
         ]
         for idx, altered in enumerate(changes):
