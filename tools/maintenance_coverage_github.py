@@ -11,9 +11,18 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from tools.maintenance_catalog import (
-    parse_common_baseline_text, parse_repository_catalog_text, resolve_catalog,
+    canonical_catalog_digest, parse_common_baseline_text,
+    parse_repository_catalog_text, resolve_catalog,
 )
-from tools.maintenance_coverage import (CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS, derive_coverage)
+from tools.maintenance_coverage import (
+    CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS,
+)
+from tools.maintenance_coverage_v2 import (
+    AttestedLedgerEvidence, derive_dual_version_coverage,
+)
+from tools.maintenance_run_attestation import (
+    ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
+)
 from tools.maintenance_ledger import (
     MaintenanceLedgerError, extract_active_run, parse_run_comment,
 )
@@ -36,6 +45,7 @@ class CoverageObservation:
     catalog_blob_sha: str
     comments_scanned: int
     machine_records: int
+    attested_records: int
     substantive_legacy_records: int
     noncredit_records: int
     untrusted_records: int
