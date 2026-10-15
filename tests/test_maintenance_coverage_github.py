@@ -58,7 +58,7 @@ class StubGitHub:
         return {
             "number": LEDGER_NO, "html_url": LEDGER_URL, "title": gh.MAINTENANCE_LEDGER_TITLE,
             "state": "open", "author_association": "OWNER",
-            "body": "## Work Status\n\n\`AUDITED\`\n\n## Active Run\n\nNone.\n",
+            "body": "## Work Status\n\n`AUDITED`\n\n## Active Run\n\nNone.\n",
         }
 
     def list_issue_comments(self, repository, number):
