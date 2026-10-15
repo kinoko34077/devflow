@@ -52,6 +52,8 @@ def run():
                                           reduced_motion="reduce",service_workers="block",
                                           accept_downloads=False)
               page=context.new_page()
+              cdp=context.new_cdp_session(page)
+              cdp.send("Performance.enable")
               failures=[]
               page.on("pageerror",lambda e: failures.append(str(e)))
               page.on("response",lambda r: failures.append("HTTP "+str(r.status)+" "+r.url)
@@ -72,12 +74,17 @@ def run():
                 assert page.locator('[data-ve-model-pilot="1"]').count()==0
               page.wait_for_timeout(120)
               record=snap(page)
+              metrics={v["name"]:v["value"] for v in cdp.send("Performance.getMetrics")["metrics"]}
+              record["heapKB"]=round(metrics.get("JSHeapUsedSize",0)/1024)
+              record["taskMs"]=round(metrics.get("TaskDuration",0)*1000,1)
+              record["scriptMs"]=round(metrics.get("ScriptDuration",0)*1000,1)
+              record["layoutMs"]=round(metrics.get("LayoutDuration",0)*1000,1)
               record["readyMs"]=round((monotonic()-start)*1000)
               record["errors"]=failures
               samples.append(record)
               context.close()
             keys=["readyMs","domMs","loadMs","firstPaintMs","requests",
-                  "transferKB","decodedKB","jsDecodedKB"]
+                  "transferKB","decodedKB","jsDecodedKB","heapKB","taskMs","scriptMs","layoutMs"]
             result={"site":site["name"],"width":width,"mode":mode,"samples":RUNS}
             for k in keys:
               nums=[s[k] for s in samples if s[k] is not None]
@@ -93,7 +100,9 @@ def run():
           print("PERF_DELTA="+json.dumps({
              "site":site["name"],"width":width,
              "extraReadyMs":round(editor["median_readyMs"]-normal["median_readyMs"],1),
-             "extraDecodedKB":round(editor["median_decodedKB"]-normal["median_decodedKB"],1)
+             "extraDecodedKB":round(editor["median_decodedKB"]-normal["median_decodedKB"],1),
+             "extraHeapKB":round(editor["median_heapKB"]-normal["median_heapKB"],1),
+             "extraTaskMs":round(editor["median_taskMs"]-normal["median_taskMs"],1)
           }),flush=True)
     finally:
       browser.close()
