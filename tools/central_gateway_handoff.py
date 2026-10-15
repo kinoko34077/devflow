@@ -79,11 +79,11 @@ def _valid_sha(value: object) -> bool:
 def _valid_repositories(repositories: object) -> bool:
     return (
         type(repositories) is tuple and 0 < len(repositories) <= 32
-        and len(set(repositories)) == len(repositories)
         and all(type(r) is str and _SCOPE.fullmatch(r) is not None
                 and all(not part.startswith((".", "-")) and
                         not part.endswith(".git") for part in r.split("/"))
                 for r in repositories)
+        and len(set(repositories)) == len(repositories)
     )
 
 
