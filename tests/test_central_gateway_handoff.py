@@ -202,6 +202,16 @@ class HandoffSafetyTests(unittest.TestCase):
         self.assertEqual((view.status, view.reason, view.non_authorizing),
                          ("HOLD", "SPLIT_BRAIN_OBSERVED", True))
 
+    def test_unobservable_old_or_central_writer_fails_closed(self):
+        for old, central in ((None, False), (False, None), (None, True),
+                             (True, None)):
+            with self.subTest(old=old, central=central):
+                result = project_writer_observation(
+                    old_writer_active=old, central_writer_active=central,
+                    old_epoch=12, central_epoch=13)
+                self.assertEqual(result.status, "HOLD")
+                self.assertEqual(result.reason, "UNOBSERVABLE_WRITER")
+
     def test_only_central_observed_is_not_permission(self):
         cases = (
             (False, True, 12, 13, "CENTRAL_OBSERVED_ONLY_NOT_AUTHORIZED"),
