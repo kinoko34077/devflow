@@ -22,6 +22,10 @@ from tools.maintenance_audit import (  # noqa: E402
     classify_repository,
 )
 from tools.maintenance_triage import triage  # noqa: E402
+from tools.operation_issue_metadata_preflight import (  # noqa: E402
+    MetadataPreflightRejected,
+    snapshot_issue,
+)
 from tools.maintenance_sync_check import (  # noqa: E402
     SyncCheckContractError,
     build_sync_check_plan,
@@ -427,11 +431,51 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         number: int,
         expected_body_sha256: str,
         body: str,
+        *,
+        expected_control_repository: str | None = None,
     ) -> bool:
+        # Existing authenticated native GET is the last observation before PATCH.
+        # A #487 snapshot is a freshness/target *check*, never writer permission,
+        # a lock, or an atomic expected-old-body condition on GitHub Issue PATCH.
         live = self.get_issue(repository, number)
-        live_body = str(live.get("body") or "")
+        live_body = live.get("body")
+        if not isinstance(live_body, str):
+            return False
+        if expected_control_repository is not None:
+            if repository != DEVFLOW_REPOSITORY:
+                return False
+            try:
+                observation = snapshot_issue(
+                    {
+                        "repository": repository,
+                        "number": live.get("number"),
+                        "updated_at": live.get("updated_at"),
+                        "state": live.get("state"),
+                        "body": live_body,
+                    },
+                    repository=repository,
+                    number=number,
+                )
+            except MetadataPreflightRejected:
+                return False
+            expected_title = (
+                "[REPO] " + expected_control_repository.rsplit("/", 1)[-1]
+            )
+            if (
+                live.get("title") != expected_title
+                or str(live.get("author_association") or "").upper()
+                not in {"OWNER", "MEMBER", "COLLABORATOR"}
+                or _scalar_section(_sections(observation.body), "Repository")
+                != expected_control_repository
+                or not isinstance(body, str)
+                or _scalar_section(_sections(body), "Repository")
+                != expected_control_repository
+            ):
+                return False
         if canonical_body_sha256(live_body) != expected_body_sha256:
             return False
+        if body == live_body:
+            return True  # Explicit read-only NO_OP; never emit a redundant PATCH.
 
         payload = json.dumps({"body": body}).encode("utf-8")
         request = urllib.request.Request(
@@ -477,6 +521,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             number,
             expected_body_sha256,
             body,
+            expected_control_repository=repository,
         )
 
     def post_issue_comment(

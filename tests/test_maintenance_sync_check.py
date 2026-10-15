@@ -639,6 +639,10 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
         from scripts import maintenance_audit as cli
 
         token = "secret-write-token"
+        live_body = (
+            "## Repository\n\n`o/r`\n\n"
+            + control_snapshot()["body"]
+        )
         issue = {
             "number": 1,
             "title": "[REPO] r",
@@ -648,7 +652,8 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
                 "devflow/issues/1"
             ),
             "author_association": "OWNER",
-            "body": control_snapshot()["body"],
+            "body": live_body,
+            "updated_at": "2026-10-16T00:00:00Z",
         }
 
         class Response:
@@ -676,10 +681,8 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
             transport.update_control_body(
                 "o/r",
                 "kinoko34077/devflow#1",
-                canonical_body_sha256(
-                    control_snapshot()["body"]
-                ),
-                control_snapshot()["body"],
+                canonical_body_sha256(live_body),
+                live_body + "\nmodified\n",
             )
         self.assertNotIn(token, str(ctx.exception))
 
