@@ -788,7 +788,11 @@ class BootstrapExecutor:
                     f"Accepted initial head is `{head_sha}`. No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
                     f"{render_control_provenance(context, full_name)}\n\n"
                     f"Cross-repository routing summary only. Bootstrap request: {context.request_url}. "
-                    f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`."
+                    f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`. "
+                    "M3 P0/P1 dual-read: retain Active Work and Next Action as manual fallback for local-work and Human/policy/cross-repository decisions; owning repository Issues/PRs remain canonical. "
+                    "Machine-derived TASK records are centrally projected, not a second task ledger or execution authority. Do not manually edit machine-owned projection markers. "
+                    "Missing, stale, untrusted, incomplete or truncated machine source is unknown, not an empty task queue. "
+                    "M3.1/M3.3 manual-authority retirement requires separate per-repository/per-consumer admission."
                 )
                 control = self._call(
                     context,

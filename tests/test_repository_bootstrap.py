@@ -177,6 +177,12 @@ class RepositoryBootstrapContractTests(unittest.TestCase):
                 "[REPO CREATE] example-repo",
             )
 
+    def test_control_notes_fallback_contract(self):
+        import inspect
+        source = inspect.getsource(rb.BootstrapExecutor)
+        self.assertIn('M3 P0/P1 dual-read', source)
+        self.assertIn('not an empty task queue', source)
+
     def test_trusted_author_associations_are_exact(self):
         for value in ("OWNER", "MEMBER", "COLLABORATOR"):
             with self.subTest(value=value):
