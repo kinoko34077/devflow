@@ -11,21 +11,18 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sqlite3
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from tools.safe_dispatch_contract import parse_json_object
+from tools.shared_execution_safety_contract import project_f3c_candidate
 from tools.wsl_fixed_public_bridge import run_once as run_fixed_public
 
 _ISSUE_URL = "https://api.github.com/repos/kinoko34077/devflow/issues/610"
 _ENDPOINT = "repos/kinoko34077/devflow/issues/comments/"
 _PREFIX = "F3C-WSL-PUBLIC-ONCE-V1\n"
-_RECIPE = "wsl-fixed-public-v1"
-_NONCE = re.compile(r"f3c-[a-z0-9]{20}\Z")
-_ALLOWED_KEYS = {"schema_version", "repository", "task_ref", "recipe_id", "effect", "nonce"}
-_ALLOWED_SCHEMA = "devflow.f3c.wsl-public-request.v1"
 _MAX_RESPONSE = 16384
 
 
@@ -75,20 +72,20 @@ def _validate(comment: dict | None, comment_id: int) -> str | None:
     body = comment.get("body")
     if type(body) is not str or len(body) > 1024 or not body.startswith(_PREFIX):
         return None
+    # M2 projection is pure CANDIDATE_ONLY. GitHub author metadata above
+    # provides attribution only, never an authenticated execution principal.
+    projection = project_f3c_candidate(
+        body, comment_id=comment_id, observed_login=author["login"]
+    )
+    if projection.status != "CANDIDATE_ONLY":
+        return None
+    # Preserve legacy sha256(nonce) SQLite identity across upgrade: use the
+    # existing reviewed strict JSON decoder, never rehash old reservations.
     try:
-        job = json.loads(body[len(_PREFIX):])
-    except (ValueError, TypeError):
+        job = parse_json_object(body[len(_PREFIX):], max_bytes=1024)
+    except ValueError:
         return None
-    if (type(job) is not dict or set(job) != _ALLOWED_KEYS
-            or job["schema_version"] != _ALLOWED_SCHEMA
-            or job["repository"] != "kinoko34077/devflow"
-            or job["task_ref"] != "kinoko34077/devflow#610"
-            or job["recipe_id"] != _RECIPE or job["effect"] != "READ_ONLY"
-            or type(job["nonce"]) is not str or _NONCE.fullmatch(job["nonce"]) is None):
-        return None
-    # Never use user-provided job fields to construct executable commands.
     return job["nonce"]
-
 
 def _ledger_path() -> Path | None:
     if os.name != "nt":
