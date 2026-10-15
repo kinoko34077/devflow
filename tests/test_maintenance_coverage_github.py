@@ -119,6 +119,10 @@ class NativeCoverageCollectorTests(unittest.TestCase):
     def test_untrusted_author_is_preserved_as_untrusted_not_accepted(self):
         value = observe(FakeGET([comment(author="CONTRIBUTOR")]))
         self.assertEqual("UNTRUSTED", correct_row(value).status)
+        self.assertEqual(1, value.machine_records)
+        self.assertEqual(1, value.untrusted_records)
+        self.assertEqual(0, value.substantive_legacy_records)
+        self.assertEqual(0, value.noncredit_records)
 
     def test_source_issue_not_same_ledger_fails_closed(self):
         item = comment()
