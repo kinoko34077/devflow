@@ -46,7 +46,7 @@ class CompatibleCursorTests(unittest.TestCase):
             "head: " + "a" * 40, "first_unfinished : M1",
             "last_completed: M0", "updated_at: " + STAMP,
             "evidence:", "   - https://github.com/kinoko34077/devflow/issues/576"])
-        body = (original[:start] + reordered + original[end] +
+        body = (original[:start] + reordered + original[end:] +
             "External note: no new authority.\n").replace("\n", "\r\n")
         parsed, warnings = parse_cursor_comment_compatible(body)
         self.assertEqual(parsed, STATE)
