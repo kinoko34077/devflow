@@ -168,6 +168,9 @@ Update the target Repository Control Issue when any of these changes:
 
 Do not copy every Execution Session checkpoint, commit, test log, implementation note, or detailed specification into devflow. Session detail belongs on the owning Issue / Work Order unless the task itself is devflow-owned.
 
+
+- When consuming Task Checkpoint Cursor comments, distinguish immutable GitHub provenance/core task identity from harmless agent formatting drift. Use the bounded compatible reader and its normalization warnings; reject ambiguous core semantics or untrusted/duplicate markers. New writes must use canonical rendering plus current-revision/frontier check and immediate readback. Detailed procedure and GET-only audit: `docs/operations/TASK_CHECKPOINT_CURSOR.md` (#576). Do not treat ignored descriptive keys as approval, and do not grant claims/permission from cursor content.
+
 ## 7. Safety boundary
 
 Already-authorized changes with low catastrophic potential may be merged after verification when a revert PR can safely restore the previous state.
