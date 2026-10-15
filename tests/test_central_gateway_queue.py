@@ -135,6 +135,15 @@ class DurableFakeJobLedgerTests(unittest.TestCase):
         self.denies("ATTEMPT_COLLISION",
                     lambda: self.first.admit_fake(same_attempt_other_actor))
 
+    def test_unserializable_fake_record_fails_closed(self):
+        for bad_job in (
+            replace(self.job, inputs={"bad": object()}),
+            replace(self.job, inputs=[]),
+        ):
+            with self.subTest(job=repr(bad_job)[:80]):
+                self.denies("INVALID_FAKE_RECORD", lambda b=bad_job:
+                            self.first.admit_fake(replace(self.rec, job=b)))
+
     def test_wrong_job_digest_and_epoch_zero_rejected(self):
         self.denies("INVALID_FAKE_RECORD", lambda: self.first.admit_fake(
             replace(self.rec, digest="c" * 64),
