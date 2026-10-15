@@ -7,7 +7,6 @@ import subprocess
 import sys
 import unittest
 from dataclasses import asdict
-from unittest.mock import patch
 
 from tools.central_runner_probe import (
     ProbeDenied, _PAYLOAD, _RECIPE_SHA256, run_fixed_probe,
@@ -50,11 +49,8 @@ class StandaloneFixedProbeTests(unittest.TestCase):
             self.assertFalse(getattr(result, key))
 
     def test_run_as_own_python_process_no_actions_scheduler_call(self):
-        command = [sys.executable, "-I", "-m",
-                   "tools.central_runner_probe", "--expected-source-sha", PIN]
-        # -I removes cwd from sys.path in some environments; module lookup
-        # requires installed package. Use normal module CLI for repo checkout.
-        command.remove("-I")
+        command = [sys.executable, "-m", "tools.central_runner_probe",
+                   "--expected-source-sha", PIN]
         out = subprocess.run(command, input=self.body(), capture_output=True,
                              timeout=8, check=False)
         self.assertEqual(out.returncode, 0, out.stderr[:250])
