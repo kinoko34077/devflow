@@ -179,7 +179,7 @@ class RepositoryBootstrapContractTests(unittest.TestCase):
 
     def test_control_notes_fallback_contract(self):
         import inspect
-        source = inspect.getsource(rb.RepositoryBootstrapService)
+        source = inspect.getsource(rb.BootstrapExecutor)
         self.assertIn('M3 P0/P1 dual-read', source)
         self.assertIn('not an empty task queue', source)
 
