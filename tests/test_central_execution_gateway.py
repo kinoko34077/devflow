@@ -290,6 +290,18 @@ class OfflineCentralGatewayTests(unittest.TestCase):
                     lambda j=job: self.submit(job=j, proof=self.proof()),
                 )
 
+    def test_another_allowed_actor_cannot_reuse_first_actor_record(self):
+        second = replace(self.policy, actors=frozenset({"central-chat", "second-agent"}))
+        self.gateway = OfflineGateway(
+            policies=(second,), hmac_key=self.key, store=self.store,
+            claims=self.claims, health=self.health, backend=self.backend,
+        )
+        self.submit()
+        self.denies("ATTEMPT_COLLISION", lambda: self.submit(
+            proof=self.proof(actor="second-agent"),
+        ))
+        self.assertEqual(self.backend.calls, [])
+
     def test_unapproved_fake_not_replaceable_by_effectful_host(self):
         class PretendBackend:
             def run(self, *args):  # pragma: no cover - must never be called
