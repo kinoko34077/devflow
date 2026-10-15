@@ -1,0 +1,44 @@
+name: Task Checkpoint Cursor audit (manual, read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Explicit devflow Issue number to inspect (one bounded owner)"
+        type: string
+        required: true
+        default: "576"
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  cursor-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Check bounded Issue input
+        env:
+          ISSUE_INPUT: ${{ inputs.issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ISSUE_INPUT" =~ ^[1-9][0-9]{0,5}$ ]]; then
+            echo "Expected one positive numeric Issue ID (at most 6 digits)." >&2
+            exit 2
+          fi
+          echo "CURSOR_AUDIT_ISSUE=$ISSUE_INPUT" >> "$GITHUB_ENV"
+      - name: Inspect only the selected public devflow owner and comments
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m tools.task_checkpoint_cursor_audit \
+            --repository kinoko34077/devflow \
+            --issue "$CURSOR_AUDIT_ISSUE"
