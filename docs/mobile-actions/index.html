@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111b2d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="KiNoTch. Devflow F8Eの監視状態を確認し、GitHub公式画面で手動Actions実行を操作します。">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://api.github.com; script-src 'self'; style-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>KiNoTch. Actions Control — Mobile</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./control.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <p class="eyebrow">KiNoTch. / DEVFLOW</p>
+      <h1>Actions Control</h1>
+      <p class="subtitle">iPhone対応・監視状態の確認と公式画面への操作導線</p>
+    </div>
+  </header>
+  <main class="wrap" id="main">
+    <section class="notice" aria-labelledby="notice-title">
+      <h2 id="notice-title">この画面は読取専用です</h2>
+      <p>GitHubへの書込、トークン入力、PING送信は行いません。操作する場合はGitHub公式のワークフロー画面へ移動し、本人のGitHubアカウントで実行します。</p>
+    </section>
+    <section class="panel" aria-labelledby="pilot-title">
+      <div class="panelhead">
+        <h2 id="pilot-title">F8E テスト用Issue #554</h2>
+        <button id="refresh" type="button">状態を更新</button>
+      </div>
+      <dl class="metrics">
+        <div><dt>監視登録</dt><dd id="enrollment">未確認</dd></div>
+        <div><dt>Issue</dt><dd id="issue-state">未確認</dd></div>
+        <div><dt>コメント件数</dt><dd id="issue-comments">未確認</dd></div>
+      </dl>
+      <p class="hint" id="enrollment-note" aria-live="polite">GitHubから取得します。</p>
+      <a href="https://github.com/kinoko34077/devflow/issues/554" target="_blank" rel="noopener noreferrer">Issue #554をGitHubで開く ↗</a>
+    </section>
+    <section class="panel" aria-labelledby="action-title">
+      <h2 id="action-title">GitHub Actions</h2>
+      <p>送信操作は以下の<strong>GitHub公式ページ</strong>で行います。既定値はpreview。sendを選ぶ場合、ワークフローと登録状態を必ず確認してください。</p>
+      <a class="primary" href="https://github.com/kinoko34077/devflow/actions/workflows/gpt-liveness-f8-manual.yml" target="_blank" rel="noopener noreferrer">公式の手動実行画面を開く ↗</a>
+      <p class="hint">GitHubにログイン後、<strong>Run workflow</strong>からmain・operationを指定します。GitHubの画面でボタンが見えない場合はSafariの「デスクトップ用Webサイトを表示」を試してください。</p>
+    </section>
+    <section class="panel" aria-labelledby="runs-title">
+      <div class="panelhead"><h2 id="runs-title">直近の実行履歴</h2><span id="runs-state" class="chip" aria-live="polite">未確認</span></div>
+      <ol id="runs" class="runs"><li>取得前</li></ol>
+      <a href="https://github.com/kinoko34077/devflow/actions/workflows/gpt-liveness-f8-manual.yml" target="_blank" rel="noopener noreferrer">すべての実行履歴を見る ↗</a>
+    </section>
+    <section class="panel" aria-labelledby="steps-title">
+      <h2 id="steps-title">実PING試験の条件</h2>
+      <p>実PINGには、期限内の明示的な監視登録が必要です。登録が無効のままsendを起動してもPINGは成立しません。この画面から登録を自動的に変更することはありません。</p>
+      <details>
+        <summary>GitHub側の送信指定</summary>
+        <dl class="reference"><div><dt>Branch</dt><dd><code>main</code></dd></div><div><dt>operation</dt><dd><code>send</code></dd></div><div><dt>confirm_mailbox</dt><dd><code>kinoko34077/devflow#554</code></dd></div></dl>
+        <p class="hint">送信する前に承認範囲と#555の記録を確認してください。送信者条件に一致しない場合、ジョブはスキップされます。</p>
+      </details>
+      <a href="https://github.com/kinoko34077/devflow/issues/555" target="_blank" rel="noopener noreferrer">実通信試験の正本 #555 ↗</a>
+    </section>
+  </main>
+  <footer class="wrap">
+    <p id="checked-at" aria-live="polite">取得日時：未確認</p>
+    <p>表示内容はGitHubの公開APIに基づきます。取得できない場合は「未確認」のままにし、稼働中・停止中を推定しません。</p>
+    <a href="https://github.com/kinoko34077/devflow/issues/562" target="_blank" rel="noopener noreferrer">この画面の開発Issue #562</a>
+  </footer>
+</body>
+</html>
