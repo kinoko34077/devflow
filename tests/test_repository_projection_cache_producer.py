@@ -138,10 +138,17 @@ class FakeWriter:
             "number": number,
             "title": "[REPO] demo",
             "state": "open",
+            "updated_at": "2026-10-16T00:00:00Z",
+            "author_association": "OWNER",
             "body": self.body,
         }
 
-    def update_issue_body(self, repository, number, body):
+    def update_issue_body(
+        self, repository, number, body, *,
+        expected_body_sha256, expected_control_repository, trust_checker,
+    ):
+        if maintenance_sync_check.canonical_body_sha256(self.body) != expected_body_sha256:
+            return False
         self.update_calls.append((repository, number, body))
         if self.persist:
             self.body = body
@@ -299,13 +306,13 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
             producer.RepositoryProjectionCacheProducerError,
             "pre-write",
         ):
-            producer.apply_plan(writer, plan)
+            producer.apply_plan(writer, plan, service=FakeService(control_issue()))
         self.assertEqual(writer.update_calls, [])
 
     def test_apply_updates_marker_only_and_confirms_readback(self):
         plan = self._plan()
         writer = FakeWriter()
-        result = producer.apply_plan(writer, plan)
+        result = producer.apply_plan(writer, plan, service=FakeService(control_issue()))
         self.assertEqual(result["status"], "UPDATED")
         self.assertEqual(result["generation_id"], plan.generation_id)
         self.assertEqual(len(writer.update_calls), 1)
@@ -329,7 +336,7 @@ class ProjectionCacheProducerApplyTests(unittest.TestCase):
             producer.RepositoryProjectionCacheProducerError,
             "post-write",
         ):
-            producer.apply_plan(writer, plan)
+            producer.apply_plan(writer, plan, service=FakeService(control_issue()))
 
 
 class FakeFleetService:
@@ -383,18 +390,23 @@ class FakeFleetService:
 
 class FakeFleetWriter:
     def __init__(self, issues):
+        self.issues = issues
         self.bodies = {number: str(issue["body"]) for number, issue in issues.items()}
         self.update_calls = []
 
     def get_issue(self, repository, number):
         return {
-            "number": number,
-            "title": f"[REPO] {number}",
-            "state": "open",
+            **self.issues[number],
+            "updated_at": "2026-10-16T00:00:00Z",
             "body": self.bodies[number],
         }
 
-    def update_issue_body(self, repository, number, body):
+    def update_issue_body(
+        self, repository, number, body, *,
+        expected_body_sha256, expected_control_repository, trust_checker,
+    ):
+        if maintenance_sync_check.canonical_body_sha256(self.bodies[number]) != expected_body_sha256:
+            return False
         self.update_calls.append((repository, number, body))
         self.bodies[number] = body
         return True
