@@ -1,5 +1,6 @@
 """M4 regression: non-executed maintenance must never suppress real audit supply."""
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from tools import maintenance_github as gh
@@ -100,7 +101,7 @@ class RealCompletionOnlyTests(unittest.TestCase):
     def test_no_penalty_from_incomplete_similar_scope(self):
         s = slot()
         ctx = ms.replace_context(context(), current_fingerprints={KEY: SHA})
-        prior = (ms.replace_context if False else history("BLOCKED"),)
+        prior = (replace(history("BLOCKED"), scope_selector="another-scope"),)
         score = ms.score_slot(s, ctx, prior)
         self.assertNotIn("recent_similar_penalty", dict(score.components))
 
