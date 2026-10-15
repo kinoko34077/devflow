@@ -138,16 +138,20 @@ class FakeWriter:
             "number": number,
             "title": "[REPO] demo",
             "state": "open",
-            "updated_at": "2026-10-16T00:00:00Z",
+            "updated_at": "2026-10-04T05:49:00Z",
             "author_association": "OWNER",
             "body": self.body,
         }
 
     def update_issue_body(
         self, repository, number, body, *,
-        expected_body_sha256, expected_control_repository, trust_checker,
+        expected_body_sha256, expected_updated_at,
+        expected_control_repository, trust_checker,
     ):
-        if maintenance_sync_check.canonical_body_sha256(self.body) != expected_body_sha256:
+        if (
+            maintenance_sync_check.canonical_body_sha256(self.body) != expected_body_sha256
+            or expected_updated_at != "2026-10-04T05:49:00Z"
+        ):
             return False
         self.update_calls.append((repository, number, body))
         if self.persist:
@@ -162,6 +166,7 @@ def control_issue(*, association="OWNER"):
         "state": "open",
         "body": CONTROL_BODY,
         "author_association": association,
+        "updated_at": "2026-10-04T05:49:00Z",
     }
 
 
@@ -352,6 +357,7 @@ class FakeFleetService:
                 "state": "open",
                 "body": CONTROL_BODY,
                 "author_association": "OWNER",
+                "updated_at": "2026-10-04T05:49:00Z",
             },
             8: {
                 "number": 8,
@@ -359,6 +365,7 @@ class FakeFleetService:
                 "state": "open",
                 "body": "## Repository\n\nkinoko34077/broken\n",
                 "author_association": "OWNER",
+                "updated_at": "2026-10-04T05:49:00Z",
             },
         }
 
@@ -397,15 +404,19 @@ class FakeFleetWriter:
     def get_issue(self, repository, number):
         return {
             **self.issues[number],
-            "updated_at": "2026-10-16T00:00:00Z",
+            "updated_at": "2026-10-04T05:49:00Z",
             "body": self.bodies[number],
         }
 
     def update_issue_body(
         self, repository, number, body, *,
-        expected_body_sha256, expected_control_repository, trust_checker,
+        expected_body_sha256, expected_updated_at,
+        expected_control_repository, trust_checker,
     ):
-        if maintenance_sync_check.canonical_body_sha256(self.bodies[number]) != expected_body_sha256:
+        if (
+            maintenance_sync_check.canonical_body_sha256(self.bodies[number]) != expected_body_sha256
+            or expected_updated_at != "2026-10-04T05:49:00Z"
+        ):
             return False
         self.update_calls.append((repository, number, body))
         self.bodies[number] = body
