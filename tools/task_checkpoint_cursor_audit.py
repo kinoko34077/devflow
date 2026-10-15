@@ -55,7 +55,10 @@ def classify_cursor(
             else "NEEDS_EVIDENCE" if observed.warnings else "PASS"
         )
         if verified_first_unfinished is not ... and c.first_unfinished != verified_first_unfinished:
-            result["status"] = "STALE_FRONTIER"
+            # Record semantic drift without hiding an existing provenance
+            # conflict; the latter requires trusted-human reconciliation first.
+            if result["status"] != "TRUST_CONFLICT":
+                result["status"] = "STALE_FRONTIER"
             result["warnings"] = list(observed.warnings) + ["WARN_CHECKPOINT_DRIFT"]
     return result
 
