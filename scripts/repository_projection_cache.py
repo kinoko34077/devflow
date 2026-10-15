@@ -17,6 +17,11 @@ if str(ROOT) not in sys.path:
 from tools import devflow_mcp_core  # noqa: E402
 from tools import maintenance_github  # noqa: E402
 from tools import repository_projection_cache_producer as producer  # noqa: E402
+from tools.maintenance_sync_check import canonical_body_sha256  # noqa: E402
+from tools.operation_issue_metadata_preflight import (  # noqa: E402
+    MetadataPreflightRejected,
+    snapshot_issue,
+)
 
 
 class _IssueWriter(maintenance_github.GitHubReadTransport):
@@ -25,7 +30,46 @@ class _IssueWriter(maintenance_github.GitHubReadTransport):
         repository: str,
         number: int,
         body: str,
+        *,
+        expected_body_sha256: str,
+        expected_control_repository: str,
+        trust_checker,
     ) -> bool:
+        # Second actual GitHub GET fences a change between producer admission
+        # and this native PATCH attempt. Issue PATCH is still not atomic CAS.
+        if repository != devflow_mcp_core.DEVFLOW_REPOSITORY:
+            return False
+        if not isinstance(body, str) or not callable(trust_checker):
+            return False
+        live = self.get_issue(repository, number)
+        if not isinstance(live, dict):
+            return False
+        try:
+            observed = snapshot_issue(
+                {
+                    "repository": repository,
+                    "number": live.get("number"),
+                    "updated_at": live.get("updated_at"),
+                    "state": live.get("state"),
+                    "body": live.get("body"),
+                },
+                repository=repository,
+                number=number,
+            )
+        except MetadataPreflightRejected:
+            return False
+        expected_title = (
+            "[REPO] " + expected_control_repository.rsplit("/", 1)[-1]
+        )
+        if (
+            live.get("title") != expected_title
+            or trust_checker(live, expected_control_repository) is not True
+            or canonical_body_sha256(observed.body) != expected_body_sha256
+        ):
+            return False
+        if body == observed.body:
+            return True  # Already applied: no duplicate PATCH.
+
         payload = json.dumps({"body": body}).encode("utf-8")
         request = urllib.request.Request(
             self._url(f"/repos/{repository}/issues/{number}"),
@@ -136,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = producer.apply_plan(
                     writer,
                     plan,
+                    service=service,
                 )
             else:
                 result = {
