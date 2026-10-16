@@ -228,7 +228,7 @@ def to_html(result: dict[str, Any]) -> str:
         f'<div class="notice" role="status"><strong>{_esc(label)}</strong> — {_esc(meta)}</div>'
         f'<section aria-label="取得件数" class="stats">{stats}</section>'
         f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
-        f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} rows in bounded search</p>'
+        f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} 件（限定検索対象）</p>'
         '<div class="tableframe"><table id="entries"><thead><tr>'
         '<th>リポジトリ / Issue</th><th>タイトル</th><th>状態</th>'
         '<th>区分 / 種類</th><th>宛先 / 依頼種別</th><th>返信状況</th>'
