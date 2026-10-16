@@ -218,7 +218,7 @@ def to_html(result: dict[str, Any]) -> str:
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta http-equiv="Content-Security-Policy" content="{_esc(csp)}">'
         '<title>KAEP | Independent Issue List</title>'
-        f'<style>{CSS}</style></head><body><main>'
+        f'<style>{CSS}</style></head><body><main data-source-status="{_esc(result.get("status", "BLOCKED"))}">'
         '<h1>KAEP / Issue 一覧</h1>'
         f'<p class="meta">Observed UTC: {_esc(result.get("observed_at", "unknown"))} '
         f'| Repositories: {_esc(", ".join(result.get("repositories", [])))} '

@@ -1,4 +1,4 @@
-name: Publish Mobile Actions Control
+name: Publish Mobile Actions Control and KAEP Issue List
 
 on:
   push:
@@ -7,9 +7,15 @@ on:
       - 'docs/mobile-actions/**'
       - 'tools/mobile_actions_snapshot.py'
       - '.github/workflows/mobile-actions-pages.yml'
+      - 'tools/kaep_issue_search_view.py'
+      - 'tools/kaep_issue_list_html.py'
+  workflow_dispatch:
 
-# Dedicated Pages artifact contains ONLY the four UI files plus sanitized status.json.
-# No Workflow Dispatch, repository write, credential or liveness enrollment.
+
+# The single Pages artifact contains the existing five mobile files AND only
+# kaep/index.html built from public, already redacted source metadata.
+# Manual publication refresh is owner-only. No issue dispatch/write, secret,
+# recurring schedule, new credential, or liveness enrollment.
 permissions:
   contents: read
 
@@ -19,7 +25,11 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'kinoko34077/devflow' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'kinoko34077/devflow' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'kinoko34077' &&
+      github.triggering_actor == 'kinoko34077'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,6 +74,50 @@ jobs:
           PY
           test "$(find "$RUNNER_TEMP/mobile-actions-public" -type f | wc -l)" -eq 5
           test "$(find "$RUNNER_TEMP/mobile-actions-public" -type l | wc -l)" -eq 0
+      - name: Generate bounded public KAEP Issue list (GET-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/mobile-actions-public"
+          mkdir -p "$out/kaep"
+          set +e
+          python -m tools.kaep_issue_search_view \
+            --repository kinoko34077/devflow \
+            --expect-source-actor kinoko34077 \
+            --format html > "$out/kaep/index.html"
+          rc=$?
+          set -e
+          # Status 2 is accepted ONLY with an explicit PARTIAL_UNKNOWN page.
+          # A fully BLOCKED candidate search must never replace the live site.
+          if [[ "$rc" != "0" && "$rc" != "2" ]]; then
+            echo 'KAEP list output command failed'; exit 1
+          fi
+          python - "$out/kaep/index.html" "$rc" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+          path = Path(sys.argv[1])
+          rc = int(sys.argv[2])
+          content = path.read_text(encoding="ascii")
+          assert 1000 < len(content) < 2000000
+          assert content.startswith("<!doctype html>")
+          match = re.search(r'<main data-source-status="([^"]+)">', content)
+          assert match is not None
+          status = match.group(1)
+          assert status in ("BOUNDED_SEARCH_READ", "PARTIAL_UNKNOWN")
+          assert (rc == 0) == (status == "BOUNDED_SEARCH_READ")
+          assert "Content-Security-Policy" in content
+          assert "connect-src &#x27;none&#x27;" in content
+          assert "github.com/kinoko34077/devflow/issues/" in content or "Source diagnostics" in content
+          assert 'href="javascript:' not in content
+          assert "api.github.com" not in content
+          assert "PARTIAL / UNKNOWN" in content or status == "BOUNDED_SEARCH_READ"
+          print("PUBLIC_KAEP_LIST_VALIDATED", status, "bytes", len(content))
+          PY
+          test "$(find "$out" -type f | wc -l)" -eq 6
+          test "$(find "$out" -type l | wc -l)" -eq 0
       - name: Upload exact isolated artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
@@ -71,7 +125,11 @@ jobs:
 
   deploy:
     needs: build
-    if: github.repository == 'kinoko34077/devflow' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'kinoko34077/devflow' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'kinoko34077' &&
+      github.triggering_actor == 'kinoko34077'
     runs-on: ubuntu-latest
     permissions:
       pages: write

@@ -91,7 +91,11 @@ class MobileSnapshotTests(unittest.TestCase):
         self.assertIn('mobile-actions-public/status.json', workflow)
         self.assertIn('eq 5', workflow)
         self.assertNotIn("schedule:", workflow)
-        self.assertNotIn("workflow_dispatch:", workflow)
+        # Owner-only Pages refresh is independent of the F8 PING sender.
+        self.assertIn("  workflow_dispatch:", workflow)
+        self.assertEqual(workflow.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(workflow.count("github.triggering_actor == 'kinoko34077'"), 2)
+        self.assertIn('eq 6', workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertNotIn("issues: write", workflow)
         self.assertNotIn("actions: write", workflow)
