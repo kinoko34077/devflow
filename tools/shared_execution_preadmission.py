@@ -46,7 +46,7 @@ class UntrustedPrincipalProjection:
     asserted_principal_id: int | None = None
     target_repository_id: int | None = None
     request_id: str | None = None
-    claim_digest: str | None = None
+    assertion_digest: str | None = None
     authenticated: bool = False
     issuer_verified: bool = False
     catalog_verified: bool = False
@@ -109,5 +109,5 @@ def project_untrusted_principal(raw: str) -> UntrustedPrincipalProjection:
         asserted_principal_id=doc["asserted_principal_id"],
         target_repository_id=doc["target_repository_id"],
         request_id=doc["request_id"],
-        claim_digest=digest,
+        assertion_digest=digest,
     )
