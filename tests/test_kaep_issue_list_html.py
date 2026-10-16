@@ -154,7 +154,7 @@ class HtmlListTests(unittest.TestCase):
         self.assertIn("KAEP", stdout.getvalue())
         self.assertTrue(stdout.getvalue().isascii())
 
-    def test_blocked_cli_never_renders_a_misleading_empty_html(self):
+    def test_blocked_cli_renders_explicit_failure_not_empty_success(self):
         with (mock.patch.object(kaep_issue_search_view, "search_repository",
                                 side_effect=kaep_issue_search_view.InvalidMessage("SEARCH_FAILED")),
               mock.patch("sys.stdout", new_callable=io.StringIO) as stdout):
@@ -162,10 +162,10 @@ class HtmlListTests(unittest.TestCase):
                 ["--repository", "kinoko34077/devflow",
                  "--expect-source-actor", "kinoko34077", "--format", "html"])
         self.assertEqual(rc, 2)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["status"], "BLOCKED")
-        self.assertTrue(payload["has_unknown_work"])
-        self.assertNotIn("<html", stdout.getvalue())
+        self.assertTrue(stdout.getvalue().startswith("<!doctype html>"))
+        self.assertIn("PARTIAL / UNKNOWN", stdout.getvalue())
+        self.assertIn("SEARCH_FAILED", stdout.getvalue())
+        self.assertIn("0 / 0 rows", stdout.getvalue())
 
 
 if __name__ == "__main__":
