@@ -95,7 +95,7 @@ class HtmlListTests(unittest.TestCase):
         self.assertTrue(content.isascii())
         self.assertIn("&#", content)
         self.assertNotIn("試験", content)
-        self.assertEqual(html_module.unescape(content).count("試験"), 1)
+        self.assertEqual(html_module.unescape(content).count("試験"), 2)  # Cell and client-side search key
 
     def test_untrusted_html_js_and_links_never_became_executable(self):
         content = to_html(report())
