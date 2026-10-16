@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 import re
 import subprocess
 import sys
@@ -94,6 +95,7 @@ def build_search_list(
     output: dict[str, Any] = {
         "schema_version": "kaep.search-list.v0.1",
         "status": "BOUNDED_SEARCH_READ",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
         "source_coverage": "SEARCH_INDEX_NOT_AUTHORITATIVE",
         "repositories": list(repositories),
         "searched_candidates": 0,
@@ -214,11 +216,18 @@ def build_search_list(
     return output
 
 
+def _cell(value: str) -> str:
+    """Escape title/display text without granting Markdown link syntax."""
+    return re.sub(r"([\\|`\[\]<>*_!])", r"\\\1", value)
+
+
 def to_markdown(result: dict[str, Any], *, role: str = "all",
-                state: str = "all", reply: str = "all") -> str:
+                issue_type: str = "all", state: str = "all",
+                reply: str = "all") -> str:
     rows = [
         x for x in result["rows"]
         if (role == "all" or x["issue_role"] == role)
+        and (issue_type == "all" or x["issue_type"] == issue_type)
         and (state == "all" or x["issue_state"] == state)
         and (reply == "all" or x["reply_observation"] == reply)
     ]
@@ -226,31 +235,34 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
         "# KAEP source discovery — read-only candidate list",
         "",
         f"Search status: {result['status']} / {result['source_coverage']}",
+        f"Observed at (UTC): {result['observed_at']}",
         f"Candidate Issues: {result['searched_candidates']}; "
         f"Read Issues: {result['validated_source_issues']}; "
         f"Rows (filtered): {len(rows)}; Errors: {len(result['errors'])}",
         "This is NOT a complete Issue/KAEP inventory, pending work queue, "
         "agent identity, current-HEAD proof, or permission to act.",
         "",
-        "| Repository / Issue | Issue role / type | Recipient | Reply observation | Source |",
-        "| --- | --- | --- | --- | --- |",
+        "| Repository / Issue | Title | State | Role / type (source) | Recipient / intent | Reply observation | Original source |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for x in rows:
         lines.append(
             f"| {x['repository'].split('/')[-1]} [#{x['issue_number']}]({x['issue_url']})"
-            f" | {x['issue_role']} / {x['issue_type'] or '-'}"
-            f" | {x['recipient']} | {x['reply_observation']}"
+            f" | {_cell(x['title_hint'])}"
+            f" | {x['issue_state']}"
+            f" | {x['issue_role']} / {x['issue_type'] or '-'} ({x['role_source']})"
+            f" | {x['recipient']} / {x['intent']}"
+            f" | {x['reply_observation']}"
             f" | [comment {x['source_comment_id']}]({x['source_url']}) |"
         )
     if not rows:
-        lines.append("| No verified rows in this bounded search/filter | - | - | - | - |")
+        lines.append("| No verified rows in this bounded search/filter | - | - | - | - | - | - |")
     if result["errors"]:
         lines.append("")
         lines.append("Errors / unknown: " + ", ".join(
             e["reason_code"] for e in result["errors"]
         ))
     return "\n".join(lines) + "\n"
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -259,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--recipient", choices=("all",) + RECIPIENTS, default="all")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument("--role", default="all")
+    parser.add_argument("--issue-type", default="all")
     parser.add_argument("--state", choices=("all", "open", "closed"), default="all")
     parser.add_argument("--reply", default="all")
     args = parser.parse_args(argv)
@@ -284,7 +297,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "json" or result["status"] == "BLOCKED":
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     else:
-        print(to_markdown(result, role=args.role, state=args.state, reply=args.reply))
+        print(to_markdown(result, role=args.role, issue_type=args.issue_type,
+                          state=args.state, reply=args.reply))
     return 0 if result["status"] == "BOUNDED_SEARCH_READ" else 2
 
 
