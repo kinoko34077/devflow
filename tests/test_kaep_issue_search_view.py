@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from tools.kaep_mailbox_codec import encode_comment
+from tools.kaep_mailbox_codec import MARKER, encode_comment
+from tools import agent_inbox
 from tools.kaep_request_sender import make_request
 from tools.kaep_issue_search_view import build_search_list, to_markdown, machine_json, console_text
 
@@ -191,6 +192,76 @@ class SearchListTests(unittest.TestCase):
         self.assertEqual(out["rows"], [])
         self.assertEqual(out["unmatched_candidates"], 1)
         self.assertTrue(out["has_unknown_work"])
+
+
+    def test_original_comment_cap_precedes_quarantine_filter(self):
+        # Every invalid message would otherwise be removed by the display
+        # quarantine, evading the existing _issue_messages <=500 safety cap.
+        bad_body = MARKER + "\nnoncanonical wrapper"
+        count = agent_inbox.MAX_ISSUE_COMMENTS + 1
+        comments = [
+            {"id": i + 1, "body": bad_body,
+             "user": {"login": OWNER}}
+            for i in range(count)
+        ]
+        paginated = json.dumps([
+            comments[i:i + 100] for i in range(0, count, 100)
+        ])
+        out = build_search_list(
+            [DEV], {DEV: searched(DEV, [576])},
+            fetch_original_issue=lambda _repo, _n: issue(),
+            fetch_comments=lambda _repo, _n: paginated,
+            expected_actor=OWNER, recipient="claude-code",
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "ISSUE_COMMENTS_LIMIT")
+        self.assertFalse(out["fallback_retirement_authorized"])
+
+    def test_owner_reply_to_bot_source_still_blocks_unknown_parent(self):
+        bot = root(n=554)
+        answer = json.loads(json.dumps(bot))
+        answer.update({
+            "message_id": "msg_search_bot_owner_answer",
+            "idempotency_key": "search.test.bot.owner.answer",
+            "kind": "ANSWER", "recipient": "chatgpt",
+            "in_reply_to": bot["message_id"],
+        })
+        out, _ = self.run_view(
+            [DEV], {(DEV, 554): issue(n=554)},
+            {(DEV, 554): [
+                comment(100, bot, actor="github-actions[bot]"),
+                comment(101, answer),
+            ]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "UNKNOWN_PARENT")
+
+    def test_quarantined_parent_with_owner_reply_still_blocks(self):
+        request = root()
+        malformed = comment(100, request)
+        malformed["body"] += "\n\nnoncanonical trailing prose"
+        answer = json.loads(json.dumps(request))
+        answer.update({
+            "message_id": "msg_search_parent_owner_answer",
+            "idempotency_key": "search.test.parent.owner.answer",
+            "kind": "ANSWER", "recipient": "chatgpt",
+            "in_reply_to": request["message_id"],
+        })
+        out, _ = self.run_view(
+            [DEV], {(DEV, 576): issue()},
+            {(DEV, 576): [malformed, comment(101, answer)]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "UNKNOWN_PARENT")
 
     def test_bot_authored_root_not_promoted_as_owner_request(self):
         msg = root(n=554)
