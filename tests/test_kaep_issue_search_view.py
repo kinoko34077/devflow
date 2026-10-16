@@ -111,6 +111,13 @@ class SearchListTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertNotIn("test-only inert source", json.dumps(out))
         self.assertIn("6193914061", to_markdown(out))
+        rendered = to_markdown(out)
+        self.assertIn("| State | Role / type (source) |", rendered)
+        self.assertIn("claude-code / ANALYZE", rendered)
+        self.assertIn("Observed at (UTC)", rendered)
+        self.assertNotIn("test-only inert source", rendered)
+        self.assertIn("No verified rows", to_markdown(out, issue_type="BUG"))
+
 
     def test_search_false_positive_without_exact_comment_is_excluded(self):
         out, _ = self.run_view(
