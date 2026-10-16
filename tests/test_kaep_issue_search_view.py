@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from tools.kaep_mailbox_codec import encode_comment
+from tools.kaep_mailbox_codec import MARKER, encode_comment
 from tools.kaep_request_sender import make_request
 from tools.kaep_issue_search_view import build_search_list, to_markdown, machine_json, console_text
 
@@ -129,6 +129,113 @@ class SearchListTests(unittest.TestCase):
         self.assertNotIn("test-only inert source", rendered)
         self.assertIn("No verified rows", to_markdown(out, issue_type="BUG"))
 
+
+
+    def test_real_576_later_noncanonical_wrapper_is_quarantined_not_pending(self):
+        earlier = root()
+        earlier["message_id"] = "msg_cursor576_readonly_audit_20261015a"
+        earlier["exchange_id"] = "ex_cursor576_readonly_audit_20261015a"
+        earlier["scope"]["expected_head"] = "60cf73abd166e14d34d73e8821589fc6cb412c57"
+        later = comment(6221821907, root(number=2))
+        later["body"] += "\n\nExplanatory text outside KAEP v0.2 fence"
+        out, _ = self.run_view(
+            [DEV], {(DEV, 576): issue()}, {(DEV, 576): [
+                comment(6193914061, earlier), later,
+            ]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 1)
+        self.assertEqual(out["quarantined_comment_count"], 1)
+        self.assertEqual(len(out["rows"]), 1)
+        self.assertEqual(out["rows"][0]["source_comment_id"], 6193914061)
+        self.assertEqual(out["rows"][0]["source_state"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"][0]["reply_observation"], "UNKNOWN_QUARANTINED_SOURCE")
+        self.assertEqual(out["errors"][0]["comment_id"], 6221821907)
+        self.assertEqual(out["errors"][0]["reason_code"], "QUARANTINED_INVALID_WRAPPER")
+        self.assertNotIn("PENDING_REPLY", to_markdown(out))
+        self.assertFalse(out["complete_source_universe"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+
+    def test_real_551_invalid_reference_quarantined_without_relaxing_codec(self):
+        valid = root(n=551)
+        bad = root(n=551, number=2)
+        bad["evidence_refs"] = ["https://invalid.example/issue/not-accepted"]
+        fence = chr(96) * 3
+        invalid_body = MARKER + "\n" + fence + "json\n" + json.dumps(bad) + "\n" + fence
+        out, _ = self.run_view(
+            [DEV], {(DEV, 551): issue(n=551)},
+            {(DEV, 551): [comment(100, valid), {
+                "id": 6175605292, "body": invalid_body,
+                "user": {"login": OWNER},
+            }]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["partial_source_issues"], 1)
+        self.assertEqual(out["errors"][0]["reason_code"], "QUARANTINED_INVALID_REF")
+        self.assertEqual(out["rows"][0]["reply_observation"], "UNKNOWN_QUARANTINED_SOURCE")
+        self.assertFalse(out["can_authorize_execution"])
+
+    def test_bot_root_with_owner_reply_stays_blocked_unknown_parent(self):
+        bot = root(n=554)
+        reply = json.loads(json.dumps(bot))
+        reply.update({
+            "message_id": "msg_testbot_owner_answer",
+            "idempotency_key": "search.fixture.bot.owner.answer",
+            "kind": "ANSWER", "recipient": "chatgpt",
+            "in_reply_to": bot["message_id"],
+        })
+        out, _ = self.run_view(
+            [DEV], {(DEV, 554): issue(n=554)},
+            {(DEV, 554): [
+                comment(100, bot, actor="github-actions[bot]"),
+                comment(101, reply),
+            ]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "UNKNOWN_PARENT")
+
+    def test_quarantined_parent_with_remaining_owner_reply_blocks_issue(self):
+        original = root()
+        malformed_parent = comment(100, original)
+        malformed_parent["body"] += "\n\nInvalid trailing Markdown"
+        reply = json.loads(json.dumps(original))
+        reply.update({
+            "message_id": "msg_quarantine_parent_reply",
+            "idempotency_key": "search.fixture.quarantine.parent",
+            "kind": "ANSWER", "recipient": "chatgpt",
+            "in_reply_to": original["message_id"],
+        })
+        out, _ = self.run_view(
+            [DEV], {(DEV, 576): issue()},
+            {(DEV, 576): [malformed_parent, comment(101, reply)]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "UNKNOWN_PARENT")
+
+    def test_other_trusted_codec_violation_still_blocks_all_source_roots(self):
+        good = root()
+        malformed = root(number=2)
+        malformed["message_id"] = "invalid_message_id"
+        fence = chr(96) * 3
+        invalid_body = MARKER + "\n" + fence + "json\n" + json.dumps(malformed) + "\n" + fence
+        out, _ = self.run_view(
+            [DEV], {(DEV, 576): issue()},
+            {(DEV, 576): [comment(100, good), {
+                "id": 101, "body": invalid_body, "user": {"login": OWNER},
+            }]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 0)
+        self.assertEqual(out["errors"][0]["reason_code"], "INVALID_MESSAGE_ID")
 
     def test_search_false_positive_without_exact_comment_is_excluded(self):
         out, _ = self.run_view(
