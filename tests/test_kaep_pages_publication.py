@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from html import unescape
 import unittest
 
 from tools.kaep_issue_list_html import to_html
@@ -17,14 +18,17 @@ class KaepPagesPublicationTests(unittest.TestCase):
         cls.workflow = WF.read_text(encoding="utf-8")
         cls.landing = LANDING.read_text(encoding="utf-8")
 
-    def test_existing_f8_artifact_remains_and_one_kaep_file_added(self):
+    def test_existing_f8_artifact_remains_and_paired_kaep_files_added(self):
         w = self.workflow
         for filename in ("index.html", "control.js", "style.css",
                          "manifest.webmanifest"):
             self.assertIn(filename, w)
         self.assertIn('mobile-actions-public/status.json', w)
         self.assertIn('kaep/index.html', w)
-        self.assertIn('test "$(find "$out" -type f | wc -l)" -eq 6', w)
+        self.assertIn('kaep/index.json', w)
+        self.assertIn('--public-json-out', w)
+        self.assertIn('PUBLIC_KAEP_AGENT_INDEX_VALIDATED', w)
+        self.assertIn('test "$(find "$out" -type f | wc -l)" -eq 7', w)
         self.assertIn("upload-pages-artifact@", w)
         self.assertIn("deploy-pages@", w)
         self.assertNotIn("gh-pages", w)
@@ -82,8 +86,8 @@ class KaepPagesPublicationTests(unittest.TestCase):
         })
         self.assertIn('data-source-status="PARTIAL_UNKNOWN"', html)
         self.assertIn("UNKNOWN_PARENT", html)
-        self.assertIn("not a complete issue universe", html.lower())
-        self.assertIn("no credentials", html.lower())
+        self.assertIn("全Issueの網羅性", unescape(html))
+        self.assertIn("認証情報", unescape(html))
         self.assertNotIn("/dispatches", html)
 
 
