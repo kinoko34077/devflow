@@ -17,7 +17,7 @@ from tools import agent_inbox, repository_projection
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
-from tools.kaep_mailbox_codec import MARKER, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import MARKER, decode_comment, read_mailbox, verify_reply_chain
 
 MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
@@ -68,6 +68,37 @@ def fetch_issue(repository: str, number: int) -> dict[str, Any]:
     return _gh_json(f"/repos/{repository}/issues/{number}")
 
 
+
+# Only these two intrinsically non-authoritative presentation defects can be
+# quarantined in this read-only list. Never relax the canonical source codec,
+# and never quarantine identity, parent-chain, scope or collision failures.
+_DISPLAY_ONLY_QUARANTINE = frozenset({"INVALID_WRAPPER", "INVALID_REF"})
+
+
+def _display_only_trusted_comments(
+    trusted: list[dict[str, Any]], *, task_ref: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    usable: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = []
+    for comment in trusted:
+        if not comment["body"].startswith(MARKER):
+            usable.append(comment)
+            continue
+        try:
+            decode_comment(comment["body"], task_ref=task_ref)
+        except InvalidMessage as exc:
+            reason = str(exc)
+            if reason not in _DISPLAY_ONLY_QUARANTINE:
+                raise
+            quarantined.append({
+                "comment_id": comment["id"],
+                "reason_code": "QUARANTINED_" + reason,
+            })
+            continue
+        usable.append(comment)
+    return usable, quarantined
+
+
 def build_search_list(
     repositories: list[str], search_results: dict[str, dict[str, Any]], *,
     fetch_original_issue: Callable[[str, int], dict[str, Any]],
@@ -100,6 +131,7 @@ def build_search_list(
         "repositories": list(repositories),
         "searched_candidates": 0,
         "validated_source_issues": 0,
+        "partial_source_issues": 0,
         "unmatched_candidates": 0,
         "rows": [],
         "errors": [],
@@ -165,6 +197,11 @@ def build_search_list(
                 if not c["body"].startswith(MARKER)
                 or c["actor_login"].casefold() == expected_actor.casefold()
             ]
+            trusted, quarantined = _display_only_trusted_comments(
+                trusted, task_ref=f"{repo}#{number}",
+            )
+            # The unchanged strict codec still verifies every remaining
+            # message; parent/collision/actor failure blocks this entire Issue.
             parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
             verify_reply_chain([m for _, m in parsed])
             recipients = RECIPIENTS if recipient == "all" else (recipient,)
@@ -186,15 +223,27 @@ def build_search_list(
                         "role_source": classified.source_kind,
                         "recipient": target,
                         "intent": root["intent"],
-                        "reply_observation": root["status"],
+                        "reply_observation": (
+                            "UNVERIFIED_DUE_TO_SOURCE_QUARANTINE"
+                            if quarantined else root["status"]
+                        ),
+                        "source_validation": (
+                            "PARTIAL_UNKNOWN" if quarantined
+                            else "STRICT_COMPLETE_FOR_CANDIDATE"
+                        ),
                         "message_id": root["source_message_id"],
                         "source_comment_id": root["source_comment_id"],
                         "head_freshness": "NOT_REVALIDATED",
                         "is_authoritative_assignment": False,
                     })
-            output["validated_source_issues"] += 1
-            if not verified_roots:
-                output["unmatched_candidates"] += 1
+            if quarantined:
+                output["partial_source_issues"] += 1
+                for entry in quarantined:
+                    output["errors"].append({"owning_issue": url, **entry})
+            else:
+                output["validated_source_issues"] += 1
+                if not verified_roots:
+                    output["unmatched_candidates"] += 1
             output["rows"].extend(verified_roots)
         except (InvalidMessage, ValueError, KeyError, TypeError) as exc:
             output["errors"].append({
@@ -237,13 +286,14 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
         f"Search status: {result['status']} / {result['source_coverage']}",
         f"Observed at (UTC): {result['observed_at']}",
         f"Candidate Issues: {result['searched_candidates']}; "
-        f"Read Issues: {result['validated_source_issues']}; "
+        f"Strict Issues: {result['validated_source_issues']}; "
+        f"Partial Issues: {result['partial_source_issues']}; "
         f"Rows (filtered): {len(rows)}; Errors: {len(result['errors'])}",
         "This is NOT a complete Issue/KAEP inventory, pending work queue, "
         "agent identity, current-HEAD proof, or permission to act.",
         "",
-        "| Repository / Issue | Title | State | Role / type (source) | Recipient / intent | Reply observation | Original source |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Repository / Issue | Title | State | Role / type (source) | Recipient / intent | Reply observation | Source validation | Original source |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for x in rows:
         lines.append(
@@ -253,10 +303,11 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
             f" | {x['issue_role']} / {x['issue_type'] or '-'} ({x['role_source']})"
             f" | {x['recipient']} / {x['intent']}"
             f" | {x['reply_observation']}"
+            f" | {x['source_validation']}"
             f" | [comment {x['source_comment_id']}]({x['source_url']}) |"
         )
     if not rows:
-        lines.append("| No verified rows in this bounded search/filter | - | - | - | - | - | - |")
+        lines.append("| No verified rows in this bounded search/filter | - | - | - | - | - | - | - |")
     if result["errors"]:
         lines.append("")
         lines.append("Errors / unknown: " + ", ".join(

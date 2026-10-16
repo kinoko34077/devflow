@@ -130,6 +130,57 @@ class SearchListTests(unittest.TestCase):
         self.assertIn("No verified rows", to_markdown(out, issue_type="BUG"))
 
 
+
+    def test_valid_old_original_visible_but_partial_when_later_wrapper_invalid(self):
+        old = root(number=51)
+        old["message_id"] = "msg_cursor576_readonly_audit_20261015a"
+        old["exchange_id"] = "ex_cursor576_readonly_audit_20261015a"
+        bad = comment(6221821907, root(number=52))
+        bad["body"] += "\n\nHistorical prose after fenced KAEP v0.2 message"
+        out, _ = self.run_view(
+            [DEV], {(DEV, 576): issue()},
+            {(DEV, 576): [comment(6193914061, old), bad]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["partial_source_issues"], 1)
+        self.assertEqual(len(out["rows"]), 1)
+        row = out["rows"][0]
+        self.assertEqual(row["source_comment_id"], 6193914061)
+        self.assertEqual(row["source_validation"], "PARTIAL_UNKNOWN")
+        self.assertEqual(row["reply_observation"],
+                         "UNVERIFIED_DUE_TO_SOURCE_QUARANTINE")
+        self.assertEqual(out["errors"][0]["comment_id"], 6221821907)
+        self.assertEqual(out["errors"][0]["reason_code"],
+                         "QUARANTINED_INVALID_WRAPPER")
+        self.assertIn("PARTIAL_UNKNOWN", to_markdown(out))
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+        self.assertTrue(out["has_unknown_work"])
+        self.assertFalse(out["complete_source_universe"])
+
+    def test_historical_invalid_ref_is_quarantined_not_recognized_as_valid(self):
+        invalid = root(n=551, number=53)
+        invalid["evidence_refs"] = ["https://invalid.example.com/source"]
+        invalid_comment = {
+            "id": 6175605292,
+            "body": "<!-- kaep:message:v0.2 -->\n```json\n"
+                    + json.dumps(invalid, ensure_ascii=False, indent=2)
+                    + "\n```",
+            "user": {"login": OWNER},
+        }
+        out, _ = self.run_view(
+            [DEV], {(DEV, 551): issue(n=551, state="closed")},
+            {(DEV, 551): [invalid_comment]},
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["partial_source_issues"], 1)
+        self.assertEqual(out["validated_source_issues"], 0)
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["errors"][0]["reason_code"],
+                         "QUARANTINED_INVALID_REF")
+        self.assertFalse(out["complete_source_universe"])
+
     def test_search_false_positive_without_exact_comment_is_excluded(self):
         out, _ = self.run_view(
             [DEV], {(DEV, 531): issue(n=531)},
