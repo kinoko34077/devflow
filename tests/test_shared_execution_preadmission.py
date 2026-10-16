@@ -41,7 +41,7 @@ class PrincipalPreadmissionTests(unittest.TestCase):
                 self.assertEqual(x.asserted_kind, kind)
                 self.assertEqual(x.asserted_principal_id, 123)
                 self.assertEqual(x.target_repository_id, 456)
-                self.assertEqual(len(x.claim_digest), 64)
+                self.assertEqual(len(x.assertion_digest), 64)
                 for flag in ("authenticated", "issuer_verified", "catalog_verified",
                              "clock_verified", "source_verified",
                              "claim_authority", "github_check_authority",
@@ -59,7 +59,7 @@ class PrincipalPreadmissionTests(unittest.TestCase):
             with self.subTest(injected=injected):
                 x = project_untrusted_principal(payload(**injected))
                 self.assertEqual(x.status, "HOLD")
-                self.assertIsNone(x.claim_digest)
+                self.assertIsNone(x.assertion_digest)
 
     def test_bad_kinds_not_promoted(self):
         for kind in ("VERIFIED", "GITHUB_OWNER", "ISSUE_AUTHOR", "HUMAN", "REVIEWED", "", 1, True, None):
@@ -114,7 +114,7 @@ class PrincipalPreadmissionTests(unittest.TestCase):
     def test_domain_digest_binds_kind_repo_and_expiry(self):
         a = project_untrusted_principal(payload())
         b = project_untrusted_principal(json.dumps(dict(reversed(list(BASE.items())))))
-        self.assertEqual(a.claim_digest, b.claim_digest)
+        self.assertEqual(a.assertion_digest, b.assertion_digest)
         for changed in (
             {"asserted_kind": "LOCAL_UNVERIFIED"},
             {"target_repository_id": 457},
@@ -123,8 +123,8 @@ class PrincipalPreadmissionTests(unittest.TestCase):
             {"nonce": "f3c-0123456789abcdefghik"},
         ):
             with self.subTest(changed=changed):
-                self.assertNotEqual(a.claim_digest, project_untrusted_principal(
-                    payload(**changed)).claim_digest)
+                self.assertNotEqual(a.assertion_digest, project_untrusted_principal(
+                    payload(**changed)).assertion_digest)
 
     def test_no_secrets_or_raw_payload_in_receipt(self):
         x = project_untrusted_principal(payload())
