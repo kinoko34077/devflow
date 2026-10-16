@@ -161,7 +161,15 @@ new_body = upsert_issue_metadata_v1(current_issue_body, payload)
 # Review exact diff, author/owner and gates BEFORE a separate authorized GitHub Issue update.
 ```
 
-For TRACKER/REFERENCE/SYSTEM, current V1 still requires explicit type/status/gate fields. Future lightweight non-TASK R3/V2 adoption is separately tested and not implicitly supplied by this helper. For an unresolved or untrusted Issue, leave it visible as legacy/unclassified/invalid and preserve the manual fallback.
+For TRACKER/REFERENCE/SYSTEM, V1 still requires complete type/status/gate fields. **R3/V2 lightweight non-TASK classification is already accepted** ([devflow #477](https://github.com/kinoko34077/devflow/issues/477), [PR #483](https://github.com/kinoko34077/devflow/pull/483)); it is not a future proposal and is **not** produced by the V1-only `upsert_issue_metadata_v1` helper. Only after verifying the owning Issue's real role, current attention and trusted author, append the distinct V2 marker with exactly these three fields:
+
+```text
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->
+{"schema_version":2,"record_role":"REFERENCE","attention":"NONE"}
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->
+```
+
+This is an **example only** for a genuinely non-actionable reference. Allowed V2 roles are `TRACKER`, `REFERENCE`, `SYSTEM`; allowed explicit attention values are `NONE`, `NEEDS_HUMAN`, `WAIT_EXTERNAL`, `NEEDS_EVIDENCE`. V2 cannot represent a TASK, imply readiness, clear a gate, retire manual work or authorize execution. Preserve the original Issue prose; mixed V1/V2, duplicate, invalid or untrusted metadata fail closed. If the current role or attention cannot be substantiated, leave the Issue legacy/unclassified and retain manual fallback. Do not mass-backfill or change another worker's Issue only to increase coverage.
 
 
 ### 4.1 Manual Execution Session Record
