@@ -85,6 +85,26 @@ class NativeReadOnlyCliTests(unittest.TestCase):
             with self.subTest(value=text), self.assertRaises(ValueError):
                 cli._target(text)
 
+    def test_only_exact_accepted_repository_ledger_pairs_are_admitted(self):
+        accepted = (
+            ("kinoko34077/devflow#367", ("kinoko34077/devflow", 367)),
+            ("kinoko34077/execution-coordinator#127",
+             ("kinoko34077/execution-coordinator", 127)),
+            ("kinoko34077/kinotch-repository-base#50",
+             ("kinoko34077/kinotch-repository-base", 50)),
+        )
+        for selected, expected in accepted:
+            with self.subTest(selected=selected):
+                self.assertEqual(expected, cli._target(selected))
+        for selected in (
+            "kinoko34077/devflow#366",
+            "kinoko34077/devflow#0367",
+            "kinoko34077/execution-coordinator#367",
+            "kinoko34077/kinotch-repository-base#51",
+        ):
+            with self.subTest(selected=selected), self.assertRaises(ValueError):
+                cli._target(selected)
+
     def test_no_silent_autodiscovery_or_double_count(self):
         with self.assertRaisesRegex(ValueError, "at least one"):
             cli.build_live_report(object(), [])
