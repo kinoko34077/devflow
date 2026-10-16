@@ -112,7 +112,7 @@ jobs:
           assert (rc == 0) == (status == "BOUNDED_SEARCH_READ")
           assert "Content-Security-Policy" in content
           assert "connect-src &#x27;none&#x27;" in content
-          assert "github.com/kinoko34077/devflow/issues/" in content or "Source diagnostics" in content
+          assert "github.com/kinoko34077/devflow/issues/" in content or "取得・検証時の注意" in content
           assert 'href="javascript:' not in content
           assert "api.github.com" not in content
           assert "PARTIAL / UNKNOWN" in content or status == "BOUNDED_SEARCH_READ"
