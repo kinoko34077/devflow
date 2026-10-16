@@ -9,6 +9,7 @@ on:
       - '.github/workflows/mobile-actions-pages.yml'
       - 'tools/kaep_issue_search_view.py'
       - 'tools/kaep_issue_list_html.py'
+      - 'tools/kaep_public_index.py'
   workflow_dispatch:
 
 
