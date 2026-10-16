@@ -365,10 +365,10 @@ def main(argv: list[str] | None = None) -> int:
             ), "has_unknown_work": True, "read_only": True,
             "fallback_retirement_authorized": False,
         }
-    if args.format == "json" or result["status"] == "BLOCKED":
+    if args.format == "json" or (args.format == "markdown" and result["status"] == "BLOCKED"):
         print(machine_json(result))
     elif args.format == "html":
-        # ASCII-safe standalone offline HTML; redirection needs no codepage edit.
+        # Even blocked reads are an explicit, readable offline diagnostic page.
         print(to_html(result))
     else:
         display = to_markdown(result, role=args.role, issue_type=args.issue_type,
