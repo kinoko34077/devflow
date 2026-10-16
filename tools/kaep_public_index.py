@@ -52,6 +52,8 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
         for key in _ROW_KEYS:
             if key in ("issue_number", "source_comment_id"):
                 continue
+            if row[key] is None:
+                row[key] = ""
             if type(row[key]) is not str or len(row[key]) > 256:
                 raise ValueError("PUBLIC_INDEX_INVALID_FIELD")
         public_rows.append(row)
