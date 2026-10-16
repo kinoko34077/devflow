@@ -1,7 +1,9 @@
 """Snapshot-only, pagination-complete audit tests for #576."""
 import unittest
 from tools.task_checkpoint_cursor import CursorState, render_cursor_comment
-from tools.task_checkpoint_cursor_audit import classify_cursor, audit_issue_ids, discover_open_issue_ids
+from tools.task_checkpoint_cursor_audit import (classify_cursor, audit_issue_ids,
+                                                discover_open_issue_ids,
+                                                audit_open_issue_shards)
 
 REPO = "kinoko34077/devflow"
 TASK = REPO + "#576"
@@ -113,6 +115,93 @@ class CursorAuditTests(unittest.TestCase):
         self.assertIn("state=open", d.path)
         with self.assertRaises(ValueError):
             discover_open_issue_ids(d, REPO, max_issues=1)
+
+
+
+
+class ShardedFake:
+    def __init__(self, ids, *, final_ids=None, missing=None, bad_owner=None):
+        self.ids = list(ids)
+        self.final_ids = list(ids if final_ids is None else final_ids)
+        self.missing = missing
+        self.bad_owner = bad_owner
+        self.discoveries = 0
+        self.issue_reads = []
+    def get_paginated(self, path):
+        if "/issues?state=open" in path:
+            self.discoveries += 1
+            ids = self.ids if self.discoveries == 1 else self.final_ids
+            return [{"number": n, "state": "open"} for n in ids] + [
+                {"number": 1000, "pull_request": {"url": "PR"}, "state": "open"}
+            ]
+        n = int(path.split("/issues/")[1].split("/")[0])
+        if n == self.missing:
+            return None
+        return []
+    def get_json(self, path):
+        n = int(path.split("/")[-1])
+        self.issue_reads.append(n)
+        if n == self.bad_owner:
+            return {"number": n, "pull_request": {"url": "PR"}}
+        return {"number": n, "html_url": "https://github.com/" + REPO + "/issues/" + str(n)}
+
+
+class ShardedCursorAuditTests(unittest.TestCase):
+    def test_101_owners_complete_deterministic_and_unknown_not_semantic_pass(self):
+        ids = list(range(1, 102))
+        fake = ShardedFake(ids)
+        report = audit_open_issue_shards(fake, REPO, shard_size=40)
+        self.assertEqual(report["checked"], 101)
+        self.assertEqual([s["count"] for s in report["shards"]], [40, 40, 21])
+        self.assertEqual(report["counts"]["NEEDS_EVIDENCE"], 101)
+        self.assertFalse(report["semantic_coverage_complete"])
+        self.assertEqual(report["frontiers_independently_verified"], 0)
+        self.assertEqual(report["eligibility_independently_supplied"], 0)
+        self.assertTrue(report["coverage_complete_for_discovered_set"])
+        self.assertFalse(report["snapshot_atomic"])
+        self.assertEqual(fake.discoveries, 2)
+        self.assertEqual(fake.issue_reads, ids)
+        self.assertNotIn(1000, fake.issue_reads)
+        again = audit_open_issue_shards(ShardedFake(list(reversed(ids))), REPO,
+                                        shard_size=40)
+        self.assertEqual(again["discovery_digest"], report["discovery_digest"])
+        self.assertEqual(again["shards"], report["shards"])
+
+    def test_oversize_invalid_duplicate_or_cohort_churn_fail_closed(self):
+        cases = (
+            ShardedFake(range(1, 102)),     # cap101
+            ShardedFake([1, 1]),            # duplicates
+            ShardedFake([1, 2], final_ids=[1, 3]),  # race
+            ShardedFake([1, 2], missing=2), # missing paginated comments
+            ShardedFake([1, 2], bad_owner=2),# unexpected PR in owner read
+        )
+        for fake in cases:
+            with self.subTest(case=fake.__dict__), self.assertRaises(ValueError):
+                audit_open_issue_shards(fake, REPO, max_total=100)
+        for bad in (0, 101, True):
+            with self.assertRaises(ValueError):
+                audit_open_issue_shards(ShardedFake([1]), REPO, shard_size=bad)
+        for bad in (0, 501, True):
+            with self.assertRaises(ValueError):
+                audit_open_issue_shards(ShardedFake([1]), REPO, max_total=bad)
+
+    def test_shard_trust_conflict_is_not_lost_and_partial_semantic_claim_is_false(self):
+        class Mixed(ShardedFake):
+            def get_paginated(self, path):
+                if "/issues?state=open" in path:
+                    return super().get_paginated(path)
+                n = int(path.split("/issues/")[1].split("/")[0])
+                return [c(render_cursor_comment(STATE), trusted=False)] if n == 576 else []
+        m = Mixed([575, 576, 577])
+        report = audit_open_issue_shards(m, REPO, shard_size=1,
+                                          eligible={575: False, 576: True},
+                                          expected={576: "M1"})
+        self.assertEqual(report["counts"]["TRUST_CONFLICT"], 1)
+        self.assertEqual(report["counts"]["EXEMPT"], 1)
+        self.assertEqual(report["counts"]["NEEDS_EVIDENCE"], 1)
+        self.assertEqual(report["frontiers_independently_verified"], 1)
+        self.assertFalse(report["semantic_coverage_complete"])
+        self.assertEqual(report["eligibility_independently_supplied"], 2)
 
 
 
