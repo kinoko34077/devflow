@@ -73,7 +73,7 @@ JS = r"""
       row.hidden=!match;
       if(match)shown++;
     }
-    document.getElementById("shown").textContent=shown+" / "+rows.length+" rows in bounded search";
+    document.getElementById("shown").textContent=shown+" / "+rows.length+" 件（限定検索対象）";
   }
   function sort(){
     const mode=document.getElementById("sort").value;
@@ -113,7 +113,7 @@ def _safe_link(value: Any, *, source: bool) -> str | None:
 def _anchor(value: Any, label: str, *, source: bool) -> str:
     link = _safe_link(value, source=source)
     return (f'<a href="{_esc(link)}" target="_blank" rel="noopener noreferrer">'
-            f'{_esc(label)}</a>') if link else _esc(label) + " (unverified link)"
+            f'{_esc(label)}</a>') if link else _esc(label) + "（リンク未検証）"
 
 
 def _hash(source: str) -> str:
@@ -144,7 +144,7 @@ def to_html(result: dict[str, Any]) -> str:
         intent = str(row.get("intent") or "-")
         comment_id = row.get("source_comment_id")
         marker = f"#{number}"
-        sourcelabel = f"Comment {comment_id}" if type(comment_id) is int else "Source"
+        sourcelabel = f"コメント {comment_id}" if type(comment_id) is int else "原典"
         text_search = " ".join((repo, marker, title, role, issue_type, state,
                                 recipient, intent, reply, validation)).lower()
         attr = {
@@ -164,49 +164,51 @@ def to_html(result: dict[str, Any]) -> str:
         )
     diagnostic = []
     if result.get("reason_code"):
-        diagnostic.append("<li>Read blocked: " + _esc(result["reason_code"]) + "</li>")
+        diagnostic.append("<li>読取失敗: " + _esc(result["reason_code"]) + "</li>")
     for err in errors:
         if type(err) is not dict:
             continue
         url = err.get("owning_issue")
-        label = _anchor(url, "Issue", source=False) if url else _esc(err.get("repository") or "General")
+        label = _anchor(url, "Issue", source=False) if url else _esc(err.get("repository") or "一般")
         diagnostic.append(f"<li>{label}: {_esc(err.get('reason_code') or 'UNKNOWN')}"
                           f" (comment {_esc(err.get('comment_id') or '-')})</li>")
     if not diagnostic:
-        diagnostic.append("<li>No explicit diagnostics in the bounded candidate set.</li>")
+        diagnostic.append("<li>今回の取得範囲で検出された診断エラーはありません。</li>")
     partial = result.get("status") != "BOUNDED_SEARCH_READ" or errors
-    label = "PARTIAL / UNKNOWN" if partial else "BOUNDED READ (NOT COMPLETE)"
-    meta = ("Search is candidate discovery only. Not a complete issue universe, "
-            "an executable work queue, current HEAD proof, recipient pickup, "
-            "or authority to retire manual Control / #503.")
+    label = "一部不明（PARTIAL / UNKNOWN）" if partial else "限定取得（完全性未保証）"
+    meta = (
+        "候補検索であり、全Issueの網羅性・現在のHEAD・AIによる受信や返信を保証しません。"
+        "この一覧だけで実行を許可せず、原典Issueを再検証してください。"
+        "手動Controlと#503の経路は維持されます。"
+    )
     summary = [
-        ("Candidate Issues", result.get("searched_candidates", "?")),
-        ("Strict Issues", result.get("validated_source_issues", "?")),
-        ("Partial Issues", result.get("partial_source_issues", "?")),
-        ("KAEP Rows", len(rows)),
-        ("Diagnostics", len(errors)),
+        ("候補Issue数", result.get("searched_candidates", "?")),
+        ("原典検証済みIssue数", result.get("validated_source_issues", "?")),
+        ("部分不明Issue数", result.get("partial_source_issues", "?")),
+        ("KAEP候補件数", len(rows)),
+        ("診断件数", len(errors)),
     ]
     stats = "".join(f'<div class="stat"><strong>{_esc(v)}</strong><span>{_esc(k)}</span></div>'
                     for k, v in summary)
     selects = [
-        ("repository", "Repository"), ("role", "Issue role"),
-        ("state", "Issue state"), ("recipient", "Recipient"),
-        ("reply", "Reply observation"), ("validation", "Source validation"),
+        ("repository", "リポジトリ"), ("role", "Issue区分"),
+        ("state", "Issue状態"), ("recipient", "宛先"),
+        ("reply", "返信状況"), ("validation", "原典検証"),
     ]
     controls = ''.join(
         f'<label class="control" for="{k}">{_esc(label)}'
-        f'<select id="{k}"><option value="">All</option></select></label>'
+        f'<select id="{k}"><option value="">すべて</option></select></label>'
         for k, label in selects
     )
     control_ui = (
-        '<label class="control" for="q">Search rows'
-        '<input id="q" type="search" placeholder="Issue, title, KAEP, recipient"></label>'
+        '<label class="control" for="q">一覧を検索'
+        '<input id="q" type="search" placeholder="Issue番号・タイトル・宛先など"></label>'
         + controls
-        + '<label class="control" for="sort">Sort'
-        '<select id="sort"><option value="issue-desc">Issue descending</option>'
-        '<option value="issue-asc">Issue ascending</option>'
-        '<option value="recipient">Recipient</option>'
-        '<option value="reply">Reply state</option></select></label>'
+        + '<label class="control" for="sort">並べ替え'
+        '<select id="sort"><option value="issue-desc">Issue番号 降順</option>'
+        '<option value="issue-asc">Issue番号 昇順</option>'
+        '<option value="recipient">宛先</option>'
+        '<option value="reply">返信状況</option></select></label>'
     )
     csp = (
         "default-src 'none'; base-uri 'none'; object-src 'none'; "
@@ -217,29 +219,29 @@ def to_html(result: dict[str, Any]) -> str:
         '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta http-equiv="Content-Security-Policy" content="{_esc(csp)}">'
-        '<title>KAEP | Independent Issue List</title>'
+        '<title>KAEP依頼一覧｜AI向け候補索引</title>'
         f'<style>{CSS}</style></head><body><main data-source-status="{_esc(result.get("status", "BLOCKED"))}">'
-        '<h1>KAEP / Issue 一覧</h1>'
-        f'<p class="meta">Observed UTC: {_esc(result.get("observed_at", "unknown"))} '
-        f'| Repositories: {_esc(", ".join(result.get("repositories", [])))} '
-        f'| Status: {_esc(label)}</p>'
+        '<h1>KAEP依頼一覧</h1><p>AIが依頼の原典Issueを探すための候補索引です。表示情報だけでは作業の開始・返信はできません。</p>'
+        f'<p class="meta">取得日時（UTC）: {_esc(result.get("observed_at", "unknown"))} '
+        f'| 対象リポジトリ: {_esc(", ".join(result.get("repositories", [])))} '
+        f'| 取得状態: {_esc(label)}</p>'
         f'<div class="notice" role="status"><strong>{_esc(label)}</strong> — {_esc(meta)}</div>'
-        f'<section aria-label="Counters" class="stats">{stats}</section>'
-        f'<section class="controls" aria-label="Filter rows">{control_ui}</section>'
-        f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} rows in bounded search</p>'
+        f'<section aria-label="取得件数" class="stats">{stats}</section>'
+        f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
+        f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} 件（限定検索対象）</p>'
         '<div class="tableframe"><table id="entries"><thead><tr>'
-        '<th>Repository / Issue</th><th>Title</th><th>State</th>'
-        '<th>Role / type</th><th>Recipient / intent</th><th>Reply</th>'
-        '<th>Validation</th><th>Original comment</th>'
+        '<th>リポジトリ / Issue</th><th>タイトル</th><th>状態</th>'
+        '<th>区分 / 種類</th><th>宛先 / 依頼種別</th><th>返信状況</th>'
+        '<th>原典検証</th><th>原典コメント</th>'
         '</tr></thead><tbody>' + "".join(cells) +
         '</tbody></table></div>'
-        f'<details {"open" if errors else ""}><summary>Source diagnostics ({len(errors)})</summary>'
+        f'<details {"open" if errors else ""}><summary>取得・検証時の注意（{len(errors)}件）</summary>'
         f'<ol class="errors">{"".join(diagnostic)}</ol></details>'
-        '<p class="footer">Standalone offline view: no GitHub Project connection, '
-        'no live refresh, no persistence, no credentials. '
-        'Regenerate using the explicit local read-only CLI to update.</p>'
-        '<noscript><p class="footer">Filtering requires JavaScript; all rows '
-        'and diagnostics remain visible without it.</p></noscript>'
+        '<p class="footer">公開時点の読取専用一覧。GitHub Projectとは連動しません。'
+        '自動更新・保存・認証情報の埋め込みはありません。'
+        '更新時は読取CLIかオーナー限定Pages更新で再生成してください。</p>'
+        '<noscript><p class="footer">絞り込みにはJavaScriptが必要です。一覧と'
+        '診断情報はJavaScriptなしでも閲覧できます。</p></noscript>'
         f'</main><script>{JS}</script></body></html>'
     )
     # Guarantees Windows redirection under CP932 can produce a faithful HTML

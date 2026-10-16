@@ -1,4 +1,12 @@
-# KiNoTch. Actions Control — iPhone Safari launchpad
+# KiNoTch. 開発実行・監視状況 — iPhone向け公開画面
+
+## 現行の役割（2026年10月17日）
+このページはGitHub Actionsの状態を読むための画面です。手動操作は公式GitHub画面へ移動します。**GPTが自動で受信・処理することを保証するものではありません**。自動ハートビートは [devflow #681](https://github.com/kinoko34077/devflow/issues/681) で独立して受入判定します。
+
+AIが依頼を効率的に見つける目的では、[KAEP候補JSON](https://kinoko34077.github.io/devflow/kaep/index.json) と [日本語一覧](https://kinoko34077.github.io/devflow/kaep/) を提供します。このJSONは公開時点の索引であり、実際の受信には [KAEP AI向けAPIの仕様](../spec/KAEP_AGENT_FIRST_API_V1.md) に従って、既存Agent Inboxのlive API/CLIと原典Issueを再検証します。索引だけで作業権限や未処理判定を確定しません。
+
+---
+
 
 Owner: [devflow #562](https://github.com/kinoko34077/devflow/issues/562). Runtime PING/ANSWER acceptance remains [devflow #555](https://github.com/kinoko34077/devflow/issues/555).
 

@@ -76,10 +76,10 @@ class HtmlListTests(unittest.TestCase):
         for keyword in ('id="q"', 'id="repository"', 'id="role"',
                         'id="recipient"', 'id="reply"', 'id="state"',
                         'id="sort"', 'id="validation"',
-                        'PARTIAL / UNKNOWN', 'Source diagnostics (2)',
+                        'PARTIAL / UNKNOWN', '取得・検証時の注意（2件）',
                         '6193914061', 'UNCLASSIFIED',
-                        'has_unknown_work' if False else 'no live refresh'):
-            self.assertIn(keyword.lower(), text.lower())
+                        'has_unknown_work' if False else '自動更新'):
+            self.assertIn(keyword.lower(), html_module.unescape(text).lower())
         self.assertIn('charset="utf-8"', text)
         self.assertIn('source_validation' if False else 'PARTIAL_UNKNOWN', text)
         self.assertIn("script-src &#x27;sha256-", text)
@@ -106,7 +106,7 @@ class HtmlListTests(unittest.TestCase):
         self.assertNotIn('href="javascript:', content)
         self.assertNotIn("notkinoko/testapp/issues/30#issuecomment-1", content)
         self.assertIn('href="https://github.com/kinoko34077/devflow/issues/576"', content)
-        self.assertIn("unverified link", content)
+        self.assertIn("リンク未検証", html_module.unescape(content))
         self.assertFalse(_safe_link("https://github.com/kinoko34077/devflow/issues/576/extra",source=False))
         self.assertFalse(_safe_link("javascript:alert(1)",source=False))
 
@@ -116,15 +116,15 @@ class HtmlListTests(unittest.TestCase):
         data["errors"] = [{"reason_code": "SOURCE_READ_UNAVAILABLE"}]
         data["status"] = "PARTIAL_UNKNOWN"
         out = to_html(data)
-        self.assertIn("0 / 0 rows", out)
+        self.assertIn("0 / 0 件", html_module.unescape(out))
         self.assertIn("SOURCE_READ_UNAVAILABLE", out)
         self.assertIn("PARTIAL / UNKNOWN", out)
-        self.assertIn("not a complete issue universe", out.lower())
-        self.assertIn("Source diagnostics (1)", out)
+        self.assertIn("全Issueの網羅性", html_module.unescape(out))
+        self.assertIn("取得・検証時の注意（1件）", html_module.unescape(out))
 
     def test_browser_no_js_still_has_all_rows_and_diagnostics(self):
         rendered = to_html(report())
-        self.assertIn("Filtering requires JavaScript", rendered)
+        self.assertIn("絞り込みにはJavaScriptが必要です", html_module.unescape(rendered))
         self.assertEqual(rendered.count("<tr data-"), 2)
         self.assertIn("QUARANTINED_INVALID_WRAPPER", rendered)
         self.assertIn("ANSWER_OBSERVED", rendered)
@@ -165,7 +165,7 @@ class HtmlListTests(unittest.TestCase):
         self.assertTrue(stdout.getvalue().startswith("<!doctype html>"))
         self.assertIn("PARTIAL / UNKNOWN", stdout.getvalue())
         self.assertIn("SEARCH_FAILED", stdout.getvalue())
-        self.assertIn("0 / 0 rows", stdout.getvalue())
+        self.assertIn("0 / 0 件", html_module.unescape(stdout.getvalue()))
 
 
 if __name__ == "__main__":

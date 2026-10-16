@@ -9,6 +9,7 @@ on:
       - '.github/workflows/mobile-actions-pages.yml'
       - 'tools/kaep_issue_search_view.py'
       - 'tools/kaep_issue_list_html.py'
+      - 'tools/kaep_public_index.py'
   workflow_dispatch:
 
 
@@ -86,7 +87,8 @@ jobs:
           python -m tools.kaep_issue_search_view \
             --repository kinoko34077/devflow \
             --expect-source-actor kinoko34077 \
-            --format html > "$out/kaep/index.html"
+            --format html \
+            --public-json-out "$out/kaep/index.json" > "$out/kaep/index.html"
           rc=$?
           set -e
           # Status 2 is accepted ONLY with an explicit PARTIAL_UNKNOWN page.
@@ -110,13 +112,31 @@ jobs:
           assert (rc == 0) == (status == "BOUNDED_SEARCH_READ")
           assert "Content-Security-Policy" in content
           assert "connect-src &#x27;none&#x27;" in content
-          assert "github.com/kinoko34077/devflow/issues/" in content or "Source diagnostics" in content
+          assert "github.com/kinoko34077/devflow/issues/" in content or "取得・検証時の注意" in content
           assert 'href="javascript:' not in content
           assert "api.github.com" not in content
           assert "PARTIAL / UNKNOWN" in content or status == "BOUNDED_SEARCH_READ"
           print("PUBLIC_KAEP_LIST_VALIDATED", status, "bytes", len(content))
           PY
-          test "$(find "$out" -type f | wc -l)" -eq 6
+          python - "$out/kaep/index.json" "$rc" <<'PY'
+          import json, sys
+          from pathlib import Path
+          source = Path(sys.argv[1]).read_text(encoding="ascii")
+          doc = json.loads(source)
+          assert doc["schema_version"] == "kaep.public-source-index.v1"
+          assert doc["kind"] == "NON_AUTHORITATIVE_CANDIDATE_SNAPSHOT"
+          assert doc["status"] in ("BOUNDED_SEARCH_READ", "PARTIAL_UNKNOWN")
+          assert (int(sys.argv[2]) == 0) == (doc["status"] == "BOUNDED_SEARCH_READ")
+          assert doc["can_authorize_execution"] is False
+          assert doc["complete_source_universe"] is False
+          assert doc["fallback_retirement_authorized"] is False
+          assert doc["requires_live_original_issue_revalidation"] is True
+          assert "token" not in doc and "body" not in doc and "secret" not in doc
+          assert all(row["source_url"].startswith(row["issue_url"] + "#issuecomment-")
+                     for row in doc["rows"])
+          print("PUBLIC_KAEP_AGENT_INDEX_VALIDATED", doc["status"], len(doc["rows"]))
+          PY
+          test "$(find "$out" -type f | wc -l)" -eq 7
           test "$(find "$out" -type l | wc -l)" -eq 0
       - name: Upload exact isolated artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4

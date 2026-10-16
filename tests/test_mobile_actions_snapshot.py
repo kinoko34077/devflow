@@ -95,7 +95,7 @@ class MobileSnapshotTests(unittest.TestCase):
         self.assertIn("  workflow_dispatch:", workflow)
         self.assertEqual(workflow.count("github.actor == 'kinoko34077'"), 2)
         self.assertEqual(workflow.count("github.triggering_actor == 'kinoko34077'"), 2)
-        self.assertIn('eq 6', workflow)
+        self.assertIn('eq 7', workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertNotIn("issues: write", workflow)
         self.assertNotIn("actions: write", workflow)
