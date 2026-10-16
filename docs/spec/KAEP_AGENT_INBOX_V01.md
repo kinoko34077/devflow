@@ -63,6 +63,18 @@ This is the **admission contract for a prospective opt-in GET-only shadow**, not
 
 The existing [strict #503 pointer shadow](https://github.com/kinoko34077/devflow/pull/630) and [original-Issue reader](https://github.com/kinoko34077/devflow/issues/531#issuecomment-6202473288) remain authoritative for their already accepted scopes. The in-memory regression in `tests/test_kaep_discovery_reader.py` preserves one *known real identifier tuple* using re-encoded sanitized text; it does **not** run GitHub APIs, establish 22-root fleet coverage, or prove runtime Consumer delivery.
 
+### B5 opt-in verified-pointer Issue-wide root shadow (read-only)
+
+The first bounded shadow implementation exists separately at `tools/kaep_source_roster_shadow.py`. It **only** considers original Issue locators that the existing strict #503 codec has source-verified (one supported `VERIFIED_POINTER` provenance type from the broader candidate-roster design above); it does not inspect arbitrary unclassified Issues or discover original Issues with **no** pointer **and no** other trusted candidate source. It uses the accepted full-source Agent Inbox mailbox correlation for `claude-code`; TASK Inbox, native MCP interfaces, and the existing #503 reader remain unchanged.
+
+To manually inspect a bounded current pointer cohort via the existing authorized `gh` login, in the repository checkout:
+
+```sh
+python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
+```
+
+Default and hard ceiling: 20 distinct verified original Issues per run. A larger or unavailable cohort, malformed or incomplete source, or rejected index yields `BLOCKED` or `PARTIAL_UNKNOWN` with nonzero exit status, never an empty/full-inventory success. A successful `BOUNDED_CANDIDATE_SOURCE_READ` includes an `ORIGINAL_ONLY` observation for a valid root on an admitted Issue lacking its own #503 pointer; it **always** reports `has_unknown_work=true`, `head_freshness=NOT_REVALIDATED`, `recipient_pickup_verified=false`, `can_authorize_execution=false`, and `fallback_retirement_authorized=false`. No KAEP message prose or credentials are included. It does not prove a current pending request, complete nonpointer fleet coverage, a consumer migration, or ability to retire #503/manual Control.
+
 ## CLI fallback for an existing Claude check-in without Devflow MCP registration
 
 Claude #533 verified that its current session could read devflow via native Python/GitHub CLI but had no Devflow MCP tool registered. The following GET-only command therefore requires no new MCP registration or timer changes, and can be called **as one step inside** the user-managed check-in:
