@@ -163,6 +163,8 @@ def to_html(result: dict[str, Any]) -> str:
             f"<td>{_anchor(row.get('source_url'), sourcelabel, source=True)}</td></tr>"
         )
     diagnostic = []
+    if result.get("reason_code"):
+        diagnostic.append("<li>Read blocked: " + _esc(result["reason_code"]) + "</li>")
     for err in errors:
         if type(err) is not dict:
             continue
