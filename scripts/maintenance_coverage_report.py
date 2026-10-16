@@ -24,18 +24,22 @@ from tools.maintenance_coverage_report import (  # noqa: E402
 )
 from tools.maintenance_coverage_html import render_coverage_html  # noqa: E402
 
-ACCEPTED_PILOTS = frozenset({
-    "kinoko34077/devflow",
-    "kinoko34077/execution-coordinator",
-    "kinoko34077/kinotch-repository-base",
-})
+# This is the exact existing PILOT Ledger allowlist, not merely a repo list.
+# A different open Issue with the same Ledger-looking title is not authority.
+ACCEPTED_PILOT_LEDGERS = {
+    "kinoko34077/devflow": 367,
+    "kinoko34077/execution-coordinator": 127,
+    "kinoko34077/kinotch-repository-base": 50,
+}
+ACCEPTED_PILOTS = frozenset(ACCEPTED_PILOT_LEDGERS)
 
 
 def _target(value: str) -> tuple[str, int]:
     repo, sep, number = value.rpartition("#")
-    if not sep or repo not in ACCEPTED_PILOTS or not number.isdecimal() or int(number) < 1:
-        raise ValueError("select an explicitly accepted PILOT repository#Ledger-Issue")
-    return repo, int(number)
+    expected_ledger = ACCEPTED_PILOT_LEDGERS.get(repo)
+    if sep != "#" or expected_ledger is None or number != str(expected_ledger):
+        raise ValueError("select an exact accepted PILOT repository#Ledger-Issue")
+    return repo, expected_ledger
 
 
 def build_live_report(transport: GitHubReadTransport, targets: list[str]) -> dict[str, object]:
