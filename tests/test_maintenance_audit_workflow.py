@@ -267,6 +267,25 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )[0]
         return textwrap.dedent(guard) + "printf 'PREFLIGHT_OK\\n'\n"
 
+    @staticmethod
+    def _completion_test_env(values: dict[str, str]) -> dict[str, str]:
+        # Windows' system32/bash.exe launches WSL: arbitrary Windows process
+        # environment entries are not forwarded unless named in WSLENV.
+        # Test fixtures use only fake credentials; do not alter host settings.
+        env = os.environ.copy()
+        env.update(values)
+        if os.name == 'nt':
+            keys = (
+                'MAINTENANCE_SUPPLY_TOKEN', 'MAINTENANCE_REPOSITORY',
+                'MAINTENANCE_CONTROL', 'MAINTENANCE_RUN_ID',
+                'MAINTENANCE_LENS', 'MAINTENANCE_RESULT',
+                'MAINTENANCE_FINDINGS_SUMMARY', 'MAINTENANCE_EVIDENCE_REF',
+                'MAINTENANCE_ATTEMPT_ID',
+            )
+            additions = ':'.join(key + '/u' for key in keys)
+            env['WSLENV'] = ':'.join(filter(None, (env.get('WSLENV', ''), additions)))
+        return env
+
     def test_completion_preflight_rejects_invalid_requests_without_writes(self):
         if shutil.which('bash') is None:
             self.skipTest('bash is unavailable on this host')
@@ -298,8 +317,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )
         for key, invalid_value in cases:
             with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
-                env = os.environ.copy()
-                env.update(base_env)
+                env = self._completion_test_env(base_env)
                 env[key] = invalid_value
                 proc = subprocess.run(
                     ['bash', '-c', guard], cwd=tmp, env=env,
@@ -316,8 +334,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         if shutil.which('bash') is None:
             self.skipTest('bash is unavailable on this host')
         guard = self._completion_preflight_script(self.text)
-        env = os.environ.copy()
-        env.update({
+        env = self._completion_test_env({
             'MAINTENANCE_SUPPLY_TOKEN': 'FAKE_TEST_TOKEN',
             'MAINTENANCE_REPOSITORY': 'kinoko34077/kinotch-repository-base',
             'MAINTENANCE_CONTROL': '20',
