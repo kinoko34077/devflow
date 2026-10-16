@@ -264,6 +264,20 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
         ))
     return "\n".join(lines) + "\n"
 
+def machine_json(value: dict[str, Any]) -> str:
+    """Emit portable machine JSON even on Windows CP932 consoles."""
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def console_text(value: str, encoding: str | None) -> str:
+    """Preserve displayable characters; escape unsupported ones, never abort."""
+    codec = encoding or "utf-8"
+    try:
+        return value.encode(codec, errors="backslashreplace").decode(codec)
+    except LookupError:
+        return value.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", action="append", required=True)
@@ -295,10 +309,11 @@ def main(argv: list[str] | None = None) -> int:
             "fallback_retirement_authorized": False,
         }
     if args.format == "json" or result["status"] == "BLOCKED":
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        print(machine_json(result))
     else:
-        print(to_markdown(result, role=args.role, issue_type=args.issue_type,
-                          state=args.state, reply=args.reply))
+        display = to_markdown(result, role=args.role, issue_type=args.issue_type,
+                              state=args.state, reply=args.reply)
+        print(console_text(display, getattr(sys.stdout, "encoding", None)))
     return 0 if result["status"] == "BOUNDED_SEARCH_READ" else 2
 
 
