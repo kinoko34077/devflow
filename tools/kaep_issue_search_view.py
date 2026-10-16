@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 import re
 import subprocess
@@ -15,6 +16,7 @@ from typing import Any, Callable
 
 from tools import agent_inbox, repository_projection
 from tools.kaep_issue_list_html import to_html
+from tools.kaep_public_index import to_public_index
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
@@ -341,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-source-actor", required=True)
     parser.add_argument("--recipient", choices=("all",) + RECIPIENTS, default="all")
     parser.add_argument("--format", choices=("markdown", "json", "html"), default="markdown")
+    parser.add_argument("--public-json-out", default=None,
+                        help="Opt-in allowlisted public candidate snapshot alongside HTML")
     parser.add_argument("--role", default="all")
     parser.add_argument("--issue-type", default="all")
     parser.add_argument("--state", choices=("all", "open", "closed"), default="all")
@@ -365,6 +369,19 @@ def main(argv: list[str] | None = None) -> int:
             ), "has_unknown_work": True, "read_only": True,
             "fallback_retirement_authorized": False,
         }
+    if args.public_json_out is not None:
+        if args.format != "html" or result["status"] == "BLOCKED":
+            # Never emit a stale/empty publicly trusted-looking JSON on failure.
+            if result["status"] != "BLOCKED":
+                print(machine_json({"status": "BLOCKED", "reason_code": "PUBLIC_INDEX_REQUIRES_HTML"}))
+            return 2
+        try:
+            Path(args.public_json_out).write_text(
+                machine_json(to_public_index(result)) + "\n", encoding="ascii")
+        except (OSError, ValueError):
+            # No HTML success must be published without its paired index.
+            print(machine_json({"status": "BLOCKED", "reason_code": "PUBLIC_INDEX_WRITE_FAILED"}))
+            return 2
     if args.format == "json" or (args.format == "markdown" and result["status"] == "BLOCKED"):
         print(machine_json(result))
     elif args.format == "html":
