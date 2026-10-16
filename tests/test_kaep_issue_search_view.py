@@ -6,7 +6,7 @@ import unittest
 
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
-from tools.kaep_issue_search_view import build_search_list, to_markdown
+from tools.kaep_issue_search_view import build_search_list, to_markdown, machine_json, console_text
 
 OWNER = "kinoko34077"
 DEV = "kinoko34077/devflow"
@@ -75,6 +75,17 @@ class SearchListTests(unittest.TestCase):
             recipient=recipient, max_candidates=max_candidates,
         )
         return result, seen
+
+    def test_windows_cp932_json_and_markdown_emit_no_unicode_error(self):
+        report = {"title": "read-only — 試験", "status": "PARTIAL_UNKNOWN"}
+        wire = machine_json(report)
+        wire.encode("cp932")  # Machine JSON must stay ASCII-safe.
+        self.assertEqual(json.loads(wire), report)
+        display = console_text("KAEP — 日本語", "cp932")
+        display.encode("cp932")  # Unrepresentable punctuation is escaped.
+        self.assertIn("KAEP", display)
+        self.assertIn("日本語", display)
+        self.assertIn(r"\u2014", display)
 
     def test_spare_testapp_zero_search_is_not_empty_work_authority(self):
         # Real testapp is a useful zero-match *negative* control; its separate
