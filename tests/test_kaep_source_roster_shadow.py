@@ -63,6 +63,131 @@ def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES):
 
 
 class SourceRootShadowTests(unittest.TestCase):
+    def task_view(self, numbers, *, state="open", freshness="CURRENT",
+                  status="AVAILABLE"):
+        return {
+            "repository": REPO,
+            "source_status": status,
+            "source_freshness": freshness,
+            "machine_task_count": len(numbers),
+            "observed_task_view": {"known_task_count": len(numbers),
+                                   "unresolved_open_issue_count": 17,
+                                   "is_complete_read": False},
+            "coverage_status": "INCOMPLETE",
+            "task_records": [
+                {"issue_number": n, "url": f"https://github.com/{REPO}/issues/{n}",
+                 "record_role": "TASK", "state": state,
+                 "work_status": "IMPLEMENTING"}
+                for n in numbers
+            ],
+        }
+
+    def test_trusted_live_task_without_pointer_admits_nonpointer_issue(self):
+        # Unlike historical closed #553, this fixture represents an OPEN
+        # machine-verified TASK from the real M3 Work View data shape.
+        msg = root(31, issue=553)
+        fetched = []
+        def fetch(repo, issue):
+            fetched.append((repo, issue))
+            return pages([comment(900, msg)])
+        from tools.kaep_source_roster_shadow import source_root_shadow
+        out = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[self.task_view([553])],
+        )
+        self.assertEqual(out["status"], "BOUNDED_CANDIDATE_SOURCE_READ")
+        self.assertEqual(fetched, [(REPO, 553)])
+        self.assertEqual(out["index_hint_count"], 0)
+        self.assertEqual(out["source_mode"],
+                         "VERIFIED_POINTER_AND_TRUSTED_M3_TASK")
+        self.assertEqual(out["candidate_issue_count"], 1)
+        self.assertEqual(out["issues"][0]["provenance"], ["TRUSTED_M3_TASK"])
+        self.assertEqual(out["issues"][0]["roots"][0]["comparison"],
+                         "ORIGINAL_ONLY")
+        self.assertFalse(out["issues"][0]["not_covered_by_task_classification"])
+        self.assertTrue(out["has_unknown_work"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+        self.assertNotIn("sanitized historical task body", json.dumps(out))
+
+    def test_pointer_and_live_task_overlap_one_original_issue_read(self):
+        msg = root(32)
+        note = pointer_notice(msg, cid=701, notice_id=32)
+        calls = []
+        def fetch(repo, issue):
+            calls.append((repo, issue))
+            return pages([comment(701, msg)])
+        from tools.kaep_source_roster_shadow import source_root_shadow
+        out = source_root_shadow(
+            pages([comment(801, note)]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[self.task_view([ISSUE])],
+        )
+        self.assertEqual(calls, [(REPO, ISSUE)])
+        self.assertEqual(out["candidate_issue_count"], 1)
+        self.assertEqual(out["issues"][0]["provenance"],
+                         ["VERIFIED_POINTER", "TRUSTED_M3_TASK"])
+        self.assertEqual(out["issues"][0]["root_count"], 1)
+        self.assertEqual(out["issues"][0]["roots"][0]["comparison"],
+                         "INDEXED_AND_ORIGINAL")
+        self.assertFalse(out["issues"][0]["not_covered_by_task_classification"])
+
+    def test_stale_or_unknown_machine_view_fails_closed(self):
+        from tools.kaep_source_roster_shadow import source_root_shadow
+        for changed in ({"source_freshness": "STALE"},
+                        {"source_status": "UNAVAILABLE"},
+                        {"machine_task_count": 99}):
+            view = self.task_view([553])
+            view.update(changed)
+            calls = []
+            def fetch(repo, issue):
+                calls.append((repo, issue))
+                raise AssertionError("untrusted TASK was fetched")
+            out = source_root_shadow(
+                pages([]), fetch_source=fetch,
+                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                task_views=[view],
+            )
+            self.assertEqual(out["status"], "BLOCKED")
+            self.assertEqual(calls, [])
+            self.assertTrue(out["has_unknown_work"])
+            self.assertEqual(out["issues"], [])
+
+    def test_invalid_task_role_state_url_or_duplicate_blocks(self):
+        from tools.kaep_source_roster_shadow import source_root_shadow
+        for key, value in (("record_role", "REFERENCE"),
+                           ("state", "closed"),
+                           ("url", f"https://github.com/{REPO}/issues/554")):
+            view = self.task_view([553])
+            view["task_records"][0][key] = value
+            out = source_root_shadow(
+                pages([]), fetch_source=lambda repo, issue: pages([]),
+                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                task_views=[view],
+            )
+            self.assertEqual(out["status"], "BLOCKED")
+            self.assertEqual(out["issues"], [])
+        with self.assertRaisesRegex(Exception, "INVALID_TASK_VIEW_COUNT"):
+            from tools.kaep_source_roster_shadow import trusted_m3_task_locators
+            trusted_m3_task_locators([self.task_view([553])] * 3)
+
+    def test_task_source_read_or_total_cap_block_no_partial_roster(self):
+        from tools.kaep_source_roster_shadow import source_root_shadow
+        view = self.task_view([553, 554])
+        calls = []
+        def fetch(repo, issue):
+            calls.append((repo, issue))
+            return pages([])
+        out = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            max_sources=1, task_views=[view],
+        )
+        self.assertEqual(out["status"], "BLOCKED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(out["issues"], [])
+        self.assertTrue(out["has_unknown_work"])
+
     def test_real_576_identity_replay_unindexed_original_detected(self):
         old = root(1)
         old["message_id"] = "msg_cursor576_readonly_audit_20261015a"

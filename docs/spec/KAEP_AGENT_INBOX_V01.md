@@ -73,6 +73,16 @@ To manually inspect a bounded current pointer cohort via the existing authorized
 python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
 ```
 
+**Opt-in live M3 TASK source provenance:** to add source-Issue candidates from the already accepted M3 work-view classifier (instead of depending on #503 pointers alone), pass an explicit managed repository (maximum two per invocation):
+
+```sh
+python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077 --task-repository kinoko34077/devflow
+```
+
+This invokes the **existing** `default_service().get_repository_work_view`, requiring `AVAILABLE/CURRENT` and a consistent bounded list of **currently open** machine-classified `TASK` records with exact Issue URL/number. It does **not** interpret Issue titles, old chat history, Project fields, unclassified Issues, or bare manual links as tasks. Each candidate is provenance-labeled `TRUSTED_M3_TASK`, `VERIFIED_POINTER`, or both; duplicates are read once. The combined pointer+TASK limit remains 20 source Issues, and failure to verify a complete selected original mailbox is BLOCKED, not empty. `NOT_COVERED_BY_TASK_CLASSIFICATION` is a source classification observation, not permission to mutate Issue roles.
+
+Closed historical TASK examples such as [#553](https://github.com/kinoko34077/devflow/issues/553) are **not active M3 TASK candidates**; their previously accepted B3 source evidence is not lost, but historical completion cannot become pending work through this view. The CLI does not claim actual consumer end-to-end parity, complete fleet source coverage, current HEAD/recipient pickup, or security authority; preserve #503 and manual Control. The remaining `VERIFIED_MANUAL_OWNER` and fully unreferenced original-Issue source universe are outside this opt-in feature and require separate source admission.
+
 Default and hard ceiling: 20 distinct verified original Issues per run. A larger or unavailable cohort, malformed or incomplete source, or rejected index yields `BLOCKED` or `PARTIAL_UNKNOWN` with nonzero exit status, never an empty/full-inventory success. A successful `BOUNDED_CANDIDATE_SOURCE_READ` includes an `ORIGINAL_ONLY` observation for a valid root on an admitted Issue lacking its own #503 pointer; it **always** reports `has_unknown_work=true`, `head_freshness=NOT_REVALIDATED`, `recipient_pickup_verified=false`, `can_authorize_execution=false`, and `fallback_retirement_authorized=false`. No KAEP message prose or credentials are included. It does not prove a current pending request, complete nonpointer fleet coverage, a consumer migration, or ability to retire #503/manual Control.
 
 ## CLI fallback for an existing Claude check-in without Devflow MCP registration

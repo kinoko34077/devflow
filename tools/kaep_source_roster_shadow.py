@@ -12,6 +12,8 @@ import json
 import sys
 from typing import Callable, Any
 
+from tools.devflow_mcp_core import DevflowMCPError, default_service
+
 from tools import agent_inbox
 from tools.kaep_discovery_reader import (
     SOURCE_URL, discover_index_shadow,
@@ -25,6 +27,53 @@ from tools.kaep_mailbox_codec import (
 
 MAX_SOURCE_ISSUES = 20
 RECIPIENT = "claude-code"
+MAX_TASK_REPOSITORIES = 2
+
+
+def trusted_m3_task_locators(views: list[dict[str, Any]]) -> set[str]:
+    """Admit ONLY already classified CURRENT machine TASK records, no title scan.
+
+    The caller supplies actual native get_repository_work_view results, not
+    arbitrary Issue prose, Project display data or user-declared TASK labels.
+    This only identifies candidate source Issues for GET-side observation.
+    """
+    if type(views) is not list or len(views) > MAX_TASK_REPOSITORIES:
+        raise InvalidMessage("INVALID_TASK_VIEW_COUNT")
+    sources: set[str] = set()
+    seen_repos: set[str] = set()
+    for view in views:
+        if type(view) is not dict:
+            raise InvalidMessage("INVALID_TASK_VIEW")
+        repository = view.get("repository")
+        rows = view.get("task_records")
+        observed = view.get("observed_task_view")
+        if (type(repository) is not str
+                or SOURCE_URL.fullmatch(f"https://github.com/{repository}/issues/1") is None
+                or repository in seen_repos
+                or view.get("source_status") != "AVAILABLE"
+                or view.get("source_freshness") != "CURRENT"
+                or type(rows) is not list
+                or type(observed) is not dict
+                or type(view.get("machine_task_count")) is not int
+                or view["machine_task_count"] != len(rows)
+                or type(observed.get("known_task_count")) is not int
+                or observed["known_task_count"] != len(rows)):
+            raise InvalidMessage("UNTRUSTED_OR_INCOMPLETE_TASK_VIEW")
+        seen_repos.add(repository)
+        for record in rows:
+            if type(record) is not dict:
+                raise InvalidMessage("INVALID_TASK_SOURCE")
+            number = record.get("issue_number")
+            url = record.get("url")
+            if (type(number) is not int or number < 1
+                    or type(url) is not str
+                    or url != f"https://github.com/{repository}/issues/{number}"
+                    or record.get("record_role") != "TASK"
+                    or record.get("state") != "open"
+                    or url in sources):
+                raise InvalidMessage("INVALID_TASK_SOURCE")
+            sources.add(url)
+    return sources
 
 
 def source_root_shadow(
@@ -33,6 +82,7 @@ def source_root_shadow(
     expected_notice_actor: str,
     expected_source_actor: str,
     max_sources: int = MAX_SOURCE_ISSUES,
+    task_views: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compare only verified #503 original-Issue locators, never work supply."""
     if type(max_sources) is not int or not 1 <= max_sources <= MAX_SOURCE_ISSUES:
@@ -80,11 +130,32 @@ def source_root_shadow(
         result["errors"].append({"reason_code": "INDEX_SOURCE_INCOMPLETE"})
         return result
 
+    try:
+        task_sources = trusted_m3_task_locators(task_views or [])
+    except InvalidMessage as exc:
+        result["errors"].append({"reason_code": str(exc)})
+        return result
+    if task_views:
+        result["source_mode"] = "VERIFIED_POINTER_AND_TRUSTED_M3_TASK"
+    # Every TASK root is a source *candidate*, not a validated KAEP REQUEST.
+    # Bound and fetch through the same verified Issue cache before parsing.
+    try:
+        for url in sorted(task_sources):
+            match = SOURCE_URL.fullmatch(url)
+            if match is None:
+                raise InvalidMessage("INVALID_TASK_SOURCE")
+            bounded_fetch(match.group(1), int(match.group(2)))
+    except (InvalidMessage, OSError, UnicodeError):
+        result["errors"].append({"reason_code": "TASK_SOURCE_READ_BLOCKED"})
+        return result
+    result["candidate_issue_count"] = len(source_cache)
     index_by_issue: dict[str, set[tuple[int, str]]] = {}
     for hint in index["hints"]:
         index_by_issue.setdefault(hint["owning_issue"], set()).add(
             (hint["source_comment_id"], hint["source_message_id"])
         )
+    for url in task_sources:
+        index_by_issue.setdefault(url, set())
     # A strictly verified source is admitted even if its enclosing Issue is
     # UNCLASSIFIED. The locator is evidence to READ, never task authority.
     for url in sorted(index_by_issue):
@@ -145,7 +216,9 @@ def source_root_shadow(
             return result
         result["issues"].append({
             "owning_issue": url,
-            "provenance": ["VERIFIED_POINTER"],
+            "provenance": ([ "VERIFIED_POINTER" ] if index_by_issue[url] else [])
+                          + ([ "TRUSTED_M3_TASK" ] if url in task_sources else []),
+            "not_covered_by_task_classification": url not in task_sources,
             "source_state": "AVAILABLE",
             "root_count": len(items),
             "original_only_count": sum(
@@ -167,16 +240,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--expect-source-actor", required=True)
     parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES)
+    parser.add_argument("--task-repository", action="append", default=[],
+                        help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
     try:
+        if (len(args.task_repository) > MAX_TASK_REPOSITORIES
+                or len(set(args.task_repository)) != len(args.task_repository)):
+            raise InvalidMessage("INVALID_TASK_REPOSITORY_COUNT")
+        service = default_service() if args.task_repository else None
+        task_views = [service.get_repository_work_view(repo)
+                      for repo in args.task_repository] if service else []
         index_pages = fetch_gh_pages("kinoko34077/devflow", 503)
         output = source_root_shadow(
             index_pages, fetch_source=fetch_gh_pages,
             expected_notice_actor=args.expect_notice_actor,
             expected_source_actor=args.expect_source_actor,
-            max_sources=args.max_sources,
+            max_sources=args.max_sources, task_views=task_views,
         )
-    except (InvalidMessage, OSError, UnicodeError) as exc:
+    except (InvalidMessage, DevflowMCPError, OSError, UnicodeError) as exc:
         # No raw GitHub stderr, messages, prompts or credential data in errors.
         output = {
             "status": "BLOCKED", "reason_code":
