@@ -14,6 +14,7 @@ import sys
 from typing import Any, Callable
 
 from tools import agent_inbox, repository_projection
+from tools.kaep_issue_list_html import to_html
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
@@ -339,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", action="append", required=True)
     parser.add_argument("--expect-source-actor", required=True)
     parser.add_argument("--recipient", choices=("all",) + RECIPIENTS, default="all")
-    parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    parser.add_argument("--format", choices=("markdown", "json", "html"), default="markdown")
     parser.add_argument("--role", default="all")
     parser.add_argument("--issue-type", default="all")
     parser.add_argument("--state", choices=("all", "open", "closed"), default="all")
@@ -364,8 +365,11 @@ def main(argv: list[str] | None = None) -> int:
             ), "has_unknown_work": True, "read_only": True,
             "fallback_retirement_authorized": False,
         }
-    if args.format == "json" or result["status"] == "BLOCKED":
+    if args.format == "json" or (args.format == "markdown" and result["status"] == "BLOCKED"):
         print(machine_json(result))
+    elif args.format == "html":
+        # Even blocked reads are an explicit, readable offline diagnostic page.
+        print(to_html(result))
     else:
         display = to_markdown(result, role=args.role, issue_type=args.issue_type,
                               state=args.state, reply=args.reply)

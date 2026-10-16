@@ -85,6 +85,19 @@ Closed historical TASK examples such as [#553](https://github.com/kinoko34077/de
 
 Default and hard ceiling: 20 distinct verified original Issues per run. A larger or unavailable cohort, malformed or incomplete source, or rejected index yields `BLOCKED` or `PARTIAL_UNKNOWN` with nonzero exit status, never an empty/full-inventory success. A successful `BOUNDED_CANDIDATE_SOURCE_READ` includes an `ORIGINAL_ONLY` observation for a valid root on an admitted Issue lacking its own #503 pointer; it **always** reports `has_unknown_work=true`, `head_freshness=NOT_REVALIDATED`, `recipient_pickup_verified=false`, `can_authorize_execution=false`, and `fallback_retirement_authorized=false`. No KAEP message prose or credentials are included. It does not prove a current pending request, complete nonpointer fleet coverage, a consumer migration, or ability to retire #503/manual Control.
 
+## Standalone KAEP Issue list (operator UI, no GitHub Project coupling)
+
+The user requested **a Project-like independent list**, not installation into GitHub Projects or a new task database. The accepted GitHub search-first view is in `tools/kaep_issue_search_view.py`: Search API discovers candidate Issue locators by existing `kaep:message:v0.2` comment marker; original Issue and all comments are independently fetched and validated by unchanged canonical codec and existing M3 Issue role classifier. No new KAEP schema/label is required.
+
+Generate a **single local HTML file** with client-side text search, repository/Issue role/Issue state/recipient/reply/validation filters, sorting, direct original GitHub Issue/comment links and always-visible source diagnostics. It contains **no browser GitHub API calls, credentials, external assets, GitHub Project connection or live refresh**.
+
+```sh
+python -m tools.kaep_issue_search_view --repository kinoko34077/devflow --expect-source-actor kinoko34077 --format html > kaep-issues.html
+```
+
+Open `kaep-issues.html` in a modern browser. To include other specifically selected managed repositories, add up to 3 `--repository owner/name` values. Regenerate the local file to refresh. JSON and Markdown formats remain available; HTML is additive and opt-in. Console HTML uses numeric Unicode references so redirection also works on Windows CP932. No publication or deployment is implicit.
+
+**Safety and completeness:** Displayed rows are **verified candidate historical KAEP roots, not pending work permissions**. The list keeps explicit `PARTIAL_UNKNOWN`, actor/codec errors and quarantined comments visible. For blocked reads HTML still shows a clear failure page and the CLI exits nonzero. Zero rows do **not** imply zero work. GitHub Search is neither complete source universe nor a substitute for direct source reading, recipient/head validation or #503/manual Control. Issue role and KAEP message kind are **independent fields**; a non-TASK Issue with KAEP is not automatically TASK. Do not use operator view to schedule agents, set Claims, bypass Human/security approval, change Issue roles or retire fallback.
 ## CLI fallback for an existing Claude check-in without Devflow MCP registration
 
 Claude #533 verified that its current session could read devflow via native Python/GitHub CLI but had no Devflow MCP tool registered. The following GET-only command therefore requires no new MCP registration or timer changes, and can be called **as one step inside** the user-managed check-in:
