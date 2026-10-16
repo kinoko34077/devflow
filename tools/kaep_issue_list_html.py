@@ -235,7 +235,7 @@ def to_html(result: dict[str, Any]) -> str:
         '<th>原典検証</th><th>原典コメント</th>'
         '</tr></thead><tbody>' + "".join(cells) +
         '</tbody></table></div>'
-        f'<details {"open" if errors else ""}><summary>取得・検証時の注意（{len(errors)})</summary>'
+        f'<details {"open" if errors else ""}><summary>取得・検証時の注意（{len(errors)}件）</summary>'
         f'<ol class="errors">{"".join(diagnostic)}</ol></details>'
         '<p class="footer">公開時点の読取専用一覧。GitHub Projectとは連動しません。'
         '自動更新・保存・認証情報の埋め込みはありません。'
