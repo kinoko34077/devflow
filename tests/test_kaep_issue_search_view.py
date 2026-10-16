@@ -164,9 +164,9 @@ class SearchListTests(unittest.TestCase):
         invalid["evidence_refs"] = ["https://invalid.example.com/source"]
         invalid_comment = {
             "id": 6175605292,
-            "body": "<!-- kaep:message:v0.2 -->\\n```json\\n"
+            "body": "<!-- kaep:message:v0.2 -->\n```json\n"
                     + json.dumps(invalid, ensure_ascii=False, indent=2)
-                    + "\\n```",
+                    + "\n```",
             "user": {"login": OWNER},
         }
         out, _ = self.run_view(
