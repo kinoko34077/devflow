@@ -187,6 +187,11 @@ def build_search_list(
             classified = repository_projection.classify_issue(issue)
             pages = parse_pages(fetch_comments(repo, number),
                                 repository=repo, issue=number)
+            # Enforce the canonical limit on the COMPLETE original mailbox,
+            # before excluding bot markers or quarantining malformed markers.
+            # Otherwise a large source could evade _issue_messages' limit.
+            if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
+                _fail("ISSUE_COMMENTS_LIMIT")
             # Only the configured GitHub transport actor is an admitted root
             # origin. A bot/outsider marker is evidence of uncertainty, not a
             # source of task authority.
