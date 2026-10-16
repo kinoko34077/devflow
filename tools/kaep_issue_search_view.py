@@ -17,7 +17,9 @@ from tools import agent_inbox, repository_projection
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
-from tools.kaep_mailbox_codec import MARKER, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    MARKER, decode_comment, read_mailbox, verify_reply_chain,
+)
 
 MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
@@ -100,6 +102,8 @@ def build_search_list(
         "repositories": list(repositories),
         "searched_candidates": 0,
         "validated_source_issues": 0,
+        "partial_source_issues": 0,
+        "quarantined_comment_count": 0,
         "unmatched_candidates": 0,
         "rows": [],
         "errors": [],
@@ -158,13 +162,37 @@ def build_search_list(
             # Only the configured GitHub transport actor is an admitted root
             # origin. A bot/outsider marker is evidence of uncertainty, not a
             # source of task authority.
-            trusted = [
-                {"id": c["id"], "body": c["body"],
-                 "user": {"login": c["actor_login"]}}
-                for c in pages
-                if not c["body"].startswith(MARKER)
-                or c["actor_login"].casefold() == expected_actor.casefold()
-            ]
+            if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
+                _fail("ISSUE_COMMENTS_LIMIT")
+            trusted = []
+            quarantined: list[dict[str, Any]] = []
+            for c in pages:
+                body, actor = c["body"], c["actor_login"]
+                if body.startswith(MARKER):
+                    if actor.casefold() != expected_actor.casefold():
+                        # Actor filtering is unchanged. If an owner reply refers
+                        # to this root, strict parent validation still BLOCKS.
+                        continue
+                    try:
+                        decode_comment(body, task_ref=f"{repo}#{number}")
+                    except InvalidMessage as exc:
+                        reason = str(exc)
+                        if reason not in ("INVALID_WRAPPER", "INVALID_REF"):
+                            raise
+                        quarantined.append({
+                            "owning_issue": url,
+                            "comment_id": c["id"],
+                            "source_url": f"{url}#issuecomment-{c['id']}",
+                            "reason_code": f"QUARANTINED_{reason}",
+                        })
+                        continue
+                trusted.append({
+                    "id": c["id"], "body": body,
+                    "user": {"login": actor},
+                })
+            # Complete remaining admitted chain must still satisfy the same
+            # canonical codec and reply parent constraints. A missing parent,
+            # collision or other malformed marker BLOCKS the whole source.
             parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
             verify_reply_chain([m for _, m in parsed])
             recipients = RECIPIENTS if recipient == "all" else (recipient,)
@@ -186,15 +214,26 @@ def build_search_list(
                         "role_source": classified.source_kind,
                         "recipient": target,
                         "intent": root["intent"],
-                        "reply_observation": root["status"],
+                        "reply_observation": (
+                            "UNKNOWN_QUARANTINED_SOURCE" if quarantined
+                            else root["status"]
+                        ),
+                        "source_state": (
+                            "PARTIAL_UNKNOWN" if quarantined else "AVAILABLE"
+                        ),
                         "message_id": root["source_message_id"],
                         "source_comment_id": root["source_comment_id"],
                         "head_freshness": "NOT_REVALIDATED",
                         "is_authoritative_assignment": False,
                     })
-            output["validated_source_issues"] += 1
-            if not verified_roots:
-                output["unmatched_candidates"] += 1
+            if quarantined:
+                output["partial_source_issues"] += 1
+                output["quarantined_comment_count"] += len(quarantined)
+                output["errors"].extend(quarantined)
+            else:
+                output["validated_source_issues"] += 1
+                if not verified_roots:
+                    output["unmatched_candidates"] += 1
             output["rows"].extend(verified_roots)
         except (InvalidMessage, ValueError, KeyError, TypeError) as exc:
             output["errors"].append({
@@ -237,13 +276,15 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
         f"Search status: {result['status']} / {result['source_coverage']}",
         f"Observed at (UTC): {result['observed_at']}",
         f"Candidate Issues: {result['searched_candidates']}; "
-        f"Read Issues: {result['validated_source_issues']}; "
+        f"Fully verified Issues: {result['validated_source_issues']}; "
+        f"Partial Issues: {result['partial_source_issues']}; "
+        f"Quarantined comments: {result['quarantined_comment_count']}; "
         f"Rows (filtered): {len(rows)}; Errors: {len(result['errors'])}",
         "This is NOT a complete Issue/KAEP inventory, pending work queue, "
         "agent identity, current-HEAD proof, or permission to act.",
         "",
-        "| Repository / Issue | Title | State | Role / type (source) | Recipient / intent | Reply observation | Original source |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Repository / Issue | Title | State | Role / type (source) | Recipient / intent | Source state | Reply observation | Original source |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for x in rows:
         lines.append(
@@ -252,11 +293,12 @@ def to_markdown(result: dict[str, Any], *, role: str = "all",
             f" | {x['issue_state']}"
             f" | {x['issue_role']} / {x['issue_type'] or '-'} ({x['role_source']})"
             f" | {x['recipient']} / {x['intent']}"
+            f" | {x['source_state']}"
             f" | {x['reply_observation']}"
             f" | [comment {x['source_comment_id']}]({x['source_url']}) |"
         )
     if not rows:
-        lines.append("| No verified rows in this bounded search/filter | - | - | - | - | - | - |")
+        lines.append("| No verified rows in this bounded search/filter | - | - | - | - | - | - | - |")
     if result["errors"]:
         lines.append("")
         lines.append("Errors / unknown: " + ", ".join(
