@@ -184,3 +184,14 @@ python -m tools.kaep_live_union_cli --recipient claude-code --updated-pages 2
 呼出し時点でGitHub REST `GET /repos/{repo}/issues/comments?sort=updated&direction=desc&per_page=100&page=N` を1→上限ページへ読み進め、ページが100件未満なら停止する。同じコメントIDが隣接ページに現れた場合、重複を排除して `UPDATED_PAGE_BOUNDARY_OVERLAP` として `PARTIAL_UNKNOWN` を残す。最後まで100件ずつだった場合も `RECENT_WINDOW_TRUNCATED`。途中でGET/JSON/形式検証が失敗した場合、途中取得結果を成功扱いせずにBLOCKEDする。1ページ既定は変更しない。
 
 このオプションは**最大300件の直近更新コメントからIssue候補を抽出するだけ**であり、既存の3repo/40原典上限がより先に成立する場合は安全にブロックする。原典Issue/全KAEPコメントの厳密なactor/recipient/返信照合は既存のものを再利用し、現在HEAD・全ソース網羅・古い編集済みコメントやコメントがないIssue更新の自動発見を保証しない。 `has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false`、#503/manual Control fallbackは維持する。新たなホスト/タイマー/認証/料金を伴わない。
+
+
+## P2 既知Issueの再照合（2026年10月17日）
+
+新着コメント最新順の有限窓（最大3ページ）だけでは、過去に発見したIssueの**コメント無しclose/編集**を自動で再発見できない。既存の厳格な `tools.kaep_live_union_cli` に任意の `--previous-report ./last-union.json` を追加し、前回出力の **Issue所在と状態比較ヒント** のみを読み込んで既存原典再GET候補へ統合する。初回の通常出力JSONを明示的にファイル保存した場合のみ使用し、CLI自身はファイル書込み・スケジュールを行わない。
+
+```sh
+python -m tools.kaep_live_union_cli --recipient claude-code --previous-report ./last-union.json
+```
+
+前回出力は未信頼。recipient・選択リポ集合の厳密一致、スキーマ・読取専用/権限なし・正規Issue URL・コメントID/Message ID・重複排除、最大2MB・40 Issueの上限を強制。旧出力自体は現在の認証・割当ではなく、各候補を**現行の正規Issue・全コメント・actor/recipient/返信検証器で再確認**してから比較する。Issue open/closed・返信状態変化と前回原典の消失を診断するが、前回JSONが改竄された場合や原典が編集でKAEPマーカーを失った場合は受信・本人性・全件網羅の証拠とはならない。原典消失はPARTIAL_UNKNOWN、`has_unknown_work=true`・`can_authorize_execution=false` を維持。3repo/40 source制限、#503/manual Controlを維持。無人モデル起動・动态HTTP API・恒久化サービスは含まない。
