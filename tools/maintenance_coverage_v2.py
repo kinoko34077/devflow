@@ -58,7 +58,9 @@ def derive_dual_version_coverage(
             and item.attestation.record.slot_id == row.slot_id
             and item.attestation.record.depth == row.depth
         ]
-        if not raw_v2:
+        if not raw_v2 or row.status == "AMBIGUOUS_HISTORY":
+            # A conflicting trusted v1 history cannot be made credible by
+            # adding an unrelated newer v2 comment.
             output.append(row)
             continue
         v2 = [item for item in raw_v2 if _trusted_attestation(item, row.repository)]
@@ -82,13 +84,47 @@ def derive_dual_version_coverage(
             continue
         latest_v2 = max(
             v2, key=lambda item: (
+                item.attestation.record.generation,
                 item.attestation.record.completed_at,
-                item.attestation.record.run_id,
             ),
         )
-        if v1 and max(item.record.completed_at for item in v1) > latest_v2.attestation.record.completed_at:
-            # Later legacy v1 is still authoritative, but cannot inherit any
-            # immutable v2 metadata from an older unrelated generation.
+        most_recent_v1 = max(
+            v1, key=lambda item: (
+                item.record.generation,
+                item.record.completed_at,
+            ),
+        ) if v1 else None
+        # The numeric generation is the authoritative monotone run sequence.
+        # A later wall-clock timestamp attached to an earlier generation
+        # represents inconsistent evidence and cannot receive coverage credit.
+        current_record = latest_v2.attestation.record
+        if any(
+            item.attestation.record.generation < current_record.generation
+            and item.attestation.record.completed_at > current_record.completed_at
+            for item in v2
+        ) or (
+            most_recent_v1 is not None
+            and (
+                (
+                    most_recent_v1.record.generation < current_record.generation
+                    and most_recent_v1.record.completed_at > current_record.completed_at
+                )
+                or (
+                    most_recent_v1.record.generation > current_record.generation
+                    and most_recent_v1.record.completed_at < current_record.completed_at
+                )
+            )
+        ):
+            output.append(replace(
+                row, status="AMBIGUOUS_HISTORY",
+                reason="completion timestamps contradict run generation order",
+            ))
+            continue
+        if (
+            most_recent_v1 is not None
+            and most_recent_v1.record.generation > current_record.generation
+        ):
+            # A later generation in v1 cannot inherit a v2 scope attestation.
             output.append(row)
             continue
         a = latest_v2.attestation
