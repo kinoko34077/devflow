@@ -112,8 +112,10 @@ def read_union(
     for key, row in sorted(current_by_key.items()):
         repo, number = key[:2]
         old = indexed_by_key.get(key)
-        changed = bool(old and (old.get("issue_state") != row["issue_state"]
-                               or old.get("reply_observation") != row["reply_observation"]))
+        changed = bool(old and (
+            (old.get("issue_state") is not None and old["issue_state"] != row["issue_state"])
+            or (old.get("reply_observation") is not None
+                and old["reply_observation"] != row["reply_observation"])))
         state_changes += changed
         out_rows.append({
             "repository": repo, "issue_number": number,
