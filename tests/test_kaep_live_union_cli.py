@@ -91,8 +91,35 @@ class LiveUnionTests(TestCase):
         self.assertEqual(report["status"], "BOUNDED_UNION_READ")
         self.assertEqual(report["live_original_roots"], 0)
         self.assertEqual(report["new_unindexed_source_issues"], 1)
+        self.assertEqual(len(report["source_candidates"]), 1)
+        candidate = report["source_candidates"][0]
+        self.assertEqual(candidate["issue_url"], f"https://github.com/{REPO}/issues/590")
+        self.assertEqual(candidate["origin"], "LATEST_COMMENT_SOURCE")
+        self.assertEqual(candidate["matching_recipient_roots"], 0)
+        self.assertEqual(candidate["source_observation"], "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED")
+        self.assertFalse(candidate["grants_work_authority"])
         self.assertTrue(report["has_unknown_work"])
         self.assertFalse(report["absence_of_work_proven"])
+
+    def test_failed_source_still_has_bounded_unknown_locator_not_assignment(self):
+        msg = root(number=15)
+        snapshot = index_with((576, 400, msg), status="BOUNDED_SEARCH_READ")
+        source = f"https://github.com/{REPO}/issues/576"
+        with mock.patch.object(union.strict, "build_search_list", return_value={
+            "status": "PARTIAL_UNKNOWN",
+            "observed_at": "2026-10-17T00:00:00Z",
+            "rows": [],
+            "errors": [{"owning_issue": source, "reason_code": "SOURCE_READ_UNAVAILABLE"}],
+        }):
+            out = union.read_union(snapshot, recipient="claude-code",
+                                   recent_read=lambda _repo, since=None: [])
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        item = out["source_candidates"][0]
+        self.assertEqual(item["issue_url"], source)
+        self.assertEqual(item["matching_recipient_roots"], 0)
+        self.assertEqual(item["source_observation"], "SOURCE_VALIDATION_UNKNOWN")
+        self.assertFalse(item["grants_work_authority"])
+        self.assertFalse(out["can_authorize_execution"])
 
     def test_source_overflow_and_page_overflow_fail_safe(self):
         snap = index_with(status="BOUNDED_SEARCH_READ")
