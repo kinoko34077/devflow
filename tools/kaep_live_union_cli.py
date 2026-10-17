@@ -19,6 +19,46 @@ from tools import kaep_issue_search_view as strict
 from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
 
 MAX_SOURCES = 40
+MAX_PUBLIC_MARKER_BYTES = 2_000_000
+MAX_PUBLIC_MARKERS = 5000
+def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str, int]], bool]:
+    """Untrusted public-owner marker candidate *locations*, not messages.
+
+    Source content is never trusted as routing, recipient, actor or authority.
+    """
+    if (type(data) is not dict
+            or data.get("schema_version") not in (
+                "kaep.public-marker-incremental.v0.1",
+                "kaep.public-marker-locators.v0.1")
+            or data.get("status") not in (
+                "BOUNDED_INCREMENTAL_BASELINE", "BOUNDED_INCREMENTAL_READ",
+                "BOUNDED_PUBLIC_MARKER_READ", "PARTIAL_UNKNOWN")
+            or data.get("owner") != "kinoko34077"
+            or data.get("public_only") is not True
+            or data.get("can_authorize_execution") is not False
+            or data.get("complete_source_universe") is not False
+            or type(data.get("locators")) is not list
+            or len(data["locators"]) > MAX_PUBLIC_MARKERS):
+        _deny("INVALID_MARKER_SOURCE")
+    found: set[tuple[str, int]] = set()
+    for row in data["locators"]:
+        if type(row) is not dict:
+            _deny("INVALID_MARKER_LOCATOR")
+        repo, number, cid = (
+            row.get("repository"), row.get("issue_number"), row.get("comment_id"))
+        if (type(repo) is not str or not REPOSITORY.fullmatch(repo)
+                or type(number) is not int or number <= 0
+                or type(cid) is not int or cid <= 0
+                or row.get("locator") != f"{repo.split('/', 1)[1]}#{number}@{cid}"
+                or row.get("source_url") !=
+                  f"https://github.com/{repo}/issues/{number}#issuecomment-{cid}"
+                or row.get("strict_source_validated") is not False
+                or row.get("is_authoritative_assignment") is not False):
+            _deny("INVALID_MARKER_LOCATOR")
+        found.add((repo, number))
+    return found, data["status"] == "PARTIAL_UNKNOWN"
+
+
 RECIPIENTS = cached.RECIPIENTS
 
 
@@ -59,6 +99,7 @@ def read_union(
     comments_read: Callable[[str, int], str] = strict.fetch_gh_pages,
     since: str | None = None,
     additional_repositories: tuple[str, ...] = (),
+    public_marker_discovery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recheck one deduplicated cohort in canonical original sources.
 
@@ -79,6 +120,15 @@ def read_union(
                > delta.MAX_REPOSITORIES):
         _deny("INVALID_ADDITIONAL_REPOSITORY_SET")
     repos = list(snapshot["repositories"]) + list(additional_repositories)
+    if public_marker_discovery is None:
+        public_marker_keys: set[tuple[str, int]] = set()
+        marker_partial = False
+    else:
+        public_marker_keys, marker_partial = _validated_public_marker_hints(
+            public_marker_discovery)
+    marker_in_scope = public_marker_keys.intersection(
+        {(repo, issue) for repo, issue in public_marker_keys if repo in repos})
+    marker_out_of_scope = public_marker_keys - marker_in_scope
     indexed_rows = [r for r in snapshot["rows"] if r["recipient"] == recipient]
     indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
     indexed_by_key = {
@@ -95,7 +145,7 @@ def read_union(
         if len(comments) == delta.MAX_WINDOW:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
 
-    all_sources = sorted(indexed_sources | recent_sources)
+    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope)
     # A cap cannot silently drop a known source. Fail closed and retain fallback.
     if len(all_sources) > MAX_SOURCES:
         _deny("UNION_SOURCE_LIMIT")
@@ -138,11 +188,13 @@ def read_union(
             "reply_observation": row["reply_observation"],
             "source_validation": row["source_validation"],
             "head_freshness": "NOT_REVALIDATED",
+            "incremental_marker_observed": (repo, number) in marker_in_scope,
             "source_origin": (
                 "BOTH" if (repo, number) in indexed_sources and
                           (repo, number) in recent_sources else
                 "INDEXED_SOURCE" if (repo, number) in indexed_sources else
-                "LATEST_COMMENT_SOURCE"
+                "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources else
+                "INCREMENTAL_MARKER_SOURCE"
             ),
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
@@ -170,11 +222,13 @@ def read_union(
             "repository": repo,
             "issue_number": number,
             "issue_url": source_url,
+            "incremental_marker_observed": (repo, number) in marker_in_scope,
             "origin": (
                 "BOTH" if (repo, number) in indexed_sources
                           and (repo, number) in recent_sources else
                 "INDEXED_SOURCE" if (repo, number) in indexed_sources
-                else "LATEST_COMMENT_SOURCE"
+                else "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources
+                else "INCREMENTAL_MARKER_SOURCE"
             ),
             "matching_recipient_roots": count,
             "source_observation": (
@@ -190,6 +244,7 @@ def read_union(
         snapshot["status"] != "BOUNDED_SEARCH_READ"
         or verified["status"] != "BOUNDED_SEARCH_READ"
         or verified["errors"] or warnings or removed
+        or marker_partial or bool(marker_out_of_scope)
     )
     return {
         "schema_version": "kaep.live-union-check.v0.1",
@@ -206,6 +261,11 @@ def read_union(
         "indexed_issue_count": len(indexed_sources),
         "recent_marker_issue_count": len(recent_sources),
         "source_issue_count": len(all_sources),
+        "public_marker_discovery_used": public_marker_discovery is not None,
+        "public_marker_issue_count_in_scope": len(marker_in_scope),
+        "public_marker_issue_count_out_of_scope": len(marker_out_of_scope),
+        "public_marker_source_partial": marker_partial,
+        "public_marker_source_untrusted": True,
         "source_candidates": candidates,
         "live_original_roots": len(out_rows),
         "new_unindexed_source_issues": len(recent_sources - indexed_sources),
@@ -238,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--additional-repository", action="append", default=[],
                         help="Explicit owner-managed repository to read (max 3 total)")
     parser.add_argument("--offline-index", type=Path)
+    parser.add_argument("--public-marker-discovery", type=Path,
+                        help="Optional bounded untrusted public marker JSON; canonical Issues are revalidated")
     parser.add_argument("--since", default=None)
     args = parser.parse_args(argv)
     try:
@@ -248,9 +310,17 @@ def main(argv: list[str] | None = None) -> int:
             if len(raw) > cached.MAX_INDEX_BYTES:
                 _deny("PUBLIC_INDEX_TOO_LARGE")
             index = json.loads(raw.decode("utf-8"), object_pairs_hook=cached._unique_pairs)
+        public_markers = None
+        if args.public_marker_discovery is not None:
+            raw = args.public_marker_discovery.read_bytes()
+            if len(raw) > MAX_PUBLIC_MARKER_BYTES:
+                _deny("PUBLIC_MARKER_FILE_TOO_LARGE")
+            public_markers = json.loads(raw.decode("utf-8"),
+                                        object_pairs_hook=cached._unique_pairs)
         result = read_union(
             index, recipient=args.recipient, since=args.since,
-            additional_repositories=tuple(args.additional_repository))
+            additional_repositories=tuple(args.additional_repository),
+            public_marker_discovery=public_markers)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {
             "schema_version": "kaep.live-union-check.v0.1",
