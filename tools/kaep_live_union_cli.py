@@ -16,7 +16,7 @@ from typing import Any, Callable
 from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
-from tools.kaep_inbox_reader import InvalidMessage, MARKER
+from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
 
 MAX_SOURCES = 40
 RECIPIENTS = cached.RECIPIENTS
@@ -58,6 +58,7 @@ def read_union(
     issue_read: Callable[[str, int], dict[str, Any]] = strict.fetch_issue,
     comments_read: Callable[[str, int], str] = strict.fetch_gh_pages,
     since: str | None = None,
+    additional_repositories: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Recheck one deduplicated cohort in canonical original sources.
 
@@ -67,7 +68,17 @@ def read_union(
     if recipient not in RECIPIENTS:
         _deny("INVALID_RECIPIENT")
     info = cached.validate_index(snapshot)
-    repos = snapshot["repositories"]
+    # Extra repositories are an explicit caller-selected scope, never
+    # discovered or authorized by untrusted public index rows.
+    if (type(additional_repositories) is not tuple
+            or any(type(r) is not str or not REPOSITORY.fullmatch(r)
+                   for r in additional_repositories)
+            or len(additional_repositories) != len(set(additional_repositories))
+            or any(r in snapshot["repositories"] for r in additional_repositories)
+            or len(snapshot["repositories"]) + len(additional_repositories)
+               > delta.MAX_REPOSITORIES):
+        _deny("INVALID_ADDITIONAL_REPOSITORY_SET")
+    repos = list(snapshot["repositories"]) + list(additional_repositories)
     indexed_rows = [r for r in snapshot["rows"] if r["recipient"] == recipient]
     indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
     indexed_by_key = {
@@ -186,6 +197,9 @@ def read_union(
         "kind": "REQUEST_TIME_ORIGINAL_ISSUE_UNION",
         "recipient": recipient, "observed_at": verified["observed_at"],
         "snapshot_observed_at": snapshot["observed_at"],
+        "repositories_checked": list(repos),
+        "explicit_additional_repositories": list(additional_repositories),
+        "repository_scope_proven_complete": False,
         **info,
         "recent_comments_observed": counts,
         "window_limit_per_repository": delta.MAX_WINDOW,
@@ -221,6 +235,8 @@ def read_union(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipient", choices=sorted(RECIPIENTS), required=True)
+    parser.add_argument("--additional-repository", action="append", default=[],
+                        help="Explicit owner-managed repository to read (max 3 total)")
     parser.add_argument("--offline-index", type=Path)
     parser.add_argument("--since", default=None)
     args = parser.parse_args(argv)
@@ -232,7 +248,9 @@ def main(argv: list[str] | None = None) -> int:
             if len(raw) > cached.MAX_INDEX_BYTES:
                 _deny("PUBLIC_INDEX_TOO_LARGE")
             index = json.loads(raw.decode("utf-8"), object_pairs_hook=cached._unique_pairs)
-        result = read_union(index, recipient=args.recipient, since=args.since)
+        result = read_union(
+            index, recipient=args.recipient, since=args.since,
+            additional_repositories=tuple(args.additional_repository))
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {
             "schema_version": "kaep.live-union-check.v0.1",
