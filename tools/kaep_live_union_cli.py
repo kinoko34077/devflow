@@ -136,6 +136,44 @@ def read_union(
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
         })
+    # Candidate locators must be visible even when this recipient has zero
+    # accepted roots. A locator is a read hint, never a delivered assignment.
+    roots_by_issue: dict[tuple[str, int], int] = {}
+    for row in out_rows:
+        key = (row["repository"], row["issue_number"])
+        roots_by_issue[key] = roots_by_issue.get(key, 0) + 1
+    failed_issues = {
+        err.get("owning_issue") for err in verified["errors"]
+        if type(err) is dict and type(err.get("owning_issue")) is str
+    }
+    global_unknown = any(
+        type(err) is not dict or not err.get("owning_issue")
+        for err in verified["errors"]
+    )
+    candidates = []
+    for repo, number in all_sources:
+        source_url = f"https://github.com/{repo}/issues/{number}"
+        count = roots_by_issue.get((repo, number), 0)
+        suspect = global_unknown or source_url in failed_issues
+        candidates.append({
+            "repository": repo,
+            "issue_number": number,
+            "issue_url": source_url,
+            "origin": (
+                "BOTH" if (repo, number) in indexed_sources
+                          and (repo, number) in recent_sources else
+                "INDEXED_SOURCE" if (repo, number) in indexed_sources
+                else "LATEST_COMMENT_SOURCE"
+            ),
+            "matching_recipient_roots": count,
+            "source_observation": (
+                "SOURCE_VALIDATION_UNKNOWN" if suspect else
+                "ACCEPTED_RECIPIENT_ROOTS" if count else
+                "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED"
+            ),
+            "grants_work_authority": False,
+        })
+
     removed = set(indexed_by_key) - set(current_by_key)
     partial = bool(
         snapshot["status"] != "BOUNDED_SEARCH_READ"
@@ -154,6 +192,7 @@ def read_union(
         "indexed_issue_count": len(indexed_sources),
         "recent_marker_issue_count": len(recent_sources),
         "source_issue_count": len(all_sources),
+        "source_candidates": candidates,
         "live_original_roots": len(out_rows),
         "new_unindexed_source_issues": len(recent_sources - indexed_sources),
         "new_in_originals": len(set(current_by_key) - set(indexed_by_key)),
