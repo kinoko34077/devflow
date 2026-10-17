@@ -7,6 +7,7 @@ A GitHub actor login remains transport evidence, not cryptographic model ID.
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime, timezone
 import json
 import sys
@@ -81,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--issue", type=int, default=519)
     parser.add_argument("--respond", action="store_true", help="explicit GPT decision to compose an ANSWER")
     parser.add_argument("--checkpoint", default=None, help="model-supplied non-secret current checkpoint")
+    parser.add_argument("--reply-to-comment-id", type=int, default=None,
+                        help="exact GitHub comment_id the model inspected in read-only phase")
+    parser.add_argument("--reply-to-nonce", default=None,
+                        help="exact 32-hex nonce from selected inspected PING")
     parser.add_argument("--mode", default="ACTIVE", choices=["ACTIVE", "LONG_RUNNING", "IDLE", "FINISHED", "NEED_USER"])
     parser.add_argument("--expected-until", default=None)
     parser.add_argument("--send", action="store_true", help="post only after explicit --respond; no auto answer")
@@ -88,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.send and not args.respond:
             raise InvalidMessage("EXPLICIT_RESPOND_REQUIRED")
+        if not args.respond and (
+            args.reply_to_comment_id is not None or args.reply_to_nonce is not None):
+            raise InvalidMessage("RESPONSE_SELECTION_WITHOUT_MODEL_DECISION")
         now = datetime.now(timezone.utc).replace(microsecond=0)
         body = fetch_issue(args.repository, args.issue)
         source = fetch_gh_pages(args.repository, args.issue)
@@ -102,15 +110,29 @@ def main(argv: list[str] | None = None) -> int:
         if not args.respond:
             print(json.dumps({"status": "MAILBOX_CHECKED", "unanswered_pings": [
                 {"comment_id": p["comment_id"], "parent_message_id": p["parent_message_id"],
+                 "nonce": p["ping"]["nonce"],
+                 "session_id": p["ping"]["session_id"],
+                 "turn_id": p["ping"]["turn_id"],
                  "expires_at": p["ping"]["expires_at"]} for p in pings],
-                 "gpt_liveness_proven": False}, sort_keys=True))
+                 "gpt_liveness_proven": False,
+                 "requires_explicit_model_challenge_selection": True,
+                 "automatic_answer_supported": False}, sort_keys=True))
             return 0
         if not args.checkpoint:
             raise InvalidMessage("CHECKPOINT_REQUIRED")
+        if (type(args.reply_to_comment_id) is not int
+                or args.reply_to_comment_id <= 0
+                or type(args.reply_to_nonce) is not str
+                or re.fullmatch(r"[0-9a-f]{32}", args.reply_to_nonce) is None):
+            raise InvalidMessage("EXPLICIT_PING_SELECTION_REQUIRED")
         if not pings:
             raise InvalidMessage("NO_VALID_PENDING_PING")
-        # Most recent challenge, not a stale prior turn.
-        chosen = pings[-1]
+        # Require the model to select the newest inspected challenge explicitly.
+        # Re-reading the canonical GitHub Issue above catches stale selection.
+        chosen = max(pings, key=lambda p: p["comment_id"])
+        if (chosen["comment_id"] != args.reply_to_comment_id
+                or chosen["ping"]["nonce"] != args.reply_to_nonce):
+            raise InvalidMessage("PING_SELECTION_STALE_OR_MISMATCHED")
         response = create_answer(ping=chosen["ping"], mode=args.mode,
                                  checkpoint=args.checkpoint,
                                  expected_until=args.expected_until, now=now)
@@ -126,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
                           "parent_message_id": chosen["parent_message_id"],
                           "posted_comment_id": outcome["posted_comment_id"],
                           "model_identity_cryptographically_verified": False,
+                          "model_selection_observed_in_tool_arguments": True,
+                          "autonomous_gpt_wake_proven": False,
                           "claim_authority": False}, sort_keys=True))
         return 0
     except (InvalidMessage, OSError, ValueError) as exc:
