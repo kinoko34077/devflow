@@ -150,3 +150,24 @@ python -m tools.kaep_public_incremental_cli --format json --state-file ./kaep-pu
 既存のカーソルが無効・重複JSONフィールド・シンボリックリンク・ディレクトリである場合は開始前にBLOCKED。取得部分不明・前回IDが見つからない・取得エラー・保存エラーの場合、保存済みのカーソルを進めず、最後の正常状態に戻る。更新直前に同じファイルが別の内容へ変わっていれば置換を拒否する。**複数プロセスの同時使用を保証する分散ロックではない**ため、各実行ホストでは一つのcheckpoint writerだけを許可する。セッション/資格情報やIssue本文は保存しない。
 
 これは**実際のモデルターンや許可されたホストが能動的にCLIを呼んだ場合のローカル状態更新**であり、バックグラウンドの自動起動、cron、常駐PC、Cloudflare APIやGitHubへの自動POSTを意味しない。受信者への厳格な作業割当、Issue編集、コメント編集監視、動的公開HTTP APIについては残存工程として維持する。
+
+
+## P2：公開差分位置→既存の宛先別原典照合を接続（2026-10-17）
+
+既存の `tools.kaep_public_incremental_cli` が発行するJSONは、公開owner全リポジトリからの **未検証KAEPマーカー位置** であり、そのままGPTへの依頼一覧ではない。これを新しい通信規約へ作り替えず、`tools.kaep_live_union_cli` の既存の原典Issue・全コメント・actor・宛先・reply chain検証へオプションとして渡す。
+
+```sh
+# 既に実行中のGPTが許可済み端末で公開コメント増分結果を取得（例）
+python -m tools.kaep_public_incremental_cli --format json --state-file ./kaep-public-head.json > ./kaep-marker-delta.json
+
+# 明示指定した原典リポジトリの宛先別の確認（最大3repo/40Issueを維持）
+python -m tools.kaep_live_union_cli --recipient chatgpt --public-marker-discovery ./kaep-marker-delta.json
+```
+
+`--public-marker-discovery` 入力は `kaep.public-marker-incremental.v0.1` / `kaep.public-marker-locators.v0.1` の未検証JSON。 `owner`・`public_only`・原典URL・`repo#issue@commentID`・非権限フラグ・JSONサイズ/重複key・入力件数を検査してから採用する。既存公開索引と直近更新コメントのIssue位置へ重複なく統合し、同一原典は**1回だけ**正規の `build_search_list` に通す。追加メッセージを解釈する独自パーサやIssue書込は増やさない。
+
+`public_marker_issue_count_in_scope`・`public_marker_issue_count_out_of_scope`・`public_marker_source_partial`・原典行 `incremental_marker_observed` で範囲を表示する。全公開40repoを1呼出しで「完全に検証済み」と偽装せず、既存の最大3repo・40件の原典上限を保持する。入力が不完全、選択範囲外がある、原典エラーや取得上限に触れた場合は `PARTIAL_UNKNOWN` 又は `BLOCKED` とし、空結果を依頼なしと断定しない。
+
+**編集/状態変化:** 過去に特定済みのIssueは最新Issueを再GETするため、既存索引に対するopen/closedやreply状態の違いは検出できる。古い未収録原典のコメント本文編集、単にIssue本文だけで発生した新規候補、全リポの任意編集を常時捕捉する保証はない。更新時刻に基づく変更捕捉・検証済みの機械HTTP API・本物のモデル継続受信は別受入条件。
+
+既存 `get_agent_inbox` と`#503`/manual Control fallback、#531 B5 source completeness HOLD、#681 F10 GPT無人起床の安全境界を維持。有料Provider/新規認証/常駐Host/定時実行は加えない。
