@@ -125,7 +125,7 @@ def discover(
                 )
                 break
             calls += 1
-            path = (f"/repos/{repo}/issues/comments?sort=created&direction=asc"
+            path = (f"/repos/{repo}/issues/comments?sort=created&direction=desc"
                     f"&per_page={PAGE_SIZE}&page={page}")
             try:
                 comments = fetch(path)

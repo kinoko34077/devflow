@@ -47,6 +47,8 @@ class PublicLocatorsTests(TestCase):
         self.assertFalse(out["recipient_pickup_proven"])
         self.assertFalse(out["can_authorize_execution"])
         self.assertEqual(len(calls), 3)
+        self.assertTrue(all("sort=created&direction=desc" in url
+                            for url in calls if "/issues/comments?" in url))
         raw = json.dumps(out)
         self.assertNotIn("json payload secret", raw)
         self.assertNotIn("ordinary", raw)
