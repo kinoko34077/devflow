@@ -86,3 +86,16 @@ python -m tools.kaep_live_union_cli --recipient chatgpt
 `source_observation` は `ACCEPTED_RECIPIENT_ROOTS`、`NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED`、`SOURCE_VALIDATION_UNKNOWN` を区別する。**0件という観測結果は、該当Issueまたはリポジトリに未処理依頼が存在しないことを意味しない**。後続AIは、必要に応じて原典Issueを独立再検証し、正しい宛先であることを確認する。候補への自動ACK、実行権限移譲、Claim変更はしない。
 
 この拡張は [devflow #680](https://github.com/kinoko34077/devflow/issues/680) の実GitHub一回限りの監査で、Codex向け「新しい候補Issue 1件 / 厳格に合致するCodex root 0件」が確認されたことへの診断改善である。全ソース網羅、真の動的HTTP API、Safari動作、無人モデルの起動は別途未達。
+
+
+## RT4-S2 明示リポジトリの限定原典取得（2026-10-17）
+
+公開 `index.json` は現状 devflow 中心のキャッシュであり、他の管理対象リポジトリの原典依頼を網羅しない。既存 `kaep_live_union_cli` に、操作者が **対象リポのlive Controlを別途確認した場合だけ** 選ぶ `--additional-repository` を導入。読み取るリポ数はキャッシュ掲載分と合わせて最大3、canonical `kinoko34077/<repo>` のみ、重複指定は拒否する。指定がなければ以前の動作を維持。
+
+```sh
+python -m tools.kaep_live_union_cli --recipient chatgpt --additional-repository kinoko34077/execution-coordinator
+```
+
+公開JSON自体・既存Pages・GitHub Projectは更新せず、追加対象は要求時GET-onlyで直近100コメントから候補Issueを探し、**既存と同一**の厳密な原典Issue全コメント再読込・KAEP codec・actor/recipient/reply検証に一度だけ通す。全リポ横断の自動発見・認証/Claim/実行・Agent wakeは導入しない。 `repositories_checked` と `explicit_additional_repositories` で範囲を機械可読とし、`repository_scope_proven_complete=false` を保持。
+
+追加対象に古い未処理rootが存在しても直近更新窓に出ない場合は**検出不能**であり、これは「依頼なし」の証明にはならない。各repoの100件上限・全体40 Issue上限・未知/部分状態・#503/manual Control fallbackを維持。検索/原典/recipient/head/実Consumerの全網羅と動的サーバ・Safari確認は未受入。
