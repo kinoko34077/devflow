@@ -169,12 +169,19 @@ class LiveUnionTests(TestCase):
         self.assertEqual(seen.count(("comments", extra, 142)), 1)
 
     def test_explicit_scope_wrong_recipient_never_assigns_work(self):
+        from tools.kaep_request_sender import make_request
         extra = "kinoko34077/execution-coordinator"
         index = index_with(status="BOUNDED_SEARCH_READ")
+        wrong_recipient_root, _ = make_request(
+            json.dumps([[]]), repository=extra, issue=142,
+            recipient="claude-code", intent="ANALYZE", expected_head="a" * 40,
+            request_key="live.union.wrong.recipient.142",
+            request_text="private wrong-recipient payload",
+            expect_existing_actor="kinoko34077")
         def issue(repo, number):
-            return {"number": number, "state": "open",
-                    "html_url": f"https://github.com/{repo}/issues/{number}",
-                    "title": "fixture", "body": ""}
+            obj = issue_object(number)
+            obj["html_url"] = f"https://github.com/{repo}/issues/{number}"
+            return obj
         out = union.read_union(
             index, recipient="codex", additional_repositories=(extra,),
             recent_read=lambda repo, since=None: ([{
@@ -182,11 +189,17 @@ class LiveUnionTests(TestCase):
                 "issue_url": f"https://api.github.com/repos/{extra}/issues/142",
                 "user": {"login": "kinoko34077"},
             }] if repo == extra else []),
-            issue_read=issue, comments_read=lambda repo, number: "[]")
+            issue_read=issue,
+            comments_read=lambda repo, number:
+                source_page((901, wrong_recipient_root, "kinoko34077")))
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
         self.assertEqual(out["live_original_roots"], 0)
         self.assertEqual(out["source_candidates"][0]["matching_recipient_roots"], 0)
+        self.assertEqual(out["source_candidates"][0]["source_observation"],
+                         "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED")
         self.assertFalse(out["source_candidates"][0]["grants_work_authority"])
         self.assertTrue(out["has_unknown_work"])
+        self.assertNotIn("private wrong-recipient payload", json.dumps(out))
 
     def test_additional_repository_scope_rejects_invalid_and_excess_before_get(self):
         index = index_with(status="BOUNDED_SEARCH_READ")
