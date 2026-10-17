@@ -19,6 +19,7 @@ from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
 
 MAX_REPOSITORIES = 3
 MAX_WINDOW = 100
+MAX_UPDATED_PAGES = 3
 MAX_BYTES = 2_000_000
 MAX_SOURCE_ISSUES = 40
 API_ISSUE = re.compile(
@@ -30,11 +31,14 @@ def _error(code: str) -> None:
     raise InvalidMessage(code)
 
 
-def read_repository_recent(repository: str, *, since: str | None = None) -> list[dict[str, Any]]:
+def read_repository_recent(repository: str, *, since: str | None = None,
+                           page: int = 1) -> list[dict[str, Any]]:
     """Read latest issue comments using the REST updated index, not Search."""
     if type(repository) is not str or not REPOSITORY.fullmatch(repository):
         _error("INVALID_REPOSITORY")
-    path = f"/repos/{repository}/issues/comments?sort=updated&direction=desc&per_page={MAX_WINDOW}&page=1"
+    if type(page) is not int or not 1 <= page <= MAX_UPDATED_PAGES:
+        _error("INVALID_UPDATED_PAGE")
+    path = f"/repos/{repository}/issues/comments?sort=updated&direction=desc&per_page={MAX_WINDOW}&page={page}"
     if since is not None:
         if type(since) is not str or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", since):
             _error("INVALID_SINCE")
@@ -62,6 +66,45 @@ def read_repository_recent(repository: str, *, since: str | None = None) -> list
     if type(obj) is not list or len(obj) > MAX_WINDOW:
         _error("LIVE_INVALID_COMMENT_PAGE")
     return obj
+
+
+def read_repository_updated_pages(
+    repository: str, *, since: str | None = None,
+    max_pages: int = 2,
+) -> dict[str, Any]:
+    """GET bounded updated-desc comment pages without silent overflow.
+
+    Caller still must revalidate original Issues and keep full-universe UNKNOWN.
+    """
+    if type(max_pages) is not int or not 1 <= max_pages <= MAX_UPDATED_PAGES:
+        _error("INVALID_UPDATED_PAGE_LIMIT")
+    all_comments: list[dict[str, Any]] = []
+    comment_ids: set[int] = set()
+    overlaps = 0
+    page_count = 0
+    truncated = False
+    for page in range(1, max_pages + 1):
+        entries = read_repository_recent(repository, since=since, page=page)
+        page_count += 1
+        for comment in entries:
+            if type(comment) is not dict or type(comment.get("id")) is not int or comment["id"] <= 0:
+                _error("INVALID_UPDATED_COMMENT")
+            if comment["id"] in comment_ids:
+                overlaps += 1
+                continue
+            comment_ids.add(comment["id"])
+            all_comments.append(comment)
+        if len(entries) < MAX_WINDOW:
+            break
+        if page == max_pages:
+            truncated = True
+    return {
+        "comments": all_comments,
+        "truncated": truncated,
+        "read_pages": page_count,
+        "page_boundary_overlap_count": overlaps,
+        "page_limit": max_pages,
+    }
 
 
 def read_live_candidates(
