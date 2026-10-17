@@ -78,3 +78,11 @@ python -m tools.kaep_live_union_cli --recipient chatgpt
 - `has_unknown_work=true`、`complete_source_universe=false`、`absence_of_work_proven=false`、`recipient_pickup_proven=false`、`can_authorize_execution=false` は常に維持。
 
 **残余:** キャッシュにも直近更新窓にもない正当な原典や他の管理対象リポジトリ、GitHub側のAPIレート制限、厳密な秒単位通知SLA、ブラウザ実機でのライブ動作、完全なHTTP Agent API、実際に新規REQUEST→ACK→ANSWERが発生した陽性実測、無人モデル起床はいずれも未達。#531 B5、#503と手動Control、F10 #681を維持。新たなHost、cron、公開権限、認証、費用を増やさない。
+
+## RT4 追跡可能な候補Issue診断（限定公開メタデータ）
+
+統合したライブ検出の中で、**指定された受信者の有効なKAEP rootが0件**でも、候補Issueの発見は保存する。 `source_candidates` は最大40件のリストで、正規の `issue_url`・`origin`（保存済み / 直近コメント / 両方）・`matching_recipient_roots`・`source_observation`・`grants_work_authority=false` のみを出力する。未検証コメント本文やユーザー提供リンクを返さない。
+
+`source_observation` は `ACCEPTED_RECIPIENT_ROOTS`、`NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED`、`SOURCE_VALIDATION_UNKNOWN` を区別する。**0件という観測結果は、該当Issueまたはリポジトリに未処理依頼が存在しないことを意味しない**。後続AIは、必要に応じて原典Issueを独立再検証し、正しい宛先であることを確認する。候補への自動ACK、実行権限移譲、Claim変更はしない。
+
+この拡張は [devflow #680](https://github.com/kinoko34077/devflow/issues/680) の実GitHub一回限りの監査で、Codex向け「新しい候補Issue 1件 / 厳格に合致するCodex root 0件」が確認されたことへの診断改善である。全ソース網羅、真の動的HTTP API、Safari動作、無人モデルの起動は別途未達。
