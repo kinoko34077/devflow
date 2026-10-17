@@ -79,6 +79,12 @@ Automatic external PING + model-processed GPT heartbeat is a separate required b
 For an already active agent that needs **new KAEP requests or replies more recent than the build-time public index**, use `python -m tools.kaep_live_delta_view --repository kinoko34077/devflow --recipient <your-recipient> --expect-source-actor kinoko34077` from an existing authenticated checkout when the installed live MCP/CLI does not already cover this source. This GET-only reader bypasses GitHub **Search indexing and Pages build staleness**; it reuses the same original-Issue strict codec. It returns `LIVE_WINDOW_READ` on a successful bounded source window, `PARTIAL_UNKNOWN` on overflow/source uncertainty and `BLOCKED` on failure. **Even success is not a complete pending inbox**: the last 100 updated comments may miss older outstanding roots and Issue-only changes; `has_unknown_work=true` and `absence_of_work_proven=false` are invariant. Preserve existing `get_agent_inbox`, manual Control and #503 fallback, and always verify exact original source/current HEAD before acting. This is **on-demand when the agent already runs**, not a new automatic timer, HTTP push service, ChatGPT wake, or new authority; requirements for continuous real-time availability remain under [#680](https://github.com/kinoko34077/devflow/issues/680).
 
 
+
+#### B6 RT4: combine historical candidates and current GitHub changes
+
+For an **already running** GPT/Claude/Codex agent needing both older indexed KAEP roots and newly updated source Issues without duplicated original-source fetches, use the GET-only `python -m tools.kaep_live_union_cli --recipient <recipient>` when existing current live Devflow MCP/Agent Inbox does not cover the needed source. It reads the pinned public `/kaep/index.json` as untrusted locators and the request-time GitHub updated-comment window; deduplicates the source Issues, then uses canonical original-Issue/reply-chain validator once. Output may show new Issues and changed Issue/response states, but `BOUNDED_UNION_READ` **never** proves complete pending work, current HEAD, authenticated recipient pickup or execution permission. Any `PARTIAL_UNKNOWN` or `BLOCKED` retains manual Control/#503 fallback. This command is not a new polling timer, unattended trigger, paid Provider, credential, service, or GPT wake. Further RT3/RT4 real browser/transition evidence is under [#680](https://github.com/kinoko34077/devflow/issues/680).
+
+
 ## 2. What owns what
 
 | Information | Canonical owner |

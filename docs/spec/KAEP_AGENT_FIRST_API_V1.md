@@ -57,3 +57,24 @@ python -m tools.kaep_live_delta_view --repository kinoko34077/devflow --recipien
 公開 `https://kinoko34077.github.io/devflow/kaep/index.json` は依然ビルド時点の静的バックアップであり、**ライブ取得結果とは異なる**。公開HTMLもまだ自動更新されない。MCP `get_agent_inbox` は現行受信者別live契約、手動Control/#503 pointerを保持する。完全性とライブHTTPサービス/Push・Web UIの最新反映は#680 RT3/RT4で継続し、GPT自身の無人モデル起床・応答は#681で継続。
 
 GitHub公式仕様: https://docs.github.com/en/rest/issues/comments#list-issue-comments-for-a-repository
+
+
+## RT4 既知の古い候補＋新着コメントの統合読取（2026年10月17日）
+
+ユーザーが求めるAI向けリアルタイム取得を、**既存の2つの読取経路を統合して取りこぼしを縮小**する段階へ進める。保存時点の `index.json` **だけ**では新規の原典Issueを取りこぼし、最新100件のコメント **だけ**では古い未処理依頼とコメントを伴わないIssue更新を取りこぼす。そのため、両方の候補Sourceを和集合にし、**1回だけ**正規原典Issue/全KAEPコメントを再検証する。
+
+実行中のAI向け限定GET-only CLI:
+```sh
+python -m tools.kaep_live_union_cli --recipient chatgpt
+```
+`--recipient` は既存の `chatgpt` / `codex` / `claude-code` / `coordinator` に限定。`--since` で最新の更新窓を限定可能（古い未処理候補は公開索引を通じて別途継続確認）。最新候補の発見は GitHub repository Issue-comments updated descのAPIで行い、新規候補のactor・KAEP妥当性は **原典Issue全コメントを再取得した上で**既存 `build_search_list` / strict codec により確認。未検証本文を公開APIに出さない。
+
+出力 `kaep.live-union-check.v0.1` には、`status`、`snapshot_age_seconds`、`recent_comments_observed`、`source_issue_count`、`new_unindexed_source_issues`、`new_in_originals`、`state_or_reply_changes_from_snapshot`、`cached_rows_not_verified_live`、原典リンク＋明示的な部分不明を含む。既存索引の原典Issueはコメントが最新窓にない場合も取得されるので、閉鎖などIssue本文側の状態変化も検証可能。
+
+受入範囲の区別:
+- `BOUNDED_UNION_READ`: 今回和集合に含めた原典Issueでの検証が成立。**現在の全件網羅や未処理ゼロではない**。終了0。
+- `PARTIAL_UNKNOWN`: もとの索引がPARTIAL、コメント窓上限・原典不正/取得失敗・索引原典未照合等。終了2。
+- `BLOCKED`: index/REST自体または入力が読めない。終了2、機密情報は表示しない。
+- `has_unknown_work=true`、`complete_source_universe=false`、`absence_of_work_proven=false`、`recipient_pickup_proven=false`、`can_authorize_execution=false` は常に維持。
+
+**残余:** キャッシュにも直近更新窓にもない正当な原典や他の管理対象リポジトリ、GitHub側のAPIレート制限、厳密な秒単位通知SLA、ブラウザ実機でのライブ動作、完全なHTTP Agent API、実際に新規REQUEST→ACK→ANSWERが発生した陽性実測、無人モデル起床はいずれも未達。#531 B5、#503と手動Control、F10 #681を維持。新たなHost、cron、公開権限、認証、費用を増やさない。
