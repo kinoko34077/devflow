@@ -124,9 +124,6 @@ class LiveUnionTests(TestCase):
     def test_explicit_cross_repository_issue_is_checked_with_full_originals(self):
         extra = "kinoko34077/execution-coordinator"
         issue_number = 142
-        msg = root(number=31, issue=issue_number, recipient="chatgpt")
-        # Actual production source scope differs from the devflow test helper.
-        msg["task_ref"] = f"{extra}#{issue_number}"
         # Canonical envelope must be generated for the correct repository.
         from tools.kaep_request_sender import make_request
         msg, _ = make_request(
@@ -146,13 +143,9 @@ class LiveUnionTests(TestCase):
             return []
         def fetch_issue(repo, number):
             seen.append(("issue", repo, number))
-            return {
-                "number": number, "state": "open",
-                "html_url": f"https://github.com/{repo}/issues/{number}",
-                "title": "source fixture", "body": "",
-                "user": {"login": "kinoko34077"},
-                "author_association": "OWNER",
-            }
+            obj = issue_object(number)
+            obj["html_url"] = f"https://github.com/{repo}/issues/{number}"
+            return obj
         def fetch_comments(repo, number):
             seen.append(("comments", repo, number))
             return source_page((905, msg, "kinoko34077"))
@@ -160,7 +153,8 @@ class LiveUnionTests(TestCase):
             index_with(status="BOUNDED_SEARCH_READ"), recipient="chatgpt",
             additional_repositories=(extra,), recent_read=recent_for,
             issue_read=fetch_issue, comments_read=fetch_comments)
-        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ",
+                         out.get("source_errors"))
         self.assertEqual(out["repositories_checked"], [REPO, extra])
         self.assertEqual(out["explicit_additional_repositories"], [extra])
         self.assertEqual(out["live_original_roots"], 1)
