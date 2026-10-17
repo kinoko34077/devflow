@@ -137,3 +137,16 @@ python -m tools.kaep_public_incremental_cli --format json --cursor-in ./kaep-pub
 `BOUNDED_INCREMENTAL_BASELINE` / `BOUNDED_INCREMENTAL_READ` は検査した公開コメント取得範囲についての成功であり、GitHubの新着競合、公開/非公開切替、コメント本文の編集、Issue本文/状態変更、現在のHEAD、recipient、信頼できる実行モデル、全ソース完全性は証明しない。故に `has_unknown_work=true`、`complete_source_universe=false`、`absence_of_work_proven=false`、`recipient_pickup_proven=false`、`can_authorize_execution=false` を保持し、`comment_edits_tracked=false` と `issue_state_changes_tracked=false` を明示。元のKAEP原典Issue・返信全履歴・actor・宛先・権限を既存正規検証器で独立検証してから利用する。
 
 この限定増分機能は動的HTTP API、公開Pagesの再生成、Webhook受信、常駐Host/Timer、無人GPT起床を提供しない。次の段階は編集・Issue状態更新の別ソース統合と、実受信者の原典再検証であり、料金Provider・認証・スケジュール・ブラウザセッション変更の承認を推定しない。
+
+## RT5 任意のローカルカーソル自動保存（2026年10月17日）
+
+初回・以後の増分を実行中のAIやCLIから**同じ一つの呼出しで**扱えるよう、任意の `--state-file` を追加。これを指定すると、既存の小さな公開先頭コメントIDカーソル（JSONのみ）を読取り、取得範囲の検証に完全成功したときだけ、一時ファイルを書いて同じディレクトリ内で原子的に置換する。未作成なら初回baselineを実行して初めて保存する。明示的 `--cursor-in`（入力のみ）と併用不可。
+
+```sh
+python -m tools.kaep_public_incremental_cli --format json --state-file ./kaep-public-head.json
+# 上と同じ呼出しを次回実行すると保存したpublic-owner境界を用いる
+```
+
+既存のカーソルが無効・重複JSONフィールド・シンボリックリンク・ディレクトリである場合は開始前にBLOCKED。取得部分不明・前回IDが見つからない・取得エラー・保存エラーの場合、保存済みのカーソルを進めず、最後の正常状態に戻る。更新直前に同じファイルが別の内容へ変わっていれば置換を拒否する。**複数プロセスの同時使用を保証する分散ロックではない**ため、各実行ホストでは一つのcheckpoint writerだけを許可する。セッション/資格情報やIssue本文は保存しない。
+
+これは**実際のモデルターンや許可されたホストが能動的にCLIを呼んだ場合のローカル状態更新**であり、バックグラウンドの自動起動、cron、常駐PC、Cloudflare APIやGitHubへの自動POSTを意味しない。受信者への厳格な作業割当、Issue編集、コメント編集監視、動的公開HTTP APIについては残存工程として維持する。
