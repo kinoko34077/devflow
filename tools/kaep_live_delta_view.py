@@ -136,7 +136,7 @@ def read_live_candidates(
     result["recent_comments_observed"] = counts
     result["window_limit_per_repository"] = MAX_WINDOW
     result["since"] = since
-    result["fresh_for_observed_sources"] = True
+    result["fresh_for_observed_sources"] = (result["status"] == "BOUNDED_SEARCH_READ" and not warnings)
     result["has_unknown_work"] = True
     result["complete_source_universe"] = False
     result["can_authorize_execution"] = False
