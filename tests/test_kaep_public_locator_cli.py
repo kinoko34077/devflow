@@ -177,6 +177,33 @@ class PublicLocatorsTests(TestCase):
                     scan.discover(fetch=lambda _: self.fail("network called"),
                                   **limits)
 
+    def test_no_repository_args_default_scans_up_to_page_40(self):
+        seen = []
+        def fetch(path):
+            seen.append(path)
+            if path.startswith("/users/"):
+                return [repo("devflow")]
+            if path.endswith("&page=40"):
+                return [comment("devflow", 500, 4000)]
+            return [comment("devflow", 503, p + 1000, kaep=False)
+                    for p in range(100)]
+        with (mock.patch.object(scan, "_gh_get", side_effect=fetch),
+              mock.patch("sys.stdout", new_callable=io.StringIO) as stream):
+            # Function default and CLI parser default must stay in sync.
+            with mock.patch.object(scan, "discover", wraps=scan.discover) as spy:
+                # The injected network callback is tested directly; no real GET.
+                out = scan.discover(fetch=fetch, max_api_calls=350)
+                self.assertEqual(out["comment_page_limit_per_repo"], 40)
+            self.assertEqual(out["status"], "BOUNDED_PUBLIC_MARKER_READ")
+            self.assertEqual(out["locator_count"], 1)
+            self.assertEqual(out["locators"][0]["locator"], "devflow#500@4000")
+            self.assertTrue(any(url.endswith("&page=40") for url in seen))
+        with (mock.patch.object(scan, "discover", return_value=out) as discovery,
+              mock.patch("sys.stdout", new_callable=io.StringIO)):
+            self.assertEqual(scan.main(["--format", "json"]), 0)
+            discovery.assert_called_once_with(max_repo_pages=3, max_comment_pages=40,
+                                              max_api_calls=350)
+
     def test_text_output_shows_only_locators_and_partial_diagnostics(self):
         report = {
             "status": "PARTIAL_UNKNOWN",

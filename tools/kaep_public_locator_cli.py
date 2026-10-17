@@ -58,7 +58,7 @@ def _gh_get(path: str) -> Any:
 def discover(
     *, fetch: Callable[[str], Any] = _gh_get,
     max_repo_pages: int = 3,
-    max_comment_pages: int = 20,
+    max_comment_pages: int = 40,
     max_api_calls: int = 350,
 ) -> dict[str, Any]:
     """Enumerate public owner repos and page through their Issue comments.
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--format", choices=("lines", "json"), default="lines")
     p.add_argument("--max-repo-pages", type=int, default=3)
-    p.add_argument("--max-comment-pages", type=int, default=20)
+    p.add_argument("--max-comment-pages", type=int, default=40)
     p.add_argument("--max-api-calls", type=int, default=350)
     args = p.parse_args(argv)
     try:
