@@ -21,6 +21,75 @@ from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
 MAX_SOURCES = 40
 MAX_PUBLIC_MARKER_BYTES = 2_000_000
 MAX_PUBLIC_MARKERS = 5000
+
+
+MAX_PREVIOUS_REPORT_BYTES = 2_000_000
+MAX_PREVIOUS_ROWS = 5000
+
+
+def _validated_previous_report(
+    data: dict[str, Any], *, recipient: str, repositories: list[str],
+) -> tuple[set[tuple[str, int]], dict[tuple[str, int, int, str], dict[str, str]], bool]:
+    """Admit *locators* and self-reported old state, NEVER prior authority.
+
+    Every candidate is fetched again through the existing original-Issue
+    verification pipeline. This is not an authenticated or durable cursor.
+    """
+    if (type(data) is not dict
+            or data.get("schema_version") != "kaep.live-union-check.v0.1"
+            or data.get("status") not in ("BOUNDED_UNION_READ", "PARTIAL_UNKNOWN")
+            or data.get("recipient") != recipient
+            or data.get("repositories_checked") != repositories
+            or data.get("read_only") is not True
+            or data.get("has_unknown_work") is not True
+            or data.get("complete_source_universe") is not False
+            or data.get("can_authorize_execution") is not False
+            or data.get("recipient_pickup_proven") is not False
+            or type(data.get("source_candidates")) is not list
+            or not len(data["source_candidates"]) <= MAX_SOURCES
+            or type(data.get("live_rows")) is not list
+            or len(data["live_rows"]) > MAX_PREVIOUS_ROWS):
+        _deny("INVALID_PREVIOUS_UNION_REPORT")
+    sources: set[tuple[str, int]] = set()
+    for row in data["source_candidates"]:
+        if type(row) is not dict:
+            _deny("INVALID_PREVIOUS_SOURCE")
+        repo, number = row.get("repository"), row.get("issue_number")
+        if (type(repo) is not str or not REPOSITORY.fullmatch(repo)
+                or repo not in repositories or type(number) is not int
+                or number <= 0 or row.get("issue_url")
+                != f"https://github.com/{repo}/issues/{number}"
+                or row.get("grants_work_authority") is not False
+                or (repo, number) in sources):
+            _deny("INVALID_PREVIOUS_SOURCE")
+        sources.add((repo, number))
+    old: dict[tuple[str, int, int, str], dict[str, str]] = {}
+    for row in data["live_rows"]:
+        if type(row) is not dict:
+            _deny("INVALID_PREVIOUS_ROOT")
+        repo, issue, cid, mid = (
+            row.get("repository"), row.get("issue_number"),
+            row.get("source_comment_id"), row.get("message_id"),
+        )
+        key = (repo, issue, cid, mid)
+        if (repo, issue) not in sources
+                or type(cid) is not int or cid <= 0
+                or type(mid) is not str
+                or re.fullmatch(r"msg_[A-Za-z0-9_-]{1,72}", mid) is None
+                or row.get("recipient") != recipient
+                or row.get("issue_url") != f"https://github.com/{repo}/issues/{issue}"
+                or row.get("source_url") !=
+                   f"https://github.com/{repo}/issues/{issue}#issuecomment-{cid}"
+                or row.get("issue_state") not in ("open", "closed")
+                or type(row.get("reply_observation")) is not str
+                or key in old):
+            _deny("INVALID_PREVIOUS_ROOT")
+        old[key] = {
+            "issue_state": row["issue_state"],
+            "reply_observation": row["reply_observation"],
+        }
+    return sources, old, data["status"] == "PARTIAL_UNKNOWN"
+
 def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str, int]], bool]:
     """Untrusted public-owner marker candidate *locations*, not messages.
 
@@ -100,6 +169,7 @@ def read_union(
     since: str | None = None,
     additional_repositories: tuple[str, ...] = (),
     public_marker_discovery: dict[str, Any] | None = None,
+    previous_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recheck one deduplicated cohort in canonical original sources.
 
@@ -129,6 +199,13 @@ def read_union(
     marker_in_scope = public_marker_keys.intersection(
         {(repo, issue) for repo, issue in public_marker_keys if repo in repos})
     marker_out_of_scope = public_marker_keys - marker_in_scope
+    if previous_report is None:
+        prior_source_keys: set[tuple[str, int]] = set()
+        prior_rows: dict[tuple[str, int, int, str], dict[str, str]] = {}
+        previous_partial = False
+    else:
+        prior_source_keys, prior_rows, previous_partial = _validated_previous_report(
+            previous_report, recipient=recipient, repositories=repos)
     indexed_rows = [r for r in snapshot["rows"] if r["recipient"] == recipient]
     indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
     indexed_by_key = {
@@ -169,7 +246,7 @@ def read_union(
         if truncated:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
 
-    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope)
+    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope | prior_source_keys)
     # A cap cannot silently drop a known source. Fail closed and retain fallback.
     if len(all_sources) > MAX_SOURCES:
         _deny("UNION_SOURCE_LIMIT")
@@ -194,6 +271,7 @@ def read_union(
     }
     out_rows: list[dict[str, Any]] = []
     state_changes = 0
+    previous_changes = 0
     for key, row in sorted(current_by_key.items()):
         repo, number = key[:2]
         old = indexed_by_key.get(key)
@@ -202,7 +280,13 @@ def read_union(
             or (old.get("reply_observation") is not None
                 and old["reply_observation"] != row["reply_observation"])))
         state_changes += changed
+        previous = prior_rows.get(key)
+        changed_previous = bool(previous and (
+            previous["issue_state"] != row["issue_state"]
+            or previous["reply_observation"] != row["reply_observation"]))
+        previous_changes += changed_previous
         out_rows.append({
+            "changed_from_previous_report": changed_previous,
             "repository": repo, "issue_number": number,
             "issue_url": row["issue_url"], "source_url": row["source_url"],
             "source_comment_id": row["source_comment_id"],
@@ -218,7 +302,8 @@ def read_union(
                           (repo, number) in recent_sources else
                 "INDEXED_SOURCE" if (repo, number) in indexed_sources else
                 "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources else
-                "INCREMENTAL_MARKER_SOURCE"
+                "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope else
+                "PREVIOUS_REPORT_SOURCE"
             ),
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
@@ -252,7 +337,8 @@ def read_union(
                           and (repo, number) in recent_sources else
                 "INDEXED_SOURCE" if (repo, number) in indexed_sources
                 else "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources
-                else "INCREMENTAL_MARKER_SOURCE"
+                else "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope
+                else "PREVIOUS_REPORT_SOURCE"
             ),
             "matching_recipient_roots": count,
             "source_observation": (
@@ -264,11 +350,13 @@ def read_union(
         })
 
     removed = set(indexed_by_key) - set(current_by_key)
+    missing_previous = set(prior_rows) - set(current_by_key)
     partial = bool(
         snapshot["status"] != "BOUNDED_SEARCH_READ"
         or verified["status"] != "BOUNDED_SEARCH_READ"
         or verified["errors"] or warnings or removed
         or marker_partial or bool(marker_out_of_scope)
+        or previous_partial or bool(missing_previous)
     )
     return {
         "schema_version": "kaep.live-union-check.v0.1",
@@ -291,6 +379,14 @@ def read_union(
         "public_marker_issue_count_out_of_scope": len(marker_out_of_scope),
         "public_marker_source_partial": marker_partial,
         "public_marker_source_untrusted": True,
+        "previous_report_used": previous_report is not None,
+        "previous_report_source_count": len(prior_source_keys),
+        "previous_report_partial": previous_partial,
+        "previous_report_state_or_reply_changes": previous_changes,
+        "previous_report_roots_missing_live": len(missing_previous),
+        "new_source_issue_count_vs_previous": len(set(all_sources) - prior_source_keys)
+            if previous_report is not None else 0,
+        "previous_report_state_comparison_untrusted": True,
         "source_candidates": candidates,
         "live_original_roots": len(out_rows),
         "new_unindexed_source_issues": len(recent_sources - indexed_sources),
@@ -325,6 +421,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offline-index", type=Path)
     parser.add_argument("--public-marker-discovery", type=Path,
                         help="Optional bounded untrusted public marker JSON; canonical Issues are revalidated")
+    parser.add_argument("--previous-report", type=Path,
+                        help="Optional prior union JSON: revalidate its original Issues, compare old states")
     parser.add_argument("--since", default=None)
     parser.add_argument("--updated-pages", type=int, default=1,
                         choices=range(1, delta.MAX_UPDATED_PAGES + 1),
@@ -345,6 +443,13 @@ def main(argv: list[str] | None = None) -> int:
                 _deny("PUBLIC_MARKER_FILE_TOO_LARGE")
             public_markers = json.loads(raw.decode("utf-8"),
                                         object_pairs_hook=cached._unique_pairs)
+        prior = None
+        if args.previous_report is not None:
+            raw = args.previous_report.read_bytes()
+            if len(raw) > MAX_PREVIOUS_REPORT_BYTES:
+                _deny("PREVIOUS_REPORT_FILE_TOO_LARGE")
+            prior = json.loads(raw.decode("utf-8"),
+                               object_pairs_hook=cached._unique_pairs)
         if args.updated_pages == 1:
             recent_reader = delta.read_repository_recent
         else:
@@ -355,7 +460,8 @@ def main(argv: list[str] | None = None) -> int:
             index, recipient=args.recipient, since=args.since,
             recent_read=recent_reader,
             additional_repositories=tuple(args.additional_repository),
-            public_marker_discovery=public_markers)
+            public_marker_discovery=public_markers,
+            previous_report=prior)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {
             "schema_version": "kaep.live-union-check.v0.1",
