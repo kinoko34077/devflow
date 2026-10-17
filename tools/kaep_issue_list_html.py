@@ -303,8 +303,8 @@ def to_html(result: dict[str, Any], *, public_live: bool = False) -> str:
     )
     # Script is raw-text HTML: numeric entities do NOT decode inside <script>.
     # Convert Japanese UI text to JS Unicode escapes BEFORE hashing CSP.
-    script = JS + (LIVE_JS.encode("ascii", "backslashreplace").decode("ascii")
-                   if public_live else "")
+    script = (JS + (LIVE_JS if public_live else "")).encode(
+        "ascii", "backslashreplace").decode("ascii")
     stylesheet = CSS + (LIVE_CSS if public_live else "")
     connection = "https://api.github.com" if public_live else "'none'"
     live_panel = (
