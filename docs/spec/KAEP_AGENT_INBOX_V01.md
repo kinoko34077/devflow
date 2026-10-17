@@ -98,6 +98,21 @@ python -m tools.kaep_issue_search_view --repository kinoko34077/devflow --expect
 Open `kaep-issues.html` in a modern browser. To include other specifically selected managed repositories, add up to 3 `--repository owner/name` values. Regenerate the local file to refresh. JSON and Markdown formats remain available; HTML is additive and opt-in. Console HTML uses numeric Unicode references so redirection also works on Windows CP932. No publication or deployment is implicit.
 
 **Safety and completeness:** Displayed rows are **verified candidate historical KAEP roots, not pending work permissions**. The list keeps explicit `PARTIAL_UNKNOWN`, actor/codec errors and quarantined comments visible. For blocked reads HTML still shows a clear failure page and the CLI exits nonzero. Zero rows do **not** imply zero work. GitHub Search is neither complete source universe nor a substitute for direct source reading, recipient/head validation or #503/manual Control. Issue role and KAEP message kind are **independent fields**; a non-TASK Issue with KAEP is not automatically TASK. Do not use operator view to schedule agents, set Claims, bypass Human/security approval, change Issue roles or retire fallback.
+## B6-D active-agent bounded live candidate revalidation (opt-in)
+
+**When a GPT/Claude/Codex agent turn is already running**, the public `https://kinoko34077.github.io/devflow/kaep/index.json` is a timestamped **candidate** index, not a real-time inbox. For recipient-specific live inspection without repeating a broad GitHub Issue search, use the existing authenticated `gh` access from the recipient environment:
+
+```sh
+python -m tools.kaep_live_candidate_cli --recipient codex
+python -m tools.kaep_live_candidate_cli --recipient claude-code
+python -m tools.kaep_live_candidate_cli --recipient chatgpt
+```
+
+This CLI first performs **one uncredentialed, pinned HTTPS GET** of the published JSON, requires its non-authoritative schema and explicit `has_unknown_work`/no-execution flags, filters source locators for the selected recipient, and re-fetches the **current** original GitHub Issue and complete paginated comments using existing authenticated `gh` and the unchanged canonical strict KAEP codec/actor/recipient/reply validation. It compares `(repository, Issue, source_comment_id, message_id)` with cached candidates and reports old/new/missing and source errors without raw prompt contents. It adds no new Issue classifier, GitHub search, queue, sender, Cloud executor, resident process, schedule or token.
+
+**Results and safety:** `BOUNDED_LIVE_CANDIDATE_READ` proves only that the selected **indexed candidate Issue cohort** was freshly fetched; it is not proof that GitHub's earlier Search snapshot found all current Issues or that the recipient agent was automatically awakened. `PARTIAL_UNKNOWN` / `BLOCKED` report missing/invalid source and return nonzero. Even when the status is bounded-success, `has_unknown_work=true`, `complete_source_universe=false`, `can_authorize_execution=false`, `current_head_verified=false`, `recipient_pickup_proven=false`, and `fallback_retirement_authorized=false`. A stale public snapshot can still supply locators for revalidation, but cannot prove any missing newly created Issue. Compare with native `get_agent_inbox`/`kaep_agent_inbox_cli` and retain the manual Control and #503 fallback; action-level authenticated actor, current HEAD, Claim, Human approval and replay checks are separately required.
+
+**Do not conflate:** This active-turn live GET is not live updating of the publicly displayed Pages HTML. For truly automatic refresh with no active recipient turn, and GPT-model-processed heartbeat, see independently gated F10 #681; this CLI does not schedule/wake a model or purchase Provider usage.
 ## CLI fallback for an existing Claude check-in without Devflow MCP registration
 
 Claude #533 verified that its current session could read devflow via native Python/GitHub CLI but had no Devflow MCP tool registered. The following GET-only command therefore requires no new MCP registration or timer changes, and can be called **as one step inside** the user-managed check-in:
