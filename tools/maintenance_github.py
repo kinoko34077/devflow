@@ -1130,14 +1130,14 @@ def collect_maintenance_control(
             "detail": str(exc),
         }
 
-    association = str(issue.get("author_association") or "").upper()
+    trusted = _control_is_trusted(transport, issue, repository)
     expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
     body = str(issue.get("body") or "")
     sections = _sections(body)
     if (
         str(issue.get("state") or "").lower() != "open"
         or "pull_request" in issue
-        or association not in TRUSTED_ASSOCIATIONS
+        or not trusted
         or issue.get("title") != expected_title
         or _scalar_section(sections, "Repository") != repository
     ):
