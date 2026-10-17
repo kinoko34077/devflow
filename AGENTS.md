@@ -99,6 +99,11 @@ Already-active agents may pass a bounded public-owner marker result produced by 
 
 Existing `tools.kaep_live_union_cli --recipient <recipient>` uses a single latest updated-comment REST page by default. When the response warns `RECENT_WINDOW_TRUNCATED`, an already running authorized agent can explicitly use `--updated-pages 2` or `3` to read up to 300 comment candidates with the existing original-Issue codec. Page overlap/drift and a full final page retain `PARTIAL_UNKNOWN`; 3 repos/40 canonical Issues and the no-authority/unknown source guarantees remain. This is not an unattended poller or full confirmed inbox. See [#680](https://github.com/kinoko34077/devflow/issues/680).
 
+
+#### P3 machine-readable same-run API response contract, not a hosted service
+
+For an **already running** authorized recipient agent, `python -m tools.kaep_live_union_cli --recipient <recipient> --response-format agent-api` projects the **same run's canonical original-Issue KAEP source verification** into strictly allowlisted `kaep.agent-current-view.v0.1` JSON. The default union JSON output is unchanged. Redacted source links, observation age, reply observation and exact partial/unknown diagnostics are non-authoritative: no raw payload, server, host, claim, credential or background GPT wake is created. `http_endpoint_deployed=false` is explicit. Never treat saved old JSON or a public Pages snapshot as a fresh authenticated Inbox; preserve #503/manual Control and #531 B5 fallback. Production hosted GET/API and agent identity require separate P3 admission [#680](https://github.com/kinoko34077/devflow/issues/680).
+
 ## 2. What owns what
 
 | Information | Canonical owner |
