@@ -100,6 +100,19 @@ class LiveDeltaTests(unittest.TestCase):
         self.assertEqual(out["warnings"][0]["reason_code"], "RECENT_WINDOW_TRUNCATED")
         self.assertEqual(out["recent_comments_observed"][REPO], 100)
 
+    def test_source_error_must_clear_verified_freshness(self):
+        def incomplete(repositories, locators, **_kwargs):
+            output = result(repositories, locators)
+            output["status"] = "PARTIAL_UNKNOWN"
+            output["errors"] = [{"reason_code": "SOURCE_READ_UNAVAILABLE"}]
+            return output
+        with mock.patch.object(live.search, "build_search_list", side_effect=incomplete):
+            out = live.read_live_candidates(
+                [REPO], recipient="claude-code", expected_actor="kinoko34077",
+                recent_read=lambda *_a, **_k: [comment()])
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertFalse(out["fresh_for_observed_sources"])
+
     def test_foreign_repo_and_invalid_json_and_invalid_since_block(self):
         with self.assertRaisesRegex(InvalidMessage, "LIVE_SOURCE_LOCATOR_MISMATCH"):
             live.read_live_candidates(
