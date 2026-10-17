@@ -170,6 +170,10 @@ def discover(
         if repo_finished:
             scanned_repos += 1
         if calls >= max_api_calls:
+            # If the inner loop already marked current+remaining scopes,
+            # avoid duplicating their budget diagnostics here.
+            if any(gap["reason_code"] == "API_BUDGET" for gap in incomplete):
+                break
             # The just-scanned repository may be complete, but all later
             # repositories are still unread. Never silently omit them.
             if idx + 1 < len(repos):
