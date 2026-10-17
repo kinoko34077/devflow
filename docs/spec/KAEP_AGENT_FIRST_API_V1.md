@@ -34,3 +34,26 @@ Status値は機械向けの識別子として翻訳せず保持する。ブラ�
 - 既存のPagesの build/deploy owner-gateと外部公開を維持し、ブラウザへ資格情報を出さない。公開索引の取得は認証なしで可能。権限ある書込みは別のGitHub認証・安全評価による。
 - モデル実行環境の自動起動、ハートビート送受信、無人処理は [#681](https://github.com/kinoko34077/devflow/issues/681) の独立要件。公開JSONだけでは実現しない。
 
+
+
+## リアルタイム更新：RT1/RT2 読取専用ライブ差分候補（2026年10月17日追加）
+
+ユーザーの追加要求「リアルタイム更新」を、静的 `index.json` の更新とは独立した**原典への要求時GET**と定義する。人間操作によるGitHub Actionsの手動実行を要しない。最終受入には全受信元の網羅性・サイト表示の自動更新・実測レイテンシ・受信者側の継続自動取得が必要。**この段階の新CLIだけでは未達**。
+
+現在実装した候補検出:
+```sh
+python -m tools.kaep_live_delta_view --repository kinoko34077/devflow --recipient chatgpt --expect-source-actor kinoko34077
+```
+`--recipient` は `claude-code` / `chatgpt` / `codex` / `coordinator` / `all`。必要なら `--since YYYY-MM-DDTHH:MM:SSZ` で限定した更新範囲を要求。実行中エージェントが自身の許可済みチェックポイントで呼び出せる。既存GitHub CLIの認証を使用し、新しい資格情報、APIサーバ、常駐サービス、課金、Actions cronは不要。
+
+処理は GitHub公式 REST `/repos/{repo}/issues/comments?sort=updated&direction=desc&per_page=100&page=1` の最新コメントを **GitHub Search索引経由ではなく毎回GET** してKAEP候補Issueだけ抽出する。さらに従来の `build_search_list` を再利用し、原典Issue・全コメント・actor・KAEP v0.2 reply chainを検証して、取得時刻・宛先・原典URL・返信観測・検証エラーを機械可読JSONで返す。内容の本文は返さない。
+
+**APIの意味の区別:**
+- `status=LIVE_WINDOW_READ`: 今回取得した**直近更新窓に限り**原典の読取・検証が成功した。終了コード0。ただし全依頼・全リポ・最新HEAD・モデル本人性・Claimの証明ではない。
+- `status=PARTIAL_UNKNOWN`: 100コメントに達してページ切捨ての可能性、あるいは原典検証エラーがあった。終了コード2。
+- `status=BLOCKED`: 元データの取得失敗や不正形式で処理を止めた。終了コード2、認証情報や通信エラーの機密文面は表示しない。
+- 全成功時でも `source_coverage=RECENT_COMMENT_WINDOW_NOT_COMPLETE`、`has_unknown_work=true`、`complete_source_universe=false`、`absence_of_work_proven=false`、`can_authorize_execution=false`。変更窓に存在しない**古い未返信の原典**やコメントを伴わないIssue開閉が欠落する可能性がある。失敗や空一覧を未処理0件と断定しない。
+
+公開 `https://kinoko34077.github.io/devflow/kaep/index.json` は依然ビルド時点の静的バックアップであり、**ライブ取得結果とは異なる**。公開HTMLもまだ自動更新されない。MCP `get_agent_inbox` は現行受信者別live契約、手動Control/#503 pointerを保持する。完全性とライブHTTPサービス/Push・Web UIの最新反映は#680 RT3/RT4で継続し、GPT自身の無人モデル起床・応答は#681で継続。
+
+GitHub公式仕様: https://docs.github.com/en/rest/issues/comments#list-issue-comments-for-a-repository
