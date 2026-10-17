@@ -73,6 +73,12 @@ The user's KAEP "list" requirement is **primarily for GPT/Claude/Codex to fetch 
 
 Automatic external PING + model-processed GPT heartbeat is a separate required but **not yet accepted** operating capability under [devflow #681](https://github.com/kinoko34077/devflow/issues/681) and parent [#516](https://github.com/kinoko34077/devflow/issues/516). An already-active turn can check and respond with its own tools at checkpoints; neither an Issue bot/sidecar auto-ANSWER nor a scheduled task in a distinct GPT execution proves the earlier interactive turn survived. Do not install a timer, resident model host, credential or auto-send because this paragraph exists. Preserve current fee-free policy and required Human security/host admission.
 
+
+#### Request-time live KAEP comment window (B6 RT1)
+
+For an already active agent that needs **new KAEP requests or replies more recent than the build-time public index**, use `python -m tools.kaep_live_delta_view --repository kinoko34077/devflow --recipient <your-recipient> --expect-source-actor kinoko34077` from an existing authenticated checkout when the installed live MCP/CLI does not already cover this source. This GET-only reader bypasses GitHub **Search indexing and Pages build staleness**; it reuses the same original-Issue strict codec. It returns `LIVE_WINDOW_READ` on a successful bounded source window, `PARTIAL_UNKNOWN` on overflow/source uncertainty and `BLOCKED` on failure. **Even success is not a complete pending inbox**: the last 100 updated comments may miss older outstanding roots and Issue-only changes; `has_unknown_work=true` and `absence_of_work_proven=false` are invariant. Preserve existing `get_agent_inbox`, manual Control and #503 fallback, and always verify exact original source/current HEAD before acting. This is **on-demand when the agent already runs**, not a new automatic timer, HTTP push service, ChatGPT wake, or new authority; requirements for continuous real-time availability remain under [#680](https://github.com/kinoko34077/devflow/issues/680).
+
+
 ## 2. What owns what
 
 | Information | Canonical owner |
