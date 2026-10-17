@@ -147,5 +147,39 @@ class ConservativeCoverageTests(unittest.TestCase):
         self.assertEqual("NO_COVERAGE", row.status)
 
 
+    def test_generation_ten_blocked_overrides_generation_nine_clean_at_equal_timestamp(self):
+        clean = evidence(
+            run_id="audit:" + REPO + ":common.correctness:9",
+            generation=9,
+            result="CLEAN",
+            completed_at="2026-10-17T00:00:00Z",
+        )
+        blocked = evidence(
+            run_id="audit:" + REPO + ":common.correctness:10",
+            generation=10,
+            result="BLOCKED",
+            completed_at="2026-10-17T00:00:00Z",
+        )
+        # A lexical run_id sort would incorrectly select ':9' over ':10'.
+        self.assertEqual("NO_COVERAGE", status((clean, blocked))[0].status)
+
+    def test_clock_reversal_never_promotes_stale_clean_as_current(self):
+        prior = evidence(
+            run_id="audit:" + REPO + ":common.correctness:9",
+            generation=9,
+            result="BLOCKED",
+            completed_at="2026-10-17T12:00:00Z",
+        )
+        later_generation = evidence(
+            run_id="audit:" + REPO + ":common.correctness:10",
+            generation=10,
+            result="CLEAN",
+            completed_at="2026-10-17T11:00:00Z",
+        )
+        self.assertEqual(
+            "AMBIGUOUS_HISTORY",
+            status((prior, later_generation))[0].status,
+        )
+
 if __name__ == "__main__":
     unittest.main()
