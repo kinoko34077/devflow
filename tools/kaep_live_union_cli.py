@@ -417,6 +417,8 @@ def read_union(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipient", choices=sorted(RECIPIENTS), required=True)
+    parser.add_argument("--response-format", choices=("union", "agent-api"), default="union",
+                        help="Default union JSON or same-call allowlisted Agent API JSON; no HTTP server")
     parser.add_argument("--additional-repository", action="append", default=[],
                         help="Explicit owner-managed repository to read (max 3 total)")
     parser.add_argument("--offline-index", type=Path)
@@ -463,6 +465,9 @@ def main(argv: list[str] | None = None) -> int:
             additional_repositories=tuple(args.additional_repository),
             public_marker_discovery=public_markers,
             previous_report=prior)
+        if args.response_format == "agent-api":
+            from tools.kaep_agent_api_projection import project_agent_view
+            result = project_agent_view(result)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {
             "schema_version": "kaep.live-union-check.v0.1",
