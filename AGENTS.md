@@ -94,6 +94,11 @@ When a running GPT/Claude/Codex needs **new KAEP source locations across all pub
 
 Already-active agents may pass a bounded public-owner marker result produced by `tools.kaep_public_incremental_cli` into the existing **strict original source** reader: `python -m tools.kaep_live_union_cli --recipient <recipient> --public-marker-discovery <result.json>`. Public marker positions are **untrusted locator hints**, not an Inbox, validated requests, or action permission. The union deduplicates within the current explicitly selected 3-repo / 40-source limit, then re-reads original GitHub Issue/full comments through canonical actor/recipient/KAEP reply-chain verification. Out-of-scope or partial inputs are UNKNOWN, not silent success. This does not make archived/edited marker-only Issue histories universally discoverable, start a model turn, or replace `get_agent_inbox` / #503/manual Control. See [#680](https://github.com/kinoko34077/devflow/issues/680).
 
+
+#### P2 opt-in wider updated-comment window
+
+Existing `tools.kaep_live_union_cli --recipient <recipient>` uses a single latest updated-comment REST page by default. When the response warns `RECENT_WINDOW_TRUNCATED`, an already running authorized agent can explicitly use `--updated-pages 2` or `3` to read up to 300 comment candidates with the existing original-Issue codec. Page overlap/drift and a full final page retain `PARTIAL_UNKNOWN`; 3 repos/40 canonical Issues and the no-authority/unknown source guarantees remain. This is not an unattended poller or full confirmed inbox. See [#680](https://github.com/kinoko34077/devflow/issues/680).
+
 ## 2. What owns what
 
 | Information | Canonical owner |

@@ -70,7 +70,7 @@ def _recent_issue_keys(
     repo: str, comments: list[dict[str, Any]],
 ) -> set[tuple[str, int]]:
     """Untrusted markers supply locators ONLY. Strict codec runs afterwards."""
-    if type(comments) is not list or len(comments) > delta.MAX_WINDOW:
+    if type(comments) is not list or len(comments) > delta.MAX_WINDOW * delta.MAX_UPDATED_PAGES:
         _deny("INVALID_LIVE_WINDOW")
     sources: set[tuple[str, int]] = set()
     for comment in comments:
@@ -137,12 +137,36 @@ def read_union(
     }
     recent_sources: set[tuple[str, int]] = set()
     counts: dict[str, int] = {}
+    updated_pages_read: dict[str, int] = {}
     warnings: list[dict[str, str]] = []
     for repo in repos:
-        comments = recent_read(repo, since=since)
-        counts[repo] = len(comments) if type(comments) is list else -1
+        raw = recent_read(repo, since=since)
+        if type(raw) is dict:
+            comments = raw.get("comments")
+            truncated = raw.get("truncated")
+            page_count = raw.get("read_pages")
+            overlap = raw.get("page_boundary_overlap_count")
+            page_limit = raw.get("page_limit")
+            if (type(comments) is not list
+                    or type(truncated) is not bool
+                    or type(page_count) is not int or not 1 <= page_count <= delta.MAX_UPDATED_PAGES
+                    or type(page_limit) is not int or page_count > page_limit
+                    or page_limit > delta.MAX_UPDATED_PAGES
+                    or type(overlap) is not int or overlap < 0
+                    or len(comments) > page_count * delta.MAX_WINDOW):
+                _deny("INVALID_UPDATED_PAGE_RESULT")
+            if overlap:
+                warnings.append({"repository": repo, "reason_code": "UPDATED_PAGE_BOUNDARY_OVERLAP"})
+        else:
+            comments = raw
+            if type(comments) is not list or len(comments) > delta.MAX_WINDOW:
+                _deny("INVALID_LIVE_WINDOW")
+            truncated = len(comments) == delta.MAX_WINDOW
+            page_count = 1
+        counts[repo] = len(comments)
+        updated_pages_read[repo] = page_count
         recent_sources.update(_recent_issue_keys(repo, comments))
-        if len(comments) == delta.MAX_WINDOW:
+        if truncated:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
 
     all_sources = sorted(indexed_sources | recent_sources | marker_in_scope)
@@ -257,6 +281,7 @@ def read_union(
         "repository_scope_proven_complete": False,
         **info,
         "recent_comments_observed": counts,
+        "updated_comment_pages_read": updated_pages_read,
         "window_limit_per_repository": delta.MAX_WINDOW,
         "indexed_issue_count": len(indexed_sources),
         "recent_marker_issue_count": len(recent_sources),
@@ -301,6 +326,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--public-marker-discovery", type=Path,
                         help="Optional bounded untrusted public marker JSON; canonical Issues are revalidated")
     parser.add_argument("--since", default=None)
+    parser.add_argument("--updated-pages", type=int, default=1,
+                        choices=range(1, delta.MAX_UPDATED_PAGES + 1),
+                        help="Opt-in bounded updated-desc GitHub comment pages (default: 1)")
     args = parser.parse_args(argv)
     try:
         if args.offline_index is None:
@@ -317,8 +345,15 @@ def main(argv: list[str] | None = None) -> int:
                 _deny("PUBLIC_MARKER_FILE_TOO_LARGE")
             public_markers = json.loads(raw.decode("utf-8"),
                                         object_pairs_hook=cached._unique_pairs)
+        if args.updated_pages == 1:
+            recent_reader = delta.read_repository_recent
+        else:
+            def recent_reader(repository: str, *, since: str | None = None):
+                return delta.read_repository_updated_pages(
+                    repository, since=since, max_pages=args.updated_pages)
         result = read_union(
             index, recipient=args.recipient, since=args.since,
+            recent_read=recent_reader,
             additional_repositories=tuple(args.additional_repository),
             public_marker_discovery=public_markers)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:

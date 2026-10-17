@@ -50,6 +50,49 @@ class LiveDeltaTests(unittest.TestCase):
         for op in ("POST", "PATCH", "DELETE", "workflow_dispatch"):
             self.assertNotIn(op, " ".join(args))
 
+    def test_updated_pages_use_explicit_page_two_and_return_bounded_unique_ids(self):
+        batch = [comment(number=576, cid=i) for i in range(1, 101)]
+        tail = [comment(number=590, cid=101),
+                comment(number=590, cid=100)]  # expected race overlap
+        with mock.patch.object(live, "read_repository_recent",
+                               side_effect=lambda repo, since=None, page=1:
+                                   batch if page == 1 else tail) as fetch:
+            result = live.read_repository_updated_pages(REPO, max_pages=2)
+        self.assertEqual(result["read_pages"], 2)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["page_boundary_overlap_count"], 1)
+        self.assertEqual(len(result["comments"]), 101)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(fetch.call_args_list[1].kwargs["page"], 2)
+
+    def test_full_second_page_is_explicitly_truncated(self):
+        with mock.patch.object(live, "read_repository_recent",
+                               side_effect=lambda repo, since=None, page=1:
+                                   [comment(cid=page * 100 + i)
+                                    for i in range(100)]):
+            out = live.read_repository_updated_pages(REPO, max_pages=2)
+        self.assertTrue(out["truncated"])
+        self.assertEqual(out["read_pages"], 2)
+        self.assertEqual(len(out["comments"]), 200)
+
+    def test_page_two_network_failure_does_not_return_partial_success(self):
+        def fail_second(repo, *, since=None, page=1):
+            if page == 2:
+                raise InvalidMessage("LIVE_GITHUB_READ_FAILED")
+            return [comment(cid=i) for i in range(1, 101)]
+        with mock.patch.object(live, "read_repository_recent",
+                               side_effect=fail_second):
+            with self.assertRaisesRegex(InvalidMessage, "LIVE_GITHUB_READ_FAILED"):
+                live.read_repository_updated_pages(REPO, max_pages=2)
+
+    def test_updated_page_limit_and_page_argument_are_bounded(self):
+        for n in (0, 4, True):
+            with self.subTest(n=n), self.assertRaisesRegex(
+                    InvalidMessage, "INVALID_UPDATED_PAGE_LIMIT"):
+                live.read_repository_updated_pages(REPO, max_pages=n)
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_UPDATED_PAGE"):
+            live.read_repository_recent(REPO, page=4)
+
     def test_selects_new_and_reply_comments_with_one_read_and_strict_original_validation(self):
         sources = [
             comment(number=576, cid=100, actor="github-actions[bot]"),

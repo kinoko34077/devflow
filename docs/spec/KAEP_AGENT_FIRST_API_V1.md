@@ -171,3 +171,16 @@ python -m tools.kaep_live_union_cli --recipient chatgpt --public-marker-discover
 **編集/状態変化:** 過去に特定済みのIssueは最新Issueを再GETするため、既存索引に対するopen/closedやreply状態の違いは検出できる。古い未収録原典のコメント本文編集、単にIssue本文だけで発生した新規候補、全リポの任意編集を常時捕捉する保証はない。更新時刻に基づく変更捕捉・検証済みの機械HTTP API・本物のモデル継続受信は別受入条件。
 
 既存 `get_agent_inbox` と`#503`/manual Control fallback、#531 B5 source completeness HOLD、#681 F10 GPT無人起床の安全境界を維持。有料Provider/新規認証/常駐Host/定時実行は加えない。
+
+
+## P2 更新済みIssueコメントのページ境界拡張（2026年10月17日）
+
+実GitHub P2再読込では、直近更新順100コメントの上限に到達し `RECENT_WINDOW_TRUNCATED` となった。旧 `read_repository_recent(...)` のデフォルト1ページは保持し、既存 `kaep_live_union_cli` に任意の `--updated-pages 2` / `--updated-pages 3`（最大3）を追加する。
+
+```sh
+python -m tools.kaep_live_union_cli --recipient claude-code --updated-pages 2
+```
+
+呼出し時点でGitHub REST `GET /repos/{repo}/issues/comments?sort=updated&direction=desc&per_page=100&page=N` を1→上限ページへ読み進め、ページが100件未満なら停止する。同じコメントIDが隣接ページに現れた場合、重複を排除して `UPDATED_PAGE_BOUNDARY_OVERLAP` として `PARTIAL_UNKNOWN` を残す。最後まで100件ずつだった場合も `RECENT_WINDOW_TRUNCATED`。途中でGET/JSON/形式検証が失敗した場合、途中取得結果を成功扱いせずにBLOCKEDする。1ページ既定は変更しない。
+
+このオプションは**最大300件の直近更新コメントからIssue候補を抽出するだけ**であり、既存の3repo/40原典上限がより先に成立する場合は安全にブロックする。原典Issue/全KAEPコメントの厳密なactor/recipient/返信照合は既存のものを再利用し、現在HEAD・全ソース網羅・古い編集済みコメントやコメントがないIssue更新の自動発見を保証しない。 `has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false`、#503/manual Control fallbackは維持する。新たなホスト/タイマー/認証/料金を伴わない。

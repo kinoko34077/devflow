@@ -344,6 +344,64 @@ class LiveUnionTests(TestCase):
         self.assertEqual(out["live_rows"][0]["issue_state"], "closed")
         self.assertTrue(out["live_rows"][0]["incremental_marker_observed"])
 
+    def test_paginated_updated_source_with_no_truncation_and_strict_original(self):
+        msg = root(number=50, issue=590)
+        # First 100 comments may include duplicates and ordinary text; second page
+        # adds an older, otherwise unindexed KAEP source.
+        first = [recent(576, cid=1000 + i, body="ordinary")
+                 for i in range(100)]
+        second = [recent(590, cid=914), recent(576, cid=1000, body="ordinary")]
+        def recent_read(repo, since=None):
+            return {
+                "comments": first + second[:1], "truncated": False,
+                "read_pages": 2, "page_limit": 2,
+                "page_boundary_overlap_count": 1,
+            }
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="claude-code",
+            recent_read=recent_read,
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number:
+                source_page((914, msg, "kinoko34077")))
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")  # overlap diagnostic
+        self.assertEqual(out["updated_comment_pages_read"][REPO], 2)
+        self.assertEqual(out["recent_comments_observed"][REPO], 101)
+        self.assertEqual(out["source_issue_count"], 1)
+        self.assertEqual(out["live_original_roots"], 1)
+        self.assertIn("UPDATED_PAGE_BOUNDARY_OVERLAP",
+                      [w["reason_code"] for w in out["warnings"]])
+        self.assertFalse(out["can_authorize_execution"])
+
+    def test_paginated_clean_second_page_is_a_bounded_read_not_complete(self):
+        msg = root(number=44)
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="claude-code",
+            recent_read=lambda repo, since=None: {
+                "comments": [recent(576)], "truncated": False,
+                "read_pages": 2, "page_limit": 2,
+                "page_boundary_overlap_count": 0,
+            },
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number:
+                source_page((912, msg, "kinoko34077")))
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(out["updated_comment_pages_read"][REPO], 2)
+        self.assertFalse(out["complete_source_universe"])
+        self.assertFalse(out["absence_of_work_proven"])
+
+    def test_paginated_cap_remains_partial_not_work_empty(self):
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="codex",
+            recent_read=lambda repo, since=None: {
+                "comments": [recent(576, cid=i, body="ordinary")
+                             for i in range(1, 101)],
+                "truncated": True, "read_pages": 2,
+                "page_limit": 2, "page_boundary_overlap_count": 0,
+            })
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["warnings"][0]["reason_code"], "RECENT_WINDOW_TRUNCATED")
+        self.assertFalse(out["absence_of_work_proven"])
+
     def test_source_overflow_and_page_overflow_fail_safe(self):
         snap = index_with(status="BOUNDED_SEARCH_READ")
         with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
