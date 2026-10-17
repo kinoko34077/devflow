@@ -138,8 +138,21 @@ def derive_coverage(
             if conflicting:
                 results.append(_row(slot, depth, fingerprint, "AMBIGUOUS_HISTORY", "conflicting trusted run ID"))
                 continue
-            selected = max(trusted, key=lambda e: (e.record.completed_at, e.record.run_id))
+            # Generation is a numeric monotone run sequence. Lexical run_id
+            # order would rank ':9' after ':10' at equal timestamps and could
+            # hide a later BLOCKED run behind an older CLEAN result.
+            selected = max(trusted, key=lambda e: (e.record.generation, e.record.completed_at))
             rec = selected.record
+            if any(
+                e.record.generation < rec.generation
+                and e.record.completed_at > rec.completed_at
+                for e in trusted
+            ):
+                results.append(_row(
+                    slot, depth, fingerprint, "AMBIGUOUS_HISTORY",
+                    "completion timestamps contradict run generation order",
+                ))
+                continue
             if rec.lens != slot.lens:
                 results.append(_row(slot, depth, fingerprint, "LENS_DRIFT", "current slot lens differs from recorded lens", selected))
             elif not has_valid_fp:
