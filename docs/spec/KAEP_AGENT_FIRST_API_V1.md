@@ -99,3 +99,18 @@ python -m tools.kaep_live_union_cli --recipient chatgpt --additional-repository 
 公開JSON自体・既存Pages・GitHub Projectは更新せず、追加対象は要求時GET-onlyで直近100コメントから候補Issueを探し、**既存と同一**の厳密な原典Issue全コメント再読込・KAEP codec・actor/recipient/reply検証に一度だけ通す。全リポ横断の自動発見・認証/Claim/実行・Agent wakeは導入しない。 `repositories_checked` と `explicit_additional_repositories` で範囲を機械可読とし、`repository_scope_proven_complete=false` を保持。
 
 追加対象に古い未処理rootが存在しても直近更新窓に出ない場合は**検出不能**であり、これは「依頼なし」の証明にはならない。各repoの100件上限・全体40 Issue上限・未知/部分状態・#503/manual Control fallbackを維持。検索/原典/recipient/head/実Consumerの全網羅と動的サーバ・Safari確認は未受入。
+
+## 全公開リポ横断のKAEPコメント位置探索（候補限定、2026-10-17）
+
+ユーザーの「リポを指定せず全公開リポからKAEP該当箇所の `リポ#Issue@コメントID` だけ寄越す」要件に対し、**受信・作業権限を持たない別の発見専用CLI** を提供する。既存3リポ/40原典上限の `kaep_live_union_cli` を無制限に拡張しない。
+
+```sh
+python -m tools.kaep_public_locator_cli --format lines
+python -m tools.kaep_public_locator_cli --format json --max-comment-pages 50 --max-api-calls 600
+```
+
+既存の `gh api` 読取のみを用い、公式REST `GET /users/kinoko34077/repos?type=owner&per_page=100&page=N` でユーザー所有の公開リポジトリを自動列挙。返却の `private=false`・実所有者 `kinoko34077`・正規repo名を検証し、他人所有・privateを採用しない。各公開リポで `GET /repos/kinoko34077/<repo>/issues/comments?sort=created&direction=asc&per_page=100&page=N` をページ送りし、**先頭が正確にKAEP v0.2マーカーのコメントだけ**の原典位置を返す。IssueコメントとPR会話コメントが対象であり、本文・prompt・タイトル・アクセストークンを出力しない。例 `execution-coordinator#142@6222272385`。JSONは公式GitHub原典URL、repo、Issue番号、comment IDとstrict未検証フラグのみ。
+
+探索範囲は全公開リポを目標とするが、ページ/API回数/最大候補数には有限上限がある。既定は公開リポ一覧最大3ページ、コメント20ページ/リポ、API最大350回、候補最大5000。上限・異常・通信失敗・途中更新では `PARTIAL_UNKNOWN` と `incomplete_scopes` に未読リポ/次ページ・固定理由コードを表示。走査が一応読み切れても新着競合・Issue本文だけの記録・別owner・private・現在HEAD・モデル本人性を保証しないため、常時 `complete_source_universe=false`、`has_unknown_work=true`、`absence_of_work_proven=false`、`can_authorize_execution=false`。
+
+**重要:** KAEPマーカーは未検証の単なる発見条件。悪意ある第三者による同型コメントも候補に入るため、REQUEST/ACK/ANSWERと断定不可。必要な原典だけ既存のstrict codec、コメント全履歴、actor、宛先、返信、現在HEAD、Controlと権限を再検証。旧Inbox、#503/manual Controlは維持。この発見CLIは公開JSONを更新せず、サーバ・タイマー・Push・無人GPTモデル起動を提供しない。今回はIssue本文にしか出てこないKAEP言及、通常本文中の単語出現は走査対象外と明示する。拡張する場合は別途要件化し、検索索引由来の偽完全性を持ち込まない。
