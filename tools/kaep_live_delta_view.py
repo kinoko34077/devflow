@@ -147,9 +147,8 @@ def read_live_candidates(
     if warnings or result["status"] != "BOUNDED_SEARCH_READ":
         result["status"] = "PARTIAL_UNKNOWN"
     else:
-        # The latest window is never a complete history, even if its own
-        # original sources were fully revalidated.
-        result["status"] = "PARTIAL_UNKNOWN"
+        # A successful bounded current read does not imply global inventory.
+        result["status"] = "LIVE_WINDOW_READ"
     return result
 
 
@@ -175,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         }
     print(search.machine_json(output))
     # Both live-window partial and hard failures remain nonzero, but emit JSON.
-    return 2 if output["status"] != "BOUNDED_SEARCH_READ" else 0
+    return 0 if output["status"] == "LIVE_WINDOW_READ" else 2
 
 
 if __name__ == "__main__":
