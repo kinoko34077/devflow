@@ -136,6 +136,22 @@ class PublicLocatorsTests(TestCase):
                          [f"{OWNER}/b", f"{OWNER}/c"])
         self.assertFalse(out["complete_comment_pages_for_observed_public_repos"])
 
+    def test_mid_repository_budget_marks_each_unread_scope_once(self):
+        def fetch(path):
+            if path.startswith("/users/"):
+                return [repo("a"), repo("b")]
+            if f"/{OWNER}/a/" in path:
+                return [comment("a", 1, n+1) for n in range(100)]
+            self.fail("second repo should not be fetched over budget")
+        out = scan.discover(fetch=fetch, max_repo_pages=1,
+                            max_comment_pages=3, max_api_calls=2)
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["api_requests_used"], 2)
+        self.assertEqual([(g["scope"], g["next_page"])
+                          for g in out["incomplete_scopes"]],
+                         [(f"{OWNER}/a", 2), (f"{OWNER}/b", 1)])
+        self.assertFalse(out["absence_of_work_proven"])
+
     def test_failed_repo_comment_get_does_not_hide_other_repo_or_claim_empty(self):
         def fetch(path):
             if path.startswith("/users/"):
