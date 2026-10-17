@@ -169,13 +169,14 @@ class PublicIncrementalTests(TestCase):
     def test_default_no_local_persistence_and_basic_cli_result(self):
         f, _ = stream(["devflow"], {"devflow": {
             1: [ptr("devflow", 8, 44)]}})
+        original = inc.discover_incremental
         with (mock.patch.object(inc.locator, "_gh_get", side_effect=f),
               mock.patch.object(inc, "discover_incremental",
                                 wraps=inc.discover_incremental) as spy,
               mock.patch("sys.stdout", new_callable=io.StringIO) as out):
             # The main uses its own function's fetch default, injected via
             # explicit wrapper to avoid changing the production default.
-            spy.side_effect = lambda **kw: inc.discover_incremental(fetch=f, **kw)
+            spy.side_effect = lambda **kw: original(fetch=f, **kw)
             rc = inc.main(["--format", "json"])
         self.assertEqual(rc, 0)
         data = json.loads(out.getvalue())
