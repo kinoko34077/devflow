@@ -118,3 +118,22 @@ python -m tools.kaep_public_locator_cli --format json --max-comment-pages 50 --m
 追記：実GitHub 40公開リポ限定走査で8リポがページ上限に達したため、新着を先に取りこぼさないようIssueコメントの走査を **created desc（新着先）** に変更。上限までに古いページを読み切らなければ未走査として `PARTIAL_UNKNOWN` を維持。今回の変更は取得順のみで、受信者に作業権限を与えない。
 
 公開40リポの実取得では39リポを20ページまでで読み切り、`devflow`のみ21〜29ページが残存した。後続の公式GETでは21〜28ページが各100件、29ページが87件、30ページが空で、21〜29ページのKAEPマーカー追加0件。通常起動でこの規模を含めるため、既定のコメントページ上限を40へ更新した。API総回数上限350・最大ページ100・`PARTIAL_UNKNOWN` は維持。ページ移動を伴う新着等の非原子的な全件性は保証しない。記録: [devflow #680](https://github.com/kinoko34077/devflow/issues/680)。
+
+## RT5 — 公開全リポの増分KAEPコメント位置探索（2026-10-17）
+
+ユーザー要求の「毎回全リポの全履歴を探さず、最新依頼を取得する」ための一工程。既存 `tools.kaep_public_locator_cli` の厳格な公開所有者・正規URL・KAEP marker の検査を使い、**初回フル走査と以後の増分走査を別モード**で提供する。受信者宛ての有効なREQUEST/ACK/ANSWERや現在の未処理状態とは異なる「未検証位置探索」。
+
+```sh
+# 初回はこれまでの全公開リポ走査を再利用し、次回用 next_cursor も返す
+python -m tools.kaep_public_incremental_cli --format json
+# 前回結果の next_cursor オブジェクトだけをローカルJSONへ保存した利用者／ホスト
+python -m tools.kaep_public_incremental_cli --format json --cursor-in ./kaep-public-head-cursor.json
+```
+
+`next_cursor` は `kaep.public-marker-head-cursor.v0.1`（owner=`kinoko34077` / public_only=true / heads=`{repository: first_comment_id}`）で、機密情報や本文を含まない**未信頼のローカル取得位置**。本CLIはGitHub API GETと標準出力だけで動作し、`--cursor-in` は明示指定された既存ファイルを読むだけ。ファイルを書き込まないため、ユーザーの既存開発環境やGitHub Issueは変更されない。カーソル保存・起動スケジュール・自動受信者連携は独立工程。
+
+増分走査は毎回GitHub公式RESTで全公開ownerリポジトリを再列挙し、各リポについて `created desc` で**厳密に前回先頭のcomment IDへ到達するまで**ページ取得する。前回コメントがないrepoは履歴末尾まで、初めて見つかった公開repoもフル履歴まで有限上限で読む。リポの消失、前回先頭IDの削除・不在、Repo・コメント取得失敗、ページ上限、総GET上限、無効なカーソルでは `PARTIAL_UNKNOWN` 又は `BLOCKED` とし、**次の完全なカーソルを発行しない**。取得済み候補の位置だけは出せるが、空一覧や差分0件を「未処理依頼なし」とは解釈しない。
+
+`BOUNDED_INCREMENTAL_BASELINE` / `BOUNDED_INCREMENTAL_READ` は検査した公開コメント取得範囲についての成功であり、GitHubの新着競合、公開/非公開切替、コメント本文の編集、Issue本文/状態変更、現在のHEAD、recipient、信頼できる実行モデル、全ソース完全性は証明しない。故に `has_unknown_work=true`、`complete_source_universe=false`、`absence_of_work_proven=false`、`recipient_pickup_proven=false`、`can_authorize_execution=false` を保持し、`comment_edits_tracked=false` と `issue_state_changes_tracked=false` を明示。元のKAEP原典Issue・返信全履歴・actor・宛先・権限を既存正規検証器で独立検証してから利用する。
+
+この限定増分機能は動的HTTP API、公開Pagesの再生成、Webhook受信、常駐Host/Timer、無人GPT起床を提供しない。次の段階は編集・Issue状態更新の別ソース統合と、実受信者の原典再検証であり、料金Provider・認証・スケジュール・ブラウザセッション変更の承認を推定しない。
