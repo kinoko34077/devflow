@@ -111,8 +111,10 @@ python -m tools.kaep_public_locator_cli --format json --max-comment-pages 50 --m
 
 既存の `gh api` 読取のみを用い、公式REST `GET /users/kinoko34077/repos?type=owner&per_page=100&page=N` でユーザー所有の公開リポジトリを自動列挙。返却の `private=false`・実所有者 `kinoko34077`・正規repo名を検証し、他人所有・privateを採用しない。各公開リポで `GET /repos/kinoko34077/<repo>/issues/comments?sort=created&direction=desc&per_page=100&page=N` をページ送りし、**先頭が正確にKAEP v0.2マーカーのコメントだけ**の原典位置を返す。IssueコメントとPR会話コメントが対象であり、本文・prompt・タイトル・アクセストークンを出力しない。例 `execution-coordinator#142@6222272385`。JSONは公式GitHub原典URL、repo、Issue番号、comment IDとstrict未検証フラグのみ。
 
-探索範囲は全公開リポを目標とするが、ページ/API回数/最大候補数には有限上限がある。既定は公開リポ一覧最大3ページ、コメント20ページ/リポ、API最大350回、候補最大5000。上限・異常・通信失敗・途中更新では `PARTIAL_UNKNOWN` と `incomplete_scopes` に未読リポ/次ページ・固定理由コードを表示。走査が一応読み切れても新着競合・Issue本文だけの記録・別owner・private・現在HEAD・モデル本人性を保証しないため、常時 `complete_source_universe=false`、`has_unknown_work=true`、`absence_of_work_proven=false`、`can_authorize_execution=false`。
+探索範囲は全公開リポを目標とするが、ページ/API回数/最大候補数には有限上限がある。既定は公開リポ一覧最大3ページ、コメント40ページ/リポ、API最大350回、候補最大5000。上限・異常・通信失敗・途中更新では `PARTIAL_UNKNOWN` と `incomplete_scopes` に未読リポ/次ページ・固定理由コードを表示。走査が一応読み切れても新着競合・Issue本文だけの記録・別owner・private・現在HEAD・モデル本人性を保証しないため、常時 `complete_source_universe=false`、`has_unknown_work=true`、`absence_of_work_proven=false`、`can_authorize_execution=false`。
 
 **重要:** KAEPマーカーは未検証の単なる発見条件。悪意ある第三者による同型コメントも候補に入るため、REQUEST/ACK/ANSWERと断定不可。必要な原典だけ既存のstrict codec、コメント全履歴、actor、宛先、返信、現在HEAD、Controlと権限を再検証。旧Inbox、#503/manual Controlは維持。この発見CLIは公開JSONを更新せず、サーバ・タイマー・Push・無人GPTモデル起動を提供しない。今回はIssue本文にしか出てこないKAEP言及、通常本文中の単語出現は走査対象外と明示する。拡張する場合は別途要件化し、検索索引由来の偽完全性を持ち込まない。
 
 追記：実GitHub 40公開リポ限定走査で8リポがページ上限に達したため、新着を先に取りこぼさないようIssueコメントの走査を **created desc（新着先）** に変更。上限までに古いページを読み切らなければ未走査として `PARTIAL_UNKNOWN` を維持。今回の変更は取得順のみで、受信者に作業権限を与えない。
+
+公開40リポの実取得では39リポを20ページまでで読み切り、`devflow`のみ21〜29ページが残存した。後続の公式GETでは21〜28ページが各100件、29ページが87件、30ページが空で、21〜29ページのKAEPマーカー追加0件。通常起動でこの規模を含めるため、既定のコメントページ上限を40へ更新した。API総回数上限350・最大ページ100・`PARTIAL_UNKNOWN` は維持。ページ移動を伴う新着等の非原子的な全件性は保証しない。記録: [devflow #680](https://github.com/kinoko34077/devflow/issues/680)。
