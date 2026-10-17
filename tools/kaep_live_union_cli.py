@@ -72,7 +72,7 @@ def _validated_previous_report(
             row.get("source_comment_id"), row.get("message_id"),
         )
         key = (repo, issue, cid, mid)
-        if (repo, issue) not in sources
+        if ((repo, issue) not in sources
                 or type(cid) is not int or cid <= 0
                 or type(mid) is not str
                 or re.fullmatch(r"msg_[A-Za-z0-9_-]{1,72}", mid) is None
