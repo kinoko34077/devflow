@@ -89,6 +89,11 @@ For an **already running** GPT/Claude/Codex agent needing both older indexed KAE
 
 When a running GPT/Claude/Codex needs **new KAEP source locations across all public owner repositories** without replaying historical comment pages, the opt-in read-only `python -m tools.kaep_public_incremental_cli --format json` provides a bounded baseline and `next_cursor` (public repository head-comment IDs). A later run with `--cursor-in <saved-cursor.json>` reads newly created comments up to exact prior comment heads and returns new *untrusted locator hints*. By default this command only prints the next cursor; an explicitly requested `--state-file <local-path>` opt-in can atomically persist that **public marker head ID cache** after a fully verified bounded read, without starting a timer, authenticating a reply, or granting a Claim. Use one writer per local state file. If any repo disappears, an old head is missing or pagination fails, do **not** advance the cursor or assert no pending work. It does **not** track Issue-only changes or edits to old comments; use canonical live Agent Inbox and re-read original Issue/KAEP reply chain before acting. See [#680](https://github.com/kinoko34077/devflow/issues/680) and `docs/spec/KAEP_AGENT_FIRST_API_V1.md`.
 
+
+#### P2: strict recipient reread of public marker delta hints
+
+Already-active agents may pass a bounded public-owner marker result produced by `tools.kaep_public_incremental_cli` into the existing **strict original source** reader: `python -m tools.kaep_live_union_cli --recipient <recipient> --public-marker-discovery <result.json>`. Public marker positions are **untrusted locator hints**, not an Inbox, validated requests, or action permission. The union deduplicates within the current explicitly selected 3-repo / 40-source limit, then re-reads original GitHub Issue/full comments through canonical actor/recipient/KAEP reply-chain verification. Out-of-scope or partial inputs are UNKNOWN, not silent success. This does not make archived/edited marker-only Issue histories universally discoverable, start a model turn, or replace `get_agent_inbox` / #503/manual Control. See [#680](https://github.com/kinoko34077/devflow/issues/680).
+
 ## 2. What owns what
 
 | Information | Canonical owner |
