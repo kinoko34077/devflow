@@ -170,6 +170,14 @@ def discover(
         if repo_finished:
             scanned_repos += 1
         if calls >= max_api_calls:
+            # The just-scanned repository may be complete, but all later
+            # repositories are still unread. Never silently omit them.
+            if idx + 1 < len(repos):
+                incomplete.extend(
+                    {"scope": name, "next_page": 1,
+                     "reason_code": "API_BUDGET"}
+                    for name in repos[idx + 1:]
+                )
             break
     locators.sort(key=lambda x: (
         x["repository"], x["issue_number"], x["comment_id"]))
