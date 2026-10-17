@@ -333,7 +333,7 @@ def to_html(result: dict[str, Any], *, public_live: bool = False) -> str:
         f'<div class="notice" role="status"><strong>{_esc(label)}</strong> — {_esc(meta)}</div>'
         f'<section aria-label="取得件数" class="stats">{stats}</section>'
         + live_panel
-        f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
+        + f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
         f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} 件（限定検索対象）</p>'
         '<div class="tableframe"><table id="entries"><thead><tr>'
         '<th>リポジトリ / Issue</th><th>タイトル</th><th>状態</th>'
@@ -344,9 +344,9 @@ def to_html(result: dict[str, Any], *, public_live: bool = False) -> str:
         f'<details {"open" if errors else ""}><summary>取得・検証時の注意（{len(errors)}件）</summary>'
         f'<ol class="errors">{"".join(diagnostic)}</ol></details>'
         '<p class="footer">公開時点の読取専用一覧。GitHub Projectとは連動しません。'
-        ('公開時の一覧自体は自動更新されません。検証前のGitHub最新候補は別枠で読取。' if public_live
-         else '自動更新・保存・認証情報の埋め込みはありません。')
-        '更新時は読取CLIかオーナー限定Pages更新で再生成してください。</p>'
+        + ('公開時の一覧自体は自動更新されません。検証前のGitHub最新候補は別枠で読取。' if public_live
+           else '自動更新・保存・認証情報の埋め込みはありません。')
+        + '更新時は読取CLIかオーナー限定Pages更新で再生成してください。</p>'
         '<noscript><p class="footer">絞り込みにはJavaScriptが必要です。一覧と'
         '診断情報はJavaScriptなしでも閲覧できます。</p></noscript>'
         f'</main><script>{script}</script></body></html>'
