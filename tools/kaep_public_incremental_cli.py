@@ -8,6 +8,9 @@ to GitHub, credentials, source text or assignment.
 from __future__ import annotations
 
 import argparse
+import os
+import stat
+import tempfile
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -246,10 +249,74 @@ def discover_incremental(
     )
 
 
+def _read_cursor_file(path: Path) -> tuple[dict[str, Any], bytes]:
+    """Read only a regular local cursor, never follow the final symlink."""
+    if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode):
+        _deny("INVALID_PUBLIC_CURSOR_FILE")
+    raw = path.read_bytes()
+    if not 0 < len(raw) <= MAX_CURSOR_BYTES:
+        _deny("INVALID_PUBLIC_CURSOR_FILE")
+    def pairs_unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, val in pairs:
+            if key in out:
+                _deny("DUPLICATE_PUBLIC_CURSOR_FIELD")
+            out[key] = val
+        return out
+    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs_unique)
+    validate_cursor(obj)
+    return obj, raw
+
+
+def _persist_cursor_file(path: Path, cursor: dict[str, Any],
+                         old: bytes | None) -> None:
+    """Atomic replace after a same-run unchanged-file check. No scheduling."""
+    validate_cursor(cursor)
+    payload = (json.dumps(cursor, ensure_ascii=True, sort_keys=True,
+                          separators=(",", ":")) + "\n").encode("ascii")
+    if len(payload) > MAX_CURSOR_BYTES:
+        _deny("INVALID_PUBLIC_CURSOR")
+    temp_name: str | None = None
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=".kaep-public-cursor-", suffix=".tmp")
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as file:
+                file.write(payload)
+                file.flush()
+                os.fsync(file.fileno())
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
+        # Detect another writer or substitution before replacing a read cursor.
+        if path.is_symlink():
+            _deny("CURSOR_CHANGED_ON_DISK")
+        if path.exists():
+            if old is None or path.read_bytes() != old:
+                _deny("CURSOR_CHANGED_ON_DISK")
+        elif old is not None:
+            _deny("CURSOR_CHANGED_ON_DISK")
+        os.replace(temp_name, path)
+        temp_name = None
+    finally:
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--cursor-in", type=Path, default=None,
-                   help="Read untrusted prior cursor JSON; no local file is written")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--cursor-in", type=Path, default=None,
+                       help="Read untrusted prior cursor JSON; no local file is written")
+    group.add_argument("--state-file", type=Path, default=None,
+                       help="Opt-in regular local cursor file; atomically update only after full successful read")
     p.add_argument("--format", choices=("json", "lines"), default="json")
     p.add_argument("--max-repo-pages", type=int, default=3)
     p.add_argument("--max-comment-pages", type=int, default=40)
@@ -257,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         previous = None
+        old_state_raw = None
+        if args.state_file is not None and args.state_file.exists():
+            previous, old_state_raw = _read_cursor_file(args.state_file)
         if args.cursor_in is not None:
             data = args.cursor_in.read_bytes()
             if len(data) > MAX_CURSOR_BYTES:
@@ -273,6 +343,17 @@ def main(argv: list[str] | None = None) -> int:
             prior=previous, max_repo_pages=args.max_repo_pages,
             max_comment_pages=args.max_comment_pages,
             max_api_calls=args.max_api_calls)
+        if args.state_file is not None and result["next_cursor"] is not None:
+            try:
+                _persist_cursor_file(args.state_file, result["next_cursor"], old_state_raw)
+                result["local_cursor_persisted"] = True
+            except (InvalidMessage, OSError, ValueError, TypeError):
+                result["status"] = "PARTIAL_UNKNOWN"
+                result["next_cursor"] = None
+                result["cursor_advanced"] = False
+                result["local_cursor_persisted"] = False
+                result["incomplete_scopes"].append({
+                    "scope": "LOCAL_CURSOR", "reason_code": "LOCAL_CURSOR_WRITE_FAILED"})
     except (InvalidMessage, ValueError, TypeError, OSError, UnicodeError):
         result = {
             "schema_version": RESULT_SCHEMA, "status": "BLOCKED",
