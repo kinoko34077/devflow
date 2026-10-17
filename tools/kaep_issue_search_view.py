@@ -345,12 +345,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--format", choices=("markdown", "json", "html"), default="markdown")
     parser.add_argument("--public-json-out", default=None,
                         help="Opt-in allowlisted public candidate snapshot alongside HTML")
+    parser.add_argument("--public-live", action="store_true",
+                        help="Public Pages only: uncredentialed GitHub GET candidates on open/refresh")
     parser.add_argument("--role", default="all")
     parser.add_argument("--issue-type", default="all")
     parser.add_argument("--state", choices=("all", "open", "closed"), default="all")
     parser.add_argument("--reply", default="all")
     args = parser.parse_args(argv)
     try:
+        if args.public_live and (args.format != "html" or args.public_json_out is None):
+            _fail("PUBLIC_LIVE_REQUIRES_PAIRED_HTML_INDEX")
         if (len(args.repository) > MAX_REPOSITORIES
                 or len(set(args.repository)) != len(args.repository)
                 or any(not REPOSITORY.fullmatch(r) for r in args.repository)):
@@ -386,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         print(machine_json(result))
     elif args.format == "html":
         # Even blocked reads are an explicit, readable offline diagnostic page.
-        print(to_html(result))
+        print(to_html(result, public_live=args.public_live))
     else:
         display = to_markdown(result, role=args.role, issue_type=args.issue_type,
                               state=args.state, reply=args.reply)

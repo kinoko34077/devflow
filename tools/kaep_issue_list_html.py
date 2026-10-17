@@ -99,6 +99,97 @@ JS = r"""
 """
 
 
+# Only compiled into the PUBLIC Pages HTML on explicit opt-in.
+# This never changes authoritative historical rows or sends a KAEP response.
+LIVE_CSS = r"""
+.livepanel{background:#fff;border:1px solid #dbe2e9;border-radius:10px;padding:14px;margin:14px 0}
+.livehead{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.livehead button{font:inherit;border:1px solid #9aacc0;border-radius:6px;background:#f6f8fb;padding:8px 12px;min-height:40px;cursor:pointer}
+.livepanel p{font-size:.82rem;color:#42546b;margin:8px 0}
+.livepanel ul{padding-left:22px;margin:8px 0}
+.livepanel li{font-size:.84rem;margin:5px 0}
+"""
+
+LIVE_JS = r"""
+(function(){
+  "use strict";
+  // Public comment-index transport metadata is discovery only, NOT KAEP validation.
+  const endpoint="https://api.github.com/repos/kinoko34077/devflow/issues/comments?sort=updated&direction=desc&per_page=100";
+  const button=document.getElementById("live-update");
+  const status=document.getElementById("live-status");
+  const list=document.getElementById("live-candidates");
+  const known=new Set(Array.from(document.querySelectorAll("#entries tbody td:last-child a[href]"))
+    .map(a=>a.getAttribute("href")).filter(Boolean));
+  let busy=false,lastFetch=0;
+  function message(text){status.textContent=text;}
+  function invalid(){message("現在情報を検証できません。公開時点の一覧はそのまま表示しています。");}
+  async function refresh(){
+    if(busy||document.visibilityState==="hidden"||Date.now()-lastFetch<60000)return;
+    lastFetch=Date.now();
+    busy=true;
+    message("GitHubの最新コメントを読取中…");
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),10000);
+    try{
+      const response=await fetch(endpoint,{
+        method:"GET",mode:"cors",credentials:"omit",cache:"no-store",
+        redirect:"error",headers:{"Accept":"application/vnd.github+json"},
+        signal:controller.signal
+      });
+      if(!response.ok)throw new Error("HTTP "+response.status);
+      const comments=await response.json();
+      if(!Array.isArray(comments)||comments.length>100)throw new Error("invalid window");
+      let eligible=0;
+      const candidates=[];
+      const seen=new Set();
+      for(const c of comments){
+        if(!c||typeof c.body!=="string"||!c.body.startsWith("<!-- kaep:message:v0.2 -->"))continue;
+        eligible++;
+        if(!c.user||c.user.login!=="kinoko34077")continue;
+        if(!Number.isSafeInteger(c.id)||c.id<=0)continue;
+        const match=typeof c.issue_url==="string" && /^https:\/\/api\.github\.com\/repos\/kinoko34077\/devflow\/issues\/[1-9][0-9]*$/.exec(c.issue_url);
+        if(!match)continue;
+        const issue=c.issue_url.replace("https://api.github.com/repos/","https://github.com/");
+        const link=issue+"#issuecomment-"+c.id;
+        if(known.has(link)||seen.has(link))continue;
+        seen.add(link);
+        candidates.push({link:link,number:issue.slice(issue.lastIndexOf("/")+1),comment:c.id});
+      }
+      list.replaceChildren();
+      for(const candidate of candidates.slice(0,12)){
+        const li=document.createElement("li");
+        const a=document.createElement("a");
+        a.href=candidate.link;
+        a.target="_blank";
+        a.rel="noopener noreferrer";
+        a.textContent="Issue #"+candidate.number+" / コメント "+candidate.comment+"（原典未検証）";
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+      const stamp=new Date().toLocaleString("ja-JP");
+      message(stamp+" 現在のGitHubから取得。直近"+comments.length+"コメント内のKAEPマーカー"+
+        eligible+"件／公開時一覧にない検証前候補"+candidates.length+"件。"+
+        (comments.length===100?"取得窓上限100件に到達。":"")+
+        "現在の全依頼や未処理件数の証明ではありません。");
+    }catch(error){
+      const label=error&&error.name==="AbortError"?"タイムアウト":
+        error&&/^HTTP [0-9]{3}$/.test(error.message) ? error.message : "通信・CORSエラー";
+      invalid();
+      status.textContent+="（"+label+"）";
+    }finally{
+      clearTimeout(timeout);
+      busy=false;
+    }
+  }
+  button.addEventListener("click",refresh);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refresh();});
+  window.setInterval(()=>{if(document.visibilityState==="visible")refresh();},300000);
+  refresh();
+})();
+"""
+
+
+
 def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else "-"), quote=True)
 
@@ -120,7 +211,7 @@ def _hash(source: str) -> str:
     return base64.b64encode(hashlib.sha256(source.encode("utf-8")).digest()).decode("ascii")
 
 
-def to_html(result: dict[str, Any]) -> str:
+def to_html(result: dict[str, Any], *, public_live: bool = False) -> str:
     """Render a local interactive table; all source data remains inert text."""
     rows = result.get("rows", [])
     errors = result.get("errors", [])
@@ -210,24 +301,42 @@ def to_html(result: dict[str, Any]) -> str:
         '<option value="recipient">宛先</option>'
         '<option value="reply">返信状況</option></select></label>'
     )
+    # Script is raw-text HTML: numeric entities do NOT decode inside <script>.
+    # Convert Japanese UI text to JS Unicode escapes BEFORE hashing CSP.
+    script = (JS + (LIVE_JS if public_live else "")).encode(
+        "ascii", "backslashreplace").decode("ascii")
+    stylesheet = CSS + (LIVE_CSS if public_live else "")
+    connection = "https://api.github.com" if public_live else "'none'"
+    live_panel = (
+        '<section class="livepanel" aria-labelledby="live-head"><div class="livehead">'
+        '<h2 id="live-head">GitHub現在の更新候補（未検証）</h2>'
+        '<button type="button" id="live-update">最新コメントを取得</button></div>'
+        '<p>この枠はGitHub公開APIからその場で取得したKAEPマーカー候補です。'
+        '元Issue全体の厳格検証、依頼の受付・実行、全件網羅は行いません。</p>'
+        '<p id="live-status" role="status" aria-live="polite">現在情報を未取得。</p>'
+        '<ul id="live-candidates"></ul>'
+        '<p>ページ表示時・前面復帰時・表示中約5分ごとに更新。'
+        'GitHub API制限・通信失敗時は過去の保存一覧を保持します。</p></section>'
+    ) if public_live else ""
     csp = (
         "default-src 'none'; base-uri 'none'; object-src 'none'; "
-        "connect-src 'none'; img-src 'none'; form-action 'none'; "
-        f"script-src 'sha256-{_hash(JS)}'; style-src 'sha256-{_hash(CSS)}'"
+        f"connect-src {connection}; img-src 'none'; form-action 'none'; "
+        f"script-src 'sha256-{_hash(script)}'; style-src 'sha256-{_hash(stylesheet)}'"
     )
     document = (
         '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta http-equiv="Content-Security-Policy" content="{_esc(csp)}">'
         '<title>KAEP依頼一覧｜AI向け候補索引</title>'
-        f'<style>{CSS}</style></head><body><main data-source-status="{_esc(result.get("status", "BLOCKED"))}">'
+        f'<style>{stylesheet}</style></head><body><main data-source-status="{_esc(result.get("status", "BLOCKED"))}">'
         '<h1>KAEP依頼一覧</h1><p>AIが依頼の原典Issueを探すための候補索引です。表示情報だけでは作業の開始・返信はできません。</p>'
         f'<p class="meta">取得日時（UTC）: {_esc(result.get("observed_at", "unknown"))} '
         f'| 対象リポジトリ: {_esc(", ".join(result.get("repositories", [])))} '
         f'| 取得状態: {_esc(label)}</p>'
         f'<div class="notice" role="status"><strong>{_esc(label)}</strong> — {_esc(meta)}</div>'
         f'<section aria-label="取得件数" class="stats">{stats}</section>'
-        f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
+        + live_panel
+        + f'<section class="controls" aria-label="一覧の絞り込み">{control_ui}</section>'
         f'<p class="count" id="shown" aria-live="polite">{len(rows)} / {len(rows)} 件（限定検索対象）</p>'
         '<div class="tableframe"><table id="entries"><thead><tr>'
         '<th>リポジトリ / Issue</th><th>タイトル</th><th>状態</th>'
@@ -238,11 +347,12 @@ def to_html(result: dict[str, Any]) -> str:
         f'<details {"open" if errors else ""}><summary>取得・検証時の注意（{len(errors)}件）</summary>'
         f'<ol class="errors">{"".join(diagnostic)}</ol></details>'
         '<p class="footer">公開時点の読取専用一覧。GitHub Projectとは連動しません。'
-        '自動更新・保存・認証情報の埋め込みはありません。'
-        '更新時は読取CLIかオーナー限定Pages更新で再生成してください。</p>'
+        + ('公開時の一覧自体は自動更新されません。検証前のGitHub最新候補は別枠で読取。' if public_live
+           else '自動更新・保存・認証情報の埋め込みはありません。')
+        + '更新時は読取CLIかオーナー限定Pages更新で再生成してください。</p>'
         '<noscript><p class="footer">絞り込みにはJavaScriptが必要です。一覧と'
         '診断情報はJavaScriptなしでも閲覧できます。</p></noscript>'
-        f'</main><script>{JS}</script></body></html>'
+        f'</main><script>{script}</script></body></html>'
     )
     # Guarantees Windows redirection under CP932 can produce a faithful HTML
     # file with Unicode text represented as numeric character references.

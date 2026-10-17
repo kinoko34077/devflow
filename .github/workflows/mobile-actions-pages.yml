@@ -88,6 +88,7 @@ jobs:
             --repository kinoko34077/devflow \
             --expect-source-actor kinoko34077 \
             --format html \
+            --public-live \
             --public-json-out "$out/kaep/index.json" > "$out/kaep/index.html"
           rc=$?
           set -e
@@ -111,10 +112,12 @@ jobs:
           assert status in ("BOUNDED_SEARCH_READ", "PARTIAL_UNKNOWN")
           assert (rc == 0) == (status == "BOUNDED_SEARCH_READ")
           assert "Content-Security-Policy" in content
-          assert "connect-src &#x27;none&#x27;" in content
+          assert "connect-src https://api.github.com" in content
+          assert 'id="live-update"' in content
+          assert "credentials:\"omit\"" in content
           assert "github.com/kinoko34077/devflow/issues/" in content or "取得・検証時の注意" in content
           assert 'href="javascript:' not in content
-          assert "api.github.com" not in content
+          assert "https://api.github.com/repos/kinoko34077/devflow/issues/comments?" in content
           assert "PARTIAL / UNKNOWN" in content or status == "BOUNDED_SEARCH_READ"
           print("PUBLIC_KAEP_LIST_VALIDATED", status, "bytes", len(content))
           PY
