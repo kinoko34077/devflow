@@ -195,3 +195,18 @@ python -m tools.kaep_live_union_cli --recipient claude-code --previous-report ./
 ```
 
 前回出力は未信頼。recipient・選択リポ集合の厳密一致、スキーマ・読取専用/権限なし・正規Issue URL・コメントID/Message ID・重複排除、最大2MB・40 Issueの上限を強制。旧出力自体は現在の認証・割当ではなく、各候補を**現行の正規Issue・全コメント・actor/recipient/返信検証器で再確認**してから比較する。Issue open/closed・返信状態変化と前回原典の消失を診断するが、前回JSONが改竄された場合や原典が編集でKAEPマーカーを失った場合は受信・本人性・全件網羅の証拠とはならない。原典消失はPARTIAL_UNKNOWN、`has_unknown_work=true`・`can_authorize_execution=false` を維持。3repo/40 source制限、#503/manual Controlを維持。無人モデル起動・动态HTTP API・恒久化サービスは含まない。
+
+
+## P3-A AI用同一実行内JSON契約（2026年10月17日）
+
+既存の `tools.kaep_live_union_cli` が、原典Issue／全KAEPコメントを要求時に読み取っている**同じCLI実行内**で、その厳格な検証結果からのみ機械向けレスポンス `kaep.agent-current-view.v0.1` を投影する。旧 `union` JSON（標準）は変更せず `--response-format agent-api` を明示した場合だけこの形式を返す。
+
+```sh
+python -m tools.kaep_live_union_cli --recipient chatgpt --response-format agent-api
+```
+
+出力は `observed_at`、`observation_age_seconds`、`observation_within_target_age`（目標60秒）、選択リポ・厳格に照合したIssue/コメント位置、宛先・返信状態、原典エラーコードと不完全性のみを固定許可項目として返却。本文・タイトル・トークン・任意のURL・ホスト情報は投影しない。元の結果が `PARTIAL_UNKNOWN` なら同じまま維持。失効/形式不正/偽造URL/偽の受信者/根拠のない権限表示を拒否し、いずれの状態でも `complete_source_universe=false`、`has_unknown_work=true`、`can_authorize_execution=false`、`recipient_pickup_proven=false`、`current_head_verified=false` を保持する。
+
+**重要な境界:** これは既存認証済みCLIからの**同一回読取投影**であり、公開HTTPサーバ、Pages上の動的URL、任意利用者向けの認証済みGateway、常駐ポーリング、Webhook、クラウド配置ではない。 `http_endpoint_deployed=false` を返す。古いJSONファイルを読み込む独立Projectionでは元の原典検証を再現できないため、その利用で「最新の認証済み依頼」を証明してはならない。将来のHTTPホストは同じ契約を再利用してよいが、Host・Source読取資格情報・呼出し制限・機密情報と公開範囲・レート制限・タイムアウト/ETag/失効条件・無償枠・リクエスト起動主体に独立した安全上の承認・実実証が必要。
+
+直接の実装根拠は[devflow #680](https://github.com/kinoko34077/devflow/issues/680)。#531 B5不完全な元依頼Universe・#503手動fallback・#681 F10無人GPT起床を置換しない。
