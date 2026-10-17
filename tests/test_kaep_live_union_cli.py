@@ -402,6 +402,90 @@ class LiveUnionTests(TestCase):
         self.assertEqual(out["warnings"][0]["reason_code"], "RECENT_WINDOW_TRUNCATED")
         self.assertFalse(out["absence_of_work_proven"])
 
+
+    def test_previous_report_retains_new_source_and_detects_issue_close_without_comments(self):
+        msg = root(number=25, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        def run(states, prior=None, comments=None):
+            return union.read_union(
+                snap, recipient="claude-code",
+                recent_read=lambda repo, since=None: [recent(590)] if comments else [],
+                issue_read=lambda repo, num: issue_object(
+                    num, state=states.get(num, "open")),
+                comments_read=lambda repo, num: source_page(
+                    (901, msg, "kinoko34077")),
+                previous_report=prior,
+            )
+        first = run({}, comments=True)
+        self.assertEqual(first["live_original_roots"], 1)
+        second = run({590: "closed"}, prior=first)
+        self.assertEqual(second["recent_marker_issue_count"], 0)
+        self.assertEqual(second["source_issue_count"], 1)
+        self.assertEqual(second["live_original_roots"], 1)
+        self.assertEqual(second["live_rows"][0]["issue_state"], "closed")
+        self.assertEqual(second["live_rows"][0]["source_origin"], "PREVIOUS_REPORT_SOURCE")
+        self.assertTrue(second["live_rows"][0]["changed_from_previous_report"])
+        self.assertEqual(second["previous_report_state_or_reply_changes"], 1)
+        self.assertEqual(second["previous_report_roots_missing_live"], 0)
+        self.assertEqual(second["previous_report_source_count"], 1)
+        self.assertTrue(second["has_unknown_work"])
+        self.assertFalse(second["can_authorize_execution"])
+
+    def test_previous_report_changed_root_becomes_partial_unknown(self):
+        msg = root(number=26, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        base = union.read_union(
+            snap, recipient="claude-code",
+            recent_read=lambda repo, since=None: [recent(590)],
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number: source_page(
+                (901, msg, "kinoko34077")),
+        )
+        result = union.read_union(
+            snap, recipient="claude-code", previous_report=base,
+            recent_read=lambda repo, since=None: [],
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number: "[]",
+        )
+        self.assertEqual(result["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(result["previous_report_roots_missing_live"], 1)
+        self.assertTrue(result["previous_report_used"])
+        self.assertEqual(result["source_issue_count"], 1)
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_previous_report_strictly_rejects_wrong_recipient_and_forged_sources(self):
+        msg = root(number=27, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        prev = union.read_union(
+            snap, recipient="claude-code",
+            recent_read=lambda repo, since=None: [recent(590)],
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number: source_page(
+                (901, msg, "kinoko34077")),
+        )
+        for adjust in (
+            lambda p: p.update(recipient="codex"),
+            lambda p: p["source_candidates"][0].update(
+                issue_url="https://github.com/attacker/r/issues/590"),
+            lambda p: p["source_candidates"][0].update(grants_work_authority=True),
+            lambda p: p["live_rows"][0].update(
+                source_url="https://github.com/attacker/r/issues/590"),
+            lambda p: p["source_candidates"].append(
+                dict(p["source_candidates"][0])),
+            lambda p: p.update(repositories_checked=[
+                "kinoko34077/execution-coordinator"]),
+        ):
+            with self.subTest(change=adjust):
+                candidate = json.loads(json.dumps(prev))
+                adjust(candidate)
+                with self.assertRaises(InvalidMessage):
+                    union.read_union(
+                        snap, recipient="claude-code",
+                        previous_report=candidate,
+                        recent_read=lambda repo, since=None:
+                            self.fail("invalid prior must fail before live read"))
+        self.assertTrue(prev["has_unknown_work"])
+
     def test_source_overflow_and_page_overflow_fail_safe(self):
         snap = index_with(status="BOUNDED_SEARCH_READ")
         with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
