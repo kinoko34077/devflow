@@ -60,9 +60,9 @@ class PublicLocatorsTests(TestCase):
             calls.append(path)
             if path.startswith("/users/"):
                 return [repo("devflow")]
-            if "page=1" in path:
+            if path.endswith("&page=1"):
                 return first
-            if "page=2" in path:
+            if path.endswith("&page=2"):
                 return [comment("devflow", 22, 101)]
             self.fail(path)
         result = scan.discover(fetch=fetch, max_comment_pages=3)
