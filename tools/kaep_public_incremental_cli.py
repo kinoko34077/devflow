@@ -281,7 +281,8 @@ def _persist_cursor_file(path: Path, cursor: dict[str, Any],
         fd, temp_name = tempfile.mkstemp(
             dir=str(path.parent), prefix=".kaep-public-cursor-", suffix=".tmp")
         try:
-            os.fchmod(fd, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
             with os.fdopen(fd, "wb") as file:
                 file.write(payload)
                 file.flush()
