@@ -431,6 +431,45 @@ class LiveUnionTests(TestCase):
         self.assertTrue(second["has_unknown_work"])
         self.assertFalse(second["can_authorize_execution"])
 
+
+    def test_previous_report_reply_transition_without_new_marker_comment(self):
+        msg = root(number=28, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        original = union.read_union(
+            snap, recipient="claude-code",
+            recent_read=lambda repo, since=None: [recent(590)],
+            issue_read=lambda repo, num: issue_object(num),
+            comments_read=lambda repo, num: source_page(
+                (901, msg, "kinoko34077")),
+        )
+        self.assertEqual(original["live_rows"][0]["reply_observation"], "PENDING_REPLY")
+        initial_row = dict(original["live_rows"][0])
+        new_row = {
+            "repository": initial_row["repository"],
+            "issue_number": initial_row["issue_number"],
+            "issue_url": initial_row["issue_url"],
+            "source_url": initial_row["source_url"],
+            "source_comment_id": initial_row["source_comment_id"],
+            "message_id": initial_row["message_id"],
+            "recipient": initial_row["recipient"],
+            "issue_state": initial_row["issue_state"],
+            "reply_observation": "ANSWER_OBSERVED",
+            "source_validation": initial_row["source_validation"],
+        }
+        with mock.patch.object(union.strict, "build_search_list", return_value={
+            "status": "BOUNDED_SEARCH_READ",
+            "observed_at": "2026-10-17T12:00:00Z",
+            "rows": [new_row], "errors": [],
+        }):
+            changed = union.read_union(
+                snap, recipient="claude-code", previous_report=original,
+                recent_read=lambda repo, since=None: [],
+            )
+        self.assertEqual(changed["previous_report_state_or_reply_changes"], 1)
+        self.assertTrue(changed["live_rows"][0]["changed_from_previous_report"])
+        self.assertEqual(changed["recent_marker_issue_count"], 0)
+        self.assertFalse(changed["can_authorize_execution"])
+
     def test_previous_report_changed_root_becomes_partial_unknown(self):
         msg = root(number=26, issue=590)
         snap = index_with(status="BOUNDED_SEARCH_READ")
@@ -452,6 +491,31 @@ class LiveUnionTests(TestCase):
         self.assertTrue(result["previous_report_used"])
         self.assertEqual(result["source_issue_count"], 1)
         self.assertFalse(result["can_authorize_execution"])
+
+
+    def test_previous_report_40_source_total_limit_kept(self):
+        msg = root(number=40, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        prev = union.read_union(
+            snap, recipient="claude-code",
+            recent_read=lambda repo, since=None: [recent(590)],
+            issue_read=lambda repo, n: issue_object(n),
+            comments_read=lambda repo, n: source_page(
+                (901, msg, "kinoko34077")),
+        )
+        for num in range(591, 630):
+            prev["source_candidates"].append({
+                "repository": REPO, "issue_number": num,
+                "issue_url": f"https://github.com/{REPO}/issues/{num}",
+                "grants_work_authority": False,
+            })
+        # Existing prior 590 + 39 extras -> exactly 40. A live new 631st
+        # source must fail-closed rather than silently discard older hints.
+        with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
+            union.read_union(
+                snap, recipient="claude-code", previous_report=prev,
+                recent_read=lambda repo, since=None: [recent(631)],
+            )
 
     def test_previous_report_strictly_rejects_wrong_recipient_and_forged_sources(self):
         msg = root(number=27, issue=590)
