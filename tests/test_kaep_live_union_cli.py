@@ -218,6 +218,132 @@ class LiveUnionTests(TestCase):
                         additional_repositories=extra, recent_read=fail_fetch)
         self.assertEqual(index["repositories"], [REPO])
 
+    @staticmethod
+    def public_markers(*items, status="BOUNDED_INCREMENTAL_READ"):
+        return {
+            "schema_version": "kaep.public-marker-incremental.v0.1",
+            "status": status,
+            "owner": "kinoko34077", "public_only": True,
+            "complete_source_universe": False,
+            "can_authorize_execution": False,
+            "locators": [{
+                "repository": repo, "issue_number": issue, "comment_id": cid,
+                "locator": f"{repo.split('/', 1)[1]}#{issue}@{cid}",
+                "source_url": f"https://github.com/{repo}/issues/{issue}#issuecomment-{cid}",
+                "strict_source_validated": False,
+                "is_authoritative_assignment": False,
+            } for repo, issue, cid in items],
+        }
+
+    def test_public_marker_delta_source_gets_strict_original_and_recipient_check(self):
+        msg = root(number=22, issue=590)
+        snap = index_with(status="BOUNDED_SEARCH_READ")
+        markers = self.public_markers((REPO, 590, 912))
+        seen = []
+        def issue(repo, number):
+            seen.append(("issue", repo, number))
+            return issue_object(number)
+        def comments(repo, number):
+            seen.append(("comments", repo, number))
+            return source_page((912, msg, "kinoko34077"))
+        with mock.patch.object(union.strict, "build_search_list",
+                               wraps=union.strict.build_search_list) as verify:
+            out = union.read_union(
+                snap, recipient="claude-code", public_marker_discovery=markers,
+                recent_read=lambda repo, since=None: [],
+                issue_read=issue, comments_read=comments)
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(out["public_marker_issue_count_in_scope"], 1)
+        self.assertEqual(out["public_marker_issue_count_out_of_scope"], 0)
+        self.assertEqual(out["live_original_roots"], 1)
+        self.assertEqual(out["live_rows"][0]["source_origin"],
+                         "INCREMENTAL_MARKER_SOURCE")
+        self.assertTrue(out["live_rows"][0]["incremental_marker_observed"])
+        self.assertEqual(out["source_candidates"][0]["origin"],
+                         "INCREMENTAL_MARKER_SOURCE")
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["recipient_pickup_proven"])
+        self.assertEqual(seen, [("issue", REPO, 590), ("comments", REPO, 590)])
+        self.assertEqual(verify.call_count, 1)
+
+    def test_public_marker_wrong_recipient_is_only_historical_issue_locator(self):
+        msg = root(number=22, issue=590, recipient="codex")
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="chatgpt",
+            public_marker_discovery=self.public_markers((REPO, 590, 912)),
+            recent_read=lambda repo, since=None: [],
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number:
+                source_page((912, msg, "kinoko34077")))
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(out["live_original_roots"], 0)
+        self.assertEqual(out["source_candidates"][0]["matching_recipient_roots"], 0)
+        self.assertFalse(out["source_candidates"][0]["grants_work_authority"])
+
+    def test_public_marker_partial_and_out_of_scope_are_reported_unknown(self):
+        other = "kinoko34077/execution-coordinator"
+        markers = self.public_markers(
+            (REPO, 576, 912), (other, 142, 914), status="PARTIAL_UNKNOWN")
+        msg = root(number=10)
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="claude-code",
+            public_marker_discovery=markers,
+            recent_read=lambda repo, since=None: [],
+            issue_read=lambda repo, number: issue_object(number),
+            comments_read=lambda repo, number:
+                source_page((912, msg, "kinoko34077")))
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertTrue(out["public_marker_source_partial"])
+        self.assertEqual(out["public_marker_issue_count_out_of_scope"], 1)
+        self.assertEqual(out["live_original_roots"], 1)
+        self.assertTrue(out["has_unknown_work"])
+
+    def test_public_marker_duplicate_and_malformed_and_limit_fail_closed_before_get(self):
+        normal = self.public_markers((REPO, 590, 912))
+        for bad in [
+            {**normal, "owner": "outsider"},
+            {**normal, "complete_source_universe": True},
+            {**normal, "status": "BLOCKED"},
+            {**normal, "locators": [
+                {**normal["locators"][0], "source_url": "https://evil.example/path"}]},
+            {**normal, "locators": [
+                {**normal["locators"][0], "is_authoritative_assignment": True}]},
+            {**normal, "locators": [normal["locators"][0]] * 5001},
+        ]:
+            with self.subTest(marker_case=str(bad)[:60]):
+                with self.assertRaisesRegex(InvalidMessage, "INVALID_MARKER"):
+                    union.read_union(
+                        index_with(status="BOUNDED_SEARCH_READ"),
+                        recipient="claude-code",
+                        public_marker_discovery=bad,
+                        recent_read=lambda repo, since=None:
+                            self.fail("not allowed to read remote on invalid marker"))
+
+    def test_public_marker_union_cap_blocks_without_silent_source_loss(self):
+        markers = self.public_markers(
+            *((REPO, issue, 1000 + issue) for issue in range(1, 42)))
+        with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
+            union.read_union(
+                index_with(status="BOUNDED_SEARCH_READ"), recipient="chatgpt",
+                public_marker_discovery=markers,
+                recent_read=lambda repo, since=None: [])
+
+    def test_marker_and_cached_source_combines_once_when_issue_only_state_changes(self):
+        msg = root(number=44)
+        snap = index_with((576, 122, msg), status="BOUNDED_SEARCH_READ")
+        snap["rows"][0]["issue_state"] = "open"
+        out = union.read_union(
+            snap, recipient="claude-code",
+            public_marker_discovery=self.public_markers((REPO, 576, 1200)),
+            recent_read=lambda repo, since=None: [],
+            issue_read=lambda repo, number: issue_object(number, state="closed"),
+            comments_read=lambda repo, number:
+                source_page((122, msg, "kinoko34077")))
+        self.assertEqual(out["source_issue_count"], 1)
+        self.assertEqual(out["state_or_reply_changes_from_snapshot"], 1)
+        self.assertEqual(out["live_rows"][0]["issue_state"], "closed")
+        self.assertTrue(out["live_rows"][0]["incremental_marker_observed"])
+
     def test_source_overflow_and_page_overflow_fail_safe(self):
         snap = index_with(status="BOUNDED_SEARCH_READ")
         with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
