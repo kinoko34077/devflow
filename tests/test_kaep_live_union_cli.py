@@ -121,6 +121,96 @@ class LiveUnionTests(TestCase):
         self.assertFalse(item["grants_work_authority"])
         self.assertFalse(out["can_authorize_execution"])
 
+    def test_explicit_cross_repository_issue_is_checked_with_full_originals(self):
+        extra = "kinoko34077/execution-coordinator"
+        issue_number = 142
+        msg = root(number=31, issue=issue_number, recipient="chatgpt")
+        # Actual production source scope differs from the devflow test helper.
+        msg["task_ref"] = f"{extra}#{issue_number}"
+        # Canonical envelope must be generated for the correct repository.
+        from tools.kaep_request_sender import make_request
+        msg, _ = make_request(
+            json.dumps([[]]), repository=extra, issue=issue_number,
+            recipient="chatgpt", intent="ANALYZE", expected_head="a" * 40,
+            request_key="live.union.extra.repo.142",
+            request_text="sensitive-request-contents",
+            expect_existing_actor="kinoko34077",
+        )
+        seen = []
+        def recent_for(repo, since=None):
+            seen.append(("recent", repo))
+            if repo == extra:
+                return [{"id": 904, "body": MARKER + " locator",
+                         "issue_url": f"https://api.github.com/repos/{extra}/issues/142",
+                         "user": {"login": "untrusted-bot"}}]
+            return []
+        def fetch_issue(repo, number):
+            seen.append(("issue", repo, number))
+            return {
+                "number": number, "state": "open",
+                "html_url": f"https://github.com/{repo}/issues/{number}",
+                "title": "source fixture", "body": "",
+                "user": {"login": "kinoko34077"},
+                "author_association": "OWNER",
+            }
+        def fetch_comments(repo, number):
+            seen.append(("comments", repo, number))
+            return source_page((905, msg, "kinoko34077"))
+        out = union.read_union(
+            index_with(status="BOUNDED_SEARCH_READ"), recipient="chatgpt",
+            additional_repositories=(extra,), recent_read=recent_for,
+            issue_read=fetch_issue, comments_read=fetch_comments)
+        self.assertEqual(out["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(out["repositories_checked"], [REPO, extra])
+        self.assertEqual(out["explicit_additional_repositories"], [extra])
+        self.assertEqual(out["live_original_roots"], 1)
+        self.assertEqual(out["live_rows"][0]["repository"], extra)
+        self.assertEqual(out["source_candidates"][0]["issue_url"],
+                         f"https://github.com/{extra}/issues/142")
+        self.assertFalse(out["repository_scope_proven_complete"])
+        self.assertFalse(out["recipient_pickup_proven"])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertNotIn("sensitive-request-contents", json.dumps(out))
+        self.assertEqual(seen.count(("issue", extra, 142)), 1)
+        self.assertEqual(seen.count(("comments", extra, 142)), 1)
+
+    def test_explicit_scope_wrong_recipient_never_assigns_work(self):
+        extra = "kinoko34077/execution-coordinator"
+        index = index_with(status="BOUNDED_SEARCH_READ")
+        def issue(repo, number):
+            return {"number": number, "state": "open",
+                    "html_url": f"https://github.com/{repo}/issues/{number}",
+                    "title": "fixture", "body": ""}
+        out = union.read_union(
+            index, recipient="codex", additional_repositories=(extra,),
+            recent_read=lambda repo, since=None: ([{
+                "id": 900, "body": MARKER + " locator",
+                "issue_url": f"https://api.github.com/repos/{extra}/issues/142",
+                "user": {"login": "kinoko34077"},
+            }] if repo == extra else []),
+            issue_read=issue, comments_read=lambda repo, number: "[]")
+        self.assertEqual(out["live_original_roots"], 0)
+        self.assertEqual(out["source_candidates"][0]["matching_recipient_roots"], 0)
+        self.assertFalse(out["source_candidates"][0]["grants_work_authority"])
+        self.assertTrue(out["has_unknown_work"])
+
+    def test_additional_repository_scope_rejects_invalid_and_excess_before_get(self):
+        index = index_with(status="BOUNDED_SEARCH_READ")
+        def fail_fetch(repo, since=None):
+            self.fail("invalid scope must fail before live GitHub access")
+        for extra in [
+            (REPO,),
+            ("other/repository",),
+            ("kinoko34077/execution-coordinator", "kinoko34077/execution-coordinator"),
+            ("kinoko34077/execution-coordinator", "kinoko34077/testapp",
+             "kinoko34077/kotonomani"),
+        ]:
+            with self.subTest(extra=extra):
+                with self.assertRaisesRegex(InvalidMessage, "INVALID_ADDITIONAL_REPOSITORY_SET"):
+                    union.read_union(index, recipient="chatgpt",
+                        additional_repositories=extra, recent_read=fail_fetch)
+        self.assertEqual(index["repositories"], [REPO])
+
     def test_source_overflow_and_page_overflow_fail_safe(self):
         snap = index_with(status="BOUNDED_SEARCH_READ")
         with self.assertRaisesRegex(InvalidMessage, "UNION_SOURCE_LIMIT"):
