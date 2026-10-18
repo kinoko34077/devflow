@@ -617,6 +617,92 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
 
         return Transport()
 
+    def test_maintenance_selector_accepts_canonical_bootstrap_trust(self):
+        result = mg.collect_maintenance_control(
+            self._transport(),
+            self.repository,
+            "kinoko34077/devflow#314",
+        )
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(result["reason_code"], "CONTROL_ACTIVE")
+
+    def test_maintenance_selector_rejects_missing_or_invalid_bootstrap_proof(self):
+        for mode in ("no_done", "wrong_provenance"):
+            with self.subTest(mode=mode):
+                transport = (
+                    self._transport(comments=[])
+                    if mode == "no_done"
+                    else self._transport()
+                )
+                if mode == "wrong_provenance":
+                    transport.get_file = lambda repository, path: {
+                        "content": '{"schema":"untrusted"}'
+                    }
+                result = mg.collect_maintenance_control(
+                    transport, self.repository, "kinoko34077/devflow#314"
+                )
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["reason_code"], "CONTROL_INVALID")
+
+    def test_maintenance_selector_preserves_exact_control_identity_checks(self):
+        for mode in ("closed", "wrong_title", "wrong_repository", "pull_request"):
+            with self.subTest(mode=mode):
+                transport = self._transport()
+                original_get_issue = transport.get_issue
+
+                def changed_issue(repository, number):
+                    issue = original_get_issue(repository, number)
+                    if number == 314:
+                        if mode == "closed":
+                            issue["state"] = "closed"
+                        elif mode == "wrong_title":
+                            issue["title"] = "[REPO] unexpected"
+                        elif mode == "wrong_repository":
+                            issue["body"] = issue["body"].replace(
+                                self.repository, "kinoko34077/unexpected"
+                            )
+                        elif mode == "pull_request":
+                            issue["pull_request"] = {"url": "not-a-control"}
+                    return issue
+
+                transport.get_issue = changed_issue
+                result = mg.collect_maintenance_control(
+                    transport, self.repository, "kinoko34077/devflow#314"
+                )
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["reason_code"], "CONTROL_INVALID")
+
+    def test_maintenance_selector_preserves_direct_trust_and_inactive_state(self):
+        transport = self._transport()
+        original_get_issue = transport.get_issue
+
+        def trusted_issue(repository, number):
+            issue = original_get_issue(repository, number)
+            if number == 314:
+                issue["author_association"] = "OWNER"
+            return issue
+
+        transport.get_issue = trusted_issue
+        accepted = mg.collect_maintenance_control(
+            transport, self.repository, "kinoko34077/devflow#314"
+        )
+        self.assertEqual(accepted["reason_code"], "CONTROL_ACTIVE")
+
+        def inactive_issue(repository, number):
+            issue = trusted_issue(repository, number)
+            if number == 314:
+                issue["body"] = issue["body"].replace(
+                    "`ACTIVE`", "`INACTIVE`", 1
+                )
+            return issue
+
+        transport.get_issue = inactive_issue
+        inactive = mg.collect_maintenance_control(
+            transport, self.repository, "kinoko34077/devflow#314"
+        )
+        self.assertEqual(inactive["status"], "NO_ELIGIBLE_WORK")
+        self.assertEqual(inactive["reason_code"], "REPOSITORY_NOT_ACTIVE")
+
     def test_bootstrap_derived_idle_control_is_trusted_by_maintenance_observation(self):
         observation = mg.collect_repository(
             self._transport(),
