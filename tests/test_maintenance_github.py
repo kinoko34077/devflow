@@ -653,13 +653,17 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
                 def changed_issue(repository, number):
                     issue = original_get_issue(repository, number)
                     if number == 314:
+                        # Isolate identity checks from the derived trust path.
+                        issue["author_association"] = "OWNER"
                         if mode == "closed":
                             issue["state"] = "closed"
                         elif mode == "wrong_title":
                             issue["title"] = "[REPO] unexpected"
                         elif mode == "wrong_repository":
                             issue["body"] = issue["body"].replace(
-                                self.repository, "kinoko34077/unexpected"
+                                f"## Repository\n\n`{self.repository}`",
+                                "## Repository\n\n`kinoko34077/unexpected`",
+                                1,
                             )
                         elif mode == "pull_request":
                             issue["pull_request"] = {"url": "not-a-control"}
