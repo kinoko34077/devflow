@@ -137,7 +137,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^https://github\\.com/kinoko34077/[A-Za-z0-9_.-]+/(issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*)$"
+        "pattern": "^https://github\\.com/kinoko34077/[A-Za-z0-9_.-]+/(issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*|commit/[0-9a-f]{40})$"
       }
     }
   },

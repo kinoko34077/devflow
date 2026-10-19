@@ -103,6 +103,49 @@ class KAEPMailboxContract(unittest.TestCase):
         self.reject(evidence_refs=["https://example.com/secret"])
         self.reject(evidence_refs=["https://github.com/kinoko34077/devflow/issues/503"]*2)
 
+    def test_canonical_owner_commit_evidence_is_accepted(self):
+        """Actual B5 #503 2026-10-17 source failures used these URL shapes."""
+        urls = (
+            "https://github.com/kinoko34077/Structured-Cell-Automaton/commit/"
+            "bc612f045148f654f4d480402aac9da9d90017e8",
+            "https://github.com/kinoko34077/2bit-cell-automaton/commit/"
+            "15eada373c1070be98b32ded7d3e66ab67368c40",
+            "https://github.com/kinoko34077/memory-palace-explorer/commit/"
+            "3e8e81c1311e90f73281bb4915a2e0417d624765",
+            "https://github.com/kinoko34077/bmp2png-pdf/commit/"
+            "7d3805407320e7fe5cd035d9056b2e8b13ec40d0",
+        )
+        for ref in urls:
+            with self.subTest(ref=ref):
+                d = envelope(evidence_refs=[
+                    "https://github.com/kinoko34077/devflow/pull/10", ref])
+                self.assertEqual(decode_comment(encode_comment(d)), d)
+
+    def test_commit_evidence_scope_remains_exact_and_fails_closed(self):
+        base = "https://github.com/kinoko34077/devflow/commit/"
+        good = "a" * 40
+        invalid = [
+            base + "a" * 39,
+            base + "A" * 40,
+            base + good + "/",
+            base + good + "?diff=1",
+            base + good + "#ref",
+            base + good + ".patch",
+            base + "g" * 40,
+            "https://github.com/not-the-owner/devflow/commit/" + good,
+            "https://github.com.evil.invalid/kinoko34077/devflow/commit/" + good,
+            "https://github.com/kinoko34077/devflow/commits/" + good,
+            "https://github.com/kinoko34077/devflow/compare/" + good,
+            "https://github.com/kinoko34077/devflow/blob/" + good,
+        ]
+        for ref in invalid:
+            with self.subTest(ref=ref), self.assertRaisesRegex(
+                    InvalidMessage, "INVALID_REF"):
+                validate(envelope(evidence_refs=[ref]))
+        # Duplication continues to be forbidden, including valid commit references.
+        with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_REFS"):
+            validate(envelope(evidence_refs=[base + good, base + good]))
+
     def test_idempotency_replay(self):
         d = envelope()
         comments = [{"id":10, "body":encode_comment(d)},{"id":11, "body":encode_comment(d)}]
