@@ -106,6 +106,11 @@ Existing `tools.kaep_live_union_cli --recipient <recipient>` uses a single lates
 
 For an **already running** authorized recipient agent, `python -m tools.kaep_live_union_cli --recipient <recipient> --response-format agent-api` projects the **same run's canonical original-Issue KAEP source verification** into strictly allowlisted `kaep.agent-current-view.v0.1` JSON. The default union JSON output is unchanged. Redacted source links, observation age, reply observation and exact partial/unknown diagnostics are non-authoritative: no raw payload, server, host, claim, credential or background GPT wake is created. `http_endpoint_deployed=false` is explicit. Never treat saved old JSON or a public Pages snapshot as a fresh authenticated Inbox; preserve #503/manual Control and #531 B5 fallback. Production hosted GET/API and agent identity require separate P3 admission [#680](https://github.com/kinoko34077/devflow/issues/680).
 
+
+#### B5 opt-in bounded consumer-cohort parity (not an Inbox)
+
+An already-running agent may compare previously emitted Claude-only strict reports from the accepted source-roster shadow and the current B6 original-Issue union via `python -m tools.kaep_b5_b6_parity_cli --shadow-report <file> --union-report <file>`. Comparison is limited to **identical canonical Issues validated on both sides**; unmatched/unknown Issues and unsynchronized time windows stay PARTIAL_UNKNOWN. It never discovers missing original sources, assigns tasks, establishes recipient identity or authorizes an Issue write. See [#531](https://github.com/kinoko34077/devflow/issues/531).
+
 ## 2. What owns what
 
 | Information | Canonical owner |
