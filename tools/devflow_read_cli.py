@@ -10,10 +10,11 @@ import json
 import sys
 from typing import Any
 
+from tools import agent_inbox
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 
 OPERATIONS = ("bootstrap", "work-view", "inbox")
-MAX_INBOX_LIMIT = 100
+MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
 
 # Never echo exception text or caller-controlled fields into machine-readable
 # diagnostics. Unknown/future core error codes fail back to the generic code.
@@ -36,6 +37,10 @@ SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_REPOSITORY",
     "INVALID_PAGINATION",
     "INBOX_OPTIONS_ON_NON_INBOX_OPERATION",
+    "INVALID_RECIPIENT",
+    "INVALID_LIMIT",
+    "INVALID_OFFSET",
+    "INVALID_WORK_STATUS",
 })
 
 
@@ -85,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
             or args.offset != 0 or args.work_status is not None
         ):
             raise ValueError("INBOX_OPTIONS_ON_NON_INBOX_OPERATION")
+        if args.operation == "inbox":
+            # Shared with the MCP core: fail before any live GitHub read.
+            agent_inbox.validate_inbox_options(
+                args.recipient, args.limit, args.offset, args.work_status
+            )
         result = read_operation(
             default_service(), operation=args.operation,
             repository=args.repository, recipient=args.recipient,
