@@ -50,7 +50,13 @@ as the MCP Agent Inbox), `--offset` (nonnegative), `--recipient` and
 fields. Invalid Inbox parameters fail locally with exit code 2 and a
 non-secret, fixed `reason_code` **before GitHub Control or Issue GETs**;
 `--limit 21` and higher cannot be used to bypass the MCP's bounded read
-contract. For an existing scheduled Claude
+contract. Agent Inbox's per-Issue source mailbox is bounded to 500 stored
+comments: the GitHub reader stops after observing the 501st comment, returns
+an overflow sentinel to the unchanged strict parser, and retains
+`ISSUE_COMMENTS_LIMIT` / `has_unknown_work=true` rather than presenting an
+empty or complete source. This bound is **only** used by the MCP Inbox
+consumer; other callers such as bootstrap provenance verification continue
+to read their full required histories. For an existing scheduled Claude
 check-in, keep using the established `tools.kaep_agent_inbox_cli` and its
 `--pending-only` behavior; this CLI does not start a check-in or manage timers.
 
