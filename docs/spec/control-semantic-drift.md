@@ -24,9 +24,9 @@ The caller must still independently check whether the compared status refers to 
 
 | Control | Current claim to investigate | Owning source | M0 disposition |
 | --- | --- | --- | --- |
-| devflow #59 / Repo Monitor | PR #85 still awaiting review/merge | #84, merged PR #85 and PR #88 | Stale Next Action; Pages acceptance separate |
+| devflow #59 / Repo Monitor | PR #85 still awaiting review/merge | #84, merged PR #85 and PR #88 | Stale Next Action; Pages deployment succeeded later, direct external HTTP readback still unverified |
 | devflow #714 / Site Kit | Pre-implementation evaluation is next | Site Kit #10, merged PR #30 | Stale instruction; M0 gate itself OPEN |
-| devflow #705 / Editor Platform | No implementation beyond seed | Editor #9, merged PR #10 | Stale present-tense note; M0 spike only |
+| devflow #705 / Editor Platform | Bootstrap note limits the Control's initial evidence scope | Editor #9, merged PR #10 | Scope disclaimer; not a proven stale claim |
 | devflow #500 / Frequency Warp | Several stages coexist | Web #183, native #172 | No status mismatch established |
 | devflow #23 / LINE | AUDITED plus open successor PR | #47, PR #67 | No status mismatch established |
 
