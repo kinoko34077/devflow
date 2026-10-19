@@ -1,10 +1,11 @@
 """Regression tests for the read-only Codex Cloud MCP-unavailable CLI."""
 import json
 import unittest
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 from tools import devflow_read_cli as cli
-from tools.devflow_mcp_core import DevflowMCPError
+from tools.devflow_mcp_core import DevflowMCPError, DevflowService, _translate_read_error
 
 
 class FakeService:
@@ -102,6 +103,68 @@ class CloudReadCLITests(unittest.TestCase):
                 self.assertEqual(cli.main(["bootstrap", "--repository", self.REPOSITORY]), 2)
         self.assertEqual(json.loads(out.call_args.args[0]), {
             "status": "BLOCKED", "reason_code": "DEVFLOW_READ_UNAVAILABLE"})
+
+    def test_http_errors_are_distinct_without_exposing_exception_text(self):
+        for status, expected in [
+            (401, "GITHUB_HTTP_401"),
+            (403, "GITHUB_HTTP_403"),
+            (404, "GITHUB_HTTP_404"),
+            (429, "GITHUB_HTTP_429"),
+            (503, "GITHUB_HTTP_OTHER"),
+        ]:
+            with self.subTest(status=status):
+                error = HTTPError("https://invalid.test/private-token", status, "secret", {}, None)
+                mapped = _translate_read_error(error)
+                self.assertEqual(mapped.reason_code, expected)
+                self.assertEqual(cli.failure_reason_code(mapped), expected)
+                self.assertNotIn("secret", cli.failure_reason_code(mapped))
+
+    def test_network_json_and_unexpected_errors_are_safely_classified(self):
+        self.assertEqual(
+            cli.failure_reason_code(_translate_read_error(URLError("secret host"))),
+            "GITHUB_NETWORK_UNAVAILABLE",
+        )
+        self.assertEqual(
+            cli.failure_reason_code(
+                _translate_read_error(json.JSONDecodeError("secret", "secret", 0))
+            ),
+            "GITHUB_INVALID_JSON",
+        )
+        self.assertEqual(
+            cli.failure_reason_code(DevflowMCPError(
+                "secret", reason_code="secret reason injected"
+            )),
+            "DEVFLOW_READ_UNAVAILABLE",
+        )
+        self.assertEqual(cli.failure_reason_code(ValueError("secret")), "INVALID_ARGUMENTS")
+
+    def test_missing_control_has_finite_no_trust_bypass_code(self):
+        class NoIssuesReader:
+            def list_issues(self, _repository, state):
+                self.assert_not_called = state
+                return []
+
+        with self.assertRaises(DevflowMCPError) as context:
+            DevflowService(NoIssuesReader()).get_repository_control(self.REPOSITORY)
+        self.assertEqual(context.exception.reason_code, "CONTROL_NOT_FOUND_OR_UNTRUSTED")
+
+    def test_cli_returns_exact_finite_code_on_known_failure(self):
+        service = FakeService()
+
+        def blocked(_repository):
+            raise DevflowMCPError(
+                "private github url and credential", reason_code="GITHUB_HTTP_403"
+            )
+
+        service.bootstrap_repository = blocked
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                self.assertEqual(cli.main([
+                    "bootstrap", "--repository", self.REPOSITORY
+                ]), 2)
+        self.assertEqual(json.loads(out.call_args.args[0]), {
+            "status": "BLOCKED", "reason_code": "GITHUB_HTTP_403",
+        })
 
     def test_unknown_operation_is_not_dispatched(self):
         service = FakeService()
