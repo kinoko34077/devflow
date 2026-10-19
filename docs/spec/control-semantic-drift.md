@@ -1,0 +1,42 @@
+# Control semantic consistency: bounded evidence contract (devflow #726)
+
+Status: **M1 read-only candidate**. Not active Control authority, not M3 work classification, not the task Cursor #576 verifier, not SMC #588, and not a repair bot.
+
+## What causes the defect?
+
+The controlling worker can accept a scoped PR/Issue transition without changing the directly affected human-readable `Next Action` on a Repository Control. GitHub Project / Repo Monitor can then present a snapshot that is structurally trusted and current but **semantically wrong** about that one task. Conversely `Work Status=AUDITED` and an open implementation PR are often perfectly compatible, because audit status and a task's implementation state are separate dimensions.
+
+Changing a single status label, comparing a historical Audit SHA to latest main, or counting open PRs does not establish semantic mismatch.
+
+## Explicit evidence (M1)
+
+`tools/control_semantic_drift.py::compare_claim` accepts **one source-verified current Control claim** and **one independently verified complete observed fact**, with the same repository, exact subject and dimension. Caller is responsible for obtaining real current GETs and for classifying the specific active `Next Action` / `Active Work` statement; historical text is not a current claim. The comparator does not parse arbitrary prose, access GitHub, update Issues or select an implementation owner.
+
+- `PR_GATE`: AWAIT_REVIEW, AWAIT_MERGE, MERGED, CLOSED_UNMERGED, UNKNOWN.
+- `PUBLIC_ENTRY`: UNVERIFIED, VERIFIED, FAILED, UNKNOWN. This is about an actual published entry, not just a Pages build.
+- `FIELD_ACCEPTANCE`: UNVERIFIED, ACCEPTED, REJECTED, UNKNOWN. Physical usability or audio experience cannot be inferred from CI.
+- Each side supplies a GitHub source URL and its actual timezone-aware read timestamp. Control URL must be an exact devflow Issue; observed URL must identify the **same owning repository and Issue/PR number**, with a PR URL required for PR_GATE. The comparator rejects credentials, ports, query strings and unrelated paths. Those checks are necessary but **not proof** that a source was independently authenticated.
+- For comparison, the observed read must be at or after the Control read and within one hour. Earlier or excessively separated reads return UNKNOWN rather than an ALIGNED/MISMATCH assertion. Actual event chronology/version authority requires upstream validation; timestamps by themselves cannot prove causality.
+- `source_verified` / `source_complete` are caller-supplied assertions and **cannot themselves establish trusted provenance**. Only an authenticated, complete canonical GET adapter may populate them; do not feed the function ad hoc untrusted Issue text.
+- Results: `ALIGNED`, `POTENTIAL_MISMATCH`, `NOT_COMPARABLE`, `UNKNOWN`. A potential mismatch is a **review candidate only**; no automatic correction, claim/permission change or read-to-write promotion. Incomplete, unverifiable, historical, mismatched or otherwise ambiguous evidence does not become a positive finding.
+
+`UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
+
+## Historical M0 observed cases (as of 2026-10-19; non-normative, not live current state)
+
+| Control | Current claim to investigate | Owning source | M0 disposition |
+| --- | --- | --- | --- |
+| devflow #59 / Repo Monitor | PR #85 still awaiting review/merge | #84, merged PR #85 and PR #88 | Stale Next Action; Pages deployment succeeded later, direct external HTTP readback still unverified |
+| devflow #714 / Site Kit | Pre-implementation evaluation is next | Site Kit #10, merged PR #30 | Stale instruction; M0 gate itself OPEN |
+| devflow #705 / Editor Platform | Bootstrap note limits the Control's initial evidence scope | Editor #9, merged PR #10 | Scope disclaimer; not a proven stale claim |
+| devflow #500 / Frequency Warp | Several stages coexist | Web #183, native #172 | No status mismatch established |
+| devflow #23 / LINE | AUDITED plus open successor PR | #47, PR #67 | No status mismatch established |
+
+## Follow-on M2–M4, not accomplished here
+
+1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.
+2. Select accepted exact subject refs in owning task/PR transitions; producer-owned `affected-surface reconciliation` remains the first-line preventive action.
+3. Offer a read-only, source-cited mismatch report showing uncertainty, observation time and the specific stale field. Normal stage difference must not be reported as drift.
+4. Validate against a bounded real pilot, independent review, exact-head regression/CI, and independently re-read any later approved Control correction; do not mutate Controls based on this candidate alone.
+
+Exit/rollback: delete this isolated comparator and tests if it gives false confidence or overlaps the existing M3 source; no runtime job, schedule, remote service or authorization state is changed.
