@@ -44,8 +44,13 @@ python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
 python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
 ```
 
-`inbox` also accepts `--limit` and `--offset`; honor its `next_offset`,
-`truncated` and source/coverage fields. For an existing scheduled Claude
+`inbox` also accepts `--limit` (1–20, with the same canonical limit
+as the MCP Agent Inbox), `--offset` (nonnegative), `--recipient` and
+`--work-status`; honor its `next_offset`, `truncated` and source/coverage
+fields. Invalid Inbox parameters fail locally with exit code 2 and a
+non-secret, fixed `reason_code` **before GitHub Control or Issue GETs**;
+`--limit 21` and higher cannot be used to bypass the MCP's bounded read
+contract. For an existing scheduled Claude
 check-in, keep using the established `tools.kaep_agent_inbox_cli` and its
 `--pending-only` behavior; this CLI does not start a check-in or manage timers.
 
