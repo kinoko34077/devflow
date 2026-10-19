@@ -58,6 +58,42 @@ Exit code 2 with `{"status":"BLOCKED",...}` means a failed read, not an
 empty work inventory. This CLI cannot authorize a Claim, write an Issue or
 prove the Codex MCP registry / GitHub token identity is functional.
 
+### Three-read troubleshooting (bootstrap / work-view / inbox)
+
+Do the comparison **inside the failing client runtime** and for the **same
+repository**. Distinguish missing registration from a tool invocation failure:
+first inspect the MCP tool catalog / stdio `initialize` + `tools/list` for
+`bootstrap_repository`, `get_repository_work_view` and `get_agent_inbox`.
+If tools are not registered, GitHub code/CLI success does not repair client
+discovery. Machine-local historical startup grace fix [#113](https://github.com/kinoko34077/devflow/issues/113)
+must not be presumed current without a fresh handshake failure measurement.
+
+When a current checkout and GitHub GET access exist, run the three CLI commands
+above for the **same target** and compare their return codes. All three route
+to the same core service; Inbox depends on Work View, and Work View depends on
+bootstrap's verified Control read. A shared failure may cascade from an
+earlier GitHub read or Control validation; it does not establish three
+independent defects.
+
+For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
+
+| Code | Meaning / next check |
+| --- | --- |
+| `GITHUB_HTTP_401` | GitHub rejected authentication; inspect that runtime's read-capable credentials without printing them. |
+| `GITHUB_HTTP_403` | Access policy, authentication scope **or** rate limits; inspect the runtime's safe response metadata. Do not assume a missing token. |
+| `GITHUB_HTTP_404` | Resource absent **or** inaccessible (including hidden Private repositories); confirm exact repo identity and access independently. |
+| `GITHUB_HTTP_429` / `GITHUB_HTTP_OTHER` | API throttling or another HTTP failure; check GitHub availability and retry only after the cause is understood. |
+| `GITHUB_NETWORK_UNAVAILABLE` / `GITHUB_INVALID_JSON` / `GITHUB_REDIRECTED_READ` | Network, invalid API body or changed observed identity; keep reads fail-closed. |
+| `CONTROL_NOT_FOUND_OR_UNTRUSTED` / `CONTROL_AMBIGUOUS` | No single accepted open Control; inspect its author/provenance and exact title through canonical GitHub reads. |
+| `CONTROL_SCHEMA_INVALID` / `CONTROL_REPOSITORY_MISMATCH` | The Control failed required sections or repository identity checks; do not bypass validation. |
+| `DEVFLOW_READ_UNAVAILABLE` | Unclassified core failure; preserve manual Control and exact original Issue reads rather than infer no work. |
+
+Codes are not proof of the underlying cause (for example, 403 and 404 remain
+ambiguous). The CLI never emits the original exception text, secrets, raw URLs
+or response headers. Successful output remains unchanged; partial/unknown
+coverage still requires manual Control and KAEP #503 fallback. Do not change
+tokens, client registration or system timers as an implicit read workaround.
+
 Cloud evidence on #531 separately establishes existing Agent Inbox CLI and
 public GitHub GET execution. It does not independently prove a fresh Cloud task
 has run the **new** three-operation adapter; real-task execution remains a
