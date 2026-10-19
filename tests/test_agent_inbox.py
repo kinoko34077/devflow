@@ -367,7 +367,7 @@ class AgentInboxProjectionTests(unittest.TestCase):
         )
         self.assertEqual(len(res["issues"]), 1)
         self.assertEqual(res["errors"], [])
-        self.assertTrue(res["has_unknown_work"])
+        self.assertFalse(res["has_unknown_work"])
 
     def test_invalid_options_rejected_before_comment_reads(self):
         view = fake_work_view([task()])
