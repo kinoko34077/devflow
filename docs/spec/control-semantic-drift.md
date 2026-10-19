@@ -15,12 +15,14 @@ Changing a single status label, comparing a historical Audit SHA to latest main,
 - `PR_GATE`: AWAIT_REVIEW, AWAIT_MERGE, MERGED, CLOSED_UNMERGED, UNKNOWN.
 - `PUBLIC_ENTRY`: UNVERIFIED, VERIFIED, FAILED, UNKNOWN. This is about an actual published entry, not just a Pages build.
 - `FIELD_ACCEPTANCE`: UNVERIFIED, ACCEPTED, REJECTED, UNKNOWN. Physical usability or audio experience cannot be inferred from CI.
-- Each side supplies a verified GitHub source URL and its actual read timestamp (timezone required). `source_verified` / `source_complete` are trusted collector assertions, never user-input privileges.
+- Each side supplies a GitHub source URL and its actual timezone-aware read timestamp. Control URL must be an exact devflow Issue; observed URL must identify the **same owning repository and Issue/PR number**, with a PR URL required for PR_GATE. The comparator rejects credentials, ports, query strings and unrelated paths. Those checks are necessary but **not proof** that a source was independently authenticated.
+- For comparison, the observed read must be at or after the Control read and within one hour. Earlier or excessively separated reads return UNKNOWN rather than an ALIGNED/MISMATCH assertion. Actual event chronology/version authority requires upstream validation; timestamps by themselves cannot prove causality.
+- `source_verified` / `source_complete` are caller-supplied assertions and **cannot themselves establish trusted provenance**. Only an authenticated, complete canonical GET adapter may populate them; do not feed the function ad hoc untrusted Issue text.
 - Results: `ALIGNED`, `POTENTIAL_MISMATCH`, `NOT_COMPARABLE`, `UNKNOWN`. A potential mismatch is a **review candidate only**; no automatic correction, claim/permission change or read-to-write promotion. Incomplete, unverifiable, historical, mismatched or otherwise ambiguous evidence does not become a positive finding.
 
-The caller must still independently check whether the compared status refers to the same stage/version and whether the observed fact is later or otherwise authoritative. The present v1 comparator does not prove chronology, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance by itself. A field name or GitHub-shaped URL is not proof of verified provenance.
+`UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
 
-## First observed cases (2026-10-19)
+## Historical M0 observed cases (as of 2026-10-19; non-normative, not live current state)
 
 | Control | Current claim to investigate | Owning source | M0 disposition |
 | --- | --- | --- | --- |
