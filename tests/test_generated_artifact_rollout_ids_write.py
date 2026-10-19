@@ -3,7 +3,7 @@ import unittest
 from tools.generated_artifact_contract import ArtifactRejected
 from tools.generated_artifact_rollout_ids_write import (
     REPOSITORY, RECIPE, OUTPUTS, NarrowIdsWriteApi,
-    validate_target, validate_outputs,
+    validate_target, validate_outputs, validate_policy,
 )
 
 class FakeTransport:
@@ -33,6 +33,14 @@ class IdsBoundaryTests(unittest.TestCase):
             validate_outputs({p: b"x" * (24 * 1024 * 1024 + 1) for p in OUTPUTS})
         with self.assertRaises(ArtifactRejected):
             validate_outputs({p: b"x" * (17 * 1024 * 1024) for p in OUTPUTS})
+
+    def test_policy_rejects_widening(self):
+        from tools.generated_artifact_rollout import fixed_policy
+        policy = fixed_policy(REPOSITORY, RECIPE, "a" * 40)
+        validate_policy(policy)
+        policy["recipe"]["paths"].append("unapproved.json")
+        with self.assertRaises(ArtifactRejected):
+            validate_policy(policy)
 
     def test_write_is_dormant(self):
         api = NarrowIdsWriteApi(FakeTransport(), "artifact/writeback-ids/probe", "a" * 40)
