@@ -116,6 +116,23 @@ def source_root_shadow(
         "errors": [],
         "rejected_index_count": len(index["rejected"]),
         "blocked_index_count": len(index["blocked"]),
+        # Preserve public, bounded blocker IDs/reason codes so a failed shadow
+        # is diagnosable without repeating broad authenticated source reads.
+        # This NEVER releases unverified roots or changes the cursor.
+        "index_blockers": [
+            {
+                "index_comment_id": b["index_comment_id"],
+                "reason_code": b["reason_code"]
+                if (type(b.get("reason_code")) is str
+                    and 1 <= len(b["reason_code"]) <= 80
+                    and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+                            for c in b["reason_code"]))
+                else "SOURCE_VALIDATION_ERROR",
+            }
+            for b in index["blocked"]
+            if type(b) is dict and type(b.get("index_comment_id")) is int
+            and b["index_comment_id"] > 0
+        ],
         "index_truncated": index["truncated"],
         "has_unknown_work": True,
         "complete_source_universe": False,

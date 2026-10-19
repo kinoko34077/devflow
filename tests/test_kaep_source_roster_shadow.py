@@ -230,6 +230,7 @@ class SourceRootShadowTests(unittest.TestCase):
             {(REPO, ISSUE): pages([comment(101, msg)])},
         )
         self.assertEqual(res["status"], "BOUNDED_CANDIDATE_SOURCE_READ")
+        self.assertEqual(res["index_blockers"], [])
         self.assertEqual(res["issues"][0]["original_only_count"], 0)
         self.assertTrue(res["has_unknown_work"])
         self.assertFalse(res["fallback_retirement_authorized"])
@@ -263,6 +264,8 @@ class SourceRootShadowTests(unittest.TestCase):
         self.assertEqual(out["status"], "BLOCKED")
         self.assertEqual(out["issues"], [])
         self.assertEqual(out["blocked_index_count"], 1)
+        self.assertEqual(out["index_blockers"], [
+            {"index_comment_id": 402, "reason_code": "CANDIDATE_LIMIT"}])
         self.assertEqual(len(fetched), 1)
         self.assertTrue(out["has_unknown_work"])
 
@@ -284,6 +287,12 @@ class SourceRootShadowTests(unittest.TestCase):
         )
         self.assertEqual(out["status"], "BLOCKED")
         self.assertEqual(out["issues"], [])
+        self.assertEqual(out["errors"][0]["reason_code"], "INDEX_SOURCE_INCOMPLETE")
+        self.assertEqual(out["index_blockers"], [
+            {"index_comment_id": 601, "reason_code": "INVALID_WRAPPER"}])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+        self.assertNotIn("malformed", json.dumps(out))
         self.assertTrue(out["has_unknown_work"])
 
     def test_untrusted_index_actor_cannot_admit_candidate(self):
