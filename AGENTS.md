@@ -135,25 +135,25 @@ An already-running agent may compare previously emitted Claude-only strict repor
 1. This file: `devflow/AGENTS.md` (or the equivalent MCP bootstrap result when already connected).
 2. **Read the live [development-policy/source index, devflow #734](https://github.com/kinoko34077/devflow/issues/734)** and fetch its applicable original GitHub/Google Drive sources; record any inaccessible source rather than assuming it was applied.
 3. The target `[REPO] <repo>` Control Issue.
-3. The target repository's own agent/readme/current-state entry point.
-4. Active repository-local Issue / Work Order.
-5. Its accepted Task Checkpoint Cursor when eligible, reading `first_unfinished` as the compact roadmap/current-position projection.
-6. Its designated durable progress surface (same Issue/comment or dedicated progress Issue/ledger) for detailed completed work, evidence, findings, decisions, blocker and handoff context.
-7. Active or latest relevant Execution Session Record(s), then linked PR/current volatile evidence when non-trivial work is active or being resumed.
-8. Task-relevant specs/code/tests.
-9. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
-10. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
+4. The target repository's own agent/readme/current-state entry point.
+5. Active repository-local Issue / Work Order.
+6. Its accepted Task Checkpoint Cursor when eligible, reading `first_unfinished` as the compact roadmap/current-position projection.
+7. Its designated durable progress surface (same Issue/comment or dedicated progress Issue/ledger) for detailed completed work, evidence, findings, decisions, blocker and handoff context.
+8. Active or latest relevant Execution Session Record(s), then linked PR/current volatile evidence when non-trivial work is active or being resumed.
+9. Task-relevant specs/code/tests.
+10. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
+11. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
 
 ### Work on devflow itself or cross-repository rules
 
 1. This file.
 2. **Read the live [development-policy/source index, devflow #734](https://github.com/kinoko34077/devflow/issues/734)** and all applicable original source material before changing common policy or cross-repository rules.
 3. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
-3. `.devflow/WORKFLOW.yaml`.
-4. Relevant devflow Work Order / Repository Control Issues.
-5. Active or latest relevant Execution Session Record(s) when the work is non-trivial or resumed.
-6. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
-7. Implementation/tests only for the touched control-plane component.
+4. `.devflow/WORKFLOW.yaml`.
+5. Relevant devflow Work Order / Repository Control Issues.
+6. Active or latest relevant Execution Session Record(s) when the work is non-trivial or resumed.
+7. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
+8. Implementation/tests only for the touched control-plane component.
 
 ## 4. Repository-local entry
 
