@@ -226,3 +226,10 @@ python -m tools.kaep_b5_b6_parity_cli \
 入力上限は各2 MiB、B5最大20 Issue、B6最大40 Issue、原典コメント行・Message ID・原典Issue URL・宛先（`claude-code`）・権限なしをチェックする。共通で**原典検証に成功したIssueだけ**を比較し、相違のある共通Issue・片側しか候補がないIssue・原典が不正で比較不能なIssueを分離する。出力は原典URL・各種件数・固定された不完全性フラグのみで、生の本文・キー・元メッセージID自体は出さない。宛先／URL／スキーマの不正や重複はBLOCKED。比較Issueが0件、共通外候補や部分取得がある場合は `PARTIAL_UNKNOWN` とし、データが不足した状態を「パリティ成立」と表示しない。
 
 **重要な限界:** 2報告は互いに異なる時刻の独立した観測であり、差分があっても「ソースが途中で編集された」「索引とConsumerの実装が異なる」のどちらかを単独では断定できない。同期スナップショット、全公開リポ原典一覧、実際のモデル受信、原典HEAD、Issue書込権限、#531 B5 Consumer完全受入は証明できない。原典を手動で再GETし因果を確定する必要がある。#503/manual Control fallbackと `has_unknown_work=true`・`can_authorize_execution=false` は維持する。CLIはGitHub/CloudflareにアクセスせずローカルJSONだけを読む。
+
+
+## B5索引失敗時の最小診断情報（2026-10-20）
+
+従来の `tools.kaep_source_roster_shadow` が `INDEX_SOURCE_INCOMPLETE` とした際、下位の正規 `discover_index_shadow` に存在した停止コメント番号・検証理由が上位出力では失われていた。今回、`index_blockers` に `index_comment_id`（公開原典の数値ID）と固定コード形式の `reason_code` のみを含める。対象は原典検証中の停止情報であり、コメント本文・認証情報・任意URLは一切再出力しない。インデックスが完全な場合は空配列。
+
+これは古い `kinotch-repo-monitor#81` のKAEPマーカー付きコメントに任意の後置文章があり、正規の `INVALID_WRAPPER` で停止する事例を、安全な停止状態のまま機械可視化する対策である。**未知の原典を「無い」と判断せず、部分取得結果を受入れず、Source網羅性とB5 Cursor rev17も更新しない。** 原典本文を編集したり、KAEP v0.2の厳格なコメント終端規則を緩めたりしない。
