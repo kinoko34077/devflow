@@ -4,6 +4,8 @@ This is the required entry point for GPT/agent work that uses KiNoTch. cross-rep
 
 Do not use chat history, GitHub Project fields, or an old summary as the source of truth when the current GitHub state is available.
 
+**Mandatory development-policy/source index — [devflow #734](https://github.com/kinoko34077/devflow/issues/734).** On the first managed-development entry of each new agent/chat/session, at every interrupted-work resume, and when the target repository, task scope, or governing sources change, **fetch and read the live body of #734**, not just its title or a remembered summary. Treat it as the single locator for KiNoTch. development principles, shared GitHub operating rules, and linked Google Drive Core/Domain sources. Follow its applicability routing and fetch the **relevant original source content**, including the Google Drive `03_Development_Specification_Principles.md` for substantive development/spec/design tasks where accessible, before deciding or modifying. This is a **required discovery/read step, not a replacement or override** of this AGENTS file, the live Repository Control, owning repository specifications, task evidence, or security/Human gates. If a linked private Google Drive source is not accessible to this worker, report that specific source as **unread/unavailable**; never pretend its content was read, copy it into public GitHub, or claim that the index grants its access. Continue only work whose authoritative prerequisites are actually available, and preserve an actionable recovery route for dependencies.
+
 ## 0. Non-negotiable execution invariants
 
 Read and apply these before any non-trivial managed-repository work. They are execution rules, not optional reminders.
@@ -131,25 +133,27 @@ An already-running agent may compare previously emitted Claude-only strict repor
 ### Normal work on a managed repository
 
 1. This file: `devflow/AGENTS.md` (or the equivalent MCP bootstrap result when already connected).
-2. The target `[REPO] <repo>` Control Issue.
-3. The target repository's own agent/readme/current-state entry point.
-4. Active repository-local Issue / Work Order.
-5. Its accepted Task Checkpoint Cursor when eligible, reading `first_unfinished` as the compact roadmap/current-position projection.
-6. Its designated durable progress surface (same Issue/comment or dedicated progress Issue/ledger) for detailed completed work, evidence, findings, decisions, blocker and handoff context.
-7. Active or latest relevant Execution Session Record(s), then linked PR/current volatile evidence when non-trivial work is active or being resumed.
-8. Task-relevant specs/code/tests.
-9. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
-10. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
+2. **Read the live [development-policy/source index, devflow #734](https://github.com/kinoko34077/devflow/issues/734)** and fetch its applicable original GitHub/Google Drive sources; record any inaccessible source rather than assuming it was applied.
+3. The target `[REPO] <repo>` Control Issue.
+4. The target repository's own agent/readme/current-state entry point.
+5. Active repository-local Issue / Work Order.
+6. Its accepted Task Checkpoint Cursor when eligible, reading `first_unfinished` as the compact roadmap/current-position projection.
+7. Its designated durable progress surface (same Issue/comment or dedicated progress Issue/ledger) for detailed completed work, evidence, findings, decisions, blocker and handoff context.
+8. Active or latest relevant Execution Session Record(s), then linked PR/current volatile evidence when non-trivial work is active or being resumed.
+9. Task-relevant specs/code/tests.
+10. `docs/operations/REPOSITORY_ISSUE_MANUAL.md` when deciding Issue ownership/lifecycle.
+11. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md` and `.devflow/WORKFLOW.yaml` only when workflow semantics or boundaries are needed.
 
 ### Work on devflow itself or cross-repository rules
 
 1. This file.
-2. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
-3. `.devflow/WORKFLOW.yaml`.
-4. Relevant devflow Work Order / Repository Control Issues.
-5. Active or latest relevant Execution Session Record(s) when the work is non-trivial or resumed.
-6. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
-7. Implementation/tests only for the touched control-plane component.
+2. **Read the live [development-policy/source index, devflow #734](https://github.com/kinoko34077/devflow/issues/734)** and all applicable original source material before changing common policy or cross-repository rules.
+3. `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
+4. `.devflow/WORKFLOW.yaml`.
+5. Relevant devflow Work Order / Repository Control Issues.
+6. Active or latest relevant Execution Session Record(s) when the work is non-trivial or resumed.
+7. `docs/project/PROJECT_SYNC.md` if synchronization/Project behavior is involved.
+8. Implementation/tests only for the touched control-plane component.
 
 ## 4. Repository-local entry
 
