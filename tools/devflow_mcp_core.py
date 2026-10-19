@@ -938,6 +938,9 @@ class DevflowService:
         No extra Issue role classification, Project read, task assignment,
         provider launch or execution authority. Partial/unknown remain visible.
         """
+        # Reject bad recipient, pagination and filter options before performing
+        # any live GitHub Control or Issue GET (including private repositories).
+        agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         view = self.get_repository_work_view(repository)
         selected = agent_inbox.select_task_records(
             view, recipient=recipient, limit=limit,
