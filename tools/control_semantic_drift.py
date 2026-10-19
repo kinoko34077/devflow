@@ -76,7 +76,8 @@ def compare_claim(control: Mapping[str, Any], observed: Mapping[str, Any]) -> di
     ):
         return {"status": "NOT_COMPARABLE", "reason": "DIFFERENT_SCOPE"}
     if not (
-        control.get("section") in CURRENT_SECTIONS
+        isinstance(control.get("section"), str)
+        and control["section"] in CURRENT_SECTIONS
         and control.get("is_current") is True
         and control.get("source_verified") is True
         and observed.get("source_verified") is True
