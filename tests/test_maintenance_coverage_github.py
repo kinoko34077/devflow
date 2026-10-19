@@ -148,6 +148,16 @@ class NativeCoverageCollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(CoverageCollectionError, "malformed"):
             observe(FakeGET([item]))
 
+    def test_duplicate_favorable_v1_result_fails_entire_ledger_projection(self):
+        item = comment(result="CLEAN")
+        item["body"] = item["body"].replace(
+            '"result":"CLEAN"',
+            '"result":"BLOCKED","result":"CLEAN"',
+            1,
+        )
+        with self.assertRaisesRegex(CoverageCollectionError, "malformed machine"):
+            observe(FakeGET([item]))
+
     def test_nonmachine_comment_is_ignored_not_counted(self):
         value = observe(FakeGET([{"body": "normal maintenance note"}]))
         self.assertEqual(0, value.machine_records)
