@@ -210,3 +210,19 @@ python -m tools.kaep_live_union_cli --recipient chatgpt --response-format agent-
 **重要な境界:** これは既存認証済みCLIからの**同一回読取投影**であり、公開HTTPサーバ、Pages上の動的URL、任意利用者向けの認証済みGateway、常駐ポーリング、Webhook、クラウド配置ではない。 `http_endpoint_deployed=false` を返す。古いJSONファイルを読み込む独立Projectionでは元の原典検証を再現できないため、その利用で「最新の認証済み依頼」を証明してはならない。将来のHTTPホストは同じ契約を再利用してよいが、Host・Source読取資格情報・呼出し制限・機密情報と公開範囲・レート制限・タイムアウト/ETag/失効条件・無償枠・リクエスト起動主体に独立した安全上の承認・実実証が必要。
 
 直接の実装根拠は[devflow #680](https://github.com/kinoko34077/devflow/issues/680)。#531 B5不完全な元依頼Universe・#503手動fallback・#681 F10無人GPT起床を置換しない。
+
+
+## B5：既存2 Consumer間の同一原典限定パリティ比較（2026年10月19日）
+
+既存B5 `tools.kaep_source_roster_shadow` は厳格な #503 POINTER / 明示M3 TASK 由来の元Issueを読込むが、同じGitHub Issueに対してB6 `tools.kaep_live_union_cli` の宛先別結果と**同じ根のコメントID＋Message ID**が一致するかを直接比較する機能はなかった。これを新たな探索エンジンにせず、既存2つの**既に生成された報告JSON**をローカルで突き合わせる。
+
+```sh
+# それぞれ既存の認証済み読取器から取得したJSONを事前に用意
+python -m tools.kaep_b5_b6_parity_cli \
+  --shadow-report ./roster-shadow.json \
+  --union-report ./strict-recipient-union.json
+```
+
+入力上限は各2 MiB、B5最大20 Issue、B6最大40 Issue、原典コメント行・Message ID・原典Issue URL・宛先（`claude-code`）・権限なしをチェックする。共通で**原典検証に成功したIssueだけ**を比較し、相違のある共通Issue・片側しか候補がないIssue・原典が不正で比較不能なIssueを分離する。出力は原典URL・各種件数・固定された不完全性フラグのみで、生の本文・キー・元メッセージID自体は出さない。宛先／URL／スキーマの不正や重複はBLOCKED。比較Issueが0件、共通外候補や部分取得がある場合は `PARTIAL_UNKNOWN` とし、データが不足した状態を「パリティ成立」と表示しない。
+
+**重要な限界:** 2報告は互いに異なる時刻の独立した観測であり、差分があっても「ソースが途中で編集された」「索引とConsumerの実装が異なる」のどちらかを単独では断定できない。同期スナップショット、全公開リポ原典一覧、実際のモデル受信、原典HEAD、Issue書込権限、#531 B5 Consumer完全受入は証明できない。原典を手動で再GETし因果を確定する必要がある。#503/manual Control fallbackと `has_unknown_work=true`・`can_authorize_execution=false` は維持する。CLIはGitHub/CloudflareにアクセスせずローカルJSONだけを読む。
