@@ -310,7 +310,7 @@ class SourceRootShadowTests(unittest.TestCase):
         msg = root(45)
         note = pointer_notice(msg, cid=20001, notice_id=45)
         malformed = {"id": 20002,
-                     "body": "<!-- kaep:message:v0.2 -->\\n`\\`\\`json\\n{}\\n\\`\\`\\`\\nUntrusted prose",
+                     "body": "<!-- kaep:message:v0.2 -->\n```json\n{}\n```\nUntrusted prose",
                      "user": {"login": ACTOR}}
         res, _ = compare(
             pages([comment(30001, note)]),
