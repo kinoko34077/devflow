@@ -49,6 +49,26 @@ def validate_outputs(outputs: Mapping[str, bytes]) -> None:
         raise ArtifactRejected("IDS writer combined output exceeds size ceiling")
 
 
+def validate_policy(policy: Mapping[str, Any]) -> None:
+    """Reject any widening of the reviewed static IDS recipe before planning."""
+    if not isinstance(policy, Mapping) or policy.get("repository") != REPOSITORY:
+        raise ArtifactRejected("IDS writer policy repository mismatch")
+    recipe = policy.get("recipe")
+    limits = policy.get("limits")
+    if not isinstance(recipe, Mapping) or recipe.get("id") != RECIPE or recipe.get("version") != "1":
+        raise ArtifactRejected("IDS writer policy recipe mismatch")
+    if not isinstance(recipe.get("paths"), list) or set(recipe["paths"]) != OUTPUTS or len(recipe["paths"]) != 2:
+        raise ArtifactRejected("IDS writer policy paths mismatch")
+    if not isinstance(limits, Mapping) or any(type(limits.get(k)) is not int or limits[k] != v for k, v in (
+        ("max_files", 2), ("max_file_bytes", MAX_FILE_BYTES), ("max_total_bytes", MAX_TOTAL_BYTES)
+    )):
+        raise ArtifactRejected("IDS writer policy limits mismatch")
+    if policy.get("default_branch") != "main" or policy.get("branch_prefix") != BRANCH_PREFIX:
+        raise ArtifactRejected("IDS writer policy branch mismatch")
+    if policy.get("forbidden_branches") != ["main"]:
+        raise ArtifactRejected("IDS writer forbidden branch policy mismatch")
+
+
 class NarrowIdsWriteApi:
     """Minimal Git object write surface; never permits default-branch mutation."""
 
