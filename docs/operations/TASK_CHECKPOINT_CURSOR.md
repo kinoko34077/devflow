@@ -15,6 +15,18 @@ The cursor lets a successor locate the current frontier before reconstructing hi
 
 The cursor is **not readiness authority**. It is also **not claim, lease, lock, CAS, or fencing authority**. A cursor naming checkpoint `X` means only that `X` is the projected first unfinished recovery unit; existing blocker, dependency, Human, security, Review, CI, publication, credential/session/permission and destructive-operation gates still govern whether `X` may run.
 
+## 1-A. Read-only open-Issue audit beyond 100 records (opt-in)
+
+The default manual `task-cursor-audit.yml` stays one explicit Issue and GET-only. The existing `--discover-open --max-issues 100` contract is also unchanged. For a live devflow Issue pool larger than 100, use the separate bounded CLI mode **only when authenticated public GitHub GET access is available**:
+
+```sh
+python -m tools.task_checkpoint_cursor_audit --repository kinoko34077/devflow --discover-open-sharded --max-total 500 --shard-size 50
+```
+
+This mode discovers all open owner Issues (PR entries excluded), validates unique/positive identities and a maximum 500 owners, sorts IDs, audits in shards of at most 100, and **re-discovers the complete cohort** at the end. It fails closed without a partial-success report on pagination error, over-limit, missing comments, unexpected owner identity, or changed cohort between reads. The output records total count, deterministic full-cohort and per-shard SHA-256 hashes, counts, zero writes, and `snapshot_atomic:false`—GitHub's REST reads are not transactional. A successfully completed cohort is **structural coverage**, NOT independent determination that each owner requires a Cursor nor that its `first_unfinished` matches durable evidence: without separately supplied verified frontiers, `semantic_coverage_complete:false` and owner eligibility remains unknown.
+
+The alternative mode performs an API GET for each open Issue and its comments and should be invoked only for a bounded need; do not add a schedule, service, elevated scopes or consume runner minutes repeatedly to demonstrate the same static snapshot.
+
 ## 2. Eligibility and single-frontier rule
 
 v1 represents exactly one **single canonical recovery frontier** per owning task.

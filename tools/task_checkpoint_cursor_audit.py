@@ -7,6 +7,7 @@ Does not modify GitHub or trigger workflows.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -130,22 +131,127 @@ def discover_open_issue_ids(read_transport: object, repository: str, *, max_issu
         raise ValueError("duplicate discovered issue identities")
     return ids
 
+def _open_owner_snapshot(read_transport: object, repository: str, *, max_total: int) -> list[int]:
+    """Get a bounded, fully-paginated open owner cohort; never count PRs."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("invalid repository")
+    if type(max_total) is not int or not 1 <= max_total <= 500:
+        raise ValueError("max_total must be 1..500")
+    rows = read_transport.get_paginated(f"/repos/{repository}/issues?state=open&per_page=100")
+    if not isinstance(rows, list):
+        raise ValueError("incomplete issue discovery")
+    ids: list[int] = []
+    for row in rows:
+        if not isinstance(row, dict) or "number" not in row:
+            raise ValueError("invalid discovered issue record")
+        if "pull_request" in row:
+            continue
+        n = row["number"]
+        if type(n) is not int or n < 1 or row.get("state", "open") != "open":
+            raise ValueError("invalid open owner identity")
+        ids.append(n)
+        if len(ids) > max_total:
+            raise ValueError("open owner issue set exceeds total coverage cap")
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate discovered issue identities")
+    return sorted(ids)
+
+
+def _cohort_hash(repository: str, issue_ids: Sequence[int]) -> str:
+    data = json.dumps({"repository": repository, "issue_ids": list(issue_ids)},
+                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def audit_open_issue_shards(
+    read_transport: object,
+    repository: str,
+    *,
+    max_total: int = 500,
+    shard_size: int = 50,
+    expected: Mapping[int, str | None] | None = None,
+    eligible: Mapping[int, bool] | None = None,
+) -> dict[str, object]:
+    """GET-only bounded >100 cohort, with strict two-pass discovery consistency.
+
+    All shard reports are built before a complete aggregate is exposed. The
+    pre/post GET comparison detects cohort churn, but is not an atomic GitHub
+    snapshot; no semantic frontier/eligibility is inferred from formatting.
+    """
+    if type(shard_size) is not int or not 1 <= shard_size <= 100:
+        raise ValueError("shard_size must be 1..100")
+    first = _open_owner_snapshot(read_transport, repository, max_total=max_total)
+    parts = [first[n:n + shard_size] for n in range(0, len(first), shard_size)]
+    reports = []
+    for i, ids in enumerate(parts):
+        result = audit_issue_ids(
+            read_transport, repository, ids, expected=expected, eligible=eligible,
+        )
+        if result["checked"] != len(ids) or not result["coverage_complete_for_explicit_set"]:
+            raise ValueError("incomplete shard inspection")
+        reports.append({"index": i, "count": len(ids),
+                        "issue_ids": ids, "digest": _cohort_hash(repository, ids),
+                        "result": result})
+    if _open_owner_snapshot(read_transport, repository, max_total=max_total) != first:
+        raise ValueError("open issue cohort changed during scan; discard all shards")
+    observed = [row for shard in reports for row in shard["result"]["results"]]
+    if len(observed) != len(first) or [
+        int(str(row["task"]).rsplit("#", 1)[1]) for row in observed
+    ] != first:
+        raise ValueError("partial, duplicated or out-of-order shard coverage")
+    counts = {status: sum(row["status"] == status for row in observed)
+              for status in ("PASS", "NORMALIZABLE", "STALE_FRONTIER",
+                             "MISSING_ELIGIBLE", "EXEMPT", "NEEDS_EVIDENCE",
+                             "TRUST_CONFLICT")}
+    frontier_count = sum(bool(row["frontier_verified"]) for row in observed)
+    return {
+        "schema": "task-checkpoint-cursor-audit.v1",
+        "scope": "complete_open_issue_ids_sharded",
+        "repository": repository,
+        "checked": len(first),
+        "discovery_digest": _cohort_hash(repository, first),
+        "discovery_rechecked_identical": True,
+        "coverage_complete_for_discovered_set": True,
+        "eligibility_independently_supplied": (
+            sum(n in eligible for n in first) if eligible is not None else 0
+        ),
+        "frontiers_independently_verified": frontier_count,
+        "semantic_coverage_complete": bool(observed) and frontier_count == len(observed),
+        "counts": counts,
+        "shards": [{"index": shard["index"], "count": shard["count"],
+                    "digest": shard["digest"], "issue_ids": shard["issue_ids"]}
+                   for shard in reports],
+        "results": observed,
+        "mutation": False,
+        "snapshot_atomic": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="GET-only bounded Cursor inventory")
     parser.add_argument("--repository", required=True)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--issue", type=int, action="append")
     group.add_argument("--discover-open", action="store_true")
+    group.add_argument("--discover-open-sharded", action="store_true")
     parser.add_argument("--max-issues", type=int, default=100)
+    parser.add_argument("--max-total", type=int, default=500)
+    parser.add_argument("--shard-size", type=int, default=50)
     args = parser.parse_args()
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         parser.error("GITHUB_TOKEN is required for authenticated read-only discovery")
     from tools.maintenance_github import GitHubReadTransport
     transport = GitHubReadTransport(token=token)
-    issue_ids = (discover_open_issue_ids(transport, args.repository, max_issues=args.max_issues)
-                 if args.discover_open else args.issue)
-    report = audit_issue_ids(transport, args.repository, issue_ids)
+    if args.discover_open_sharded:
+        report = audit_open_issue_shards(transport, args.repository,
+                                         max_total=args.max_total,
+                                         shard_size=args.shard_size)
+    else:
+        issue_ids = (discover_open_issue_ids(transport, args.repository,
+                                             max_issues=args.max_issues)
+                     if args.discover_open else args.issue)
+        report = audit_issue_ids(transport, args.repository, issue_ids)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
     return 0
 
