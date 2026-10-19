@@ -240,10 +240,13 @@ class GitHubReader:
         return issue
 
     def list_issue_comments(
-        self, repository: str, issue_number: int, per_page: int = 100
+        self, repository: str, issue_number: int, per_page: int = 100,
+        *, max_comments: int | None = None,
     ) -> list[dict[str, Any]]:
         if issue_number < 1:
             raise DevflowMCPError("Issue number must be >= 1.")
+        if max_comments is not None and (type(max_comments) is not int or max_comments < 1):
+            raise DevflowMCPError("Invalid comment read bound.")
         comments: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -253,6 +256,10 @@ class GitHubReader:
             if not isinstance(batch, list):
                 raise DevflowMCPError("GitHub Issue comments response was not a list.")
             comments.extend(item for item in batch if isinstance(item, dict))
+            if max_comments is not None and len(comments) > max_comments:
+                # A single extra stored comment proves Inbox's parser limit.
+                # Never fetch the remainder or present this as complete history.
+                return comments[:max_comments + 1]
             if len(batch) < per_page:
                 return comments
             page += 1
@@ -953,7 +960,8 @@ class DevflowService:
                 number = record["issue_number"]
                 try:
                     comments_by_issue[number] = self.reader.list_issue_comments(
-                        selected["repository"], number)
+                        selected["repository"], number,
+                        max_comments=agent_inbox.MAX_ISSUE_COMMENTS)
                 except DevflowMCPError:
                     errors_by_issue[number] = "GITHUB_COMMENT_READ_FAILED"
         return agent_inbox.build_agent_inbox(
