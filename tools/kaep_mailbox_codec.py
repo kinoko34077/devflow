@@ -69,7 +69,7 @@ def validate(raw: object, *, task_ref: str | None = None) -> dict[str, Any]:
     if any(ord(c) < 32 and c not in "\n\t" for c in t): fail("INVALID_CONTROL")
     refs = d["evidence_refs"]
     if type(refs) is not list or len(refs) > 8: fail("INVALID_REFS")
-    pattern = r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/(?:issues/[1-9][0-9]*(?:#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*)"
+    pattern = r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/(?:issues/[1-9][0-9]*(?:#issuecomment-[1-9][0-9]*)?|pull/[1-9][0-9]*|actions/runs/[1-9][0-9]*|commit/[0-9a-f]{40})"
     for ref in refs:
         if not matches(pattern, ref): fail("INVALID_REF")
     if len(refs) != len(set(refs)): fail("DUPLICATE_REFS")
