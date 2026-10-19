@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlsplit
 
 from tools import devflow_mcp_core, repository_projection
 from tests.test_repository_bootstrap import issue_body, request_payload
@@ -32,6 +33,52 @@ class DevflowMCPParsingTests(unittest.TestCase):
         )
 
 
+class DevflowMCPCommentPageBoundTests(unittest.TestCase):
+    def test_bounded_inbox_fetch_stops_once_comment_limit_proved(self):
+        for total, expected_pages, expected_count in (
+            (500, 6, 500), (501, 6, 501), (800, 6, 501),
+        ):
+            with self.subTest(total=total):
+                pages = []
+
+                def transport(url, _headers):
+                    page = int(parse_qs(urlsplit(url).query)["page"][0])
+                    pages.append(page)
+                    start = (page - 1) * 100
+                    return [{"id": i} for i in range(start + 1, min(start + 101, total + 1))]
+
+                reader = devflow_mcp_core.GitHubReader(transport=transport)
+                result = reader.list_issue_comments(
+                    "kinoko34077/devflow", 16, max_comments=500
+                )
+                self.assertEqual(len(result), expected_count)
+                self.assertEqual(pages, list(range(1, expected_pages + 1)))
+
+    def test_unbounded_non_inbox_reader_preserves_old_full_history(self):
+        pages = []
+
+        def transport(url, _headers):
+            page = int(parse_qs(urlsplit(url).query)["page"][0])
+            pages.append(page)
+            start = (page - 1) * 100
+            return [{"id": i} for i in range(start + 1, min(start + 101, 801))]
+
+        reader = devflow_mcp_core.GitHubReader(transport=transport)
+        self.assertEqual(len(reader.list_issue_comments("kinoko34077/devflow", 16)), 800)
+        self.assertEqual(len(pages), 9)
+
+    def test_invalid_comment_bound_fails_without_github_io(self):
+        calls = []
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: calls.append((url, headers))
+        )
+        for invalid in (True, 0, -1):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+                    reader.list_issue_comments("kinoko34077/devflow", 16, max_comments=invalid)
+        self.assertEqual(calls, [])
+
+
 class FakeReader:
     def __init__(self, issues, *, issues_by_repository=None, files=None, comments=None):
         self.issues = issues
@@ -57,9 +104,10 @@ class FakeReader:
                 return issue
         raise AssertionError("issue not found")
 
-    def list_issue_comments(self, repository, issue_number):
+    def list_issue_comments(self, repository, issue_number, *, max_comments=None):
         self.calls.append((repository, "comments", issue_number))
-        return list(self.comments.get((repository, issue_number), []))
+        rows = list(self.comments.get((repository, issue_number), []))
+        return rows[:max_comments + 1] if max_comments is not None else rows
 
     def get_file(self, repository, path):
         self.calls.append((repository, "file", path))
