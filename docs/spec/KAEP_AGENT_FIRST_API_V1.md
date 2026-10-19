@@ -233,3 +233,16 @@ python -m tools.kaep_b5_b6_parity_cli \
 従来の `tools.kaep_source_roster_shadow` が `INDEX_SOURCE_INCOMPLETE` とした際、下位の正規 `discover_index_shadow` に存在した停止コメント番号・検証理由が上位出力では失われていた。今回、`index_blockers` に `index_comment_id`（公開原典の数値ID）と固定コード形式の `reason_code` のみを含める。対象は原典検証中の停止情報であり、コメント本文・認証情報・任意URLは一切再出力しない。インデックスが完全な場合は空配列。
 
 これは古い `kinotch-repo-monitor#81` のKAEPマーカー付きコメントに任意の後置文章があり、正規の `INVALID_WRAPPER` で停止する事例を、安全な停止状態のまま機械可視化する対策である。**未知の原典を「無い」と判断せず、部分取得結果を受入れず、Source網羅性とB5 Cursor rev17も更新しない。** 原典本文を編集したり、KAEP v0.2の厳格なコメント終端規則を緩めたりしない。
+
+
+## B5 verified-pointer原典の明示的な上限拡張（2026-10-20）
+
+B5 #531の実原典 #503走査で、既定の20原典Issue取得上限に到達し、`CANDIDATE_LIMIT` が2件返った。既定のソース範囲は変更せず、実行主体が明示した場合に限り最大40件までの既存正規原典参照を許可する。
+
+```sh
+python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077 --max-sources 40
+```
+
+対象は従来通り、実際に署名やactorを検証した #503の正規pointerと、明示的に取得したM3の信頼済みTASK原典候補に限定。**任意Issueの全件探索ではない。** 指定値を超える候補は黙って捨てず `BLOCKED` とし、根拠のない「原典が全部取得できた」「依頼なし」を決して返さない。デフォルト20件はAPI・CLIの両方で維持、40件超も拒否する。既知の `INVALID_WRAPPER` や actor/recipient・reply-chain の検査、`has_unknown_work=true`、`can_authorize_execution=false`、B5 cursor rev17および #503/manual Control fallbackは維持。
+
+この変更は「前回20件の上限で止まった候補が、明示した範囲で同一原典検証を受けられる」という有限受入だけを目的とする。履歴に埋もれた未知Issue、モデル本人性、異時点パリティ、全Sourceの網羅性、動的HTTP/APIやGPT無人起動の完了を意味しない。有料Provider・Cloudflare D1/Authは使用しない。

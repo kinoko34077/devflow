@@ -25,7 +25,8 @@ from tools.kaep_mailbox_codec import (
     MARKER, read_mailbox, verify_reply_chain,
 )
 
-MAX_SOURCE_ISSUES = 20
+MAX_SOURCE_ISSUES = 20  # unchanged default for old callers
+MAX_OPT_IN_SOURCE_ISSUES = 40  # bounded explicit expansion only
 RECIPIENT = "claude-code"
 MAX_TASK_REPOSITORIES = 2
 
@@ -85,7 +86,7 @@ def source_root_shadow(
     task_views: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compare only verified #503 original-Issue locators, never work supply."""
-    if type(max_sources) is not int or not 1 <= max_sources <= MAX_SOURCE_ISSUES:
+    if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
 
     source_cache: dict[tuple[str, int], str] = {}
@@ -256,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--expect-source-actor", required=True)
-    parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES)
+    parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES,
+                        help="Verified #503/M3 original Issue cap; default 20, explicit maximum 40")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
