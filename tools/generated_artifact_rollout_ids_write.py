@@ -5,12 +5,18 @@ immutable pinned workflow are required before effectful execution.
 """
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 import urllib.parse
 from collections.abc import Mapping
 from typing import Any
 
 from tools.generated_artifact_contract import ArtifactRejected
+from tools.generated_artifact_rollout import ARCHIVE_NAME, MANIFEST_NAME
+from tools.generated_artifact_rollout_admission import attest_authenticated_readonly
+from tools.generated_artifact_rollout_dryrun import MANIFEST_CEILING, _read_regular_bounded
+from tools.generated_artifact_writer import verified_writeback
 
 REPOSITORY = "kinoko34077/IDS-Composit"
 RECIPE = "ids-known-merge-v0.2"
@@ -109,3 +115,43 @@ class NarrowIdsWriteApi:
         if path != self._patch_ref or set(payload) != {"sha", "force"} or payload.get("force") is not False:
             raise ArtifactRejected("IDS writer allows only non-force scratch branch updates")
         return self._transport.patch(path, dict(payload))
+
+def plan_ids_scoped_write(
+    api: Any, env: Mapping[str, str], artifact_dir: pathlib.Path, *,
+    target_branch: str, expected_head: str, devflow_sha: str,
+    devflow_checkout_sha: str,
+) -> dict[str, Any]:
+    """Authenticate and plan IDS two-file writeback, without any mutation.
+
+    This is the independently usable read-only prerequisite for a future
+    reviewed effectful job. No caller-controlled activation flag exists.
+    """
+    validate_target(getattr(api, "repository", ""), RECIPE, target_branch, expected_head)
+    if env.get("MODE") != "dry-run" or env.get("GITHUB_REPOSITORY") != REPOSITORY:
+        raise ArtifactRejected("IDS planning requires authenticated dry-run context")
+    scoped = NarrowIdsWriteApi(api, target_branch, expected_head)
+    auth = attest_authenticated_readonly(
+        scoped, env, repository=REPOSITORY, recipe_id=RECIPE,
+        target_branch=target_branch, expected_head=expected_head,
+        source_head=expected_head, devflow_sha=devflow_sha,
+        devflow_checkout_sha=devflow_checkout_sha,
+    )
+    policy = auth["policy"]
+    validate_policy(policy)
+    main = scoped.get("/branches/main")
+    if not isinstance(main, dict) or main.get("name") != "main" or main.get("protected") is not True:
+        raise ArtifactRejected("IDS main protection cannot be verified")
+    try:
+        manifest = json.loads(_read_regular_bounded(
+            artifact_dir / MANIFEST_NAME, MANIFEST_CEILING,
+        ).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ArtifactRejected("IDS manifest is not strict JSON") from exc
+    archive = _read_regular_bounded(
+        artifact_dir / ARCHIVE_NAME, policy["limits"]["max_archive_bytes"],
+    )
+    result = verified_writeback(
+        scoped, policy, auth["admission"], manifest, archive, dry_run=True,
+    )
+    return {**result, "writer_scope": REPOSITORY, "writes_performed": False,
+            "writeback_enabled": False, "ci_verified": False}
