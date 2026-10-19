@@ -195,7 +195,9 @@ def compare_reports(shadow: dict[str, Any], union: dict[str, Any]) -> dict[str, 
         "schema_version": "kaep.b5-b6-source-parity.v0.1",
         "kind": "READ_ONLY_UNTRUSTED_REPORT_COHORT_COMPARISON",
         "status": "OBSERVED_DISAGREEMENT" if differences else (
-            "PARTIAL_UNKNOWN" if (sglobal or uglobal or len(matched) != len(shared)
+            "PARTIAL_UNKNOWN" if (not matched or sglobal or uglobal
+                                  or len(matched) != len(shared)
+                                  or scovered != ucovered
                                   or shadow["status"] != "BOUNDED_CANDIDATE_SOURCE_READ"
                                   or union["status"] != "BOUNDED_UNION_READ")
             else "BOUNDED_SHARED_SOURCE_MATCH"),
