@@ -122,6 +122,10 @@ class SemanticDriftTests(unittest.TestCase):
     def test_non_mapping_input_is_unknown(self):
         self.assertEqual(compare_claim(None, {})["status"], "UNKNOWN")
 
+    def test_unhashable_section_fails_closed(self):
+        self.check("UNKNOWN", c__section=["Next Action"])
+        self.check("UNKNOWN", c__section={})
+
     def test_explicit_failed_field_observation_contradicts_accepted(self):
         self.check("POTENTIAL_MISMATCH", "FIELD_ACCEPTANCE", "ACCEPTED", "REJECTED")
 
