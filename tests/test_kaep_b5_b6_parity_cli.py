@@ -103,7 +103,7 @@ class BoundedParityTests(unittest.TestCase):
     def test_other_issue_is_not_a_false_mismatch_or_fake_full_parity(self):
         other = f"https://github.com/{REPO}/issues/590"
         report = compare_reports(shadow(issue=ISSUE), union(issue=other))
-        self.assertEqual(report["status"], "BOUNDED_SHARED_SOURCE_MATCH")
+        self.assertEqual(report["status"], "PARTIAL_UNKNOWN")
         self.assertEqual(report["shared_issue_compared"], 0)
         self.assertEqual(report["shadow_only_issue_count"], 1)
         self.assertEqual(report["union_only_issue_count"], 1)
