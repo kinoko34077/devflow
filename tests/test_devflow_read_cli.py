@@ -93,6 +93,41 @@ class CloudReadCLITests(unittest.TestCase):
                     get_service.assert_not_called()
                 self.assertEqual(json.loads(out.call_args.args[0])["status"], "BLOCKED")
 
+    def test_inbox_limit_matches_shared_core_boundary(self):
+        self.assertEqual(cli.MAX_INBOX_LIMIT, 20)
+        service = FakeService()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                result = cli.main([
+                    "inbox", "--repository", self.REPOSITORY,
+                    "--recipient", "codex", "--limit", "20",
+                ])
+        self.assertEqual(result, 0)
+        self.assertEqual(service.calls, [
+            ("inbox", self.REPOSITORY, "codex", 20, 0, None)])
+        self.assertTrue(json.loads(out.call_args.args[0])["has_unknown_work"])
+
+    def test_bad_inbox_options_fail_before_service_and_return_fixed_codes(self):
+        cases = [
+            (["--limit", "21"], "INVALID_PAGINATION"),
+            (["--limit", "100"], "INVALID_PAGINATION"),
+            (["--recipient", "not-registered"], "INVALID_RECIPIENT"),
+            (["--work-status", ""], "INVALID_WORK_STATUS"),
+        ]
+        for option, expected in cases:
+            with self.subTest(option=option):
+                with patch("tools.devflow_read_cli.default_service") as factory:
+                    with patch("builtins.print") as out:
+                        status = cli.main([
+                            "inbox", "--repository", self.REPOSITORY, *option,
+                        ])
+                self.assertEqual(status, 2)
+                factory.assert_not_called()
+                self.assertEqual(
+                    json.loads(out.call_args.args[0]),
+                    {"status": "BLOCKED", "reason_code": expected},
+                )
+
     def test_transport_failure_is_redacted_and_nonzero(self):
         service = FakeService()
         def blocked(_repository):

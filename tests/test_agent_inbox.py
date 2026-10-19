@@ -341,6 +341,34 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertFalse(offset["is_full_work_inventory"])
         self.assertTrue(offset["has_unknown_work"])
 
+    def test_service_invalid_inbox_options_do_not_read_github(self):
+        cases = [
+            ({"limit": 21}, "INVALID_LIMIT"),
+            ({"limit": True}, "INVALID_LIMIT"),
+            ({"limit": 0}, "INVALID_LIMIT"),
+            ({"recipient": "unknown"}, "INVALID_RECIPIENT"),
+            ({"offset": -1}, "INVALID_OFFSET"),
+            ({"offset": True}, "INVALID_OFFSET"),
+            ({"work_status": ""}, "INVALID_WORK_STATUS"),
+        ]
+        for options, expected in cases:
+            with self.subTest(options=options):
+                reader = fixture_reader([task()])
+                with self.assertRaisesRegex(ValueError, "^" + expected + "$"):
+                    devflow_mcp_core.DevflowService(reader).get_agent_inbox(
+                        "demo", **options
+                    )
+                self.assertEqual(reader.calls, [])
+
+    def test_service_inbox_accepts_shared_upper_bound(self):
+        reader = fixture_reader([task()], {(REPO, 21): []})
+        res = devflow_mcp_core.DevflowService(reader).get_agent_inbox(
+            "demo", limit=agent_inbox.MAX_INBOX_TASKS
+        )
+        self.assertEqual(len(res["issues"]), 1)
+        self.assertEqual(res["errors"], [])
+        self.assertFalse(res["has_unknown_work"])
+
     def test_invalid_options_rejected_before_comment_reads(self):
         view = fake_work_view([task()])
         for options in [
