@@ -3,7 +3,7 @@ import unittest
 from tools.generated_artifact_contract import ArtifactRejected
 from tools.generated_artifact_rollout_ids_write import (
     REPOSITORY, RECIPE, OUTPUTS, NarrowIdsWriteApi,
-    validate_target, validate_outputs, validate_policy,
+    validate_target, validate_outputs, validate_policy, plan_ids_scoped_write,
 )
 
 class FakeTransport:
@@ -41,6 +41,13 @@ class IdsBoundaryTests(unittest.TestCase):
         policy["recipe"]["paths"].append("unapproved.json")
         with self.assertRaises(ArtifactRejected):
             validate_policy(policy)
+
+    def test_plan_rejects_effectful_mode_before_api(self):
+        from pathlib import Path
+        with self.assertRaises(ArtifactRejected):
+            plan_ids_scoped_write(FakeTransport(), {"MODE": "write", "GITHUB_REPOSITORY": REPOSITORY}, Path("."),
+                target_branch="artifact/writeback-ids/probe", expected_head="a" * 40,
+                devflow_sha="a" * 40, devflow_checkout_sha="a" * 40)
 
     def test_write_is_dormant(self):
         api = NarrowIdsWriteApi(FakeTransport(), "artifact/writeback-ids/probe", "a" * 40)
