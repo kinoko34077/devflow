@@ -141,7 +141,8 @@ class CloudReadCLITests(unittest.TestCase):
     def test_missing_control_has_finite_no_trust_bypass_code(self):
         class NoIssuesReader:
             def list_issues(self, _repository, state):
-                self.assert_not_called = state
+                if state != "open":
+                    raise AssertionError("Unexpected read scope")
                 return []
 
         with self.assertRaises(DevflowMCPError) as context:
