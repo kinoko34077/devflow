@@ -15,6 +15,38 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 OPERATIONS = ("bootstrap", "work-view", "inbox")
 MAX_INBOX_LIMIT = 100
 
+# Never echo exception text or caller-controlled fields into machine-readable
+# diagnostics. Unknown/future core error codes fail back to the generic code.
+SAFE_READ_FAILURE_CODES = frozenset({
+    "DEVFLOW_READ_UNAVAILABLE",
+    "GITHUB_HTTP_401",
+    "GITHUB_HTTP_403",
+    "GITHUB_HTTP_404",
+    "GITHUB_HTTP_429",
+    "GITHUB_HTTP_OTHER",
+    "GITHUB_NETWORK_UNAVAILABLE",
+    "GITHUB_INVALID_JSON",
+    "GITHUB_REDIRECTED_READ",
+    "CONTROL_NOT_FOUND_OR_UNTRUSTED",
+    "CONTROL_AMBIGUOUS",
+    "CONTROL_SCHEMA_INVALID",
+    "CONTROL_REPOSITORY_MISMATCH",
+})
+SAFE_ARGUMENT_FAILURE_CODES = frozenset({
+    "INVALID_REPOSITORY",
+    "INVALID_PAGINATION",
+    "INBOX_OPTIONS_ON_NON_INBOX_OPERATION",
+})
+
+
+def failure_reason_code(exc: DevflowMCPError | ValueError) -> str:
+    """Expose only an enumerated diagnostic; never a raw exception message."""
+    if isinstance(exc, DevflowMCPError):
+        code = getattr(exc, "reason_code", None)
+        return code if code in SAFE_READ_FAILURE_CODES else "DEVFLOW_READ_UNAVAILABLE"
+    code = str(exc)
+    return code if code in SAFE_ARGUMENT_FAILURE_CODES else "INVALID_ARGUMENTS"
+
 
 def read_operation(
     service: Any, *, operation: str, repository: str,
@@ -64,8 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (DevflowMCPError, ValueError) as exc:
         # Do not expose GitHub response bodies, headers, private Issues or tokens.
-        reason = str(exc) if isinstance(exc, ValueError) else "DEVFLOW_READ_UNAVAILABLE"
-        print(json.dumps({"status": "BLOCKED", "reason_code": reason}))
+        print(json.dumps({"status": "BLOCKED", "reason_code": failure_reason_code(exc)}))
         return 2
 
 

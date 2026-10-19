@@ -61,7 +61,11 @@ HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
 
 
 class DevflowMCPError(RuntimeError):
-    pass
+    """Read failure with a finite, non-secret machine-readable diagnostic code."""
+
+    def __init__(self, message: str, *, reason_code: str = "DEVFLOW_READ_UNAVAILABLE") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 def _strip_scalar(value: str) -> str:
@@ -115,7 +119,8 @@ def _default_transport(url: str, headers: dict[str, str]) -> Any:
             # one (transfer, rename, misrouting). Fail closed; never relabel.
             raise DevflowMCPError(
                 "GitHub read was redirected; refusing to use a response whose "
-                f"identity differs from the request ({_redact_url(url)} -> {_redact_url(final_url)})."
+                f"identity differs from the request ({_redact_url(url)} -> {_redact_url(final_url)}).",
+                reason_code="GITHUB_REDIRECTED_READ",
             )
         payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else None
@@ -132,13 +137,28 @@ def _translate_read_error(exc: Exception) -> DevflowMCPError:
             return DevflowMCPError(
                 f"GitHub read failed with HTTP {exc.code}. "
                 "If the repository is private or access-controlled, configure a read-capable "
-                "DEVFLOW_GITHUB_TOKEN or GITHUB_TOKEN."
+                "DEVFLOW_GITHUB_TOKEN or GITHUB_TOKEN.",
+                reason_code=f"GITHUB_HTTP_{exc.code}",
             )
-        return DevflowMCPError(f"GitHub read failed with HTTP {exc.code}.")
+        if exc.code == 429:
+            return DevflowMCPError(
+                "GitHub read failed with HTTP 429.",
+                reason_code="GITHUB_HTTP_429",
+            )
+        return DevflowMCPError(
+            f"GitHub read failed with HTTP {exc.code}.",
+            reason_code="GITHUB_HTTP_OTHER",
+        )
     if isinstance(exc, urllib.error.URLError):
-        return DevflowMCPError(f"GitHub network read failed: {exc.reason}")
+        return DevflowMCPError(
+            f"GitHub network read failed: {exc.reason}",
+            reason_code="GITHUB_NETWORK_UNAVAILABLE",
+        )
     if isinstance(exc, json.JSONDecodeError):
-        return DevflowMCPError("GitHub returned invalid JSON.")
+        return DevflowMCPError(
+            "GitHub returned invalid JSON.",
+            reason_code="GITHUB_INVALID_JSON",
+        )
     return DevflowMCPError(f"GitHub read failed: {type(exc).__name__}.")
 
 
@@ -591,20 +611,27 @@ class DevflowService:
         if not matches:
             raise DevflowMCPError(
                 f"No open Repository Control Issue titled {title!r}. "
-                "Do not infer managed state; onboarding or control reconciliation is required."
+                "Do not infer managed state; onboarding or control reconciliation is required.",
+                reason_code="CONTROL_NOT_FOUND_OR_UNTRUSTED",
             )
         if len(matches) != 1:
-            raise DevflowMCPError(f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.")
+            raise DevflowMCPError(
+                f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.",
+                reason_code="CONTROL_AMBIGUOUS",
+            )
         issue = matches[0]
         sections = parse_sections(str(issue.get("body") or ""), reject_duplicates=True)
         try:
             WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
         except workflow_contract.WorkflowContractError as exc:
-            raise DevflowMCPError(str(exc)) from exc
+            raise DevflowMCPError(
+                str(exc), reason_code="CONTROL_SCHEMA_INVALID",
+            ) from exc
         recorded_repository = sections.get("Repository", "").strip()
         if recorded_repository and normalize_repository(recorded_repository) != normalized:
             raise DevflowMCPError(
-                f"Repository Control title resolved to {recorded_repository!r}, not {normalized!r}."
+                f"Repository Control title resolved to {recorded_repository!r}, not {normalized!r}.",
+                reason_code="CONTROL_REPOSITORY_MISMATCH",
             )
         return {
             "repository": normalized,
