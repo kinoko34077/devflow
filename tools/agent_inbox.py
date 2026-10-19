@@ -30,7 +30,7 @@ def _safe_untrusted_title(value: object) -> str:
 
 
 
-def _validate_options(recipient: str, limit: int, offset: int, work_status: str | None) -> None:
+def validate_inbox_options(recipient: str, limit: int, offset: int, work_status: str | None) -> None:
     if type(recipient) is not str or recipient not in RECIPIENTS:
         raise ValueError("INVALID_RECIPIENT")
     if type(limit) is not int or not 1 <= limit <= MAX_INBOX_TASKS:
@@ -47,7 +47,7 @@ def select_task_records(
     work_status: str | None = None,
 ) -> dict[str, Any]:
     """Select verified machine TASKs only; no automatic agent ownership."""
-    _validate_options(recipient, limit, offset, work_status)
+    validate_inbox_options(recipient, limit, offset, work_status)
     is_current = (
         work_view.get("source_status") == "AVAILABLE"
         and work_view.get("source_freshness") == "CURRENT"
