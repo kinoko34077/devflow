@@ -58,3 +58,10 @@ A separately approved resident Codex/agent can consume and produce the same enve
 **Current active work is not defined by this static historical spec.** Before processing, consult [live owning Issue #503](https://github.com/kinoko34077/devflow/issues/503), especially `Safety and next action` and latest comments. A distinct [M1-W request 6160545158](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6160545158) was issued to test the user's *already-configured* Claude self check-in, but its completion must be determined from subsequent actual Issue evidence, not inferred from this file. Do not automatically send it again or configure any new ChatGPT/Claude schedule. Optional Channels/PR wake and independently proven agent identity remain separately gated.
 
 The optional senders require explicit `--send` for an ordinary GitHub Issue comment, with an existing authorized `gh` session; no automatic send, runtime dispatch or permission acquisition. The shared post-readback boundary checks exact comment ID/content **and the expected GitHub actor**, which is not a model/session signature. No credential/IAM/permission change, new GitHub Action, scheduled ChatGPT task, external service, production dispatch or fleet rollout is authorized by this contract.
+
+
+### evidence_refs：GitHubコミットURLの限定対応（2026-10-20）
+
+正式な `evidence_refs` は従来の所有者 `kinoko34077` のIssue（Issue commentアンカーを含む）、Pull Request、Actions runに加え、**所有者repoのコミットURL** `https://github.com/kinoko34077/<repo>/commit/<40桁の小文字16進SHA>` を受け付ける。これはGitHubの不変コミットへの資料参照に限り、任意URL/別owner/短縮SHA/大文字SHA/URLクエリ・フラグメント/別パスを許可するものではない。最大8件、重複不可、原典Issueとactor・宛先・返信検証も従来どおりである。
+
+変更理由：B5 [#531](https://github.com/kinoko34077/devflow/issues/531) とDiscovery [#503](https://github.com/kinoko34077/devflow/issues/503) の正規原典GETで、2026-10-17発行の既存6件が全て妥当なコミット証拠URLを含み、旧allowlistの `INVALID_REF` により索引が `PARTIAL_BLOCKED` となることを確認した。歴史上のコメントを改変せず、Python正規codecと `docs/spec/kaep_message_v02.schema.json` の双方へ**同じ正規パターンだけ**追加する。通過した場合でもSource完全性、モデル本人性、実行許可、現在HEAD、B5 Cursor rev17の受入を意味しない。全原典/Consumer parityは引き続き別の受入条件である。
