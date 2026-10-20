@@ -112,6 +112,48 @@ class ImmutableAttestationTests(unittest.TestCase):
                 with self.assertRaises(RunAttestationError):
                     render_attested_run_comment(AttestedRun(obj.record, scope, obj.coverage_key, DIGEST))
 
+    def test_untyped_json_scope_and_coverage_values_fail_with_contract_error(self):
+        """JSON primitives must never escape as TypeError/AttributeError."""
+        canonical = render_attested_run_comment(value())
+        prefix, rest = canonical.split("```json\n", 1)
+        payload_text, suffix = rest.split("\n```", 1)
+        wrong_types = ([1], {"unexpected": 1}, 123, True, None)
+        for field in ("kind", "selector", "coverage_key"):
+            for wrong in wrong_types:
+                with self.subTest(field=field, wrong=wrong):
+                    payload = json.loads(payload_text)
+                    if field == "coverage_key":
+                        payload["coverage_key"] = wrong
+                    else:
+                        payload["scope"][field] = wrong
+                    mutated = (
+                        prefix + "```json\n"
+                        + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+                        + "\n```" + suffix
+                    )
+                    with self.assertRaises(RunAttestationError):
+                        parse_attested_run_comment(mutated)
+
+    def test_untyped_direct_render_scope_and_key_fail_with_contract_error(self):
+        """Direct construction must be validated just like decoded JSON."""
+        from tools.maintenance_run_attestation import AttestedRun
+        original = value()
+        wrong_types = ([1], {"unexpected": 1}, 123, False, None)
+        for field in ("kind", "selector", "coverage_key"):
+            for wrong in wrong_types:
+                with self.subTest(field=field, wrong=wrong):
+                    scope = Scope(
+                        kind=wrong if field == "kind" else original.scope.kind,
+                        selector=wrong if field == "selector" else original.scope.selector,
+                    )
+                    attestation = AttestedRun(
+                        record=original.record, scope=scope,
+                        coverage_key=wrong if field == "coverage_key" else original.coverage_key,
+                        catalog_digest=original.catalog_digest,
+                    )
+                    with self.assertRaises(RunAttestationError):
+                        render_attested_run_comment(attestation)
+
     def test_duplicate_json_keys_rejected_even_nested(self):
         text = render_attested_run_comment(value())
         mutated = text.replace('"coverage_key":"common.correctness"',
