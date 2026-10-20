@@ -125,6 +125,7 @@ def derive_dual_version_coverage(
         most_recent_v1 = max(
             v1, key=lambda item: item.record.generation,
         ) if v1 else None
+        current_record = latest_v2.attestation.record
         # Every trusted v1 and v2 generation belongs to the same audit
         # chronology. Checking only the nearest prior run missed inversions
         # among older v1 generations and could falsely attest a later scope.
