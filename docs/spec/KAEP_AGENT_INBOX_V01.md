@@ -134,3 +134,18 @@ Manual CLI use alone establishes only native read capability. In B3, an actual s
 
 ## Evidence
 Initial native MCP API [PR #536](https://github.com/kinoko34077/devflow/pull/536); truncated page safety [PR #538](https://github.com/kinoko34077/devflow/pull/538); native CLI [PR #539](https://github.com/kinoko34077/devflow/pull/539); security/correlation hardening [PR #540](https://github.com/kinoko34077/devflow/pull/540); check-in entrypoint documentation [PR #548](https://github.com/kinoko34077/devflow/pull/548); Codex test parity [PR #556](https://github.com/kinoko34077/devflow/pull/556); E2E source Issue [#553](https://github.com/kinoko34077/devflow/issues/553).
+## B5/B6 既存Consumer同一原典の有限パリティ比較（2026-10-20、optional/offline）
+
+[B5 #531](https://github.com/kinoko34077/devflow/issues/531) の最初の未受入条件「原典Source universe/Consumer parity」のうち、**既に取得・検証を実施した同一Issueについてのみ**B5 ShadowとB6 live Unionのroot集合を比較する、offline専用補助器 `tools.kaep_b5_b6_parity_cli` を追加する。原典取得・actor/recipient/KAEP検証器を追加・変更しない。
+
+```sh
+python -m tools.kaep_b5_b6_parity_cli --shadow-report ./shadow.json --union-report ./union.json
+```
+
+入力はそれぞれ `kaep.source-roster-shadow.v0.1` と `kaep.live-union-check.v0.1` のローカルJSON。両者とも **claude-code** 宛のみ、原典GitHub Issue URL形式・Comment ID・Message ID・root count・非権限フラグ・重複・サイズを照合する。現行のB5 Shadowはデフォルト20件、**明示拡張時だけ最大40原典**（[#743](https://github.com/kinoko34077/devflow/pull/743)）。B6 Unionは最大40原典であり、比較器も各上限を保持する。
+
+双方に含まれ、どちらも原典照合が成立したIssueだけを比較する。結果はroot識別子の一致数と差分件数、片側Issue・検証不明Issueを**原典URLと件数だけ**で返す。本文、タイトル、トークン、コメントID＋メッセージIDの生の差分配列は出力しない。Unionの検証エラーは `source_errors[].issue_url`（旧Shadowは `errors[].owning_issue`）を別々に検証し、帰属不明のエラーでは比較可能原典なし、帰属済みの原典エラーを一致判定対象から除外する。エラー・範囲不足・片側のみのIssue・異時点の結果では完全一致を保証しない。
+
+出力 `kaep.b5-b6-source-parity.v0.1` の `BOUNDED_SHARED_SOURCE_MATCH` はあくまで**入力された限定共有原典のroot集合一致**であり、同時スナップショット、Source universe完全性、最新HEAD、実際の未処理依頼、モデルによる受信、実行権限、fallback退役のいずれも証明しない。 `OBSERVED_DISAGREEMENT` は観測された非一致であり、異時点更新とDecoder不整合を識別しない。
+
+**実運用上の未達（2026-10-20時点）:** B5 Shadowの実原典走査は、legacy [kinotch-repo-monitor #81](https://github.com/kinoko34077/kinotch-repo-monitor/issues/81) の `INVALID_WRAPPER` により `BLOCKED`（#531 受入記録）である。比較器は `BLOCKED` Shadowを受け入れて見かけのパリティを成立させない。今回のCLI/単体テストが成功しても本物のB5/B6 Consumerパリティ検証完了にはならない。Cloudflare D1実接続はユーザー指定により保留、#503/manual Control と #531 rev17 HOLD、F10 #681の無人GPT起動境界を維持する。
