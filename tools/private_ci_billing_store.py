@@ -138,8 +138,8 @@ class LocalBillingObservationStore:
                 SELECT account, date_jst, billing_month, observation,
                        recorded_at_utc
                 FROM daily_observations
-                WHERE account = ? AND date_jst = ?
-            """, (account, day)).fetchone()
+                WHERE account = ? AND billing_month = ? AND date_jst = ?
+            """, (account, now_utc.strftime("%Y-%m"), day)).fetchone()
         if row is None:
             return None
         if row[2] != now_utc.strftime("%Y-%m") or row[3] not in _DAILY_KINDS:
