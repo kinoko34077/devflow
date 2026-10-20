@@ -86,7 +86,7 @@ def fetch_actions_summary_once(
         report = json.loads(payload)
     except (JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
         return BillingReadResult("HOLD", "INVALID_BILLING_REPORT_JSON", account, month)
-    if type(report) is not dict or report.get("user", "").casefold() != account.casefold():
+    if (type(report) is not dict or type(report.get("user")) is not str\n            or report["user"].casefold() != account.casefold()):
         return BillingReadResult("HOLD", "MISMATCHED_BILLING_OWNER", account, month)
     period = report.get("timePeriod")
     if (type(period) is not dict or type(period.get("year")) is not int
@@ -97,7 +97,7 @@ def fetch_actions_summary_once(
     if type(items) is not list:
         return BillingReadResult("HOLD", "MISSING_USAGE_ITEMS", account, month)
     for item in items:
-        if type(item) is not dict or item.get("product", "").casefold() != "actions":
+        if (type(item) is not dict or type(item.get("product")) is not str\n                or item["product"].casefold() != "actions"):
             return BillingReadResult("HOLD", "UNEXPECTED_BILLING_PRODUCT", account, month)
     return BillingReadResult(
         "REPORT_RECEIVED_INCONCLUSIVE", "PUBLIC_AND_INCLUDED_DISCOUNTS_NOT_SEPARABLE",
