@@ -112,6 +112,36 @@ class ImmutableAttestationTests(unittest.TestCase):
                 with self.assertRaises(RunAttestationError):
                     render_attested_run_comment(AttestedRun(obj.record, scope, obj.coverage_key, DIGEST))
 
+    def test_v2_scope_and_coverage_nonstring_values_fail_with_contract_error(self):
+        from tools.maintenance_run_attestation import AttestedRun
+
+        obj = value()
+        canonical = render_attested_run_comment(obj)
+        fields = (
+            ('"kind":"repository"', "kind", "scope kind"),
+            ('"selector":"."', "selector", "scope selector"),
+            ('"coverage_key":"common.correctness"', "coverage_key", "coverage key"),
+        )
+        malformed = ([], {}, 123, True, False, None)
+        for source, field, name in fields:
+            self.assertIn(source, canonical)
+            for bad in malformed:
+                with self.subTest(field=name, bad=bad):
+                    raw = canonical.replace(
+                        source, '"' + field + '":' + json.dumps(bad), 1,
+                    )
+                    with self.assertRaises(RunAttestationError):
+                        parse_attested_run_comment(raw)
+
+                    scope = Scope(bad, ".") if field == "kind" else (
+                        Scope("repository", bad) if field == "selector" else obj.scope
+                    )
+                    key = bad if field == "coverage_key" else obj.coverage_key
+                    with self.assertRaises(RunAttestationError):
+                        render_attested_run_comment(
+                            AttestedRun(obj.record, scope, key, DIGEST),
+                        )
+
     def test_duplicate_json_keys_rejected_even_nested(self):
         text = render_attested_run_comment(value())
         mutated = text.replace('"coverage_key":"common.correctness"',
