@@ -131,6 +131,29 @@ def context(slots, **overrides):
 
 
 class SelectorScoreTests(unittest.TestCase):
+    def test_malformed_source_fingerprint_cannot_be_selected(self):
+        value = slot()
+        valid = ms.canonical_fingerprint({"repository": value.repository, "slot": value.slot_id})
+        self.assertEqual(55, ms.select_maintenance((value,), context(
+            (value,), current_fingerprints={key(value): valid},
+        ), ()).score)
+        invalid = (
+            "sha256:x",
+            "sha256:" + "a" * 63,
+            "sha256:" + "a" * 65,
+            "sha256:" + "A" * 64,
+            "sha256:" + "g" * 64,
+            "sha256:" + "a" * 64 + "\\n",
+            "sha256:" + "a" * 64 + ":extra",
+            "SHA256:" + "a" * 64,
+            "", None, 123, True,
+        )
+        for bad in invalid:
+            with self.subTest(fingerprint=bad):
+                ctx = context((value,), current_fingerprints={key(value): bad})
+                self.assertIsNone(ms.score_slot(value, ctx, ()))
+                self.assertIsNone(ms.select_maintenance((value,), ctx, ()))
+
     def test_never_run_score_is_explainable(self):
         value = slot()
         result = ms.select_maintenance((value,), context((value,)), ())
