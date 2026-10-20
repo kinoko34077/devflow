@@ -8,6 +8,7 @@ No network, credential access, background task or executor lives here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
@@ -77,7 +78,7 @@ class LocalBillingObservationStore:
                 billing_month TEXT NOT NULL,
                 observation TEXT NOT NULL,
                 recorded_at_utc TEXT NOT NULL,
-                PRIMARY KEY (account, date_jst)
+                PRIMARY KEY (account, billing_month, date_jst)
             )
         """)
         conn.execute("""
@@ -114,8 +115,8 @@ class LocalBillingObservationStore:
                 SELECT account, date_jst, billing_month, observation,
                        recorded_at_utc
                 FROM daily_observations
-                WHERE account = ? AND date_jst = ?
-            """, (account, day)).fetchone()
+                WHERE account = ? AND billing_month = ? AND date_jst = ?
+            """, (account, month, day)).fetchone()
             if row[:4] != (account, day, month, observation):
                 raise ValueError("CONFLICTING_DAILY_OBSERVATION")
             conn.execute("COMMIT")
@@ -132,7 +133,7 @@ class LocalBillingObservationStore:
         account = _check_account(account)
         now_utc = _check_now(now_utc)
         day = now_utc.astimezone(_JST).strftime("%Y-%m-%d")
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute("""
                 SELECT account, date_jst, billing_month, observation,
                        recorded_at_utc
@@ -188,7 +189,7 @@ class LocalBillingObservationStore:
         """Return only matching UTC month; never trust old month implicitly."""
         account = _check_account(account)
         month = _check_now(now_utc).strftime("%Y-%m")
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute("""
                 SELECT account, billing_month, check_run_id, repository,
                        recorded_at_utc
