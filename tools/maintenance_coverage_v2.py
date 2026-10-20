@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Mapping, Sequence
 
 from tools.maintenance_catalog import ResolvedSlot
@@ -14,6 +15,7 @@ from tools.maintenance_coverage import (
     CoverageRow, LedgerEvidence, derive_coverage, _trusted,
 )
 from tools.maintenance_run_attestation import AttestedRun
+from tools.maintenance_ledger import RunRecord
 
 _SHA = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SUBSTANTIVE = frozenset({"CLEAN", "FINDINGS", "RECONCILED"})
@@ -31,6 +33,41 @@ def _trusted_attestation(item: AttestedLedgerEvidence, repo: str) -> bool:
         LedgerEvidence(item.attestation.record, item.source_url, item.author_association),
         repo,
     )
+
+
+def _generation_clock_conflict(records: Sequence[RunRecord]) -> bool:
+    """All trusted generations must agree with their actual UTC timestamps.
+
+    Compare parsed instants, not textual RFC3339 strings (whole seconds and
+    fractional seconds can denote the same instant but sort differently).
+    An invalid timestamp fails closed even if a caller bypassed Ledger parsing.
+    """
+    bounds: dict[int, tuple[datetime, datetime]] = {}
+    try:
+        for item in records:
+            timestamp = item.completed_at
+            if (
+                type(item.generation) is not int
+                or item.generation < 1
+                or type(timestamp) is not str
+                or not timestamp.endswith("Z")
+            ):
+                return True
+            instant = datetime.fromisoformat(timestamp[:-1] + "+00:00")
+            prior = bounds.get(item.generation)
+            bounds[item.generation] = (
+                min(prior[0], instant) if prior else instant,
+                max(prior[1], instant) if prior else instant,
+            )
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return True
+    latest_prior: datetime | None = None
+    for generation in sorted(bounds):
+        earliest, latest = bounds[generation]
+        if latest_prior is not None and earliest < latest_prior:
+            return True
+        latest_prior = max(latest_prior, latest) if latest_prior else latest
+    return False
 
 
 def derive_dual_version_coverage(
@@ -83,37 +120,18 @@ def derive_dual_version_coverage(
                                   reason="duplicate trusted run ID across v1/v2"))
             continue
         latest_v2 = max(
-            v2, key=lambda item: (
-                item.attestation.record.generation,
-                item.attestation.record.completed_at,
-            ),
+            v2, key=lambda item: item.attestation.record.generation,
         )
         most_recent_v1 = max(
-            v1, key=lambda item: (
-                item.record.generation,
-                item.record.completed_at,
-            ),
+            v1, key=lambda item: item.record.generation,
         ) if v1 else None
-        # The numeric generation is the authoritative monotone run sequence.
-        # A later wall-clock timestamp attached to an earlier generation
-        # represents inconsistent evidence and cannot receive coverage credit.
         current_record = latest_v2.attestation.record
-        if any(
-            item.attestation.record.generation < current_record.generation
-            and item.attestation.record.completed_at > current_record.completed_at
-            for item in v2
-        ) or (
-            most_recent_v1 is not None
-            and (
-                (
-                    most_recent_v1.record.generation < current_record.generation
-                    and most_recent_v1.record.completed_at > current_record.completed_at
-                )
-                or (
-                    most_recent_v1.record.generation > current_record.generation
-                    and most_recent_v1.record.completed_at < current_record.completed_at
-                )
-            )
+        # Every trusted v1 and v2 generation belongs to the same audit
+        # chronology. Checking only the nearest prior run missed inversions
+        # among older v1 generations and could falsely attest a later scope.
+        if _generation_clock_conflict(
+            [item.record for item in v1]
+            + [item.attestation.record for item in v2]
         ):
             output.append(replace(
                 row, status="AMBIGUOUS_HISTORY",

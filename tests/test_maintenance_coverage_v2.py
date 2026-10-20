@@ -187,6 +187,48 @@ class ScopeAttestationProjectionTests(unittest.TestCase):
             rows(v1=(old_a, old_b), v2=(later,))[0].status,
         )
 
+    def test_older_legacy_generations_clock_reversal_cannot_promote_v2(self):
+        # v1 generation 1 finished after generation 2, but both precede
+        # a later trusted v2 run. Inspect the *whole* history, not only
+        # the highest-generation v1 completion adjacent to v2.
+        first = evidence(
+            run_id=f"audit:{REPO}:common.correctness:1",
+            generation=1, result="BLOCKED",
+            completed_at="2026-10-18T12:00:00Z",
+        )
+        second = evidence(
+            run_id=f"audit:{REPO}:common.correctness:2",
+            generation=2, result="FINDINGS",
+            completed_at="2026-10-17T10:00:00Z",
+        )
+        third = attested(record=record(
+            run_id=f"audit:{REPO}:common.correctness:3",
+            generation=3, result="CLEAN",
+            completed_at="2026-10-19T09:00:00Z",
+        ))
+        self.assertEqual(
+            "AMBIGUOUS_HISTORY",
+            rows(v1=(first, second), v2=(third,))[0].status,
+        )
+
+    def test_equivalent_utc_fractional_timestamp_is_not_clock_reversal(self):
+        # RFC3339 accepts whole-second and fractional equivalent UTC values.
+        # Textual sorting incorrectly treats ".000Z" as before "Z".
+        prior = evidence(
+            run_id=f"audit:{REPO}:common.correctness:1",
+            generation=1, result="BLOCKED",
+            completed_at="2026-10-17T00:00:00Z",
+        )
+        next_run = attested(record=record(
+            run_id=f"audit:{REPO}:common.correctness:2",
+            generation=2, result="CLEAN",
+            completed_at="2026-10-17T00:00:00.000Z",
+        ))
+        self.assertEqual(
+            "ATTESTED_SCOPE_MATCH",
+            rows(v1=(prior,), v2=(next_run,))[0].status,
+        )
+
     def test_v2_generation_timestamp_reversal_is_ambiguous(self):
         prior = attested(record=record(
             run_id=f"audit:{REPO}:common.correctness:9",
