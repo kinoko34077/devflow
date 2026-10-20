@@ -157,7 +157,7 @@ class BoundedParityTests(unittest.TestCase):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_UNION_ROOT_COUNT"):
             compare_reports(shadow(), bad)
 
-    def test_duplicate_roots_and_20_40_caps_fail_closed(self):
+    def test_duplicate_roots_and_40_caps_fail_closed(self):
         bad = shadow(roots=((912, "msg_first"), (912, "msg_first")))
         with self.assertRaisesRegex(InvalidMessage, "INVALID_SHADOW_ROOT"):
             compare_reports(bad, union())
@@ -165,13 +165,52 @@ class BoundedParityTests(unittest.TestCase):
         with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_UNION_ROOT"):
             compare_reports(shadow(), bad)
         a = shadow()
-        a["issues"] = a["issues"] * 21
+        a["issues"] = a["issues"] * 41
         with self.assertRaisesRegex(InvalidMessage, "INVALID_SHADOW_REPORT"):
             compare_reports(a, union())
         b = union()
         b["source_candidates"] = b["source_candidates"] * 41
         with self.assertRaisesRegex(InvalidMessage, "INVALID_UNION_REPORT"):
             compare_reports(shadow(), b)
+
+    def test_live_union_issue_url_error_excludes_only_affected_source(self):
+        other = f"https://github.com/{REPO}/issues/590"
+        a = shadow()
+        a["issues"].append(shadow(issue=other)["issues"][0])
+        b = union()
+        extra = union(roots=(), issue=other)
+        extra["source_candidates"][0]["source_observation"] = "SOURCE_VALIDATION_UNKNOWN"
+        b["source_candidates"].append(extra["source_candidates"][0])
+        b["status"] = "PARTIAL_UNKNOWN"
+        # Real union output stores URL under issue_url, not owning_issue.
+        b["source_errors"] = [{"issue_url": other, "reason_code": "INVALID_FIELDS"}]
+        output = compare_reports(a, b)
+        self.assertEqual(output["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(output["shared_issue_count"], 2)
+        self.assertEqual(output["shared_issue_compared"], 1)
+        self.assertEqual(output["shared_issue_unknown"], 1)
+        self.assertEqual(len(output["same_source_matches"]), 1)
+
+    def test_global_union_error_invalidates_all_provisional_comparisons(self):
+        b = union()
+        b["status"] = "PARTIAL_UNKNOWN"
+        b["source_errors"] = [{"reason_code": "SOURCE_UNAVAILABLE", "issue_url": None}]
+        report = compare_reports(shadow(), b)
+        self.assertEqual(report["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(report["shared_issue_compared"], 0)
+        self.assertEqual(report["shared_issue_unknown"], 1)
+        self.assertEqual(report["same_source_matches"], [])
+
+    def test_shadow_opt_in_40_distinct_issue_limit_matches_merged_shadow_contract(self):
+        a = shadow()
+        a["issues"] = [shadow(roots=(), issue=f"https://github.com/{REPO}/issues/{n}")["issues"][0]
+                       for n in range(1, 41)]
+        report = compare_reports(a, union(roots=(), issue=f"https://github.com/{REPO}/issues/1"))
+        self.assertEqual(report["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(report["shadow_source_issues_observed"], 40)
+        a["issues"].append(shadow(roots=(), issue=f"https://github.com/{REPO}/issues/41")["issues"][0])
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_SHADOW_REPORT"):
+            compare_reports(a, union())
 
     def test_cli_offline_input_and_duplicate_json_key_safe_fail(self):
         with tempfile.TemporaryDirectory() as temp:
