@@ -69,9 +69,14 @@ def _validate(value: AttestedRun) -> AttestedRun:
         raise RunAttestationError("attestation must be AttestedRun")
     if not isinstance(value.scope, Scope):
         raise RunAttestationError("attestation scope missing")
-    if value.scope.kind not in SCOPE_KINDS or not value.scope.selector.strip():
+    if (
+        type(value.scope.kind) is not str
+        or value.scope.kind not in SCOPE_KINDS
+        or type(value.scope.selector) is not str
+        or not value.scope.selector.strip()
+    ):
         raise RunAttestationError("attestation scope is invalid")
-    if not isinstance(value.coverage_key, str) or not value.coverage_key.strip():
+    if type(value.coverage_key) is not str or not value.coverage_key.strip():
         raise RunAttestationError("attestation coverage_key missing")
     _hash(value.catalog_digest, "catalog_digest")
     # Accepted v1 authoritative parser provides closed result/depth/run-id,
