@@ -143,7 +143,7 @@ class SelectorScoreTests(unittest.TestCase):
             "sha256:" + "a" * 65,
             "sha256:" + "A" * 64,
             "sha256:" + "g" * 64,
-            "sha256:" + "a" * 64 + "\\n",
+            "sha256:" + "a" * 64 + "\n",
             "sha256:" + "a" * 64 + ":extra",
             "SHA256:" + "a" * 64,
             "", None, 123, True,
