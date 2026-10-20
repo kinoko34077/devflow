@@ -166,5 +166,45 @@ class ImmutableAttestationTests(unittest.TestCase):
             parse_attested_run_comment(malformed)
 
 
+    def test_malformed_v2_scope_values_fail_with_contract_error(self):
+        """JSON types must not escape as TypeError/AttributeError on untrusted v2."""
+        canonical = render_attested_run_comment(value())
+        payload = canonical.split("```json\n", 1)[1].split("\n```", 1)[0]
+        original = json.loads(payload)
+        bad_values = ([], {}, 123, True, False, None)
+        for field in ("kind", "selector", "coverage_key"):
+            for invalid in bad_values:
+                with self.subTest(field=field, invalid=invalid):
+                    changed = json.loads(payload)
+                    if field == "coverage_key":
+                        changed[field] = invalid
+                    else:
+                        changed["scope"][field] = invalid
+                    mutated = canonical.replace(
+                        payload,
+                        json.dumps(changed, sort_keys=True, separators=(",", ":")),
+                        1,
+                    )
+                    with self.assertRaises(RunAttestationError):
+                        parse_attested_run_comment(mutated)
+        self.assertEqual(value(), parse_attested_run_comment(canonical))
+
+    def test_malformed_direct_scope_and_key_fail_with_contract_error(self):
+        from tools.maintenance_run_attestation import AttestedRun
+
+        base = value()
+        for invalid in ([], {}, 123, True, False, None):
+            for field in ("kind", "selector", "coverage_key"):
+                with self.subTest(field=field, invalid=invalid):
+                    if field == "coverage_key":
+                        changed = AttestedRun(base.record, base.scope, invalid, DIGEST)
+                    elif field == "kind":
+                        changed = AttestedRun(base.record, Scope(invalid, "."), base.coverage_key, DIGEST)
+                    else:
+                        changed = AttestedRun(base.record, Scope("repository", invalid), base.coverage_key, DIGEST)
+                    with self.assertRaises(RunAttestationError):
+                        render_attested_run_comment(changed)
+
+
 if __name__ == "__main__":
     unittest.main()
