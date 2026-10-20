@@ -202,6 +202,7 @@ def compare_reports(shadow: dict[str, Any], union: dict[str, Any]) -> dict[str, 
             "PARTIAL_UNKNOWN" if (not matched or sglobal or uglobal
                                   or len(matched) != len(shared)
                                   or scovered != ucovered
+                                  or bool(shadow["errors"]) or bool(union["source_errors"])
                                   or shadow["status"] != "BOUNDED_CANDIDATE_SOURCE_READ"
                                   or union["status"] != "BOUNDED_UNION_READ")
             else "BOUNDED_SHARED_SOURCE_MATCH"),
