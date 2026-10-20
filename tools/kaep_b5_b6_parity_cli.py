@@ -16,7 +16,7 @@ from typing import Any
 from tools.kaep_inbox_reader import InvalidMessage
 
 MAX_REPORT_BYTES = 2_000_000
-SHADOW_LIMIT = 20
+SHADOW_LIMIT = 40  # shadow default 20; explicit bounded max40 since accepted PR #743
 UNION_LIMIT = 40
 MAX_UNION_ROWS = 5000
 ISSUE_URL = re.compile(r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
@@ -161,7 +161,9 @@ def _validate_union(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str]
     for err in doc["source_errors"]:
         if type(err) is not dict or type(err.get("reason_code")) is not str or REASONS.fullmatch(err["reason_code"]) is None:
             _deny("INVALID_UNION_ERROR")
-        url = err.get("owning_issue")
+        # Existing B6 live-union report uses source_errors[].issue_url, not
+        # the owning_issue field emitted by the original strict reader.
+        url = err.get("issue_url")
         if url is None:
             global_unknown = True
         else:
@@ -179,7 +181,9 @@ def compare_reports(shadow: dict[str, Any], union: dict[str, Any]) -> dict[str, 
     svalid, scovered, sglobal = _validate_shadow(shadow)
     uvalid, ucovered, uglobal = _validate_union(union)
     shared = scovered & ucovered
-    matched = sorted(shared & svalid.keys() & uvalid.keys())
+    # If any error lacks a source identity, it may taint the whole cohort.
+    # Keep diagnostics, but do not assert parity for even otherwise matched keys.
+    matched = sorted(shared & svalid.keys() & uvalid.keys()) if not (sglobal or uglobal) else []
     matches, differences = [], []
     for repo, number in matched:
         a, b = svalid[(repo, number)], uvalid[(repo, number)]
@@ -198,6 +202,7 @@ def compare_reports(shadow: dict[str, Any], union: dict[str, Any]) -> dict[str, 
             "PARTIAL_UNKNOWN" if (not matched or sglobal or uglobal
                                   or len(matched) != len(shared)
                                   or scovered != ucovered
+                                  or bool(shadow["errors"]) or bool(union["source_errors"])
                                   or shadow["status"] != "BOUNDED_CANDIDATE_SOURCE_READ"
                                   or union["status"] != "BOUNDED_UNION_READ")
             else "BOUNDED_SHARED_SOURCE_MATCH"),
