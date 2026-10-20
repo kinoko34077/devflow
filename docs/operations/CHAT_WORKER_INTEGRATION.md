@@ -63,6 +63,17 @@ Section 1 below remains the local fallback.
 
 ## 1.1 Standing-maintenance fallback after ordinary no-work
 
+### Manual / explicit SMC versus independently scheduled model launch
+
+SMC is a **worker-side idle fallback**, **not** a request to start a new AI session or to use the scheduled Claude Controller. The current accepted manual-start worker path (#190 / #202) is independent of the automatic provider-launch program (#223 / execution-coordinator#87), including its incomplete fee-bearing Provider E2E or Actions-independent F3C host. Reuse the existing open ChatGPT/Codex/Claude session when the user invokes SMC; this path needs no newly launched Provider.
+
+- **Explicit SMC request** (e.g. "SMCを進めて", "この監査を実行"): resolve the authorized repository/scope, inspect the current catalog, Ledger, Control and fresh selection directly. Do **not** require ordinary `NO_ELIGIBLE_WORK` as a prerequisite; the user explicitly chose maintenance. This changes the invocation selection order, not permanent Issue Priority.
+- **Broad idle request** (e.g. "なんかして"): ordinary pickup / recovery still precedes the maintenance selector as specified below.
+- **Automatic model launch** is separate. Accepted execution-coordinator [#148](https://github.com/kinoko34077/execution-coordinator/issues/148) / [PR #149](https://github.com/kinoko34077/execution-coordinator/pull/149) excludes trusted owning Issues with canonical `Type: MAINTENANCE` from scheduled Claude offers and rejects stale maintenance offers before Claim. A high-priority Repository Control does not turn a maintenance Ledger into an automatic trigger.
+- Existing Priority order remains **P0 highest, P1, P2, P3 lowest**. A standing audit Ledger need not be relabeled P0. Explicit user intent is per-request context, not a silent durable Priority rewrite or paid-provider authorization.
+- **Execution remains guarded**: selecting a slot is not executing it. For a real credited maintenance run, the existing exact catalog/Control/owner eligibility, publisher/consumer attempt separation (3C), serialized coordinator Claim + acknowledge, source-bound actual work, and Ledger readback are mandatory. An already-open chat may consume admitted manual-only supply through the accepted pickup path; no second queue, synthetic work, or uncoordinated direct Claim is introduced. The user no-fee-bearing-Provider rule still forbids launch through a charged route; do not promote a read-only selector result or source-only review to completed audit coverage.
+- The legacy #209 `NO_CURRENT_SUPPLY` pause on fee-bearing auto-consumable offers is **not** evidence that every manual read-only SMC operation is blocked. Resolve a bounded manual-only catalog supply under #209's existing authority and #148 guard before attempting publication; if its exact claim transport is unavailable, record the technical blocker and continue permitted GET-only work rather than redirecting to paid Claude.
+
 This is an outer operational loop around bootstrap-v1, not a new bootstrap disposition.
 
 For a generic broad-work request:
