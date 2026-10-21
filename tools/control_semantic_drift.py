@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 DIMENSIONS = {
-    "PR_GATE": frozenset({"AWAIT_REVIEW", "AWAIT_MERGE", "MERGED", "CLOSED_UNMERGED", "UNKNOWN"}),
+    "PR_GATE": frozenset({"OPEN", "AWAIT_REVIEW", "AWAIT_MERGE", "MERGED", "CLOSED_UNMERGED", "UNKNOWN"}),
     "PUBLIC_ENTRY": frozenset({"UNVERIFIED", "VERIFIED", "FAILED", "UNKNOWN"}),
     "FIELD_ACCEPTANCE": frozenset({"UNVERIFIED", "ACCEPTED", "REJECTED", "UNKNOWN"}),
     # Proof of code existence is not proof of a deployed read or a live route.
@@ -119,6 +119,13 @@ def compare_claim(control: Mapping[str, Any], observed: Mapping[str, Any]) -> di
     # physical/public acceptance claim outside the available GitHub evidence.
     if dim != "PR_GATE" and "UNVERIFIED" in (cv, ov):
         return {"status": "UNKNOWN", "reason": "NO_ACCEPTANCE_EVIDENCE"}
+    # GitHub state=open is compatible with a pending-review or pending-merge
+    # workflow stage. It does not prove the latter and is not contradictory.
+    if dim == "PR_GATE" and (
+        (cv == "OPEN" and ov in ("AWAIT_REVIEW", "AWAIT_MERGE"))
+        or (ov == "OPEN" and cv in ("AWAIT_REVIEW", "AWAIT_MERGE"))
+    ):
+        return {"status": "UNKNOWN", "reason": "OPEN_DOES_NOT_PROVE_REVIEW_STAGE"}
     if cv == ov:
         return {"status": "ALIGNED", "reason": "SAME_SCOPED_STAGE"}
     return {"status": "POTENTIAL_MISMATCH", "reason": "SAME_SCOPE_CONTRADICTORY_STAGE"}

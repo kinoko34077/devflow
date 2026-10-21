@@ -91,6 +91,30 @@ edits only their directly affected fields, with independent readback.
 | devflow #500 / Frequency Warp | Several stages coexist | Web #183, native #172 | No status mismatch established |
 | devflow #23 / LINE | AUDITED plus open successor PR | #47, PR #67 | No status mismatch established |
 
+## M2 producer-invoked exact PR stage check (2026-10-22; bounded)
+
+Reuses `tools/control_semantic_pilot.py` (does not create a second comparator).
+At an accepted transition, an authorized producer may explicitly run:
+
+`python -m tools.control_semantic_pilot --control 705 --repository kinoko34077/kinotch-editor-platform --pr 15`
+
+The checker performs exactly two bounded native `gh api GET` reads of the
+selected Control and owning PR; it does not fetch source code, change a
+permission, update an Issue, watch other repos, or schedule a daemon.
+Only canonical exact subject links in the CURRENT `## Next Action` with
+an explicit stage label are comparable. Current `OPEN` means only GitHub
+`state=open`, not 'review accepted', mergeable or product-ready; it is
+distinct from AWAIT_REVIEW and AWAIT_MERGE. Comparing OPEN with either pending-review stage returns UNKNOWN (different granularity), not a false mismatch. A later merged PR with an
+unchanged explicit OPEN claim yields a POTENTIAL_MISMATCH review candidate,
+never a Control auto-write. Missing/ambiguous claim or inconsistent source
+yields UNKNOWN. The no-arguments #705/PR14 invocation remains supported.
+
+Producer-owned affected-surface reconciliation under
+`docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md` §7 remains the
+authority. A producer must actually call and interpret this advisory
+at their transition; merely merging this code does not install a hook.
+Full automatic merge/Close interception and all-repository semantic
+monitoring are NOT accepted by this bounded command.
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
 1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.

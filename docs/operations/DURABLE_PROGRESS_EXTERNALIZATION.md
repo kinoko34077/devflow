@@ -126,6 +126,25 @@ A bounded unit is not operationally complete until:
 
 Cross-repository or periodic consistency audits are a backstop for missed drift, interaction defects and policy gaps. They are not the routine garbage collector for stale state produced by ordinary workers.
 
+### Scoped PR semantic check for the affected producer (#726)
+
+The existing producer-owned reconciliation duty in this section can be
+assisted by the **read-only** `tools.control_semantic_pilot` CLI. For
+a Control with an explicit current PR stage claim, invoke the fixed
+two-source check on that exact subject after a verified merge/close:
+
+`python -m tools.control_semantic_pilot --control 705 --repository kinoko34077/kinotch-editor-platform --pr 15`
+
+ALIGNED means only that the exact PR stage claim matches the actual GitHub
+PR stage at the two read times; it does not confer product acceptance.
+POTENTIAL_MISMATCH requires the producer to verify and reconcile only
+the affected canonical fields within existing permissions. UNKNOWN does
+not waive the inspection duty and must not be turned into a green status.
+Never infer review-readiness from OPEN, or infer deployed/physical acceptance
+from a merged source PR. No automatic Control mutation, scheduler or
+merge hook is installed. Full M2 transition-time automation remains open
+in devflow #726. Do not add semantic claims to unrelated historical prose
+simply to force the tool to report ALIGNED.
 ## 8. Working notes are allowed
 
 The progress surface may also contain concise temporary material such as:

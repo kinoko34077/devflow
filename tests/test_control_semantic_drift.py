@@ -68,6 +68,24 @@ class SemanticDriftTests(unittest.TestCase):
                    "CODE_ONLY", "CODE_ONLY",
                    o__dimension="PRIVATE_EXECUTOR_ADMISSION")
 
+    def test_open_state_and_review_stage_have_different_semantics(self):
+        for pending in ("AWAIT_REVIEW", "AWAIT_MERGE"):
+            for cv, ov in (("OPEN", pending), (pending, "OPEN")):
+                with self.subTest(cv=cv, ov=ov):
+                    control, observed = fixtures(
+                        "PR_GATE", cv, ov
+                    )
+                    self.assertEqual(
+                        compare_claim(control, observed),
+                        {"status": "UNKNOWN",
+                         "reason": "OPEN_DOES_NOT_PROVE_REVIEW_STAGE"},
+                    )
+
+    def test_pr_open_not_review_readiness_but_merge_transition_drift(self):
+        self.check("ALIGNED", "PR_GATE", "OPEN", "OPEN")
+        self.check("POTENTIAL_MISMATCH", "PR_GATE", "OPEN", "MERGED")
+        self.check("POTENTIAL_MISMATCH", "PR_GATE", "MERGED", "OPEN")
+
     def test_current_review_gate_has_merged_pr(self):
         self.check("POTENTIAL_MISMATCH")
 
