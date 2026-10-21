@@ -1,5 +1,7 @@
 """Offline regression tests for the fixed native PR semantic pilot (#726)."""
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 from types import SimpleNamespace
 from unittest import TestCase, main
 from unittest.mock import patch
@@ -331,6 +333,50 @@ class PilotTests(TestCase):
                 pilot.check_pr_transition_once(0, pilot.REPOSITORY, 15)["status"],
                 "UNKNOWN",
             )
+
+    def test_strict_producer_exit_contract(self):
+        for status, expected in (
+            ("ALIGNED", 0),
+            ("POTENTIAL_MISMATCH", 2),
+            ("UNKNOWN", 3),
+            ("NOT_COMPARABLE", 3),
+        ):
+            with self.subTest(status=status):
+                capture = StringIO()
+                with patch.object(
+                    pilot, "check_pr_transition_once",
+                    return_value={"status": status, "reason": "fixture"},
+                ) as check:
+                    with redirect_stdout(capture):
+                        code = pilot.run_cli([
+                            "--repository", pilot.REPOSITORY,
+                            "--control", "705", "--pr", "15",
+                            "--require-aligned",
+                        ])
+                self.assertEqual(code, expected)
+                self.assertEqual(json.loads(capture.getvalue())["status"], status)
+                check.assert_called_once_with(705, pilot.REPOSITORY, 15)
+
+    def test_non_strict_diagnostic_preserves_backward_compatible_exit_zero(self):
+        for status in ("UNKNOWN", "POTENTIAL_MISMATCH", "ALIGNED"):
+            with self.subTest(status=status):
+                with patch.object(
+                    pilot, "check_pr_transition_once",
+                    return_value={"status": status, "reason": "fixture"},
+                ):
+                    with redirect_stdout(StringIO()):
+                        self.assertEqual(pilot.run_cli([]), 0)
+
+    def test_strict_real_source_unknown_is_not_a_success(self):
+        # Existing code path returning UNKNOWN when source is missing is
+        # a genuine blocked producer exit, never a green gate.
+        with patch.object(pilot.subprocess, "run", side_effect=OSError("no gh")):
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    pilot.run_cli(["--require-aligned"]), 3
+                )
+
+
 
 if __name__ == "__main__":
     main()
