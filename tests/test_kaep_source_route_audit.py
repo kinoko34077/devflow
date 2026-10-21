@@ -106,6 +106,25 @@ class RouteAuditTests(unittest.TestCase):
         self.assertEqual(untrusted["index_warnings"][0]["reason_code"],
                          "UNTRUSTED_DISCOVERY_ACTOR")
 
+    def test_existing_github_actions_notice_actor_contract_is_reused(self):
+        root = source()
+        out = audit_route(
+            pages([comment(101, root)]),
+            pages([route_comment(root, actor="github-actions[bot]")]),
+            repository=REPO, issue=ISSUE, message_id=root["message_id"],
+            expected_source_actor=ACTOR,
+            expected_notice_actor="github-actions[bot]",
+        )
+        self.assertEqual(out["status"], "EXACT_POINTER_OBSERVED")
+        self.assertFalse(out["recipient_pickup_proven"])
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_NOTICE_ACTOR"):
+            audit_route(
+                pages([comment(101, root)]), pages([]),
+                repository=REPO, issue=ISSUE, message_id=root["message_id"],
+                expected_source_actor=ACTOR,
+                expected_notice_actor="bot⚠️",
+            )
+
     def test_wrong_pointer_origin_fails_closed_without_misrouting(self):
         root = source()
         bad = route_comment(root, source_comment_id=101)
