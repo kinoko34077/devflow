@@ -63,7 +63,7 @@ This is the **admission contract for a prospective opt-in GET-only shadow**, not
 
 The existing [strict #503 pointer shadow](https://github.com/kinoko34077/devflow/pull/630) and [original-Issue reader](https://github.com/kinoko34077/devflow/issues/531#issuecomment-6202473288) remain authoritative for their already accepted scopes. The in-memory regression in `tests/test_kaep_discovery_reader.py` preserves one *known real identifier tuple* using re-encoded sanitized text; it does **not** run GitHub APIs, establish 22-root fleet coverage, or prove runtime Consumer delivery.
 
-#### B5 per-original producer→pointer audit (opt-in GET-only)
+### B5 per-original producer→pointer audit (opt-in GET-only)
 
 The separate producer-side Work Order [#771](https://github.com/kinoko34077/devflow/issues/771) records a concrete failure: `kaep_request_sender` can report original Issue `SENT_AND_READ_BACK` while the #503 pointer is absent, because `kaep_route_notice` is independently invoked. A source write is not the receiver's discovery, nor proof of its model pickup.
 
