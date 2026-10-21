@@ -35,6 +35,15 @@ assignees: ''
 
 <!-- State the observable outcome, not only the implementation method. -->
 
+## Higher purpose / user-success evidence (when material)
+
+<!-- Trusted Issue author: do not stop at the implementation method. Summarize the user's actionable higher goal, the problem being removed, and how users will know it worked. Cite the actual request/spec. Mark a derived goal as source-derived and an AI-only interpretation as an unaccepted hypothesis; do not silently promote either to an explicit fixed requirement. If this Work Order is a child, link the owning parent goal instead of duplicating it. Trivial low-risk PRs do not require this section or extra Issue. For structured opt-in storage see REPOSITORY_ISSUE_MANUAL.md §4.0 and tools.issue_goal_context. Never copy private Source contents into public Issues. -->
+
+- Original request and authoritative source:
+- Actionable higher goal + provenance (explicit / source-derived / hypothesis), or parent goal Issue:
+- User-observable successful outcome:
+- Explicit fixed conditions and exclusions:
+
 ## Scope
 
 - [ ]
