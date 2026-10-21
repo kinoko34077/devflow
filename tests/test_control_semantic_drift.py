@@ -68,6 +68,11 @@ class SemanticDriftTests(unittest.TestCase):
                    "CODE_ONLY", "CODE_ONLY",
                    o__dimension="PRIVATE_EXECUTOR_ADMISSION")
 
+    def test_pr_open_not_review_readiness_but_merge_transition_drift(self):
+        self.check("ALIGNED", "PR_GATE", "OPEN", "OPEN")
+        self.check("POTENTIAL_MISMATCH", "PR_GATE", "OPEN", "MERGED")
+        self.check("POTENTIAL_MISMATCH", "PR_GATE", "MERGED", "OPEN")
+
     def test_current_review_gate_has_merged_pr(self):
         self.check("POTENTIAL_MISMATCH")
 
