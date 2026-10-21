@@ -180,6 +180,46 @@ class PilotTests(TestCase):
             self.assertEqual(pilot.check_editor_pr14_once()["status"], "UNKNOWN")
 
 
+
+    def test_real_control_pr15_trailing_comma_after_bold_stage(self):
+        """Reproduces actual Control PR15 syntax: closing bold then comma."""
+        doc = issue(body=issue()["body"].replace(
+            "- [PR #15](https://github.com/kinoko34077/"
+            "kinotch-editor-platform/pull/15) remains independently pending.",
+            "- [PR #15](https://github.com/kinoko34077/"
+            "kinotch-editor-platform/pull/15) is "
+            "**OPEN, READY (not Draft), base main**, HEAD "
+            "6dc3a3cb20e3089046e8f86ee5afe50a37e83494.",
+        ))
+        current = pr(
+            number=15,
+            html_url="https://github.com/kinoko34077/kinotch-editor-platform/pull/15",
+            state="open", merged=False, merged_at=None,
+            head={"sha": "6dc3a3cb20e3089046e8f86ee5afe50a37e83494"},
+        )
+        queue = [doc, current]
+
+        def provider(args, **kw):
+            return SimpleNamespace(
+                stdout=json.dumps(queue.pop(0)).encode(),
+                returncode=0, stderr=b"",
+            )
+
+        with patch.object(pilot.subprocess, "run", side_effect=provider):
+            result = pilot.check_pr_transition_once(
+                705, "kinoko34077/kinotch-editor-platform", 15
+            )
+        self.assertEqual(result["status"], "ALIGNED")
+        self.assertEqual(result["observed_stage"], "OPEN")
+        self.assertEqual(result["claimed_stage"], "OPEN")
+        self.assertEqual(result["pr_head_sha"], current["head"]["sha"])
+
+    def test_bold_stage_word_suffix_without_punctuation_rejected(self):
+        doc = issue(body=issue()["body"].replace(
+            "is **MERGED**", "is **MERGED**suffix"
+        ))
+        self.check("UNKNOWN", control=doc)
+
     def test_explicit_second_pr_current_open_is_aligned(self):
         # One opted-in Control, two distinct PR subjects; not a repo crawl.
         doc = issue(body=issue()["body"].replace(
