@@ -104,7 +104,7 @@ permission, update an Issue, watch other repos, or schedule a daemon.
 Only canonical exact subject links in the CURRENT `## Next Action` with
 an explicit stage label are comparable. Current `OPEN` means only GitHub
 `state=open`, not 'review accepted', mergeable or product-ready; it is
-distinct from AWAIT_REVIEW and AWAIT_MERGE. A later merged PR with an
+distinct from AWAIT_REVIEW and AWAIT_MERGE. Comparing OPEN with either pending-review stage returns UNKNOWN (different granularity), not a false mismatch. A later merged PR with an
 unchanged explicit OPEN claim yields a POTENTIAL_MISMATCH review candidate,
 never a Control auto-write. Missing/ambiguous claim or inconsistent source
 yields UNKNOWN. The no-arguments #705/PR14 invocation remains supported.
