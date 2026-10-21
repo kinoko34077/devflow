@@ -51,7 +51,7 @@ def observe_private_ci_on_demand(
         # owner may fix the ephemeral token or GitHub transport and retry.
         return PrivateCiObservation(
             "HOLD", "QUERY_BILLING_ERROR", result.reason,
-            queried_github_billing=result.status not in ("AUTH_UNAVAILABLE", "HOLD"),
+            queried_github_billing=result.request_attempted,
         )
     try:
         store.record_daily(account, now_utc, "REPORT_RECEIVED_INCONCLUSIVE")
