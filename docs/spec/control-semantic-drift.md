@@ -155,9 +155,11 @@ automatic pull-request merger is introduced.
   and a sanitized report appears in the **run summary**; a failed gate is
   a producer reconciliation signal, not a rollback of the merged PR.
 - A canonical claim already MERGED gives `ALIGNED` / exit 0.
-- No *exact current PR link* gives `NOT_APPLICABLE` / exit 0:
-  **not** an endorsement that the Control contains no drift. An explicit
-  target link with incomplete/ambiguous stage gives `UNKNOWN` / exit 3.
+- No *exact current PR link or scoped mention* gives `NOT_APPLICABLE` / exit 0:
+  **not** an endorsement that the Control contains no drift. A loose exact-number
+  PR mention without its canonical link, or an explicit target link with
+  incomplete/ambiguous stage, gives `UNKNOWN` / exit 3; similarly numbered
+  PRs must not be mistaken for the triggering PR.
 - Unexpected repository, bad event identity, missing canonical source,
   API failures and malformed input all fail closed with `UNKNOWN`.
 
