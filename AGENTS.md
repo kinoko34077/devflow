@@ -63,9 +63,19 @@ messages. These delegate to the same live GET-only service as MCP. When only
 the older accepted Inbox CLI is available, it remains a valid bounded Inbox
 fallback; direct Control and source Issue inspection remains mandatory if
 coverage is incomplete or unavailable. Preserve #503 pointer fallback.
-Never interpret an empty filtered Inbox as proof of no tasks, and do not
+**When the Codex Inbox is `INCOMPLETE`/`has_unknown_work=true` (including a
+filtered zero), and the already-running Codex task needs recipient messages
+outside known machine TASKs**, use the *existing* B6 read-only original-Issue
+union from this checkout:
+`python -m tools.kaep_live_union_cli --recipient codex --response-format agent-api`.
+It combines bounded public-index candidates with recent GitHub comment
+candidates and strictly revalidates original Issues; it is NOT a second
+Inbox, a complete universe, a current-head check, or recipient delivery.
+An empty union or `PARTIAL_UNKNOWN`/`BLOCKED` cannot clear unknown work;
+keep direct Control/owning Issue and #503 fallback. Do not start a model,
 install tokens, change client tools, create timers, or grant execution
-authority to make a read succeed. See `docs/operations/DEVFLOW_MCP.md`.
+authority to make a read succeed. See `docs/operations/DEVFLOW_MCP.md`
+and B6 owner #680.
 
 ### KAEP Agent Inbox on an already-active Claude check-in
 
