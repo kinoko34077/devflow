@@ -50,8 +50,7 @@ def audit_route(
     if len(comments) > MAX_INDEX_COMMENTS:
         raise InvalidMessage("DISCOVERY_INDEX_TOO_LARGE")
     if (type(expected_notice_actor) is not str
-            or ACTOR.fullmatch(expected_notice_actor) is None
-            or expected_notice_actor != "kinoko34077"):
+            or ACTOR.fullmatch(expected_notice_actor) is None):
         raise InvalidMessage("INVALID_NOTICE_ACTOR")
 
     matches: list[int] = []
