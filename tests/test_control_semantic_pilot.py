@@ -110,7 +110,7 @@ class PilotTests(TestCase):
     def test_control_not_current_or_wrong_owner(self):
         for changed in ({"state": "closed"}, {"title": "[REPO] other"},
                         {"html_url": "https://other.test/705"},
-                        {"number": 706}, {"body": None}):
+                        {"number": 706}, {"body": ""}):
             with self.subTest(changed=changed):
                 self.check("UNKNOWN", control=issue(**changed))
 
