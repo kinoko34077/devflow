@@ -18,6 +18,7 @@ from tools.kaep_mailbox_codec import (
 from tools.kaep_route_notice import (
     DISCOVERY_ISSUE, DISCOVERY_REPOSITORY, verify_source_request,
 )
+from tools.kaep_reply_sender import ACTOR
 
 MAX_INDEX_COMMENTS = 500
 
