@@ -34,6 +34,7 @@ class BillingReadResult:
     usage_rows: int = 0
     # Deliberately NEVER an authenticated runner authorization or quota proof.
     included_minutes_exhausted: bool | None = None
+    request_attempted: bool = False
 
 
 def fetch_actions_summary_once(
@@ -69,41 +70,46 @@ def fetch_actions_summary_once(
     try:
         with opener.open(request, timeout=_TIMEOUT_SECONDS) as response:
             if response.geturl() != url:
-                return BillingReadResult("HOLD", "UNEXPECTED_FINAL_ENDPOINT", account, month)
+                return BillingReadResult("HOLD", "UNEXPECTED_FINAL_ENDPOINT", account, month, request_attempted=True)
             if response.status != 200:
-                return BillingReadResult("API_UNAVAILABLE", "UNEXPECTED_HTTP_STATUS", account, month)
+                return BillingReadResult("API_UNAVAILABLE", "UNEXPECTED_HTTP_STATUS", account, month, request_attempted=True)
             payload = response.read(_MAX_RESPONSE + 1)
     except HTTPError as exc:
         if exc.code in (401, 403, 404):
-            return BillingReadResult("AUTH_UNAVAILABLE", "BILLING_API_AUTH_REJECTED", account, month)
-        return BillingReadResult("API_UNAVAILABLE", "BILLING_API_HTTP_ERROR", account, month)
+            return BillingReadResult("AUTH_UNAVAILABLE", "BILLING_API_AUTH_REJECTED", account, month, request_attempted=True)
+        return BillingReadResult("API_UNAVAILABLE", "BILLING_API_HTTP_ERROR", account, month, request_attempted=True)
     except (URLError, OSError, TimeoutError):
-        return BillingReadResult("API_UNAVAILABLE", "BILLING_API_UNREACHABLE", account, month)
+        return BillingReadResult("API_UNAVAILABLE", "BILLING_API_UNREACHABLE", account, month, request_attempted=True)
 
     if len(payload) > _MAX_RESPONSE:
-        return BillingReadResult("HOLD", "BILLING_API_RESPONSE_TOO_LARGE", account, month)
+        return BillingReadResult("HOLD", "BILLING_API_RESPONSE_TOO_LARGE", account, month, request_attempted=True)
     try:
         report = json.loads(payload)
     except (JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
-        return BillingReadResult("HOLD", "INVALID_BILLING_REPORT_JSON", account, month)
+        return BillingReadResult("HOLD", "INVALID_BILLING_REPORT_JSON", account, month, request_attempted=True)
     if (type(report) is not dict or type(report.get("user")) is not str
             or report["user"].casefold() != account.casefold()):
-        return BillingReadResult("HOLD", "MISMATCHED_BILLING_OWNER", account, month)
+        return BillingReadResult("HOLD", "MISMATCHED_BILLING_OWNER", account, month, request_attempted=True)
     period = report.get("timePeriod")
+    # Official user summary examples may report only timePeriod.year even
+    # when the request is pinned to a single month. The fixed HTTPS request
+    # carries the month constraint; reject an explicit contradictory month.
     if (type(period) is not dict or type(period.get("year")) is not int
-            or type(period.get("month")) is not int
-            or period["year"] != now_utc.year or period["month"] != now_utc.month):
-        return BillingReadResult("HOLD", "BILLING_PERIOD_NOT_PROVEN", account, month)
+            or period["year"] != now_utc.year
+            or ("month" in period and (
+                type(period["month"]) is not int
+                or period["month"] != now_utc.month))):
+        return BillingReadResult("HOLD", "BILLING_PERIOD_NOT_PROVEN", account, month, request_attempted=True)
     items = report.get("usageItems")
     if type(items) is not list:
-        return BillingReadResult("HOLD", "MISSING_USAGE_ITEMS", account, month)
+        return BillingReadResult("HOLD", "MISSING_USAGE_ITEMS", account, month, request_attempted=True)
     for item in items:
         if (type(item) is not dict or type(item.get("product")) is not str
                 or item["product"].casefold() != "actions"):
-            return BillingReadResult("HOLD", "UNEXPECTED_BILLING_PRODUCT", account, month)
+            return BillingReadResult("HOLD", "UNEXPECTED_BILLING_PRODUCT", account, month, request_attempted=True)
     return BillingReadResult(
         "REPORT_RECEIVED_INCONCLUSIVE", "PUBLIC_AND_INCLUDED_DISCOUNTS_NOT_SEPARABLE",
-        account, month, len(items),
+        account, month, len(items), request_attempted=True,
     )
 
 
