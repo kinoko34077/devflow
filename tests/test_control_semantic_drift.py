@@ -38,6 +38,36 @@ class SemanticDriftTests(unittest.TestCase):
         self.assertEqual(result["status"], want)
         self.assertEqual(set(result), {"status", "reason"})
 
+    def test_merged_code_not_live_billing_router(self):
+        # Tests/main may pass while on-demand worker and Private dispatch are absent.
+        self.check("POTENTIAL_MISMATCH", "BILLING_PREFLIGHT_DEPLOYMENT",
+                   "ROUTING_LIVE", "CODE_ONLY")
+
+    def test_readonly_billing_is_not_active_dispatch(self):
+        self.check("POTENTIAL_MISMATCH", "BILLING_PREFLIGHT_DEPLOYMENT",
+                   "ROUTING_LIVE", "READ_ONLY_LIVE")
+
+    def test_code_only_state_is_not_stale_when_proven(self):
+        self.check("ALIGNED", "BILLING_PREFLIGHT_DEPLOYMENT",
+                   "CODE_ONLY", "CODE_ONLY")
+
+    def test_no_private_worker_approval_not_confused_with_public_oneshot(self):
+        self.check("POTENTIAL_MISMATCH", "PRIVATE_EXECUTOR_ADMISSION",
+                   "ADMITTED", "NOT_ADMITTED")
+
+    def test_private_admission_requires_same_scope_trusted_source(self):
+        self.check("UNKNOWN", "PRIVATE_EXECUTOR_ADMISSION",
+                   "ADMITTED", "NOT_ADMITTED", o__source_verified=False)
+
+    def test_runtime_proof_missing_is_not_negation(self):
+        self.check("UNKNOWN", "BILLING_PREFLIGHT_DEPLOYMENT",
+                   "ROUTING_LIVE", "UNKNOWN")
+
+    def test_runtime_and_admission_dimensions_never_cross_compare(self):
+        self.check("NOT_COMPARABLE", "BILLING_PREFLIGHT_DEPLOYMENT",
+                   "CODE_ONLY", "CODE_ONLY",
+                   o__dimension="PRIVATE_EXECUTOR_ADMISSION")
+
     def test_current_review_gate_has_merged_pr(self):
         self.check("POTENTIAL_MISMATCH")
 
