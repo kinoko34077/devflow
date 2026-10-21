@@ -44,6 +44,29 @@ python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
 python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
 ```
 
+A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
+or `has_unknown_work=true` is *not* the end of a recipient message check:
+non-TASK original Issues can contain authentic KAEP roots. For an
+**already-running, authorized** Codex Cloud task that needs those messages,
+reuse the existing B6 read-only bounded original-Issue union, not another
+classifier or MCP server:
+
+```sh
+python -m tools.kaep_live_union_cli --recipient codex --response-format agent-api
+```
+
+This is a separate B6 candidate-discovery path (#680), not an MCP call or an
+Agent Inbox authority upgrade. It combines the current public candidate
+index and a bounded updated-comment window, then re-fetches original Issues
+with the canonical actor/KAEP/recipient validator (up to 40 source Issues).
+The public index and updated-comment window cannot prove that every new,
+old, or private root was found. `BOUNDED_UNION_READ` does not authorize
+execution or prove pickup; `PARTIAL_UNKNOWN`, `BLOCKED`, an empty response,
+or an unverified current HEAD require direct source/Control and #503 fallback.
+No timer, credentials, network settings or MCP registration are installed by
+this workflow. Existing B5 (#531) remains incomplete until genuinely trusted
+full-source coverage and recipient/Consumer parity are proved.
+
 `inbox` also accepts `--limit` (1–20, with the same canonical limit
 as the MCP Agent Inbox), `--offset` (nonnegative), `--recipient` and
 `--work-status`; honor its `next_offset`, `truncated` and source/coverage
