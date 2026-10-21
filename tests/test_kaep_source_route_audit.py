@@ -57,9 +57,11 @@ def route_comment(root, *, source_comment_id=101, index_comment_id=301,
 
 
 def audited(root, *index, source_actor=ACTOR):
+    # The canonical provider adapter admits up to 100 comments per page.
+    batches = [list(index)[i:i + 100] for i in range(0, len(index), 100)] or [[]]
     return audit_route(
         pages([comment(101, root, actor=source_actor)]),
-        pages(list(index)),
+        pages(*batches),
         repository=REPO, issue=ISSUE,
         message_id=root["message_id"],
         expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
