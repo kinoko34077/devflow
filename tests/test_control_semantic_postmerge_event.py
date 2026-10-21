@@ -81,6 +81,21 @@ class PostMergeEventTests(unittest.TestCase):
         read.assert_called_once()
         check.assert_not_called()
 
+    def test_loose_or_prefix_reference_is_not_falsely_aligned(self):
+        uncanonical = control()
+        uncanonical["body"] = uncanonical["body"].replace(
+            "[PR #777](https://github.com/kinoko34077/devflow/pull/777)",
+            "PR #777",
+        )
+        result, _, check = self.verify("UNKNOWN", body=uncanonical)
+        self.assertEqual(result["reason"], "UNCANONICAL_CURRENT_PR_REFERENCE")
+        check.assert_not_called()
+
+        non_target = control(number=7770)
+        result, _, check = self.verify("NOT_APPLICABLE", body=non_target)
+        self.assertEqual(result["reason"], "NO_EXPLICIT_CURRENT_PR_REFERENCE")
+        check.assert_not_called()
+
     def test_other_event_wrong_repo_or_bad_subject_denied_without_get(self):
         for corrupted in (
             {"action": "opened"},
