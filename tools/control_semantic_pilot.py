@@ -29,13 +29,6 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 REPO_NAME = re.compile(r"^kinoko34077/[A-Za-z0-9_.-]{1,100}$")
 # Unlike review readiness, OPEN only states API PR.state; no gate inferred.
 STAGES = r"MERGED|CLOSED_UNMERGED|AWAIT_REVIEW|AWAIT_MERGE|OPEN"
-CLAIM = re.compile(
-    r"^- Actual \[PR #14\]"
-    r"\(https://github\.com/kinoko34077/kinotch-editor-platform/pull/14\)"
-    rf" is \*\*(?:{STAGES})(?=[*])\*\*(?=[\s(]|$)", re.MULTILINE
-)
-
-
 def _read_json(path: str) -> tuple[dict[str, Any], datetime] | None:
     """Only a validated owner-specific GitHub REST path, shell disabled."""
     try:
