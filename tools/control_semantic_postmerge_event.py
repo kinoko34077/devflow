@@ -93,8 +93,13 @@ def check_native_postmerge_once(
     current = _current_next_action(issue)
     if current is None:
         return _result("UNKNOWN", "CURRENT_CONTROL_NOT_PROVEN", number)
-    exact_link = f"https://github.com/kinoko34077/devflow/pull/{number}"
+    exact_link = (
+        f"[PR #{number}](https://github.com/kinoko34077/devflow/pull/{number})"
+    )
     if exact_link not in current:
+        # A loose but exact-number PR reference cannot safely be skipped.
+        if re.search(rf"\bPR\s*#{number}(?!\d)", current):
+            return _result("UNKNOWN", "UNCANONICAL_CURRENT_PR_REFERENCE", number)
         # No reference is NOT confirmation that the Control is consistent.
         return _result("NOT_APPLICABLE", "NO_EXPLICIT_CURRENT_PR_REFERENCE", number)
     checked = pilot.check_pr_transition_once(CONTROL_NUMBER, REPOSITORY, number)
