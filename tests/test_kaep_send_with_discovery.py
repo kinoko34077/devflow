@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.kaep_inbox_reader import InvalidMessage
+from tools.kaep_mailbox_codec import encode_comment
+from tools.kaep_request_sender import make_request
 from tools.kaep_send_with_discovery import publish_source_and_route, main
 
 REPO = "kinoko34077/devflow"
@@ -44,13 +46,73 @@ def pointer(status="SENT_AND_READ_BACK", cid=301):
     }
 
 
+def staged_call(**options):
+    """Mock only the external index preflight for legacy writer-state cases."""
+    with patch("tools.kaep_send_with_discovery._discovery_read_preflight"):
+        return publish_source_and_route(**options)
+
+
+def indexed_page(*, trailing_newline=False):
+    index, existing = make_request(
+        json.dumps([[]]), repository="kinoko34077/devflow", issue=503,
+        recipient="claude-code", intent="REPORT",
+        request_key="kaep.discovery.preflight.fixture",
+        request_text="stable benign marker",
+        expect_existing_actor=ACTOR,
+    )
+    assert existing is None
+    wire = encode_comment(index) + ("\\n" if trailing_newline else "")
+    return json.dumps([[{"id": 41, "body": wire, "user": {"login": ACTOR}}]])
+
+
 class TwoPhaseSourceRouteTests(unittest.TestCase):
+    def test_live_style_malformed_index_blocks_before_any_source_post(self):
+        with patch("tools.kaep_send_with_discovery.fetch_gh_pages",
+                   return_value=indexed_page(trailing_newline=True)) as reader, patch(
+                "tools.kaep_send_with_discovery.verify_public_source") as public, patch(
+                "tools.kaep_send_with_discovery.send_request") as source_writer, patch(
+                "tools.kaep_send_with_discovery.route_request") as route_writer:
+            out = publish_source_and_route(**args(do_send=True))
+        public.assert_called_once_with(REPO)
+        reader.assert_called_once_with("kinoko34077/devflow", 503)
+        self.assertEqual(out["status"], "DISCOVERY_PREFLIGHT_BLOCKED")
+        self.assertEqual(out["reason_code"], "INVALID_WRAPPER")
+        self.assertFalse(out["delivery_confirmed"])
+        source_writer.assert_not_called()
+        route_writer.assert_not_called()
+
+    def test_live_style_valid_index_allows_reusing_existing_writers(self):
+        with patch("tools.kaep_send_with_discovery.fetch_gh_pages",
+                   return_value=indexed_page()), patch(
+                "tools.kaep_send_with_discovery.verify_public_source"), patch(
+                "tools.kaep_send_with_discovery.send_request",
+                return_value=source()) as writer, patch(
+                "tools.kaep_send_with_discovery.route_request",
+                return_value=pointer()) as notice:
+            out = publish_source_and_route(**args(do_send=True))
+        self.assertEqual(out["status"], "SOURCE_AND_POINTER_READBACK")
+        writer.assert_called_once()
+        notice.assert_called_once()
+
+    def test_index_transport_failure_stops_original_before_post(self):
+        with patch("tools.kaep_send_with_discovery.fetch_gh_pages",
+                   side_effect=OSError("do not expose connection details")), patch(
+                "tools.kaep_send_with_discovery.verify_public_source"), patch(
+                "tools.kaep_send_with_discovery.send_request") as writer, patch(
+                "tools.kaep_send_with_discovery.route_request") as notice:
+            out = publish_source_and_route(**args(do_send=True))
+        self.assertEqual(out["status"], "DISCOVERY_PREFLIGHT_BLOCKED")
+        self.assertEqual(out["reason_code"], "DISCOVERY_READ_UNAVAILABLE")
+        self.assertNotIn("connection details", json.dumps(out))
+        writer.assert_not_called()
+        notice.assert_not_called()
+
     def test_fresh_dry_run_only_prepares_source_and_never_routes(self):
         with patch("tools.kaep_send_with_discovery.send_request",
                    return_value=source("PREPARED", None)) as send, patch(
                 "tools.kaep_send_with_discovery.route_request") as route, patch(
                 "tools.kaep_send_with_discovery.verify_public_source") as visibility:
-            out = publish_source_and_route(**args())
+            out = staged_call(**args())
         self.assertEqual(out["status"], "SOURCE_PREPARED_ONLY")
         self.assertIsNone(out["discovery_comment_id"])
         self.assertFalse(out["delivery_confirmed"])
@@ -65,7 +127,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.route_request",
                 return_value=pointer()) as route, patch(
                 "tools.kaep_send_with_discovery.verify_public_source") as visibility:
-            out = publish_source_and_route(**args(do_send=True))
+            out = staged_call(**args(do_send=True))
         visibility.assert_called_once_with(REPO)
         self.assertTrue(route.call_args.kwargs["do_send"])
         self.assertEqual(out["status"], "SOURCE_AND_POINTER_READBACK")
@@ -85,7 +147,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.route_request",
                 return_value=pointer("ALREADY_SENT")) as route, patch(
                 "tools.kaep_send_with_discovery.verify_public_source"):
-            out = publish_source_and_route(**args(do_send=True))
+            out = staged_call(**args(do_send=True))
         self.assertEqual(out["status"], "SOURCE_AND_POINTER_READBACK")
         self.assertEqual(route.call_args.kwargs["message_id"], MESSAGE_ID)
 
@@ -95,7 +157,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.route_request",
                 side_effect=InvalidMessage("SOURCE_MAILBOX_UNAVAILABLE")) as route, patch(
                 "tools.kaep_send_with_discovery.verify_public_source"):
-            out = publish_source_and_route(**args(do_send=True))
+            out = staged_call(**args(do_send=True))
         self.assertEqual(route.call_count, 1)
         self.assertEqual(out["status"], "SOURCE_STORED_ROUTE_UNVERIFIED")
         self.assertEqual(out["source_comment_id"], 101)
@@ -108,7 +170,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                    side_effect=OSError("sensitive network failure")), patch(
                 "tools.kaep_send_with_discovery.route_request") as route, patch(
                 "tools.kaep_send_with_discovery.verify_public_source"):
-            out = publish_source_and_route(**args(do_send=True))
+            out = staged_call(**args(do_send=True))
         self.assertEqual(out["status"], "SOURCE_NOT_VERIFIED")
         self.assertEqual(out["reason_code"], "SOURCE_POST_OR_READBACK_UNVERIFIED")
         self.assertNotIn("sensitive", json.dumps(out))
@@ -120,7 +182,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.send_request") as send, patch(
                 "tools.kaep_send_with_discovery.route_request") as route:
             with self.assertRaisesRegex(InvalidMessage, "SOURCE_NOT_PUBLIC"):
-                publish_source_and_route(**args(do_send=True))
+                staged_call(**args(do_send=True))
         send.assert_not_called()
         route.assert_not_called()
 
@@ -132,7 +194,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                     "tools.kaep_send_with_discovery.send_request") as send, patch(
                     "tools.kaep_send_with_discovery.route_request") as route:
                 with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
-                    publish_source_and_route(**args(
+                    staged_call(**args(
                         repository="kinoko34077/devflow", issue=503,
                         do_send=do_send,
                     ))
@@ -145,7 +207,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.send_request") as send, patch(
                 "tools.kaep_send_with_discovery.route_request") as route:
             with self.assertRaisesRegex(InvalidMessage, "INVALID_ACTOR"):
-                publish_source_and_route(**args(
+                staged_call(**args(
                     expected_notice_actor="untrusted ⚠️", do_send=True,
                 ))
             visibility.assert_not_called()
@@ -160,7 +222,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                     return_value=result), patch(
                     "tools.kaep_send_with_discovery.route_request") as route, patch(
                     "tools.kaep_send_with_discovery.verify_public_source"):
-                out = publish_source_and_route(**args(do_send=True))
+                out = staged_call(**args(do_send=True))
                 self.assertEqual(out["status"], "SOURCE_NOT_VERIFIED")
                 route.assert_not_called()
 
@@ -170,26 +232,26 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
                 "tools.kaep_send_with_discovery.route_request",
                 return_value=pointer("SENT_AND_READ_BACK", cid=None)), patch(
                 "tools.kaep_send_with_discovery.verify_public_source"):
-            out = publish_source_and_route(**args(do_send=True))
+            out = staged_call(**args(do_send=True))
         self.assertEqual(out["status"], "SOURCE_STORED_ROUTE_UNVERIFIED")
         self.assertEqual(out["reason_code"], "INVALID_ROUTE_RECEIPT")
 
     def test_explicit_route_intent_and_offline_write_gates(self):
         with self.assertRaisesRegex(InvalidMessage, "ROUTE_UNSUPPORTED_INTENT"):
-            publish_source_and_route(**args(intent="TEST"))
+            staged_call(**args(intent="TEST"))
         with self.assertRaisesRegex(InvalidMessage, "OFFLINE_POST_FORBIDDEN"):
-            publish_source_and_route(**args(
+            staged_call(**args(
                 do_send=True, offline_source_pages="[]",
                 offline_discovery_pages="[]",
             ))
         with self.assertRaisesRegex(InvalidMessage, "INCOMPLETE_OFFLINE_FIXTURE"):
-            publish_source_and_route(**args(offline_source_pages="[]"))
+            staged_call(**args(offline_source_pages="[]"))
 
     def test_cli_dry_run_does_not_activate_source_or_route_write(self):
         with TemporaryDirectory() as root:
             path = Path(root) / "request.txt"
             path.write_text("test-only safe text", encoding="utf-8")
-            with patch("tools.kaep_send_with_discovery.send_request",
+            with patch("tools.kaep_send_with_discovery._discovery_read_preflight"), patch("tools.kaep_send_with_discovery.send_request",
                        return_value=source("PREPARED", None)) as send, patch(
                     "tools.kaep_send_with_discovery.route_request") as route, redirect_stdout(io.StringIO()) as out:
                 result = main([
