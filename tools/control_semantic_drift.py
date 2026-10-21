@@ -15,6 +15,13 @@ DIMENSIONS = {
     "PR_GATE": frozenset({"AWAIT_REVIEW", "AWAIT_MERGE", "MERGED", "CLOSED_UNMERGED", "UNKNOWN"}),
     "PUBLIC_ENTRY": frozenset({"UNVERIFIED", "VERIFIED", "FAILED", "UNKNOWN"}),
     "FIELD_ACCEPTANCE": frozenset({"UNVERIFIED", "ACCEPTED", "REJECTED", "UNKNOWN"}),
+    # Proof of code existence is not proof of a deployed read or a live route.
+    "BILLING_PREFLIGHT_DEPLOYMENT": frozenset({
+        "CODE_ONLY", "READ_ONLY_LIVE", "ROUTING_LIVE", "UNKNOWN",
+    }),
+    # An independently approved Private worker is a separate axis from
+    # Public one-shot WSL proof, paid-minute accounting or native CI success.
+    "PRIVATE_EXECUTOR_ADMISSION": frozenset({"NOT_ADMITTED", "ADMITTED", "UNKNOWN"}),
 }
 CURRENT_SECTIONS = frozenset({"Next Action", "Active Work"})
 MAX_READ_GAP = timedelta(hours=1)
