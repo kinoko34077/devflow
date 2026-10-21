@@ -75,7 +75,7 @@ python -m tools.kaep_source_route_audit --repository kinoko34077/devflow --issue
 
 `EXACT_POINTER_OBSERVED` proves one correctly matched canonical source/pointer tuple in the observed index, **not** all sources, fresh HEAD, pending work or delivery (RC 0). `EXACT_POINTER_NOT_OBSERVED` means no matching strict pointer in this complete bounded index read (RC 2), **not** that no request exists; `PARTIAL_UNKNOWN` means a trusted marker/index source was malformed or otherwise incomplete (RC 2), and `BLOCKED` means source/index failed validation or transport (RC 2). The diagnostic never copies original request prose, auto-routes historical requests, writes a comment, grants Claim, or retires #503/manual Control. Historical #81 `INVALID_WRAPPER` remains a B5 source blocker. Never retry by forging an old REQUEST/ACK or bulk promoting unknown Issues.
 
-## B5 opt-in verified-pointer Issue-wide root shadow (read-only)
+### B5 opt-in verified-pointer Issue-wide root shadow (read-only)
 
 The first bounded shadow implementation exists separately at `tools/kaep_source_roster_shadow.py`. It **only** considers original Issue locators that the existing strict #503 codec has source-verified (one supported `VERIFIED_POINTER` provenance type from the broader candidate-roster design above); it does not inspect arbitrary unclassified Issues or discover original Issues with **no** pointer **and no** other trusted candidate source. It uses the accepted full-source Agent Inbox mailbox correlation for `claude-code`; TASK Inbox, native MCP interfaces, and the existing #503 reader remain unchanged.
 
