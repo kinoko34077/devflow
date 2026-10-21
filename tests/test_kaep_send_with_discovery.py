@@ -124,6 +124,34 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
         send.assert_not_called()
         route.assert_not_called()
 
+    def test_discovery_mailbox_source_rejected_before_original_post(self):
+        # Codex review P2: source #503 can never be routed to itself.
+        for do_send in (False, True):
+            with self.subTest(do_send=do_send), patch(
+                    "tools.kaep_send_with_discovery.verify_public_source") as visibility, patch(
+                    "tools.kaep_send_with_discovery.send_request") as send, patch(
+                    "tools.kaep_send_with_discovery.route_request") as route:
+                with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
+                    publish_source_and_route(**args(
+                        repository="kinoko34077/devflow", issue=503,
+                        do_send=do_send,
+                    ))
+                visibility.assert_not_called()
+                send.assert_not_called()
+                route.assert_not_called()
+
+    def test_invalid_notice_actor_rejected_before_original_post(self):
+        with patch("tools.kaep_send_with_discovery.verify_public_source") as visibility, patch(
+                "tools.kaep_send_with_discovery.send_request") as send, patch(
+                "tools.kaep_send_with_discovery.route_request") as route:
+            with self.assertRaisesRegex(InvalidMessage, "INVALID_ACTOR"):
+                publish_source_and_route(**args(
+                    expected_notice_actor="untrusted ⚠️", do_send=True,
+                ))
+            visibility.assert_not_called()
+            send.assert_not_called()
+            route.assert_not_called()
+
     def test_missing_or_invalid_source_receipt_prevents_pointer(self):
         for result in (source("SENT_AND_READ_BACK", None),
                        source("UNKNOWN", 101)):
