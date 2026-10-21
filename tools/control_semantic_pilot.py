@@ -64,7 +64,7 @@ def _claim_pattern(repository: str, pr_number: int) -> re.Pattern[str]:
     return re.compile(
         rf"^- (?:Actual )?\[PR #{pr_number}\]\({re.escape(url)}\)"
         rf" is \*\*(?P<stage>{STAGES})"
-        r"(?:, [^*\r\n]{1,72})?\*\*(?=[\s(]|$)",
+        r"(?:, [^*\r\n]{1,72})?\*\*(?=\W|$)",
         re.MULTILINE,
     )
 
