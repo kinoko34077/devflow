@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 DIMENSIONS = {
-    "PR_GATE": frozenset({"AWAIT_REVIEW", "AWAIT_MERGE", "MERGED", "CLOSED_UNMERGED", "UNKNOWN"}),
+    "PR_GATE": frozenset({"OPEN", "AWAIT_REVIEW", "AWAIT_MERGE", "MERGED", "CLOSED_UNMERGED", "UNKNOWN"}),
     "PUBLIC_ENTRY": frozenset({"UNVERIFIED", "VERIFIED", "FAILED", "UNKNOWN"}),
     "FIELD_ACCEPTANCE": frozenset({"UNVERIFIED", "ACCEPTED", "REJECTED", "UNKNOWN"}),
     # Proof of code existence is not proof of a deployed read or a live route.
