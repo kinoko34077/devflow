@@ -174,7 +174,7 @@ class BillingReadOnlyTests(unittest.TestCase):
     def test_wrong_owner_and_unknown_period_rejected(self):
         for payload in (
             {"user": "another"},
-            {"timePeriod": {"year": 2026}},
+            {"timePeriod": {"year": "2026"}},
             {"timePeriod": {"year": 2025, "month": 10}},
             {"timePeriod": {"year": 2026, "month": 11}},
         ):
