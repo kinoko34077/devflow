@@ -120,7 +120,7 @@ monitoring are NOT accepted by this bounded command.
 After an accepted PR transition, the producing worker can execute the same
 scoped native reader with `--require-aligned`:
 
-`python -m tools.control_semantic_pilot --control 16 --repository kinoko34077/devflow --pr 774 --require-aligned`
+`python -m tools.control_semantic_pilot --control 705 --repository kinoko34077/kinotch-editor-platform --pr 15 --require-aligned`
 
 Exit code **0** means exactly `ALIGNED` for the one scoped PR stage;
 **2** means `POTENTIAL_MISMATCH` needing producer-owned recheck/repair;
