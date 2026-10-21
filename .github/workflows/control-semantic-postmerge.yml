@@ -1,0 +1,49 @@
+name: Devflow post-merge Control semantic check
+
+# Read-only, single-repository pilot. This is not a fleet webhook.
+# A PR merge may cause a *failed audit run* if its current Control PR stage
+# is stale. A non-referenced PR is NOT_APPLICABLE, never ALIGNED.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  verify-current-pr-claim:
+    if: >-
+      github.repository == 'kinoko34077/devflow' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Read current Control and merged PR; never write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set +e
+          python -m tools.control_semantic_postmerge_event \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "$GITHUB_REPOSITORY" > semantic-observation.json
+          status=$?
+          echo "## Read-only merged-PR Control check" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Result is scoped to one PR, not product or fleet acceptance.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'A missing exact PR reference is NOT_APPLICABLE, not ALIGNED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Expected mismatch/unknown requires producer-owned follow-up.' >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
+          cat semantic-observation.json >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
