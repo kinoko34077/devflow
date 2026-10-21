@@ -13,12 +13,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY
+from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_request_sender import send_request
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, route_request, verify_public_source,
 )
-from tools.kaep_reply_sender import ACTOR
+from tools.kaep_reply_sender import ACTOR, _mailbox
 
 _SUPPORTED_INTENTS = frozenset(("ANALYZE", "REPORT"))
 _SOURCE_STORED = frozenset(("SENT_AND_READ_BACK", "ALREADY_SENT"))
@@ -41,6 +41,18 @@ def _base() -> dict[str, Any]:
         "fallback_retirement_authorized": False,
         "agent_woken": False,
     }
+
+
+def _discovery_read_preflight(offline_pages: str | None) -> None:
+    """Prove the current #503 mailbox can be read by the existing strict writer.
+
+    Before the first source POST, reject malformed trusted/untrusted KAEP
+    markers, duplicate IDs, broken reply chains, incomplete pagination, and
+    transport errors. This does not relax the codec or repair old comments.
+    """
+    pages = (offline_pages if offline_pages is not None else
+             fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE))
+    _mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE)
 
 
 def publish_source_and_route(
@@ -88,6 +100,17 @@ def publish_source_and_route(
         verify_public_source(repository)
 
     out = _base()
+    try:
+        # Existing route_request later invokes the strict #503 mailbox writer.
+        # That same mailbox MUST be readable before the first original POST;
+        # otherwise a known bad index produces a preventable partial write.
+        _discovery_read_preflight(offline_discovery_pages)
+    except (InvalidMessage, OSError, UnicodeError) as exc:
+        out["status"] = "DISCOVERY_PREFLIGHT_BLOCKED"
+        out["reason_code"] = (str(exc) if isinstance(exc, InvalidMessage)
+                              else "DISCOVERY_READ_UNAVAILABLE")
+        return out
+
     try:
         src = send_request(
             repository=repository, issue=issue, recipient="claude-code",
