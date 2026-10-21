@@ -76,6 +76,35 @@ def query(opener, token=TOKEN, account=ACCOUNT, now=NOW):
 
 
 class BillingReadOnlyTests(unittest.TestCase):
+    def test_documented_year_only_period_is_valid_for_pinned_month(self):
+        # GitHub official summary schema includes timePeriod.year only.
+        # The request itself includes year/month, and no competing period.
+        opener = FakeOpener(body=report(timePeriod={"year": 2026}))
+        value = query(opener)
+        self.assertEqual(value.status, "REPORT_RECEIVED_INCONCLUSIVE")
+        self.assertTrue(value.request_attempted)
+        self.assertIsNone(value.included_minutes_exhausted)
+
+    def test_explicit_month_mismatch_or_malformed_month_rejected(self):
+        for period in (
+            {"year": 2026, "month": 9},
+            {"year": 2026, "month": "10"},
+            {"year": 2025},
+        ):
+            with self.subTest(period=period):
+                result = query(FakeOpener(body=report(timePeriod=period)))
+                self.assertEqual(result.status, "HOLD")
+                self.assertTrue(result.request_attempted)
+
+    def test_attempted_http_failure_vs_preflight_failure(self):
+        blocked = query(FakeOpener(http_error=401))
+        unavailable = query(FakeOpener(http_error="offline"))
+        absent = query(FakeOpener(), token="")
+        self.assertEqual(blocked.status, "AUTH_UNAVAILABLE")
+        self.assertTrue(blocked.request_attempted)
+        self.assertTrue(unavailable.request_attempted)
+        self.assertFalse(absent.request_attempted)
+
     def test_fixed_destination_one_get_with_ephemeral_token(self):
         transport = FakeOpener()
         result = query(transport)
@@ -145,7 +174,7 @@ class BillingReadOnlyTests(unittest.TestCase):
     def test_wrong_owner_and_unknown_period_rejected(self):
         for payload in (
             {"user": "another"},
-            {"timePeriod": {"year": 2026}},
+            {"timePeriod": {"year": "2026"}},
             {"timePeriod": {"year": 2025, "month": 10}},
             {"timePeriod": {"year": 2026, "month": 11}},
         ):

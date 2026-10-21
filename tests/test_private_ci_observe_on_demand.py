@@ -59,6 +59,17 @@ class OnDemandObservationTests(unittest.TestCase):
         return observe_private_ci_on_demand(
             OWNER, now, token, self.path, opener=opener)
 
+    def test_http_auth_rejection_is_reported_as_attempted(self):
+        from urllib.error import HTTPError
+
+        class Unauthorized:
+            def open(self, request, timeout):
+                raise HTTPError(request.full_url, 401, "unauthorized", {}, None)
+
+        failed = self.observe(Unauthorized())
+        self.assertEqual(failed.action, "QUERY_BILLING_ERROR")
+        self.assertTrue(failed.queried_github_billing)
+
     def test_first_read_and_second_cached(self):
         opener = FakeOpener()
         first = self.observe(opener)
