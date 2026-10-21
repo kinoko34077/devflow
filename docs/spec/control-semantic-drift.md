@@ -26,6 +26,44 @@ The last two axes were added after actual #752 R1/R2 code-only vs runtime confus
 
 `UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
 
+## M2 bounded native-read pilot (2026-10-22; pending acceptance)
+
+The production-authority gap is **not** closed by a pure comparator. The
+first bounded adapter lives at `tools/control_semantic_pilot.py`; it calls the
+existing owner-authenticated `gh api` CLI with only two fixed GET paths:
+`devflow/issues/705` and `kinotch-editor-platform/pulls/14`. This pilot is
+intentionally **one public repository and one PR** and is not a fleet crawler,
+GitHub App, new credential holder, scheduler, auto-writer or source of claims.
+
+Source truth is created after successful native reads, not accepted as a
+caller-provided JSON flag. It verifies exact open Control identity, one
+current `## Next Action` claim with a canonical exact PR link and explicit
+stage token, exact owning PR identity/base/head and result chronology.
+`MERGED` and `CLOSED_UNMERGED` are determined from GitHub's PR terminal
+fields. An open PR alone **does not prove review readiness**, so the adapter
+reports `UNKNOWN`; ambiguous prose, multiple claims, historical sections,
+unexpected fields, failed/unauthenticated reads and changing source shapes
+also return `UNKNOWN` without effect. The existing
+`compare_claim` remains the single comparator and returns a **candidate**
+`POTENTIAL_MISMATCH`, never a Control mutation instruction.
+
+Run once, explicitly, from an existing authorized CLI session:
+`python -m tools.control_semantic_pilot`.
+Output is a sanitized structured result with exact source URLs, observed
+times and PR HEAD SHA; no raw Issue body or authentication credential is
+printed. Unit tests substitute the subprocess with synthetic REST shapes
+and therefore **do not count as a real authenticated GET pilot**. A real
+successful one-shot and post-main CI are separate acceptance gates.
+The static target/grammar intentionally avoids silently inferring arbitrary
+Control prose. Extending to a different PR requires its own scope and
+source-backed parser contract rather than guessing from status keywords.
+
+This *pilot adapter* does not establish M2 comprehensive producer-owned
+update prevention, M3 projection signals, M4 fleet coverage or durable
+cross-repository automatically triggered detection. Results must be
+correlated with an actual current Control text snapshot before a producer
+edits only their directly affected fields, with independent readback.
+
 ## Historical M0 observed cases (as of 2026-10-19; non-normative, not live current state)
 
 | Control | Current claim to investigate | Owning source | M0 disposition |
