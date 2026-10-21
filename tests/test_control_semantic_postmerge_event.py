@@ -53,7 +53,7 @@ class PostMergeEventTests(unittest.TestCase):
             target.pilot, "_read_json", return_value=(issue, NOW)
         ) as read, patch.object(
             target.pilot, "check_pr_transition_once",
-            return_value={"status": checked, "reason": "test"},
+            return_value={"status": checked, "reason": "test", "subject": target.REPOSITORY + "#777"},
         ) as check:
             result = target.check_native_postmerge_once(
                 case, target.REPOSITORY
