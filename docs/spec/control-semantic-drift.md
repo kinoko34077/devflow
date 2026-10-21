@@ -1,6 +1,6 @@
 # Control semantic consistency: bounded evidence contract (devflow #726)
 
-Status: **M1 read-only candidate**. Not active Control authority, not M3 work classification, not the task Cursor #576 verifier, not SMC #588, and not a repair bot.
+Status: **M1 bounded comparator accepted; M2 one-source read-only live pilot accepted on 2026-10-22**. Full M2 transition-time detection, fleet rollout, M3 and M4 remain OPEN. No active Control authority, no repair bot, no replacement for Cursor #576 or SMC #588.
 
 ## What causes the defect?
 
@@ -26,7 +26,7 @@ The last two axes were added after actual #752 R1/R2 code-only vs runtime confus
 
 `UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
 
-## M2 bounded native-read pilot (2026-10-22; pending acceptance)
+## M2 bounded native-read pilot (2026-10-22; accepted in one exact Public scope)
 
 The production-authority gap is **not** closed by a pure comparator. The
 first bounded adapter lives at `tools/control_semantic_pilot.py`; it calls the
@@ -51,9 +51,26 @@ Run once, explicitly, from an existing authorized CLI session:
 `python -m tools.control_semantic_pilot`.
 Output is a sanitized structured result with exact source URLs, observed
 times and PR HEAD SHA; no raw Issue body or authentication credential is
-printed. Unit tests substitute the subprocess with synthetic REST shapes
-and therefore **do not count as a real authenticated GET pilot**. A real
-successful one-shot and post-main CI are separate acceptance gates.
+printed. Unit tests substitute the subprocess with synthetic REST shapes and
+do **not** alone count as a real authenticated GET pilot. The real
+one-shot and post-main Required CI have been independently completed:
+
+- [devflow PR #768](https://github.com/kinoko34077/devflow/pull/768)
+  merged at exact main `f7453ce4e018f8a834943c33fe31b3ab3df397a1`.
+- Exact-head [Required #39639341465](https://github.com/kinoko34077/devflow/actions/runs/39639341465)
+  SUCCESS, 2,093 tests including 14 new tests; native Formal Review
+  #5603251343 and readiness [#39639341473 attempt 2](https://github.com/kinoko34077/devflow/actions/runs/39639341473) SUCCESS.
+- [Post-main Required #39639606165](https://github.com/kinoko34077/devflow/actions/runs/39639606165)
+  SUCCESS, authenticated owner CLI query.
+- Real owner-PC existing authenticated `gh api` two-GET execution
+  of the merged Python module returned `ALIGNED / SAME_SCOPED_STAGE`
+  for Control #705 `MERGED` and PR #14 `MERGED`, exact
+  PR head `f6ef6f9980a80e5fbfa881db766f8231d2bb3e38`.
+  Direct request times 2026-10-21T17:00:16.629669+00:00 and
+  2026-10-21T17:00:19.125984+00:00; process exit 0, transient
+  files removed. [Owning acceptance #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6321748478).
+  This evidence is confined to this one Public PR and does
+  not prove a live detector for arbitrary Controls.
 The static target/grammar intentionally avoids silently inferring arbitrary
 Control prose. Extending to a different PR requires its own scope and
 source-backed parser contract rather than guessing from status keywords.
@@ -74,7 +91,7 @@ edits only their directly affected fields, with independent readback.
 | devflow #500 / Frequency Warp | Several stages coexist | Web #183, native #172 | No status mismatch established |
 | devflow #23 / LINE | AUDITED plus open successor PR | #47, PR #67 | No status mismatch established |
 
-## Follow-on M2–M4, not accomplished here
+## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
 1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.
 2. Select accepted exact subject refs in owning task/PR transitions; producer-owned `affected-surface reconciliation` remains the first-line preventive action.
