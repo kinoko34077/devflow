@@ -13,9 +13,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tools.kaep_inbox_reader import InvalidMessage
+from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY
 from tools.kaep_request_sender import send_request
-from tools.kaep_route_notice import route_request, verify_public_source
+from tools.kaep_route_notice import (
+    DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, route_request, verify_public_source,
+)
+from tools.kaep_reply_sender import ACTOR
 
 _SUPPORTED_INTENTS = frozenset(("ANALYZE", "REPORT"))
 _SOURCE_STORED = frozenset(("SENT_AND_READ_BACK", "ALREADY_SENT"))
@@ -63,6 +66,16 @@ def publish_source_and_route(
     """
     if type(do_send) is not bool:
         raise InvalidMessage("INVALID_SEND_MODE")
+    # Route eligibility must be checked before the original Issue POST.
+    # Once the source is written an invalid target cannot be rolled back.
+    if (type(repository) is not str or REPOSITORY.fullmatch(repository) is None
+            or type(issue) is not int or issue < 1):
+        raise InvalidMessage("INVALID_TARGET")
+    if repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE:
+        raise InvalidMessage("DISCOVERY_LOOP")
+    if (type(expected_notice_actor) is not str
+            or ACTOR.fullmatch(expected_notice_actor) is None):
+        raise InvalidMessage("INVALID_ACTOR")
     if intent not in _SUPPORTED_INTENTS:
         raise InvalidMessage("ROUTE_UNSUPPORTED_INTENT")
     if (offline_source_pages is None) != (offline_discovery_pages is None):
