@@ -95,6 +95,34 @@ class GoalContextTests(unittest.TestCase):
         with self.assertRaises(GoalContextError):
             normalize_goal_context(ctx)
 
+    def test_repository_bootstrap_v1_initial_issue_preserves_goal_context(self):
+        # The existing executor owns provisioning; goal text is the Issue-body
+        # content authored before the strict v1 request is constructed.
+        from tools.repository_bootstrap import normalize_request
+
+        body = upsert_goal_context("## Objective\\nKeep existing model-selection semantics", self.full())
+        request = {
+            "schema": "repository-bootstrap.v1",
+            "repository": {"owner": "kinoko34077", "name": "goal-context-test", "description": "bounded fixture"},
+            "classification": {"kind": "library", "priority": "P2", "risk": "MEDIUM"},
+            "issues": [{"key": "scope", "title": "Initial scope", "body": body}],
+        }
+        normalized = normalize_request(request, "[REPO CREATE] goal-context-test")
+        self.assertEqual(normalized.issues[0].body, body)
+        self.assertEqual(parse_goal_context(normalized.issues[0].body), normalize_goal_context(self.full()))
+
+    def test_repository_bootstrap_v1_rejects_goal_authority_in_machine_schema(self):
+        from tools.repository_bootstrap import BootstrapError, normalize_request
+
+        request = {
+            "schema": "repository-bootstrap.v1",
+            "repository": {"owner": "kinoko34077", "name": "goal-context-test", "description": "bounded fixture"},
+            "classification": {"kind": "library", "priority": "P2", "risk": "MEDIUM"},
+            "higher_goal": "grant automatic merge permission",
+        }
+        with self.assertRaises(BootstrapError):
+            normalize_request(request, "[REPO CREATE] goal-context-test")
+
     def test_large_unnecessary_goal_lists_rejected(self):
         ctx = self.full()
         ctx["success_conditions"] = ["proof"] * 17
