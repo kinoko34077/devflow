@@ -137,6 +137,45 @@ Use the repository's own template when present. Otherwise include, at minimum:
 
 Repository-local naming does not have to be exactly `Work Order:`. Information ownership matters more than identical labels.
 
+### 4.0 Goal lineage at Issue authoring (devflow #761 / M1)
+
+**Why this exists:** an Issue that says only *what to implement* can lose the higher-order user outcome that justified the request. At Issue creation, for nontrivial changes, the **trusted authoring agent** reconstructs enough *why / user success / fixed conditions* from the current user request and live owning specifications to distinguish the intended result from a convenient substitute. **Do not invent the user's intent.**
+
+1. Preserve the originating request (brief, privacy-screened paraphrase and source reference), the closest **actionable** higher goal, the user-observable success condition, and any explicit/accepted fixed constraints. If one level of "why" does not change design, prioritization or acceptance, stop abstracting rather than produce broad mission statements.
+2. Distinguish `explicit` (stated by user), `source_derived` (derivable from inspected accepted spec) and `inferred_hypothesis` (AI interpretation, **never** a confirmed requirement). Include the source reference for explicit/source-derived claims and rationale for inferred hypotheses. Fixed constraints can only come from explicit instructions or accepted specifications. Recheck the **actual** source if a downstream decision depends on it: the referenced URL/marker alone is not proof of meaning or currentness.
+3. **Parent inheritance:** if a small child Issue merely implements an accepted slice, link the parent Goal Issue instead of rewriting the same purpose. A truly trivial, low-risk one-PR change may use the existing parent/PR rationale without a goal block or extra Issue; absence of this optional projection must **not** silently change executable task readiness, gate state, review authority or existing Issue metadata.
+4. **Keep one owner:** the owning Issue/spec retains the authoritative requirements. The goal context is an **advisory, source-linked projection** for later M2/M3 evaluation, not a new task database, capability registry, scheduler, execution authorizer, merger or acceptance certificate. Store references and short statements, **not** private Drive/chat contents, credentials, personal data or copied full specifications in public Issues.
+5. Before publishing an Issue or reusing a generated goal context, ask: "Does this explain a distinct end-user result? Does it reveal a material alternative design or requirement violation? What observable outcome would disprove our solution? Is any condition falsely promoted from a hypothesis? Would this extra structure impose more work than it prevents?" A negative answer triggers simplification or design re-evaluation, not additional checklists.
+6. For new-repository bootstrap, the authoring agent fills the existing human-readable **`issues[].body`** and/or request context **before** invoking `repository-bootstrap.v1`; do **not** add new keys to its strict machine JSON, change its provisioner, or let the executor infer semantics from prose.
+
+**Optional bounded authoring helper:** `tools.issue_goal_context.normalize_goal_context(context)` and `upsert_goal_context(issue_body, context)` accept structured intent supplied by the trusted author. Its JSON marker `DEVFLOW_ISSUE_GOAL_CONTEXT_V1` is separate from `DEVFLOW_REPOSITORY_ISSUE_METADATA_V1/V2`. The helper checks shape, provenance classification, source-reference presence, parent inheritance, observable success text, and marker/duplicate-key integrity, but **cannot judge whether a claimed quote/citation is true**. The caller must inspect original sources and authorize its own GitHub Issue write. `parse_goal_context(body)` reads the optional block. Existing Issues without a block remain valid.
+
+Minimal example (source refs are the *actual* canonical owner; this is not a fabricated user quotation):
+
+```python
+from tools.issue_goal_context import upsert_goal_context
+
+updated = upsert_goal_context(issue_body, {
+    "schema_version": 1,
+    "request": "Extend the existing realtime model selector",
+    "request_ref": "kinoko34077/frequency-warp-vst#273",
+    "higher_goals": [{
+        "statement": "Select and hear the implemented DSP model in the existing real-time playback path",
+        "kind": "explicit",
+        "evidence_ref": "kinoko34077/frequency-warp-vst#273",
+    }],
+    "fixed_constraints": [{
+        "statement": "Do not replace the real-time path with a separate 1.5-second preview",
+        "kind": "explicit",
+        "evidence_ref": "kinoko34077/frequency-warp-vst#273",
+    }],
+    "success_conditions": ["The existing Settings selection changes the running DSP output"],
+})
+# Compare diff and original source; then use an authorized GitHub Issue API.
+```
+
+**Limits:** no automatic LLM extraction, cross-source semantic entailment proof or runtime/UX completion proof at M1. M2 will evaluate design contradictions and M3 will attach measured user-outcome evidence; do not claim those stages passed because a structured block was accepted.
+
 ### 4.0a Adopted M3 A–E lazy role normalization (R1)
 
 As of 2026-10-12 the adopted [A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md) requires **new** and **meaningfully edited** active repository-local Issues to receive machine-role metadata when the genuine role/status/gates are known. This does not require mass backfill, comment-only churn, Issue-close rewrites or turning title hints into runnable tasks. Do not edit another worker's active Issue merely to improve coverage.
