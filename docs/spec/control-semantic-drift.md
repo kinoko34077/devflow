@@ -135,6 +135,46 @@ It does not install a webhook, modify branch protection, update an Issue,
 or make a scheduler. A strict UNKNOWN is a reason to inspect the affected
 canonical surfaces, not permission to mark failure/complete.
 
+## M2 devflow-only automatic event pilot (pending live acceptance)
+
+The repository-local `.github/workflows/control-semantic-postmerge.yml`
+subscribes to GitHub's native `pull_request.closed` event only in **devflow**
+for a genuinely `merged=true` PR, using the existing read-only default
+GitHub Actions token (`contents:read`, `issues:read`,
+`pull-requests:read`). It invokes `tools/control_semantic_postmerge_event.py`
+from the now-current main branch. This adapter reuses the previously
+accepted `check_pr_transition_once` and `compare_claim` functions rather
+than creating a second comparator or cross-repository cache. No webhook
+server, periodic process, secret, broad permission, Control writer, or
+automatic pull-request merger is introduced.
+
+- Only a trusted exact devflow PR event and exact open Control #16 current
+  `## Next Action` can be checked.
+- A canonical linked claim matching the *triggering PR* that remains OPEN
+  after the actual merge gives `POTENTIAL_MISMATCH`, the CI step exits 2
+  and a sanitized report appears in the **run summary**; a failed gate is
+  a producer reconciliation signal, not a rollback of the merged PR.
+- A canonical claim already MERGED gives `ALIGNED` / exit 0.
+- No *exact current PR link* gives `NOT_APPLICABLE` / exit 0:
+  **not** an endorsement that the Control contains no drift. An explicit
+  target link with incomplete/ambiguous stage gives `UNKNOWN` / exit 3.
+- Unexpected repository, bad event identity, missing canonical source,
+  API failures and malformed input all fail closed with `UNKNOWN`.
+
+The event pilot does **not** automatically correct a Control or claim
+every merged PR changed the repository-wide Next Action. A producer still
+owns the targeted repair and readback under #251. It cannot cover PRs
+in other repositories without their own authorized event routing and
+matching owner Control. It does not verify product deployment/physical
+acceptance or general semantics of unstructured old prose.
+
+**Separate acceptance gates:** full offline CI, native Review/readiness,
+safe merge, observed `pull_request.closed` live workflow run, an actual
+stale Control found by this automatic event, producer repair and verified
+subsequent recheck. Merely adding this workflow does not establish
+operational adoption; preserve this paragraph as PENDING until live
+provider evidence is recorded in owning #726.
+
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
 1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.
