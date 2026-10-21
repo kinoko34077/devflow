@@ -138,11 +138,14 @@ class PilotTests(TestCase):
         )
         self.assertEqual(answer["observed_stage"], "CLOSED_UNMERGED")
 
-    def test_open_pr_is_unknown_even_if_claimed_ready(self):
+    def test_open_pr_is_not_a_merge_and_does_not_prove_review_ready(self):
         result, _ = self.check(
-            "UNKNOWN", pull=pr(state="open", merged=False, merged_at=None)
+            "POTENTIAL_MISMATCH", pull=pr(
+                state="open", merged=False, merged_at=None
+            )
         )
-        self.assertEqual(result["observed_stage"], "UNKNOWN")
+        self.assertEqual(result["observed_stage"], "OPEN")
+        self.assertNotIn("READY", result["observed_stage"])
 
     def test_http_failure_does_not_emit_false_mismatch(self):
         self.check("UNKNOWN", returncode=1)
@@ -176,6 +179,118 @@ class PilotTests(TestCase):
         ):
             self.assertEqual(pilot.check_editor_pr14_once()["status"], "UNKNOWN")
 
+
+    def test_explicit_second_pr_current_open_is_aligned(self):
+        # One opted-in Control, two distinct PR subjects; not a repo crawl.
+        doc = issue(body=issue()["body"].replace(
+            "- [PR #15](https://github.com/kinoko34077/"
+            "kinotch-editor-platform/pull/15) remains independently pending.",
+            "- [PR #15](https://github.com/kinoko34077/"
+            "kinotch-editor-platform/pull/15) is "
+            "**OPEN, READY (not Draft), base main** — unrelated review scope.",
+        ))
+        second = pr(
+            number=15,
+            html_url="https://github.com/kinoko34077/kinotch-editor-platform/pull/15",
+            state="open", merged=False, merged_at=None,
+        )
+        seen = []
+
+        def provider(args, **kw):
+            seen.append(args[-1])
+            return SimpleNamespace(
+                stdout=json.dumps(doc if len(seen) == 1 else second).encode(),
+                returncode=0, stderr=b"",
+            )
+
+        with patch.object(pilot.subprocess, "run", side_effect=provider):
+            result = pilot.check_pr_transition_once(
+                705, "kinoko34077/kinotch-editor-platform", 15
+            )
+        self.assertEqual(result["status"], "ALIGNED")
+        self.assertEqual(result["claimed_stage"], "OPEN")
+        self.assertEqual(result["observed_stage"], "OPEN")
+        self.assertEqual(seen, [
+            "repos/kinoko34077/devflow/issues/705",
+            "repos/kinoko34077/kinotch-editor-platform/pulls/15",
+        ])
+
+    def test_subsequent_merge_with_stale_open_claim_is_mismatch(self):
+        doc = issue(body=(
+            "## Next Action\n- [PR #15]"
+            "(https://github.com/kinoko34077/kinotch-editor-platform/pull/15)"
+            " is **OPEN** — still under review.\n## Canonical Entry Points\n"
+        ))
+        merged = pr(
+            number=15,
+            html_url="https://github.com/kinoko34077/kinotch-editor-platform/pull/15",
+            merged=True, merged_at="2026-10-22T00:00:00Z",
+        )
+        docs = [doc, merged]
+
+        def provider(args, **kw):
+            return SimpleNamespace(
+                stdout=json.dumps(docs.pop(0)).encode(),
+                returncode=0, stderr=b"",
+            )
+
+        with patch.object(pilot.subprocess, "run", side_effect=provider):
+            result = pilot.check_pr_transition_once(
+                705, "kinoko34077/kinotch-editor-platform", 15
+            )
+        self.assertEqual(result["status"], "POTENTIAL_MISMATCH")
+        self.assertEqual((result["claimed_stage"], result["observed_stage"]),
+                         ("OPEN", "MERGED"))
+
+    def test_invalid_or_cross_owner_input_does_not_invoke_network(self):
+        for args in (
+            (True, pilot.REPOSITORY, 14),
+            (705, pilot.REPOSITORY, 0),
+            (705, "someoneelse/repo", 14),
+            (705, "kinoko34077/repo/../../other", 14),
+            (705, "kinoko34077/repo..other", 14),
+            (705, pilot.REPOSITORY, True),
+        ):
+            with self.subTest(args=args):
+                with patch.object(
+                    pilot.subprocess, "run",
+                    side_effect=AssertionError("network called"),
+                ):
+                    self.assertEqual(
+                        pilot.check_pr_transition_once(*args)["status"], "UNKNOWN"
+                    )
+
+    def test_open_claim_not_review_readiness(self):
+        doc = issue(body=issue()["body"].replace(
+            "is **MERGED**", "is **OPEN, READY (not Draft)**"
+        ))
+        unready = pr(state="open", merged=False, merged_at=None)
+        result, _ = self.check("ALIGNED", control=doc, pull=unready)
+        self.assertEqual(result["observed_stage"], "OPEN")
+
+    def test_mismatched_pr_merge_metadata_fails_closed(self):
+        self.check("UNKNOWN", pull=pr(merged=False))
+        self.check("UNKNOWN", pull=pr(state="open", merged=True))
+        self.check("UNKNOWN", pull=pr(
+            state="closed", merged=False, merged_at="2026-10-19T00:00:00Z"
+        ))
+
+    def test_current_heading_duplicated_fails_closed(self):
+        doc = issue(body=issue()["body"].replace(
+            "## Canonical Entry Points", "## Next Action\nambiguous\n"
+            "## Canonical Entry Points"
+        ))
+        self.check("UNKNOWN", control=doc)
+
+    def test_second_pr_identity_is_not_satisfied_by_first_pr(self):
+        # The first subject is MERGED; a request for #15 must not reuse it.
+        with patch.object(pilot.subprocess, "run", side_effect=AssertionError(
+            "expected caller-specific GET fixture"
+        )):
+            self.assertEqual(
+                pilot.check_pr_transition_once(0, pilot.REPOSITORY, 15)["status"],
+                "UNKNOWN",
+            )
 
 if __name__ == "__main__":
     main()
