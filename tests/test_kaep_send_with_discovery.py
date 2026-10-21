@@ -61,7 +61,7 @@ def indexed_page(*, trailing_newline=False):
         expect_existing_actor=ACTOR,
     )
     assert existing is None
-    wire = encode_comment(index) + ("\\n" if trailing_newline else "")
+    wire = encode_comment(index) + ("\n" if trailing_newline else "")
     return json.dumps([[{"id": 41, "body": wire, "user": {"login": ACTOR}}]])
 
 
