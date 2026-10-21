@@ -115,6 +115,26 @@ authority. A producer must actually call and interpret this advisory
 at their transition; merely merging this code does not install a hook.
 Full automatic merge/Close interception and all-repository semantic
 monitoring are NOT accepted by this bounded command.
+### Opt-in producer-exit status gate
+
+After an accepted PR transition, the producing worker can execute the same
+scoped native reader with `--require-aligned`:
+
+`python -m tools.control_semantic_pilot --control 705 --repository kinoko34077/kinotch-editor-platform --pr 15 --require-aligned`
+
+Exit code **0** means exactly `ALIGNED` for the one scoped PR stage;
+**2** means `POTENTIAL_MISMATCH` needing producer-owned recheck/repair;
+**3** means `UNKNOWN`/`NOT_COMPARABLE` (missing source or inadequate
+proof). JSON output is kept for durable receipts. Without the flag, the
+established diagnostic command retains exit 0 for compatibility. A merge,
+CI success or emitted JSON is not enough to close a bounded task if the
+actual producer-exit check has never been called and the relevant Control
+was not verified. This does **not** block GitHub merges: it only allows
+an explicitly participating producer to refuse premature `DONE`.
+It does not install a webhook, modify branch protection, update an Issue,
+or make a scheduler. A strict UNKNOWN is a reason to inspect the affected
+canonical surfaces, not permission to mark failure/complete.
+
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
 1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.

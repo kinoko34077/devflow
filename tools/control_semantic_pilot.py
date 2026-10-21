@@ -194,15 +194,35 @@ def check_editor_pr14_once() -> dict[str, str]:
     return check_pr_transition_once(CONTROL_ID, REPOSITORY, PR_NUMBER)
 
 
-if __name__ == "__main__":
+def run_cli(argv: list[str] | None = None) -> int:
+    """Optional producer-exit gate: non-ALIGNED must not silently succeed.
+
+    The default remains a diagnostic command returning zero, even when the
+    observation is UNKNOWN or a mismatch candidate. --require-aligned makes
+    the producer explicitly opt into an exit barrier, NEVER a merge-blocker,
+    Control editor, or source of higher operational authority.
+    """
     parser = argparse.ArgumentParser(
         description="Read-only scoped PR/Control stage discrepancy check."
     )
     parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("--control", type=int, default=CONTROL_ID)
     parser.add_argument("--pr", type=int, default=PR_NUMBER)
-    args = parser.parse_args()
-    print(json.dumps(
-        check_pr_transition_once(args.control, args.repository, args.pr),
-        ensure_ascii=False, sort_keys=True,
-    ))
+    parser.add_argument(
+        "--require-aligned", action="store_true",
+        help="Exit nonzero on possible drift or evidence not proven.",
+    )
+    args = parser.parse_args(argv)
+    result = check_pr_transition_once(args.control, args.repository, args.pr)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if not args.require_aligned:
+        return 0
+    if result["status"] == "ALIGNED":
+        return 0
+    if result["status"] == "POTENTIAL_MISMATCH":
+        return 2
+    return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_cli())

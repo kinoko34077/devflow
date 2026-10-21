@@ -145,6 +145,17 @@ from a merged source PR. No automatic Control mutation, scheduler or
 merge hook is installed. Full M2 transition-time automation remains open
 in devflow #726. Do not add semantic claims to unrelated historical prose
 simply to force the tool to report ALIGNED.
+A worker using this command as a **task-exit gate** should append
+`--require-aligned`. Exit 0 only on exact scoped `ALIGNED`, exit 2 on
+`POTENTIAL_MISMATCH`, exit 3 on `UNKNOWN` / incomparable evidence.
+A nonzero result triggers scoped readback and producer-owned reconciliation
+before declaring the affected transition's Control surface complete.
+The flag has no merge or write privileges; the default read-only
+diagnostic command remains compatible. The task may still be completed
+through independent verified evidence if its Control does not have a
+canonical exact-stage claim; do not manufacture or force a marker to get
+a green result. Full fleet use remains an unaccepted #726 milestone.
+
 ## 8. Working notes are allowed
 
 The progress surface may also contain concise temporary material such as:
