@@ -66,7 +66,7 @@ class OnDemandObservationTests(unittest.TestCase):
             def open(self, request, timeout):
                 raise HTTPError(request.full_url, 401, "unauthorized", {}, None)
 
-        failed = self.query(Unauthorized())
+        failed = self.observe(Unauthorized())
         self.assertEqual(failed.action, "QUERY_BILLING_ERROR")
         self.assertTrue(failed.queried_github_billing)
 
