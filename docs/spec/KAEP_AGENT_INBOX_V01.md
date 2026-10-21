@@ -63,6 +63,18 @@ This is the **admission contract for a prospective opt-in GET-only shadow**, not
 
 The existing [strict #503 pointer shadow](https://github.com/kinoko34077/devflow/pull/630) and [original-Issue reader](https://github.com/kinoko34077/devflow/issues/531#issuecomment-6202473288) remain authoritative for their already accepted scopes. The in-memory regression in `tests/test_kaep_discovery_reader.py` preserves one *known real identifier tuple* using re-encoded sanitized text; it does **not** run GitHub APIs, establish 22-root fleet coverage, or prove runtime Consumer delivery.
 
+### B5 per-original producer→pointer audit (opt-in GET-only)
+
+The separate producer-side Work Order [#771](https://github.com/kinoko34077/devflow/issues/771) records a concrete failure: `kaep_request_sender` can report original Issue `SENT_AND_READ_BACK` while the #503 pointer is absent, because `kaep_route_notice` is independently invoked. A source write is not the receiver's discovery, nor proof of its model pickup.
+
+For **one already identified authentic** Claude READ_ONLY/ANALYZE or REPORT original request, opt in to the existing strict source verifier plus complete bounded #503 comment observation (no new GitHub writes or task classifier):
+
+```sh
+python -m tools.kaep_source_route_audit --repository kinoko34077/devflow --issue 726 --message-id msg_control726_review_20261019_v1 --expect-source-actor kinoko34077 --expect-notice-actor kinoko34077
+```
+
+`EXACT_POINTER_OBSERVED` proves one correctly matched canonical source/pointer tuple in the observed index, **not** all sources, fresh HEAD, pending work or delivery (RC 0). `EXACT_POINTER_NOT_OBSERVED` means no matching strict pointer in this complete bounded index read (RC 2), **not** that no request exists; `PARTIAL_UNKNOWN` means a trusted marker/index source was malformed or otherwise incomplete (RC 2), and `BLOCKED` means source/index failed validation or transport (RC 2). The diagnostic never copies original request prose, auto-routes historical requests, writes a comment, grants Claim, or retires #503/manual Control. Historical #81 `INVALID_WRAPPER` remains a B5 source blocker. Never retry by forging an old REQUEST/ACK or bulk promoting unknown Issues.
+
 ### B5 opt-in verified-pointer Issue-wide root shadow (read-only)
 
 The first bounded shadow implementation exists separately at `tools/kaep_source_roster_shadow.py`. It **only** considers original Issue locators that the existing strict #503 codec has source-verified (one supported `VERIFIED_POINTER` provenance type from the broader candidate-roster design above); it does not inspect arbitrary unclassified Issues or discover original Issues with **no** pointer **and no** other trusted candidate source. It uses the accepted full-source Agent Inbox mailbox correlation for `claude-code`; TASK Inbox, native MCP interfaces, and the existing #503 reader remain unchanged.
