@@ -72,6 +72,18 @@ def select_task_records(
         "source_error": work_view.get("source_error"),
         "coverage_status": work_view.get("coverage_status"),
         "unresolved_open_issue_count": observed.get("unresolved_open_issue_count"),
+        # Preserve the already-classified M3 source-gap categories for consumers.
+        # An unavailable source is UNKNOWN, never zero. These counts are
+        # observations only: no legacy/unclassified Issue becomes a TASK.
+        "unresolved_issue_breakdown": {
+            category: work_view.get(field) if is_current else None
+            for category, field in (
+                ("legacy_hint", "legacy_hint_count"),
+                ("unclassified", "unclassified_count"),
+                ("invalid_metadata", "invalid_metadata_count"),
+                ("untrusted_metadata", "untrusted_metadata_count"),
+            )
+        },
         "known_task_count": observed.get("known_task_count"),
         "manual_control": work_view.get("manual_control"),
         "can_authorize_execution": False,
