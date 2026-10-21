@@ -135,7 +135,7 @@ It does not install a webhook, modify branch protection, update an Issue,
 or make a scheduler. A strict UNKNOWN is a reason to inspect the affected
 canonical surfaces, not permission to mark failure/complete.
 
-## M2 devflow-only automatic event pilot (pending live acceptance)
+## M2 devflow-only automatic merged-PR event pilot (accepted for exact current claims)
 
 The repository-local `.github/workflows/control-semantic-postmerge.yml`
 subscribes to GitHub's native `pull_request.closed` event only in **devflow**
@@ -170,12 +170,27 @@ in other repositories without their own authorized event routing and
 matching owner Control. It does not verify product deployment/physical
 acceptance or general semantics of unstructured old prose.
 
-**Separate acceptance gates:** full offline CI, native Review/readiness,
-safe merge, observed `pull_request.closed` live workflow run, an actual
-stale Control found by this automatic event, producer repair and verified
-subsequent recheck. Merely adding this workflow does not establish
-operational adoption; preserve this paragraph as PENDING until live
-provider evidence is recorded in owning #726.
+**Accepted first live event:** [devflow PR #776](https://github.com/kinoko34077/devflow/pull/776)
+merged at `af280d0c9d6e23b31d31cdee949a030380240cf9`; Required
+[#39695059094](https://github.com/kinoko34077/devflow/actions/runs/39695059094)
+passed 2,132 tests, formal current-head Review/readiness accepted, and
+post-main Required [#39695388127](https://github.com/kinoko34077/devflow/actions/runs/39695388127)
+succeeded. A **real automatically GitHub-triggered**
+[pull_request run #39695388458](https://github.com/kinoko34077/devflow/actions/runs/39695388458)
+detected the actual stale Control #16 PR #776 `OPEN` claim after merge
+and failed exit 2. The producing worker then repaired only its own
+Control #16 stage to `MERGED` and reran the failed run: attempt 2
+**SUCCESS**. Both the actual triggering event and its repair recovery
+were independently observed. Durable owner receipt:
+[devflow #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6329124725).
+
+**Still unaccepted:** an event with no explicit current PR reference has
+only offline `NOT_APPLICABLE` tests until an actual run confirms it;
+this branch's normal documentation-only PR will provide a bounded native
+negative control. Neither a missing PR reference nor a successful workflow
+means all semantic claims are consistent. Other repositories do not inherit
+this workflow, and M2 cross-repository propagation, M3, M4 remain OPEN.
+No automatic Control writeback has been authorized.
 
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
