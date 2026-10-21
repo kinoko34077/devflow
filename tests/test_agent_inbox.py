@@ -174,6 +174,10 @@ class AgentInboxProjectionTests(unittest.TestCase):
         res = devflow_mcp_core.DevflowService(reader).get_agent_inbox("demo")
         self.assertTrue(res["has_unknown_work"])
         self.assertEqual(res["unresolved_open_issue_count"], 1)
+        self.assertEqual(res["unresolved_issue_breakdown"], {
+            "legacy_hint": 0, "unclassified": 1,
+            "invalid_metadata": 0, "untrusted_metadata": 0,
+        })
         self.assertEqual([e["issue_number"] for e in res["issues"]], [21])
         self.assertEqual(res["coverage_status"], "INCOMPLETE")
         self.assertEqual(res["manual_control"]["active_work"], "manual pointer")
@@ -191,6 +195,41 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertIsNone(result["task_count_filtered"])
         self.assertTrue(result["has_unknown_work"])
         self.assertEqual(result["source_status"], "UNAVAILABLE")
+
+    def test_gap_breakdown_does_not_expand_task_scope_or_hide_missing_source(self):
+        view = fake_work_view([task(21)])
+        view.update(
+            coverage_status="INCOMPLETE", legacy_hint_count=3,
+            unclassified_count=96, invalid_metadata_count=0,
+            untrusted_metadata_count=0,
+        )
+        view["observed_task_view"].update(
+            is_complete_read=False, unresolved_open_issue_count=99,
+            status="OBSERVED_PARTIAL",
+        )
+        result = agent_inbox.build_agent_inbox(
+            view, recipient="codex", comments_by_issue={21: []},
+            work_status="BLOCKED",
+        )
+        self.assertEqual(result["unresolved_open_issue_count"], 99)
+        self.assertEqual(result["unresolved_issue_breakdown"], {
+            "legacy_hint": 3, "unclassified": 96,
+            "invalid_metadata": 0, "untrusted_metadata": 0,
+        })
+        self.assertEqual(result["issues"], [])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["is_full_work_inventory"])
+        self.assertFalse(result["can_authorize_execution"])
+
+        view["source_status"] = "UNAVAILABLE"
+        view["source_freshness"] = "UNKNOWN"
+        unavailable = agent_inbox.select_task_records(view, recipient="codex")
+        self.assertEqual(unavailable["unresolved_issue_breakdown"], {
+            "legacy_hint": None, "unclassified": None,
+            "invalid_metadata": None, "untrusted_metadata": None,
+        })
+        self.assertEqual(unavailable["selected"], [])
+        self.assertFalse(unavailable["is_full_work_inventory"])
 
     def test_failed_comments_is_not_misclassified_as_no_pending_message(self):
         result = agent_inbox.build_agent_inbox(
@@ -398,6 +437,8 @@ def fake_work_view(issues):
         "repository": REPO, "source_status":"AVAILABLE",
         "source_freshness":"CURRENT", "coverage_status":"COMPLETE",
         "source_error":None, "task_records":records,
+        "legacy_hint_count":0, "unclassified_count":0,
+        "invalid_metadata_count":0, "untrusted_metadata_count":0,
         "observed_task_view":{
             "status":"COMPLETE_READ", "known_task_count":len(records),
             "unresolved_open_issue_count":0,"is_complete_read":True},
