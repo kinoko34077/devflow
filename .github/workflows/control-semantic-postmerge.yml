@@ -42,7 +42,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo 'Result is scoped to one PR, not product or fleet acceptance.' >> "$GITHUB_STEP_SUMMARY"
           echo 'A missing exact PR reference is NOT_APPLICABLE, not ALIGNED.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Expected mismatch/unknown requires producer-owned follow-up.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Mismatch, unknown, or owner-linked review candidate requires producer follow-up; no auto-write.' >> "$GITHUB_STEP_SUMMARY"
           echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
           cat semantic-observation.json >> "$GITHUB_STEP_SUMMARY"
           echo '~~~' >> "$GITHUB_STEP_SUMMARY"
