@@ -1,8 +1,8 @@
 # KAEP discovery index recovery — proposal and acceptance gates (draft v0.1)
 
-- **Status: PROPOSAL ONLY / NOT ACCEPTED; no authority to publish, migrate, relax parsing or change the default sender.**
+- **Status: OPTION B ACCEPTED FOR NEW PUBLIC INDEX ISSUE CREATION (2026-10-22 JST); #789 CREATED / EMPTY / INACTIVE. Reader read-only integration is staged; production write/cutover/recipient E2E not yet accepted.**
 - Owner: [devflow #503](https://github.com/kinoko34077/devflow/issues/503) (KAEP protocol). Work: [#771](https://github.com/kinoko34077/devflow/issues/771) (producer source→locator). Consumers: [#531](https://github.com/kinoko34077/devflow/issues/531) (B5), [#680](https://github.com/kinoko34077/devflow/issues/680) (B6).
-- Date: 2026-10-22 JST. This is an engineering comparison, **not** a user-authorized successor mailbox, historical exception, launch, or task authority.
+- Date: 2026-10-22 JST. The user explicitly authorized **option B and creation of public successor Issue #789**. This document still provides engineering/security rollout gates, **not** authority to publish KAEP REQUESTs, turn on automatic agents, bypass provenance checks, or retire legacy fallback.
 
 ## 1. Outcome and current verified gap
 
@@ -26,7 +26,7 @@ At the last bounded real #503 observation, there were **155 comments / 117 KAEP-
 | **B. Versioned successor index with backward-compatible dual-read**: append *new* source locators to an independently designated clean public owner Issue; preserve old #503 as historical read-only; consumers merge strict-validated original-root identities | Original and old #503 bytes unchanged | **Yes** — an explicit owner-approved public Issue, new index contract, rollout/dual-read tests | Independent security/visibility/actor/replay review; stable producer→pointer recovery; strict read-back and privacy gates; dedup same source tuple across old/new; migration parity and rollback | More implementation and public-surface changes; historical completeness not automatically solved |
 | **C. Edit historic comments or globally accept trailing whitespace** | No, changes existing provenance or canonical wire grammar | None | Would require an explicit exception to strict v0.2 source authority | **Excluded under current accepted B5/#503 security conditions** |
 
-**Conditional technical direction:** Prefer **B as the long-lived architecture** if owner authorizes a new public discovery surface, because it avoids a permanent hard-coded historical exception in the primary index. A is a possible strictly bounded transitional path only if its exact-byte and collision provenance is independently proven and an owner explicitly accepts the exception. **Neither is accepted or enabled by this proposal.** Do not create a new public mailbox simply because this document exists.
+**User decision:** B selected and the single public successor index [#789](https://github.com/kinoko34077/devflow/issues/789) created (empty, inactive); option A remains an unaccepted alternative. The creation permission **does not** authorize a new model-addressed REQUEST, broad source backfill, or unreviewed activation. Strict source/actor/visibility/replay review and actual recipient GET/ACK/ANSWER remain separate before claiming delivery.
 
 ### B read-only compatibility pilot (not a migration)
 
@@ -41,6 +41,17 @@ Admission tests intentionally include: duplicate verified old/new pointer; malfo
 `tools.kaep_route_notice.route_request` (the accepted existing pointer composer) now accepts optional `discovery_issue`, default **unchanged #503**. Any non-#503 target is admitted **only with both explicit offline GitHub-page fixtures and `do_send=False`**. It uses the same `verify_source_request` and `kaep_request_sender.send_request` with target-specific `task_ref` and idempotency identity. A successor target with `--send` always fails **before any GitHub read or write** with `SUCCESSOR_INDEX_NOT_APPROVED`; the CLI does not publish or create an index. A self-loop or invalid target fails before composing a message.
 
 An offline regression prepares one valid original, captures the existing route composer's successor-target pointer payload, constructs its exact existing KAEP v0.2 envelope through `make_request`, and feeds it to `discover_batch(index_issue=synthetic_successor)` for independent strict original/recipient readback. Invalid/partial fixture and forbidden live publish scenarios are negative-tested. This proves **serializer/parser compatibility in fixtures**, not public-index selection, real POST/readback, recipient model pickup, migration authorization, completeness, or source visibility. Production successor routing requires explicit #503 owner decision, independent security validation and a separate code change to remove the intentional non-#503 send lock after approval.
+### Physical approved successor v2 read path (S0 done, S1 review in progress)
+
+The real approved index Issue is **devflow #789**, not the previous synthetic test number #9001. Existing `kaep_discovery_reader` now supports opt-in read-only `--index-issue 789` and `--dual-shadow` for canonical #503 + #789 via existing original-verifying A3; other requested Issue IDs fail closed. Empty #789 (observed 0 KAEP comments) must **never** mean no work; legacy #503 remains with historical invalid markers and manual fallback. Accepted Issue creation does not enable the producer live `--send` to #789. Commands after S1 code acceptance:
+
+```
+python -m tools.kaep_discovery_reader --index-issue 789 --shadow-all --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
+python -m tools.kaep_discovery_reader --dual-shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
+```
+
+`--dual-shadow` only compares bounded index cohorts and retains unknown coverage even when indexes are empty; it is not a recipient session or B5 total source-universe proof.
+
 ## 3. Proposed phased acceptance, independent evidence and rollback
 
 1. **R2.1 — Source evidence + authority.** Re-read live `#503` and owning Issue at the exact test time; record total/pagination, every rejected marker ID, raw-body digest metadata (no request prose in reports), actor and edit/time provenance. Confirm old pointer and original identities under canonical validators; distinguish a GitHub transport account from an authenticated worker identity. Pick A or B *explicitly at #503*, recording why the other's risk is unacceptable.
