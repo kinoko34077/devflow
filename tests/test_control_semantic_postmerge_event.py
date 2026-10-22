@@ -266,7 +266,7 @@ class PostMergeEventTests(unittest.TestCase):
         template = (
             Path(__file__).resolve().parents[1] / ".github" / "pull_request_template.md"
         ).read_text(encoding="utf-8")
-        self.assertEqual(template.count("- Owning-Issue:"), 1)
+        self.assertEqual([line for line in template.splitlines() if line.startswith("- Owning-Issue:")], ["- Owning-Issue:"])
         self.assertEqual(target.OWNER_LINE.findall(template), [""])
 
     def test_template_shorthand_and_legacy_owner_values(self):
