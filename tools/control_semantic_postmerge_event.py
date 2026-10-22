@@ -91,6 +91,31 @@ OWNER_VALUE = re.compile(
 )
 
 
+# GitHub's template has a separate optional closing-keyword relation.
+# Parse anchored declaration lines only, never arbitrary narrative mentions.
+CLOSING_LINE = re.compile(
+    # An ordinary bullet such as "- Fixes the post-merge handler" is NOT
+    # an Issue closing declaration. Require an Issue-reference-shaped value;
+    # the subsequent owner parser validates its exact repository and number.
+    r"^(?:- )?(?:closes|fixes|resolves)[ \t]*:?[ \t]*"
+    r"((?:#|https?://|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#)[^\r\n]*)\r?$",
+    re.IGNORECASE | re.MULTILINE,
+)
+CLOSING_QUALIFIED = re.compile(
+    r"^(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})$"
+)
+
+
+def _parse_closing_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
+    """Interpret GitHub closing syntax through the *existing* owner parser."""
+    qualified = CLOSING_QUALIFIED.fullmatch(value)
+    if qualified is not None:
+        owner, number = qualified.groups()
+        value = f"https://github.com/{owner}/issues/{number}"
+    return _parse_owner_issue(value, caller_repository)
+
+
+
 def _parse_owner_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
     """GitHub relative #N names the *caller* Issue, never devflow by default."""
     marker = OWNER_VALUE.fullmatch(value)
@@ -130,16 +155,38 @@ def _owner_reconciliation_candidate(
     if type(body) is not str:
         return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number, repository)
     declarations = [part.strip() for part in OWNER_LINE.findall(body)]
-    # Empty template placeholders are not evidence of ownership.
-    # Ignore inline code/prose mentioning the field name entirely.
+    # Blank template fields are not evidence; do not guess from prose.
     filled = [part for part in declarations if part]
-    if not filled:
-        return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number, repository)
-    if len(filled) != 1:
+    closings = [part.strip() for part in CLOSING_LINE.findall(body)]
+    valid_closings = [part for part in closings if part not in ("", "#")]
+    if len(filled) > 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number, repository)
-    scoped_owner = _parse_owner_issue(filled[0], repository)
-    if scoped_owner is None:
-        return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number, repository)
+    if len(valid_closings) > 1:
+        return _result("UNKNOWN", "AMBIGUOUS_CLOSING_MARKER", number, repository)
+    closing_owner = None
+    if valid_closings:
+        # GitHub interprets PR closing keywords for the default branch only.
+        base = pr["base"]
+        default = base["repo"].get("default_branch")
+        if (
+            type(default) is not str or not default
+            or type(base.get("ref")) is not str
+            or base["ref"] != default
+        ):
+            return _result("UNKNOWN", "CLOSING_RELATION_BASE_NOT_PROVEN", number, repository)
+        closing_owner = _parse_closing_issue(valid_closings[0], repository)
+        if closing_owner is None:
+            return _result("UNKNOWN", "UNCANONICAL_CLOSING_MARKER", number, repository)
+    if filled:
+        scoped_owner = _parse_owner_issue(filled[0], repository)
+        if scoped_owner is None:
+            return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number, repository)
+        if closing_owner is not None and scoped_owner != closing_owner:
+            return _result("UNKNOWN", "CONTRADICTORY_OWNER_AND_CLOSING_MARKER", number, repository)
+    elif closing_owner is not None:
+        scoped_owner = closing_owner
+    else:
+        return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number, repository)
     owner_repository, owner = scoped_owner
     owner_receipt = pilot._read_json(
         f"repos/{owner_repository}/issues/{owner}"
@@ -151,7 +198,9 @@ def _owner_reconciliation_candidate(
         type(issue.get("number")) is not int or issue["number"] != owner
         or issue.get("html_url")
         != f"https://github.com/{owner_repository}/issues/{owner}"
-        or issue.get("state") != "open"
+        or issue.get("state") not in (
+            ("open", "closed") if closing_owner is not None else ("open",)
+        )
         or type(issue.get("pull_request")) is dict
     ):
         return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number, repository)
@@ -182,7 +231,10 @@ def _owner_reconciliation_candidate(
     if not mentioned:
         return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number, repository)
     answer = _result(
-        "RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK", number, repository
+        "RECONCILIATION_REVIEW_REQUIRED",
+        ("CLOSING_ISSUE_WITHOUT_PR_LINK" if closing_owner is not None
+         else "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        number, repository,
     )
     answer["owner_issue_url"] = exact_link
     return answer
