@@ -269,19 +269,167 @@ class PostMergeEventTests(unittest.TestCase):
         self.assertEqual([line for line in template.splitlines() if line.startswith("- Owning-Issue:")], ["- Owning-Issue:"])
         self.assertEqual(target.OWNER_LINE.findall(template), [""])
 
-    def test_template_shorthand_and_legacy_owner_values(self):
-        for value in (
-            "#726",
-            "https://github.com/kinoko34077/devflow/issues/726",
+    def test_owner_field_namespace_contract(self):
+        caller = "kinoko34077/2bit-cell-automaton"
+        for raw, expected in (
+            ("#726", (caller, 726)),
+            ("https://github.com/kinoko34077/devflow/issues/726",
+             ("kinoko34077/devflow", 726)),
+            ("https://github.com/kinoko34077/2bit-cell-automaton/issues/11",
+             (caller, 11)),
+            ("#11", (caller, 11)),
         ):
-            with self.subTest(value=value):
-                m = target.OWNER_VALUE.fullmatch(value)
-                self.assertIsNotNone(m)
-                self.assertEqual(int(m.group(1) or m.group(2)), 726)
-        for bad in ("#7260suffix", "https://evil.invalid/issues/726",
-                    "#0", "devflow #726", "#726; #727"):
+            with self.subTest(raw=raw):
+                self.assertEqual(target._parse_owner_issue(raw, caller), expected)
+        self.assertEqual(target._parse_owner_issue(
+            "#726", target.REPOSITORY
+        ), (target.REPOSITORY, 726))
+        for bad in (
+            "#7260suffix", "https://evil.invalid/issues/726",
+            "#0", "devflow #726", "#726; #727",
+            "https://github.com/kinoko34077/another-repo/issues/726",
+        ):
             with self.subTest(bad=bad):
-                self.assertIsNone(target.OWNER_VALUE.fullmatch(bad))
+                self.assertIsNone(target._parse_owner_issue(bad, caller))
+
+    def test_crossrepo_bare_issue_number_cannot_impersonate_devflow_owner(self):
+        """A caller's #726 must not inherit unrelated devflow #726."""
+        caller = "kinoko34077/2bit-cell-automaton"
+        e = event(number=14)
+        e["repository"]["full_name"] = caller
+        p = e["pull_request"]
+        p["html_url"] = f"https://github.com/{caller}/pull/14"
+        p["base"]["repo"]["full_name"] = caller
+        c = control(number=14)
+        c.update(number=6, title="[REPO] 2bit-cell-automaton",
+                 html_url="https://github.com/kinoko34077/devflow/issues/6")
+        c["body"] = (
+            "## Next Action\n#726 is the devflow owner.\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        native_pr = dict(p, state="closed", body="- Owning-Issue: #726")
+        reads = []
+        def lookup(path):
+            reads.append(path)
+            if path.endswith("/issues/6"):
+                return c, NOW
+            if path == f"repos/{caller}/pulls/14":
+                return native_pr, NOW
+            if path == f"repos/{caller}/issues/726":
+                return None
+            if path == "repos/kinoko34077/devflow/issues/726":
+                raise AssertionError("incorrect devflow owner binding")
+            raise AssertionError(path)
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "OWNER_ISSUE_READ_FAILED")
+        self.assertEqual(reads[-1], f"repos/{caller}/issues/726")
+
+    def test_crossrepo_explicit_devflow_owner_requires_review(self):
+        caller = "kinoko34077/2bit-cell-automaton"
+        e = event(number=14)
+        e["repository"]["full_name"] = caller
+        e["pull_request"]["html_url"] = f"https://github.com/{caller}/pull/14"
+        e["pull_request"]["base"]["repo"]["full_name"] = caller
+        c = control()
+        c.update(number=6, title="[REPO] 2bit-cell-automaton",
+                 html_url="https://github.com/kinoko34077/devflow/issues/6")
+        c["body"] = (
+            "## Next Action\n- [Work #726]"
+            "(https://github.com/kinoko34077/devflow/issues/726) ongoing\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        native_pr = dict(
+            e["pull_request"], state="closed",
+            body="- Owning-Issue: https://github.com/kinoko34077/devflow/issues/726",
+        )
+        reads = []
+        def lookup(path):
+            reads.append(path)
+            if path.endswith("/issues/6"):
+                return c, NOW
+            if path == f"repos/{caller}/pulls/14":
+                return native_pr, NOW
+            if path == "repos/kinoko34077/devflow/issues/726":
+                return {
+                    "number": 726,
+                    "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+                    "state": "open",
+                }, NOW
+            raise AssertionError(path)
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
+        self.assertEqual(result["owner_issue_url"],
+                         "https://github.com/kinoko34077/devflow/issues/726")
+        self.assertEqual(reads[-1], "repos/kinoko34077/devflow/issues/726")
+
+    def test_crossrepo_local_owner_needs_qualified_current_control_reference(self):
+        caller = "kinoko34077/2bit-cell-automaton"
+        e = event(number=14)
+        e["repository"]["full_name"] = caller
+        e["pull_request"]["html_url"] = f"https://github.com/{caller}/pull/14"
+        e["pull_request"]["base"]["repo"]["full_name"] = caller
+        c = control()
+        c.update(number=6, title="[REPO] 2bit-cell-automaton",
+                 html_url="https://github.com/kinoko34077/devflow/issues/6")
+        c["body"] = (
+            "## Next Action\n- Relevant local task "
+            f"[Issue #15](https://github.com/{caller}/issues/15)\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        native_pr = dict(
+            e["pull_request"], state="closed", body="- Owning-Issue: #15"
+        )
+        observed = []
+        def lookup(path):
+            observed.append(path)
+            if path.endswith("/issues/6"):
+                return c, NOW
+            if path == f"repos/{caller}/pulls/14":
+                return native_pr, NOW
+            if path == f"repos/{caller}/issues/15":
+                return {
+                    "number": 15,
+                    "html_url": f"https://github.com/{caller}/issues/15",
+                    "state": "open",
+                }, NOW
+            raise AssertionError(path)
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "RECONCILIATION_REVIEW_REQUIRED")
+        self.assertEqual(observed[-1], f"repos/{caller}/issues/15")
+        c["body"] = c["body"].replace(
+            f"https://github.com/{caller}/issues/15",
+            "https://github.com/kinoko34077/devflow/issues/15",
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "UNKNOWN")
+        self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+
+        # Another account's same-named repo is NOT the caller's owner.
+        c["body"] = (
+            "## Next Action\n"
+            "other-owner/2bit-cell-automaton#15 is unrelated.\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "UNKNOWN")
+        self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+
+        # Unqualified short repo identity without an account is allowed
+        # only when NOT embedded inside somebody else's account/repo.
+        c["body"] = (
+            "## Next Action\n"
+            "2bit-cell-automaton#15 is the current local task.\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "RECONCILIATION_REVIEW_REQUIRED")
 
     def test_owner_source_missing_fails_closed(self):
         c = control(number=775)

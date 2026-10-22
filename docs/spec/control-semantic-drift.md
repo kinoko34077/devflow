@@ -321,6 +321,35 @@ belong to caller, so Private Actions #752 restrictions still apply.
   2 SUCCEEDED. No workflow-owned Issue mutation was performed.
 - [Durable evidence on #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6331292004).
 
+### Owning-Issue repository namespace (2026-10-22 correction)
+
+The immutable shared M2 reader must **not** assume a caller PR's unqualified
+`- Owning-Issue: #N` refers to devflow. By GitHub's ordinary issue-reference
+semantics, that form identifies `kinoko34077/<caller>#N`. In a devflow PR
+it still means devflow, but in another repository it means the **caller-local**
+Issue. Authors who intend a **devflow** owner from another repository must
+write its full canonical URL:
+`- Owning-Issue: https://github.com/kinoko34077/devflow/issues/726`.
+
+An explicit canonical Issue URL may instead target the caller repository.
+Only those two qualified namespaces are admitted; any third repository,
+malformed or ambiguous reference, missing/closed Issue, incomplete
+authenticated GET, or mismatched Issue identity yields `UNKNOWN`, never an
+assumed devflow owner or automatic Control write. Caller-local `#N` must
+also appear **qualified by caller repository** in the current devflow Control
+Next Action (full caller URL or `caller-name#N`); a bare `#N` in that
+devflow Control is a devflow Issue and does not match a caller-local owner.
+For devflow owners, explicit devflow URL/`devflow#N` or bare `#N` in
+the devflow Control can match.
+
+This is a correctness fix for **future shared-source SHA revisions only**.
+Historical 2bit-cell-automaton #14 used `- Owning-Issue: #726` intending
+devflow: its existing reusable workflow is immutable-pinned to the prior
+code, and its observed successful pilot remains dated evidence, **not**
+proof that the relative owner syntax was safe. Do not revise a protected
+caller or make a new hosted run merely to retroactively reinterpret history.
+Any new caller needs explicit owner namespace and separate live acceptance.
+
 **Unaccepted:** no guarantee when author omits or misidentifies the owner
 field, no general relevance proof from an issue reference alone, no
 57-repository distribution or Issue Close coverage, no Private hosted
