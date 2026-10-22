@@ -33,7 +33,7 @@ def control(claim):
     }
 
 
-def pr(number=21, body="- Owning-Issue: #726"):
+def pr(number=21, body="- Owning-Issue: https://github.com/kinoko34077/devflow/issues/726"):
     return {
         "number": number, "html_url": f"https://github.com/{REPO}/pull/{number}",
         "state": "closed", "merged": True,
