@@ -28,6 +28,14 @@ At the last bounded real #503 observation, there were **155 comments / 117 KAEP-
 
 **Conditional technical direction:** Prefer **B as the long-lived architecture** if owner authorizes a new public discovery surface, because it avoids a permanent hard-coded historical exception in the primary index. A is a possible strictly bounded transitional path only if its exact-byte and collision provenance is independently proven and an owner explicitly accepts the exception. **Neither is accepted or enabled by this proposal.** Do not create a new public mailbox simply because this document exists.
 
+### B read-only compatibility pilot (not a migration)
+
+An **opt-in in-memory test helper** `tools.kaep_discovery_reader.discover_dual_index_shadow` reuses the accepted A3 strict `discover_index_shadow` source verifier **twice**, one for the existing #503 index and one for a synthetic successor Issue (test fixture number only; no actual GitHub Issue is created). The optional `index_issue` argument defaults to #503 and does not change the existing CLI/default reader. Both readers retain exact `task_ref`, Github actor, pagination, KAEP v0.2 wire format, original Issue verification and per-index rejection/blocked cursors. Neither can recursively treat either known index Issue as an original source.
+
+Dedup is only allowed for the **same strictly original-verified tuple** `(owning_issue, source_message_id, source_comment_id)`; cross-index identity conflicts or a rejected/blocked/truncated index produce `PARTIAL_UNKNOWN`, not a queue, merged cursor, permission, or full-source proof. For a clear bounded fixture, `BOUNDED_DUAL_INDEX_READ` remains **bounded only** with `has_unknown_work=true`; authenticated agent pickup remains false even with two identical pointers.
+
+Admission tests intentionally include: duplicate verified old/new pointer; malformed old index with valid later pointer (no starvation, still partial); untrusted new actor; successor/legacy loop; corrupt original source; incomplete batch and provider failure; invalid successor Issue. This pilot is **not enabled in the default check-in flow** and cannot publish an index or issue. An actual successor index needs separate #503 owner authorization, security review, privacy/transport proof, and then live recipient session E2E.
+
 ## 3. Proposed phased acceptance, independent evidence and rollback
 
 1. **R2.1 — Source evidence + authority.** Re-read live `#503` and owning Issue at the exact test time; record total/pagination, every rejected marker ID, raw-body digest metadata (no request prose in reports), actor and edit/time provenance. Confirm old pointer and original identities under canonical validators; distinguish a GitHub transport account from an authenticated worker identity. Pick A or B *explicitly at #503*, recording why the other's risk is unacceptable.
