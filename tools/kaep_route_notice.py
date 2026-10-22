@@ -100,7 +100,7 @@ def route_request(
             _fail("SUCCESSOR_REQUIRES_OFFLINE_FIXTURE")
     # Neither old nor new public discovery index can be an original source.
     if repository == DISCOVERY_REPOSITORY and issue in (
-            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, discovery_issue):
         _fail("DISCOVERY_LOOP")
     if do_send and (offline_source_pages is not None or offline_discovery_pages is not None):
         _fail("OFFLINE_POST_FORBIDDEN")
