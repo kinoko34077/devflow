@@ -95,8 +95,14 @@ def _source_context(
 def discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
-    after_id: int = 0,
+    after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
+    additional_forbidden_issue: int | None = None,
 ) -> dict[str, Any]:
+    if (type(index_issue) is not int or index_issue <= 0
+            or additional_forbidden_issue is not None
+            and (type(additional_forbidden_issue) is not int
+                 or additional_forbidden_issue <= 0)):
+        _fail("INVALID_DISCOVERY_INDEX")
     if type(after_id) is not int or after_id < 0:
         _fail("INVALID_CURSOR")
     if (type(expected_notice_actor) is not str or not ACTOR.fullmatch(expected_notice_actor)
@@ -105,7 +111,7 @@ def discover_batch(
     # Provider pagination/order/user metadata remains globally verified. Only
     # individual untrusted Issue comment content gets per-item isolation.
     comments = parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
-                           issue=DISCOVERY_ISSUE)
+                           issue=index_issue)
     remaining = [item for item in comments if item["id"] > after_id]
     subset = remaining[:MAX_INDEX_BATCH]
     result: dict[str, Any] = {
@@ -135,7 +141,7 @@ def discover_batch(
                                        "reason_code": "UNTRUSTED_DISCOVERY_ACTOR"})
             continue
         try:
-            msg = decode_comment(body, task_ref=f"{DISCOVERY_REPOSITORY}#{DISCOVERY_ISSUE}")
+            msg = decode_comment(body, task_ref=f"{DISCOVERY_REPOSITORY}#{index_issue}")
             identity = fingerprint(msg)
             old_msg = seen_msg.get(msg["message_id"])
             old_key = seen_keys.get(msg["idempotency_key"])
@@ -158,6 +164,11 @@ def discover_batch(
             match = SOURCE_URL.fullmatch(pointer["owning_issue"])
             assert match is not None
             repo, issue = match.group(1), int(match.group(2))
+            # A registered discovery index may not recursively designate itself
+            # or a second recognized index as an original task source.
+            if (repo == DISCOVERY_REPOSITORY
+                    and (issue == index_issue or issue == additional_forbidden_issue)):
+                _fail("DISCOVERY_LOOP")
             key = (repo, issue)
             source_validation = True
             if key not in source_cache:
@@ -213,6 +224,8 @@ def discover_index_shadow(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
     after_id: int = 0, max_batches: int = MAX_SHADOW_BATCHES,
+    index_issue: int = DISCOVERY_ISSUE,
+    additional_forbidden_issue: int | None = None,
 ) -> dict[str, Any]:
     """Opt-in bounded #503 index shadow, using the unchanged strict reader.
 
@@ -242,6 +255,8 @@ def discover_index_shadow(
             index_pages, expected_notice_actor=expected_notice_actor,
             expected_source_actor=expected_source_actor,
             fetch_source=cached_source, after_id=cursor,
+            index_issue=index_issue,
+            additional_forbidden_issue=additional_forbidden_issue,
         )
         batches += 1
         for hint in batch["hints"]:
@@ -280,6 +295,118 @@ def discover_index_shadow(
         "read_only": True, "peer_identity_verified": False,
         "complete_work_inventory": False, "fallback_retirement_authorized": False,
     }
+
+
+def discover_dual_index_shadow(
+    legacy_pages: str, successor_pages: str, *,
+    successor_issue: int, expected_notice_actor: str,
+    expected_source_actor: str, fetch_source: Callable[[str, int], str],
+    max_batches: int = MAX_SHADOW_BATCHES,
+) -> dict[str, Any]:
+    """Offline/read-only successor compatibility experiment, NOT an index cutover.
+
+    Both candidate indexes use the existing strict original verifier. An
+    invalid source or index never becomes trusted work; each index retains
+    its own cursor/status. No successor Issue is fetched/created here.
+    """
+    if (type(successor_issue) is not int or successor_issue <= 0
+            or successor_issue == DISCOVERY_ISSUE):
+        _fail("INVALID_SUCCESSOR_INDEX")
+    source_cache: dict[tuple[str, int], str] = {}
+
+    def cached_source(repository: str, issue: int) -> str:
+        key = (repository, issue)
+        if key not in source_cache:
+            source_cache[key] = fetch_source(repository, issue)
+        return source_cache[key]
+
+    old = discover_index_shadow(
+        legacy_pages, expected_notice_actor=expected_notice_actor,
+        expected_source_actor=expected_source_actor, fetch_source=cached_source,
+        max_batches=max_batches, index_issue=DISCOVERY_ISSUE,
+        additional_forbidden_issue=successor_issue,
+    )
+    new = discover_index_shadow(
+        successor_pages, expected_notice_actor=expected_notice_actor,
+        expected_source_actor=expected_source_actor, fetch_source=cached_source,
+        max_batches=max_batches, index_issue=successor_issue,
+        additional_forbidden_issue=DISCOVERY_ISSUE,
+    )
+    by_root: dict[tuple[str, str, int], dict[str, Any]] = {}
+    by_message: dict[tuple[str, str], tuple[str, str, int]] = {}
+    by_comment: dict[tuple[str, int], tuple[str, str, int]] = {}
+    conflict_roots: set[tuple[str, str, int]] = set()
+    duplicate_count = 0
+    for origin, snapshot in (("legacy", old), ("successor", new)):
+        for hint in snapshot["hints"]:
+            key = (hint["owning_issue"], hint["source_message_id"],
+                   hint["source_comment_id"])
+            message_key = key[:2]
+            comment_key = (key[0], key[2])
+            other = by_message.get(message_key) or by_comment.get(comment_key)
+            if other is not None and other != key:
+                conflict_roots.update((other, key))
+                continue
+            by_message[message_key] = key
+            by_comment[comment_key] = key
+            if key not in by_root:
+                by_root[key] = {
+                    "owning_issue": key[0],
+                    "source_message_id": key[1],
+                    "source_comment_id": key[2],
+                    "expected_head": hint["expected_head"],
+                    "observed_reply_kinds": hint["observed_reply_kinds"],
+                    "index_origins": [origin],
+                    "index_comment_ids": {origin: hint["index_comment_id"]},
+                    "status": "POINTER_SOURCE_VERIFIED_ONLY",
+                }
+            else:
+                current = by_root[key]
+                if (current["expected_head"] != hint["expected_head"]
+                        or current["observed_reply_kinds"] != hint["observed_reply_kinds"]):
+                    conflict_roots.add(key)
+                    continue
+                duplicate_count += 1
+                current["index_origins"].append(origin)
+                current["index_comment_ids"][origin] = hint["index_comment_id"]
+    accepted = [v for k, v in sorted(by_root.items()) if k not in conflict_roots]
+    partial = bool(
+        conflict_roots
+        or old["status"] != "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY"
+        or new["status"] != "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY"
+    )
+    return {
+        "schema_version": "kaep.dual-index-shadow.v0.1",
+        "status": "PARTIAL_UNKNOWN" if partial else "BOUNDED_DUAL_INDEX_READ",
+        "index_status": {
+            "legacy": old["status"], "successor": new["status"],
+        },
+        "index_issue_numbers": {
+            "legacy": DISCOVERY_ISSUE, "successor": successor_issue,
+        },
+        "index_diagnostics": {
+            origin: {
+                "rejected": report["rejected"], "blocked": report["blocked"],
+                "truncated": report["truncated"],
+                "next_after_id": report["next_after_id"],
+            }
+            for origin, report in (("legacy", old), ("successor", new))
+        },
+        "source_verified_roots": accepted,
+        "cross_index_duplicate_count": duplicate_count,
+        "cross_index_identity_conflicts": len(conflict_roots),
+        "distinct_source_issue_count": len(source_cache),
+        "read_only": True,
+        "has_unknown_work": True,
+        "complete_source_universe": False,
+        "complete_work_inventory": False,
+        "recipient_pickup_proven": False,
+        "current_head_verified": False,
+        "can_authorize_execution": False,
+        "fallback_retirement_authorized": False,
+        "index_migration_approved": False,
+    }
+
 
 def discover(
     index_pages: str, *, expected_notice_actor: str,
