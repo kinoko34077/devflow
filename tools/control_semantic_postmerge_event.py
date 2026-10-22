@@ -1,6 +1,6 @@
 """Read-only native devflow post-merge Control PR semantic event check (#726).
 
-This is an event-triggered, *one-repository* adapter around the existing
+This is an event-triggered, source-scoped adapter around the existing
 source-backed semantic PR reader. No GitHub mutation, new credential, local
 persistence, scheduler, general multi-repo hook, or implicit readiness claim.
 """
@@ -62,7 +62,7 @@ def _current_next_action(issue: dict[str, Any], control_id: int = CONTROL_NUMBER
     if (
         type(issue.get("number")) is not int
         or issue.get("number") != control_id
-        or issue.get("title") != f"[REPO] {repository.split(chr(47), 1)[1]}"
+        or issue.get("title") != f"[REPO] {repository.split("/", 1)[1]}"
         or issue.get("html_url") != f"https://github.com/kinoko34077/devflow/issues/{control_id}"
         or issue.get("state") != "open"
         or type(issue.get("body")) is not str
@@ -96,7 +96,7 @@ def _owner_reconciliation_candidate(
     """Human-authored ownership yields a read-only review candidate, not proof."""
     receipt = pilot._read_json(f"repos/{repository}/pulls/{number}")
     if receipt is None:
-        return _result("UNKNOWN", "PR_SOURCE_READ_FAILED", number)
+        return _result("UNKNOWN", "PR_SOURCE_READ_FAILED", number, repository)
     pr, _time = receipt
     if (
         type(pr.get("number")) is not int or pr["number"] != number
@@ -108,29 +108,29 @@ def _owner_reconciliation_candidate(
         or type(pr["base"].get("repo")) is not dict
         or pr["base"]["repo"].get("full_name") != repository
     ):
-        return _result("UNKNOWN", "MERGED_PR_SOURCE_NOT_PROVEN", number)
+        return _result("UNKNOWN", "MERGED_PR_SOURCE_NOT_PROVEN", number, repository)
     body = pr.get("body")
     if body is None:
         body = ""
     if type(body) is not str:
-        return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number)
+        return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number, repository)
     declarations = [part.strip() for part in OWNER_LINE.findall(body)]
     # Empty template placeholders are not evidence of ownership.
     # Ignore inline code/prose mentioning the field name entirely.
     filled = [part for part in declarations if part]
     if not filled:
-        return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number)
+        return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number, repository)
     if len(filled) != 1:
-        return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number)
+        return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number, repository)
     marker = OWNER_VALUE.fullmatch(filled[0])
     if marker is None:
-        return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number)
+        return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number, repository)
     owner = int(marker.group(1) or marker.group(2))
     owner_receipt = pilot._read_json(
         f"repos/kinoko34077/devflow/issues/{owner}"
     )
     if owner_receipt is None:
-        return _result("UNKNOWN", "OWNER_ISSUE_READ_FAILED", number)
+        return _result("UNKNOWN", "OWNER_ISSUE_READ_FAILED", number, repository)
     issue, _at = owner_receipt
     if (
         type(issue.get("number")) is not int or issue["number"] != owner
@@ -139,7 +139,7 @@ def _owner_reconciliation_candidate(
         or issue.get("state") != "open"
         or type(issue.get("pull_request")) is dict
     ):
-        return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number)
+        return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number, repository)
     exact_link = f"https://github.com/kinoko34077/devflow/issues/{owner}"
     mentioned = (
         re.search(re.escape(exact_link) + r"(?=$|[\s)\],;.!?])", current)
@@ -148,9 +148,9 @@ def _owner_reconciliation_candidate(
         is not None
     )
     if not mentioned:
-        return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number)
+        return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number, repository)
     answer = _result(
-        "RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK", number
+        "RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK", number, repository
     )
     answer["owner_issue_url"] = exact_link
     return answer
@@ -166,26 +166,26 @@ def check_native_postmerge_once(
     if number is None:
         return _result("UNKNOWN", event_reason)
     if event_reason == "CLOSED_UNMERGED_NOT_IN_SCOPE":
-        return _result("NOT_APPLICABLE", event_reason, number)
+        return _result("NOT_APPLICABLE", event_reason, number, repository_env)
     receipt = pilot._read_json(f"repos/kinoko34077/devflow/issues/{control_id}")
     if receipt is None:
-        return _result("UNKNOWN", "CANONICAL_CONTROL_READ_FAILED", number)
+        return _result("UNKNOWN", "CANONICAL_CONTROL_READ_FAILED", number, repository_env)
     issue, _stamp = receipt
     current = _current_next_action(issue, control_id, repository_env)
     if current is None:
-        return _result("UNKNOWN", "CURRENT_CONTROL_NOT_PROVEN", number)
+        return _result("UNKNOWN", "CURRENT_CONTROL_NOT_PROVEN", number, repository_env)
     exact_link = (
         f"[PR #{number}](https://github.com/{repository_env}/pull/{number})"
     )
     if exact_link not in current:
         # A loose but exact-number PR reference cannot safely be skipped.
         if re.search(rf"\bPR\s*#{number}(?!\d)", current):
-            return _result("UNKNOWN", "UNCANONICAL_CURRENT_PR_REFERENCE", number)
+            return _result("UNKNOWN", "UNCANONICAL_CURRENT_PR_REFERENCE", number, repository_env)
         # No reference is NOT confirmation that the Control is consistent.
         return _owner_reconciliation_candidate(
             current, number, event["pull_request"]["merged_at"], repository_env
         )
-    checked = pilot.check_pr_transition_once(control_id, repository_env, number)
+    checked = pilot.check_pr_transition_once(control_id, repository_env, number, repository_env)
     if checked.get("status") == "UNKNOWN":
         checked["reason"] = "EXPLICIT_REFERENCE_BUT_STAGE_NOT_PROVEN"
     return checked
