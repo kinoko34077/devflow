@@ -130,7 +130,8 @@ class PostMergeEventTests(unittest.TestCase):
             "base": {"repo": {"full_name": target.REPOSITORY}},
             "body": (
                 "### Context\nThis PR explains the `Owning-Issue:` marker.\n"
-                "Owning-Issue: "
+                "- Owning-Issue: #726"
+                "\nLegacy: "
                 "https://github.com/kinoko34077/devflow/issues/726\n"
             ),
         }
@@ -250,18 +251,37 @@ class PostMergeEventTests(unittest.TestCase):
 
     def test_owner_marker_accepts_crlf_while_not_loosening_identity(self):
         self.assertEqual(
-            target.OWNER_MARKER.findall(
-                "Intro\r\nOwning-Issue: "
+            target.OWNER_LINE.findall(
+                "Intro\r\n- Owning-Issue: "
                 "https://github.com/kinoko34077/devflow/issues/726\r\n"
             ),
-            ["726"],
+            ["https://github.com/kinoko34077/devflow/issues/726"],
         )
         self.assertEqual(
-            target.OWNER_MARKER.findall(
-                "Owning-Issue: https://github.com/kinoko34077/devflow/issues/7260\r\n"
-            ),
-            ["7260"],
+            target.OWNER_LINE.findall("Owner note\r\n- Owning-Issue: #726\r\n"),
+            ["#726"],
         )
+
+    def test_template_field_is_unique_and_blank_is_not_an_error(self):
+        template = (
+            Path(__file__).resolve().parents[1] / ".github" / "pull_request_template.md"
+        ).read_text(encoding="utf-8")
+        self.assertEqual([line for line in template.splitlines() if line.startswith("- Owning-Issue:")], ["- Owning-Issue:"])
+        self.assertEqual(target.OWNER_LINE.findall(template), [""])
+
+    def test_template_shorthand_and_legacy_owner_values(self):
+        for value in (
+            "#726",
+            "https://github.com/kinoko34077/devflow/issues/726",
+        ):
+            with self.subTest(value=value):
+                m = target.OWNER_VALUE.fullmatch(value)
+                self.assertIsNotNone(m)
+                self.assertEqual(int(m.group(1) or m.group(2)), 726)
+        for bad in ("#7260suffix", "https://evil.invalid/issues/726",
+                    "#0", "devflow #726", "#726; #727"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(target.OWNER_VALUE.fullmatch(bad))
 
     def test_owner_source_missing_fails_closed(self):
         c = control(number=775)
