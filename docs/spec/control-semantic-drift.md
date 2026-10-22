@@ -192,6 +192,45 @@ means all semantic claims are consistent. Other repositories do not inherit
 this workflow, and M2 cross-repository propagation, M3, M4 remain OPEN.
 No automatic Control writeback has been authorized.
 
+## M2 bounded missing-PR anchor review (2026-10-22; pending live acceptance)
+
+The devflow-only native merged-PR event checker previously emitted
+`NOT_APPLICABLE` when no canonical current PR link existed in Control #16.
+This is not proof of non-impact: a PR can belong to an *already tracked*
+Work Order even when its number has not yet entered Next Action.
+
+To avoid introducing a second comparator or a general language heuristic, the
+existing `tools/control_semantic_postmerge_event.py` optionally follows
+a **single exact owner declaration** in the *merged* PR body:
+
+`Owning-Issue: https://github.com/kinoko34077/devflow/issues/726`
+
+Only when the actual owning PR and owner Issue are independently obtained
+via read-only native GitHub GET, correctly identified and open, and the same
+owner Issue is mentioned in Control #16 **current** Next Action, does the
+checker emit `RECONCILIATION_REVIEW_REQUIRED` (exit 4). It is a *producer
+review obligation*, **NOT** a proven stale Control, not an Issue mutation,
+not a work-complete status or a merge rollback. Missing marker → `NOT_APPLICABLE`,
+not `ALIGNED`; malformed/ambiguous marker, untrusted owner, missing current
+owner reference, invalid response or failed GET → `UNKNOWN` (exit 3).
+Exact current PR stage link continues to use the original M1 comparator.
+Never infer owner scope from a similarly numbered Issue or broad prose.
+
+The owner marker is author-supplied and not an authority grant. It only
+raises a review signal, which requires the producer to compare actual
+accepted scope against the Control's Current Action and update only truly
+stale surfaces. It does not require adding every merged PR to a Control
+without a substantive reason. No privileged writeback, GitHub App, new
+token, additional repository runner, or background process.
+
+**Acceptance boundary:** mocked negative/positive cases and full CI are
+not operational proof. Observe one real merged PR with this exact
+owner marker and missing Control PR link: automatic `pull_request` run
+must emit exit 4. Producer records an independently justified minimal
+Control reconciliation, and same event rerun must leave no unreviewed
+stale claim. Do not generalize this pilot to all managed repos or claim
+M2 automatic repair based solely on event delivery.
+
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
 1. Add a **trusted, source-complete GET adapter** using existing devflow read transport/projection contracts; do not build a new privileged crawler or let the comparator infer reliability from JSON submitted by the caller.
