@@ -20,33 +20,33 @@ CONTROL_URL = "https://github.com/kinoko34077/devflow/issues/16"
 EVENT_MAX_BYTES = 1_048_576
 
 
-def _result(status: str, reason: str, number: int | None = None) -> dict[str, str]:
+def _result(status: str, reason: str, number: int | None = None, repository: str = REPOSITORY) -> dict[str, str]:
     answer = {"status": status, "reason": reason}
     if type(number) is int and number > 0:
-        answer["subject"] = f"{REPOSITORY}#{number}"
+        answer["subject"] = f"{repository}#{number}"
     return answer
 
 
-def _event_number(event: Any, repository_env: str) -> tuple[int | None, str]:
-    if type(event) is not dict or repository_env != REPOSITORY:
+def _event_number(event: Any, repository_env: str, expected_repository: str = REPOSITORY) -> tuple[int | None, str]:
+    if type(event) is not dict or repository_env != expected_repository:
         return None, "UNTRUSTED_REPOSITORY_OR_EVENT"
     if event.get("action") != "closed":
         return None, "NOT_A_CLOSED_PR_EVENT"
     repo = event.get("repository")
     pr = event.get("pull_request")
-    if type(repo) is not dict or repo.get("full_name") != REPOSITORY:
+    if type(repo) is not dict or repo.get("full_name") != expected_repository:
         return None, "UNTRUSTED_REPOSITORY_OR_EVENT"
     if type(pr) is not dict:
         return None, "MISSING_PR_EVENT"
     number = pr.get("number")
     if type(number) is not int or number < 1 or number > 1_000_000_000:
         return None, "INVALID_PR_NUMBER"
-    if pr.get("html_url") != f"https://github.com/{REPOSITORY}/pull/{number}":
+    if pr.get("html_url") != f"https://github.com/{expected_repository}/pull/{number}":
         return None, "INVALID_PR_IDENTITY"
     base = pr.get("base")
     if type(base) is not dict or type(base.get("repo")) is not dict:
         return None, "INVALID_PR_BASE"
-    if base["repo"].get("full_name") != REPOSITORY:
+    if base["repo"].get("full_name") != expected_repository:
         return None, "INVALID_PR_BASE"
     # Non-merged close is not this pilot's acceptance target.
     if pr.get("merged") is False:
@@ -58,12 +58,12 @@ def _event_number(event: Any, repository_env: str) -> tuple[int | None, str]:
     return number, "MERGED_EVENT_VERIFIED"
 
 
-def _current_next_action(issue: dict[str, Any]) -> str | None:
+def _current_next_action(issue: dict[str, Any], control_id: int = CONTROL_NUMBER, repository: str = REPOSITORY) -> str | None:
     if (
         type(issue.get("number")) is not int
-        or issue.get("number") != CONTROL_NUMBER
-        or issue.get("title") != "[REPO] devflow"
-        or issue.get("html_url") != CONTROL_URL
+        or issue.get("number") != control_id
+        or issue.get("title") != f"[REPO] {repository.split(chr(47), 1)[1]}"
+        or issue.get("html_url") != f"https://github.com/kinoko34077/devflow/issues/{control_id}"
         or issue.get("state") != "open"
         or type(issue.get("body")) is not str
     ):
@@ -91,22 +91,22 @@ OWNER_VALUE = re.compile(
 
 
 def _owner_reconciliation_candidate(
-    current: str, number: int, merged_at: str,
+    current: str, number: int, merged_at: str, repository: str = REPOSITORY,
 ) -> dict[str, str]:
     """Human-authored ownership yields a read-only review candidate, not proof."""
-    receipt = pilot._read_json(f"repos/kinoko34077/devflow/pulls/{number}")
+    receipt = pilot._read_json(f"repos/{repository}/pulls/{number}")
     if receipt is None:
         return _result("UNKNOWN", "PR_SOURCE_READ_FAILED", number)
     pr, _time = receipt
     if (
         type(pr.get("number")) is not int or pr["number"] != number
-        or pr.get("html_url") != f"https://github.com/{REPOSITORY}/pull/{number}"
+        or pr.get("html_url") != f"https://github.com/{repository}/pull/{number}"
         or pr.get("state") != "closed"
         or pr.get("merged") is not True
         or pr.get("merged_at") != merged_at
         or type(pr.get("base")) is not dict
         or type(pr["base"].get("repo")) is not dict
-        or pr["base"]["repo"].get("full_name") != REPOSITORY
+        or pr["base"]["repo"].get("full_name") != repository
     ):
         return _result("UNKNOWN", "MERGED_PR_SOURCE_NOT_PROVEN", number)
     body = pr.get("body")
@@ -158,22 +158,24 @@ def _owner_reconciliation_candidate(
 
 
 def check_native_postmerge_once(
-    event: dict[str, Any], repository_env: str
+    event: dict[str, Any], repository_env: str, control_id: int = CONTROL_NUMBER
 ) -> dict[str, str]:
-    number, event_reason = _event_number(event, repository_env)
+    if not pilot._scope(control_id, repository_env, 1):
+        return _result("UNKNOWN", "OUT_OF_SCOPE_REPOSITORY_OR_CONTROL")
+    number, event_reason = _event_number(event, repository_env, repository_env)
     if number is None:
         return _result("UNKNOWN", event_reason)
     if event_reason == "CLOSED_UNMERGED_NOT_IN_SCOPE":
         return _result("NOT_APPLICABLE", event_reason, number)
-    receipt = pilot._read_json("repos/kinoko34077/devflow/issues/16")
+    receipt = pilot._read_json(f"repos/kinoko34077/devflow/issues/{control_id}")
     if receipt is None:
         return _result("UNKNOWN", "CANONICAL_CONTROL_READ_FAILED", number)
     issue, _stamp = receipt
-    current = _current_next_action(issue)
+    current = _current_next_action(issue, control_id, repository_env)
     if current is None:
         return _result("UNKNOWN", "CURRENT_CONTROL_NOT_PROVEN", number)
     exact_link = (
-        f"[PR #{number}](https://github.com/kinoko34077/devflow/pull/{number})"
+        f"[PR #{number}](https://github.com/{repository_env}/pull/{number})"
     )
     if exact_link not in current:
         # A loose but exact-number PR reference cannot safely be skipped.
@@ -181,9 +183,9 @@ def check_native_postmerge_once(
             return _result("UNKNOWN", "UNCANONICAL_CURRENT_PR_REFERENCE", number)
         # No reference is NOT confirmation that the Control is consistent.
         return _owner_reconciliation_candidate(
-            current, number, event["pull_request"]["merged_at"]
+            current, number, event["pull_request"]["merged_at"], repository_env
         )
-    checked = pilot.check_pr_transition_once(CONTROL_NUMBER, REPOSITORY, number)
+    checked = pilot.check_pr_transition_once(control_id, repository_env, number)
     if checked.get("status") == "UNKNOWN":
         checked["reason"] = "EXPLICIT_REFERENCE_BUT_STAGE_NOT_PROVEN"
     return checked
@@ -193,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Devflow read-only merged-PR Control check")
     parser.add_argument("--event-path", required=True)
     parser.add_argument("--repository", required=True)
+    parser.add_argument("--control", type=int, default=CONTROL_NUMBER)
     args = parser.parse_args(argv)
     try:
         if Path(args.event_path).stat().st_size > EVENT_MAX_BYTES:
@@ -201,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, UnicodeError):
         result = _result("UNKNOWN", "EVENT_UNAVAILABLE_OR_INVALID")
     else:
-        result = check_native_postmerge_once(event, args.repository)
+        result = check_native_postmerge_once(event, args.repository, args.control)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     if result["status"] in ("ALIGNED", "NOT_APPLICABLE"):
         return 0
