@@ -49,8 +49,27 @@ class PostMergeEventTests(unittest.TestCase):
     def verify(self, expected, event_value=None, body=None, checked="ALIGNED"):
         case = event() if event_value is None else event_value
         issue = control() if body is None else body
+        def native_read(path):
+            if path == "repos/kinoko34077/devflow/issues/16":
+                return issue, NOW
+            if path.startswith("repos/kinoko34077/devflow/pulls/"):
+                p = case["pull_request"]
+                return {
+                    "number": p["number"],
+                    "html_url": p["html_url"],
+                    "state": "closed", "merged": p["merged"],
+                    "merged_at": p["merged_at"], "body": "",
+                    "base": {"repo": {"full_name": target.REPOSITORY}},
+                }, NOW
+            if path == "repos/kinoko34077/devflow/issues/726":
+                return {
+                    "number": 726, "state": "open",
+                    "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+                }, NOW
+            raise AssertionError("unexpected native GET path: " + path)
+
         with patch.object(
-            target.pilot, "_read_json", return_value=(issue, NOW)
+            target.pilot, "_read_json", side_effect=native_read
         ) as read, patch.object(
             target.pilot, "check_pr_transition_once",
             return_value={"status": checked, "reason": "test", "subject": target.REPOSITORY + "#777"},
@@ -77,8 +96,8 @@ class PostMergeEventTests(unittest.TestCase):
     def test_missing_current_pr_link_is_not_fake_alignment(self):
         body = control(number=775, stage="MERGED")
         result, read, check = self.verify("NOT_APPLICABLE", body=body)
-        self.assertEqual(result["reason"], "NO_EXPLICIT_CURRENT_PR_REFERENCE")
-        read.assert_called_once()
+        self.assertEqual(result["reason"], "NO_PR_OR_OWNER_REFERENCE")
+        self.assertEqual(read.call_count, 2)
         check.assert_not_called()
 
     def test_loose_or_prefix_reference_is_not_falsely_aligned(self):
@@ -95,6 +114,114 @@ class PostMergeEventTests(unittest.TestCase):
         result, _, check = self.verify("NOT_APPLICABLE", body=non_target)
         self.assertEqual(result["reason"], "NO_EXPLICIT_CURRENT_PR_REFERENCE")
         check.assert_not_called()
+
+    def test_owner_link_without_pr_anchor_requires_review_not_mismatch(self):
+        case = event()
+        c = control(number=775, stage="MERGED")
+        c["body"] = c["body"].replace(
+            "## Next Action\n\n",
+            "## Next Action\n\nNext action for #726 is pending.\n",
+        )
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{target.REPOSITORY}/pull/777",
+            "state": "closed", "merged": True,
+            "merged_at": case["pull_request"]["merged_at"],
+            "base": {"repo": {"full_name": target.REPOSITORY}},
+            "body": (
+                "### Context\nOwning-Issue: "
+                "https://github.com/kinoko34077/devflow/issues/726\n"
+            ),
+        }
+        reads = []
+
+        def lookup(path):
+            reads.append(path)
+            if path.endswith("/issues/16"):
+                return c, NOW
+            if path.endswith("/pulls/777"):
+                return pr, NOW
+            if path.endswith("/issues/726"):
+                return {
+                    "number": 726, "state": "open",
+                    "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+                }, NOW
+            raise AssertionError(path)
+
+        with patch.object(target.pilot, "_read_json", side_effect=lookup), patch.object(
+            target.pilot, "check_pr_transition_once", side_effect=AssertionError(
+                "must not invoke exact PR claim checker"
+            ),
+        ):
+            result = target.check_native_postmerge_once(case, target.REPOSITORY)
+        self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
+        self.assertEqual(result["reason"], "OWNER_ACTIVE_WITHOUT_PR_LINK")
+        self.assertEqual(result["owner_issue_url"],
+                         "https://github.com/kinoko34077/devflow/issues/726")
+        self.assertEqual(reads, [
+            "repos/kinoko34077/devflow/issues/16",
+            "repos/kinoko34077/devflow/pulls/777",
+            "repos/kinoko34077/devflow/issues/726",
+        ])
+        self.assertNotIn("body", result)
+
+    def test_owner_outcome_ambiguity_and_absent_scope_fail_closed(self):
+        e = event()
+        current = control(number=775, stage="MERGED")
+        current["body"] = current["body"].replace(
+            "## Next Action\n\n", "## Next Action\n\n#726 is current.\n"
+        )
+        basic = {
+            "number": 777,
+            "html_url": "https://github.com/kinoko34077/devflow/pull/777",
+            "state": "closed", "merged": True,
+            "merged_at": e["pull_request"]["merged_at"],
+            "base": {"repo": {"full_name": target.REPOSITORY}},
+            "body": "Owning-Issue: https://github.com/kinoko34077/devflow/issues/726",
+        }
+        owner = {
+            "number": 726, "state": "open",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+        }
+        variants = [
+            ({"body": basic["body"] + "\n" + basic["body"]}, {}, {}, "UNKNOWN"),
+            ({"body": "Owning-Issue: https://other.invalid/issues/726"}, {}, {}, "UNKNOWN"),
+            ({"body": basic["body"].replace("/726", "/7260")}, {}, {}, "UNKNOWN"),
+            ({"merged": False}, {}, {}, "UNKNOWN"),
+            ({}, {"body": current["body"].replace("#726 is current", "#7260 is current")}, {}, "UNKNOWN"),
+            ({}, {}, {"state": "closed"}, "UNKNOWN"),
+            ({}, {}, {"html_url": "https://evil.invalid"}, "UNKNOWN"),
+        ]
+        for pr_update, control_update, owner_update, status in variants:
+            with self.subTest(pr=pr_update, ctl=control_update, owner=owner_update):
+                current_case = dict(current, **control_update)
+                actual_pr = dict(basic, **pr_update)
+                actual_owner = dict(owner, **owner_update)
+
+                def look(path):
+                    if path.endswith("/issues/16"):
+                        return current_case, NOW
+                    if path.endswith("/pulls/777"):
+                        return actual_pr, NOW
+                    if path.endswith("/issues/726"):
+                        return actual_owner, NOW
+                    return None
+
+                with patch.object(target.pilot, "_read_json", side_effect=look):
+                    result = target.check_native_postmerge_once(e, target.REPOSITORY)
+                self.assertEqual(result["status"], status)
+
+    def test_owner_source_missing_fails_closed(self):
+        c = control(number=775)
+        c["body"] = c["body"].replace(
+            "## Next Action\n\n", "## Next Action\n\n#726 is current.\n"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=[
+            (c, NOW), None,
+        ]):
+            result = target.check_native_postmerge_once(event(), target.REPOSITORY)
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "PR_SOURCE_READ_FAILED")
 
     def test_other_event_wrong_repo_or_bad_subject_denied_without_get(self):
         for corrupted in (
@@ -178,6 +305,7 @@ class PostMergeEventTests(unittest.TestCase):
                 ("ALIGNED", 0),
                 ("NOT_APPLICABLE", 0),
                 ("POTENTIAL_MISMATCH", 2),
+                ("RECONCILIATION_REVIEW_REQUIRED", 4),
                 ("UNKNOWN", 3),
             ):
                 with self.subTest(state=state):
