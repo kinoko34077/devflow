@@ -1,0 +1,85 @@
+name: KiNoTch Identity OIDC issuance probe (manual caller only)
+
+# This workflow has no push/PR/schedule triggers and no recipient.
+# It is NOT a cryptographic JWT verifier or permission grant.
+# The real recipient must use kinotch-identity's reviewed jose verifier.
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  observe-issuer:
+    if: >-
+      github.repository == 'kinoko34077/testapp' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'kinoko34077'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      id-token: write
+    steps:
+      - name: Observe GitHub-issued OIDC claims without exporting the token
+        shell: bash
+        env:
+          EXPECTED_AUDIENCE: urn:kinotch:identity-read-pilot:v1
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const fail = () => { throw Error('OIDC_ISSUANCE_PROBE_DENIED'); };
+          async function probe() {
+            const endpoint = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const credential = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            const audience = process.env.EXPECTED_AUDIENCE;
+            if (!endpoint || !credential || audience !== 'urn:kinotch:identity-read-pilot:v1') fail();
+            const url = new URL(endpoint);
+            if (url.protocol !== 'https:' || !url.hostname.endsWith('.actions.githubusercontent.com')) fail();
+            url.searchParams.set('audience', audience);
+            const response = await fetch(url, {
+              method: 'GET',
+              headers: { Authorization: 'Bearer ' + credential, Accept: 'application/json' },
+              redirect: 'error',
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!response.ok) fail();
+            const responseBody = await response.json();
+            const jwt = responseBody?.value;
+            if (typeof jwt !== 'string' || jwt.length < 60 || jwt.length > 16000) fail();
+            const parts = jwt.split('.');
+            if (parts.length !== 3) fail();
+            // Local diagnostics only: decoding is NOT verifying JWT signature.
+            // Never use these claims to authorize an external API operation.
+            const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+            const claim = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            const oldSub = 'repo:kinoko34077/testapp:ref:refs/heads/main';
+            const newSub = 'repo:kinoko34077@79015263/testapp@1065582181:ref:refs/heads/main';
+            if (header?.alg !== 'RS256' ||
+                claim?.iss !== 'https://token.actions.githubusercontent.com' ||
+                claim?.aud !== audience ||
+                claim?.repository !== 'kinoko34077/testapp' ||
+                String(claim?.repository_owner_id) !== '79015263' ||
+                String(claim?.repository_id) !== '1065582181' ||
+                claim?.ref !== 'refs/heads/main' ||
+                claim?.event_name !== 'workflow_dispatch' ||
+                ![oldSub, newSub].includes(claim?.sub) ||
+                typeof claim?.jti !== 'string' || claim.jti.length < 8 ||
+                typeof claim?.job_workflow_ref !== 'string' ||
+                !claim.job_workflow_ref.startsWith(
+                  'kinoko34077/devflow/.github/workflows/identity-oidc-issuer-pilot.yml@'
+                ) ||
+                !Number.isSafeInteger(claim?.exp) || claim.exp * 1000 <= Date.now()) fail();
+            // No JWT, auth header, request URL, JWT claims or subject to logs,
+            // outputs, files, artifacts, downstream services or issues.
+            process.stdout.write('OIDC_ISSUER_CLAIM_SHAPE_OBSERVED_ONLY; NO_SIGNATURE_OR_RECIPIENT_PROOF\n');
+            if (process.env.GITHUB_STEP_SUMMARY) {
+              appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+                'GitHub OIDC issuance probe: claimed shape observed in-run; independent JWT signature verification and remote API authorization NOT tested.\n');
+            }
+          }
+          await probe().catch(() => {
+            process.stderr.write('OIDC_ISSUANCE_PROBE_FAILED\n');
+            process.exitCode = 1;
+          });
+          NODE
