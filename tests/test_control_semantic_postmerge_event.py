@@ -211,6 +211,56 @@ class PostMergeEventTests(unittest.TestCase):
                     result = target.check_native_postmerge_once(e, target.REPOSITORY)
                 self.assertEqual(result["status"], status)
 
+    def test_owner_issue_url_prefix_collision_is_unknown(self):
+        e = event()
+        c = control(number=775)
+        c["body"] = c["body"].replace(
+            "## Next Action\n\n",
+            "## Next Action\n\n"
+            "https://github.com/kinoko34077/devflow/issues/7260 is tracked.\n",
+        )
+        pr = {
+            "number": 777,
+            "html_url": "https://github.com/kinoko34077/devflow/pull/777",
+            "state": "closed", "merged": True,
+            "merged_at": e["pull_request"]["merged_at"],
+            "base": {"repo": {"full_name": target.REPOSITORY}},
+            "body": "Owning-Issue: https://github.com/kinoko34077/devflow/issues/726",
+        }
+        owner = {
+            "number": 726, "state": "open",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+        }
+
+        def look(path):
+            if path.endswith("/issues/16"):
+                return c, NOW
+            if path.endswith("/pulls/777"):
+                return pr, NOW
+            if path.endswith("/issues/726"):
+                return owner, NOW
+            raise AssertionError(path)
+
+        with patch.object(target.pilot, "_read_json", side_effect=look):
+            result = target.check_native_postmerge_once(e, target.REPOSITORY)
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+
+    def test_owner_marker_accepts_crlf_while_not_loosening_identity(self):
+        self.assertEqual(
+            target.OWNER_MARKER.findall(
+                "Intro\r\nOwning-Issue: "
+                "https://github.com/kinoko34077/devflow/issues/726\r\n"
+            ),
+            ["726"],
+        )
+        self.assertEqual(
+            target.OWNER_MARKER.findall(
+                "Owning-Issue: https://github.com/kinoko34077/devflow/issues/7260\r\n"
+            ),
+            ["7260"],
+        )
+
     def test_owner_source_missing_fails_closed(self):
         c = control(number=775)
         c["body"] = c["body"].replace(
