@@ -1,6 +1,6 @@
 # Control semantic consistency: bounded evidence contract (devflow #726)
 
-Status: **M1 bounded comparator accepted; M2 one-source read-only live pilot accepted on 2026-10-22**. Full M2 transition-time detection, fleet rollout, M3 and M4 remain OPEN. No active Control authority, no repair bot, no replacement for Cursor #576 or SMC #588.
+Status: **M1 bounded comparator accepted; M2 devflow-only native postmerge PR-stage and explicit owner-linked review pilots accepted on 2026-10-22**. Full multi-repository transition coverage, unlinked/undeclared PR relevance, M3 and M4 remain OPEN. No active Control authority, no repair bot, no replacement for Cursor #576 or SMC #588.
 
 ## What causes the defect?
 
@@ -192,7 +192,7 @@ means all semantic claims are consistent. Other repositories do not inherit
 this workflow, and M2 cross-repository propagation, M3, M4 remain OPEN.
 No automatic Control writeback has been authorized.
 
-## M2 bounded missing-PR anchor review (2026-10-22; pending live acceptance)
+## M2 bounded missing-PR anchor review (2026-10-22; live event accepted in devflow only)
 
 The devflow-only native merged-PR event checker previously emitted
 `NOT_APPLICABLE` when no canonical current PR link existed in Control #16.
@@ -223,13 +223,36 @@ stale surfaces. It does not require adding every merged PR to a Control
 without a substantive reason. No privileged writeback, GitHub App, new
 token, additional repository runner, or background process.
 
-**Acceptance boundary:** mocked negative/positive cases and full CI are
-not operational proof. Observe one real merged PR with this exact
-owner marker and missing Control PR link: automatic `pull_request` run
-must emit exit 4. Producer records an independently justified minimal
-Control reconciliation, and same event rerun must leave no unreviewed
-stale claim. Do not generalize this pilot to all managed repos or claim
-M2 automatic repair based solely on event delivery.
+**Actual native acceptance evidence:** [PR #778](https://github.com/kinoko34077/devflow/pull/778)
+introduced the owner marker but its first real automatic
+[run #39706303305](https://github.com/kinoko34077/devflow/actions/runs/39706303305)
+exited 3: a quoted inline marker was miscounted as a second owner declaration.
+This first failed pilot is **not accepted** as proof of exit 4. The real
+defect was repaired in [PR #780](https://github.com/kinoko34077/devflow/pull/780),
+merged as `986884445b0e6f8fcbe6d24350200dd818d9b5ab`, with **2,137
+passing tests**, exact-head review/readiness, and
+[post-main Required #39706669943](https://github.com/kinoko34077/devflow/actions/runs/39706669943)
+SUCCESS. The fix counts only uniquely anchored complete declaration lines,
+including CRLF, rather than prose quotations.
+
+The actual unprompted GitHub
+[merged-PR event #39706669809](https://github.com/kinoko34077/devflow/actions/runs/39706669809)
+for #780, initially with no direct Control #16 PR #780 anchor but an
+explicit owner marker and current Control #726 work reference,
+**failed with exit 4** (producer reconciliation review candidate).
+The producer independently checked actual merge main, corrected only the
+meaningfully affected Control #16 current stage to PR #780 MERGED, and
+reran the failed event job: **attempt 2 SUCCESS**. The raw job step-summary
+JSON was not fetched; code's one-to-one exit4 status mapping and native job
+exit evidence support this bounded finding.
+
+This accepts one devflow-only owner-link trigger and producer repair,
+**not** universal provenance of owner relevance or unattended writeback.
+A PR lacking the optional marker still returns `NOT_APPLICABLE` without
+validating absence of semantic drift; do not distribute the partial
+detector broadly and claim complete fleet M2. Owning
+[Issue #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6330598972)
+holds the exact evidence and remaining gates.
 
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
