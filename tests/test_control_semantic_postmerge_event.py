@@ -303,13 +303,9 @@ class PostMergeEventTests(unittest.TestCase):
         c = control(number=14)
         c.update(number=6, title="[REPO] 2bit-cell-automaton",
                  html_url="https://github.com/kinoko34077/devflow/issues/6")
-        c["body"] = c["body"].replace(
-            "## Next Action\n\n", "## Next Action\n\n#726 is the devflow owner.\n"
-        ).replace(
-            "- [PR #14]", "- [PR #14]"
-        ).replace(
-            "[PR #777](https://github.com/kinoko34077/devflow/pull/777)",
-            "unrelated completed work",
+        c["body"] = (
+            "## Next Action\n#726 is the devflow owner.\n"
+            "## Canonical Entry Points\nREADME.md\n"
         )
         native_pr = dict(p, state="closed", body="- Owning-Issue: #726")
         reads = []
