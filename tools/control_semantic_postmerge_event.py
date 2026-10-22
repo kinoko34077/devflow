@@ -185,7 +185,7 @@ def check_native_postmerge_once(
         return _owner_reconciliation_candidate(
             current, number, event["pull_request"]["merged_at"], repository_env
         )
-    checked = pilot.check_pr_transition_once(control_id, repository_env, number, repository_env)
+    checked = pilot.check_pr_transition_once(control_id, repository_env, number)
     if checked.get("status") == "UNKNOWN":
         checked["reason"] = "EXPLICIT_REFERENCE_BUT_STAGE_NOT_PROVEN"
     return checked
