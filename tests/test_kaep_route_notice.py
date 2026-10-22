@@ -11,6 +11,7 @@ from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
     verify_source_request, route_request,
 )
+from tools.kaep_discovery_reader import discover_batch
 
 REPO = "kinoko34077/UniverseGenome"
 ISSUE = 336
@@ -75,6 +76,93 @@ class DiscoveryNoticeTests(unittest.TestCase):
         self.assertIsNone(kwargs["expected_head"])
         self.assertEqual(kwargs["request_key"], "kaep.discovery." + root["message_id"])
         self.assertEqual(json.loads(kwargs["request_text"])["comment_id"], 67)
+
+    def test_offline_successor_pointer_prepared_and_strict_A3_verified(self):
+        root = root_request()
+        with patch("tools.kaep_route_notice.send_request",
+                   return_value={"status": "PREPARED", "posted_comment_id": None}) as send:
+            result = route_request(**route_kwargs(root), discovery_issue=9001)
+        self.assertEqual(result["status"], "PREPARED")
+        self.assertEqual(result["discovery_issue"], "kinoko34077/devflow#9001")
+        kwargs = send.call_args.kwargs
+        self.assertEqual(kwargs["repository"], DISCOVERY_REPOSITORY)
+        self.assertEqual(kwargs["issue"], 9001)
+        self.assertFalse(kwargs["do_send"])
+        self.assertEqual(kwargs["request_key"], "kaep.discovery." + root["message_id"])
+        self.assertNotIn("Confidential payload", kwargs["request_text"])
+
+        # Compose in memory via the ORIGINAL writer and read via the
+        # ORIGINAL strict A3 verifier, not a separate successor codec.
+        prepared, existing = make_request(
+            pages([]), repository=kwargs["repository"], issue=kwargs["issue"],
+            recipient=kwargs["recipient"], intent=kwargs["intent"],
+            request_key=kwargs["request_key"], request_text=kwargs["request_text"],
+            expected_head=kwargs["expected_head"], expect_existing_actor=ACTOR,
+        )
+        self.assertIsNone(existing)
+        fetched = []
+        def fetch_source(repo, issue):
+            fetched.append((repo, issue))
+            return pages([comment(67, root)])
+        observed = discover_batch(
+            pages([comment(91, prepared)]), index_issue=9001,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            fetch_source=fetch_source,
+        )
+        self.assertEqual(observed["status"], "READ_ONLY")
+        self.assertEqual(observed["rejected"], [])
+        self.assertEqual(observed["blocked"], [])
+        self.assertEqual(len(observed["hints"]), 1)
+        self.assertEqual(observed["hints"][0]["source_comment_id"], 67)
+        self.assertEqual(fetched, [(REPO, ISSUE)])
+        self.assertFalse(observed["peer_identity_verified"])
+
+    def test_successor_live_post_denied_before_visibility_or_writer(self):
+        root = root_request()
+        with patch("tools.kaep_route_notice.send_request") as send, patch(
+                "tools.kaep_route_notice.verify_public_source") as visibility, patch(
+                "tools.kaep_route_notice.fetch_gh_pages") as fetch:
+            with self.assertRaisesRegex(InvalidMessage, "SUCCESSOR_INDEX_NOT_APPROVED"):
+                route_request(
+                    repository=REPO, issue=ISSUE, message_id=root["message_id"],
+                    expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
+                    do_send=True, discovery_issue=9001,
+                )
+        visibility.assert_not_called()
+        send.assert_not_called()
+        fetch.assert_not_called()
+
+    def test_successor_dry_run_requires_complete_offline_fixture(self):
+        root = root_request()
+        kw = dict(
+            repository=REPO, issue=ISSUE, message_id=root["message_id"],
+            expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
+            discovery_issue=9001,
+        )
+        with patch("tools.kaep_route_notice.send_request") as send, patch(
+                "tools.kaep_route_notice.fetch_gh_pages") as fetch:
+            with self.assertRaisesRegex(InvalidMessage, "SUCCESSOR_REQUIRES_OFFLINE_FIXTURE"):
+                route_request(**kw)
+        fetch.assert_not_called()
+        send.assert_not_called()
+
+    def test_successor_recursive_index_and_invalid_issue_preflight(self):
+        root = root_request()
+        kw = route_kwargs(root)
+        kw.update(repository=DISCOVERY_REPOSITORY, issue=9001,
+                  discovery_issue=9001)
+        with patch("tools.kaep_route_notice.send_request") as send, patch(
+                "tools.kaep_route_notice.fetch_gh_pages") as fetch:
+            with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
+                route_request(**kw)
+            for bad in (True, 0, -3, "9001"):
+                with self.subTest(bad=bad):
+                    other = route_kwargs(root)
+                    other["discovery_issue"] = bad
+                    with self.assertRaisesRegex(InvalidMessage, "INVALID_DISCOVERY_INDEX"):
+                        route_request(**other)
+        fetch.assert_not_called()
+        send.assert_not_called()
 
     def test_route_dedup_key_is_stable(self):
         root = root_request()
