@@ -114,7 +114,10 @@ def _owner_reconciliation_candidate(
         if "Owning-Issue:" in body:
             return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number)
         return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number)
-    if len(markers) != 1 or body.count("Owning-Issue:") != 1:
+    # Only top-level declaration lines count. An inline code quotation
+    # elsewhere in PR prose does not create a second owner declaration.
+    declarations = re.findall(r"^Owning-Issue:[^\r\n]*", body, re.MULTILINE)
+    if len(markers) != 1 or len(declarations) != 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number)
     owner = int(markers[0])
     owner_receipt = pilot._read_json(
