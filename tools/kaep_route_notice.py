@@ -85,7 +85,20 @@ def route_request(
     expected_source_actor: str, expected_notice_actor: str,
     do_send: bool = False, offline_source_pages: str | None = None,
     offline_discovery_pages: str | None = None,
+    discovery_issue: int = DISCOVERY_ISSUE,
 ) -> dict[str, Any]:
+    # Successor issue support is ONLY a code/offline contract until the
+    # protocol owner authorizes a public index. Never make this a free-form
+    # GitHub comment target: the only live writer remains #503.
+    if type(discovery_issue) is not int or discovery_issue < 1:
+        _fail("INVALID_DISCOVERY_INDEX")
+    if discovery_issue != DISCOVERY_ISSUE:
+        if do_send:
+            _fail("SUCCESSOR_INDEX_NOT_APPROVED")
+        if offline_source_pages is None or offline_discovery_pages is None:
+            _fail("SUCCESSOR_REQUIRES_OFFLINE_FIXTURE")
+    if repository == DISCOVERY_REPOSITORY and issue == discovery_issue:
+        _fail("DISCOVERY_LOOP")
     if do_send and (offline_source_pages is not None or offline_discovery_pages is not None):
         _fail("OFFLINE_POST_FORBIDDEN")
     if (offline_source_pages is None) != (offline_discovery_pages is None):
@@ -100,7 +113,7 @@ def route_request(
     # No payload, task instruction or secrets are copied into the pointer.
     text = json.dumps(pointer, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     result = send_request(
-        repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+        repository=DISCOVERY_REPOSITORY, issue=discovery_issue,
         recipient="claude-code", intent="REPORT",
         request_key=f"kaep.discovery.{message_id}", request_text=text,
         expect_existing_actor=expected_notice_actor, expected_head=None,
@@ -110,7 +123,7 @@ def route_request(
         "owning_issue": pointer["owning_issue"],
         "source_message_id": pointer["message_id"],
         "source_comment_id": pointer["comment_id"],
-        "discovery_issue": f"{DISCOVERY_REPOSITORY}#{DISCOVERY_ISSUE}",
+        "discovery_issue": f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
         "discovery_comment_id": result["posted_comment_id"],
         "delivery_confirmed": False,
         "agent_woken": False,
@@ -126,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--offline-source-pages", type=Path)
     parser.add_argument("--offline-discovery-pages", type=Path)
+    parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
+                        help="Offline successor fixture only; live --send remains locked to #503")
     parser.add_argument("--send", action="store_true",
                         help="Opt-in, ordinary GitHub Issue comment on the discovery mailbox")
     args = parser.parse_args(argv)
@@ -135,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             message_id=args.message_id,
             expected_source_actor=args.expect_source_actor,
             expected_notice_actor=args.expect_notice_actor,
-            do_send=args.send,
+            do_send=args.send, discovery_issue=args.discovery_issue,
             offline_source_pages=args.offline_source_pages.read_text(encoding="utf-8")
             if args.offline_source_pages is not None else None,
             offline_discovery_pages=args.offline_discovery_pages.read_text(encoding="utf-8")
