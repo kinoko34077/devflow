@@ -12,7 +12,7 @@ Changing a single status label, comparing a historical Audit SHA to latest main,
 
 `tools/control_semantic_drift.py::compare_claim` accepts **one source-verified current Control claim** and **one independently verified complete observed fact**, with the same repository, exact subject and dimension. Caller is responsible for obtaining real current GETs and for classifying the specific active `Next Action` / `Active Work` statement; historical text is not a current claim. The comparator does not parse arbitrary prose, access GitHub, update Issues or select an implementation owner.
 
-- `PR_GATE`: AWAIT_REVIEW, AWAIT_MERGE, MERGED, CLOSED_UNMERGED, UNKNOWN.
+- `PR_GATE`: OPEN, AWAIT_REVIEW, AWAIT_MERGE, MERGED, CLOSED_UNMERGED, UNKNOWN. OPEN is GitHub PR state, not review readiness.
 - `PUBLIC_ENTRY`: UNVERIFIED, VERIFIED, FAILED, UNKNOWN. This is about an actual published entry, not just a Pages build.
 - `FIELD_ACCEPTANCE`: UNVERIFIED, ACCEPTED, REJECTED, UNKNOWN. Physical usability or audio experience cannot be inferred from CI.
 - `BILLING_PREFLIGHT_DEPLOYMENT`: CODE_ONLY, READ_ONLY_LIVE, ROUTING_LIVE, UNKNOWN. `CODE_ONLY` means merged model/adapter/test code without an independently observed deployed authenticated reader; `READ_ONLY_LIVE` requires a real current preflight GET/retained result but NO job routing; `ROUTING_LIVE` requires an effect-time trusted route decision and independently observed action. A GitHub Actions CI pass cannot establish the latter two.
@@ -264,6 +264,37 @@ validating absence of semantic drift; do not distribute the partial
 detector broadly and claim complete fleet M2. Owning
 [Issue #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6330598972)
 holds the exact evidence and remaining gates.
+
+## M2 owner omission coverage: existing GitHub PR closing keyword (bounded; pending actual live event)
+
+The existing devflow PR template has two **optional and distinct** fields:
+`- Closes #` for an actually completed Issue and `- Owning-Issue:` for
+ownership without completing the Issue. GitHub's closing keywords are
+interpreted on default-branch PRs, with a relative `#N` resolving to
+the caller repository and an explicit owner/repo-qualified reference
+resolving to that repository; the target may already be CLOSED when
+the post-merge workflow runs.
+
+The already accepted `control_semantic_postmerge_event.py` reuses the
+existing `_parse_owner_issue` resolver and authenticated Issue GET
+for a *single populated* template Closes/Fixes/Resolves declaration
+when `Owning-Issue` is empty. This addresses a source-level false
+negative where a normally closing PR had previously returned
+`NOT_APPLICABLE`. A verified related Issue, whether OPEN or already
+CLOSED due to the merge, and an exact current corresponding Control
+owner mention yield **only** `RECONCILIATION_REVIEW_REQUIRED` (exit 4),
+not an asserted factual mismatch, automatic Issue Close or Control edit.
+
+The blank `- Closes #` placeholder remains no evidence. Invalid,
+ambiguous, contradictory, foreign-repo or non-default-branch closing
+declarations return `UNKNOWN`. One populated owner field continues
+to be honored; if both populated owner and closing references disagree,
+treat that ambiguity as UNKNOWN rather than silently choosing one.
+This is not generic natural-language Issue inference and does not
+infer product acceptance, fix 57 repository workflow coverage, or
+automatically update a Control. Unit regressions prove the limited
+parser contract. **Native merged PR event live proof remains a separate
+acceptance gate**; never close a real owner Issue merely for a test.
 
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 
