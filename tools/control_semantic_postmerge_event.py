@@ -94,7 +94,11 @@ OWNER_VALUE = re.compile(
 # GitHub's template has a separate optional closing-keyword relation.
 # Parse anchored declaration lines only, never arbitrary narrative mentions.
 CLOSING_LINE = re.compile(
-    r"^(?:- )?(?:closes|fixes|resolves)[ \t]*:?[ \t]*([^\r\n]*)\r?$",
+    # An ordinary bullet such as "- Fixes the post-merge handler" is NOT
+    # an Issue closing declaration. Require an Issue-reference-shaped value;
+    # the subsequent owner parser validates its exact repository and number.
+    r"^(?:- )?(?:closes|fixes|resolves)[ \t]*:?[ \t]*"
+    r"((?:#|https?://|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#)[^\r\n]*)\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
 CLOSING_QUALIFIED = re.compile(
