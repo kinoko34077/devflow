@@ -112,7 +112,7 @@ class PostMergeEventTests(unittest.TestCase):
 
         non_target = control(number=7770)
         result, _, check = self.verify("NOT_APPLICABLE", body=non_target)
-        self.assertEqual(result["reason"], "NO_EXPLICIT_CURRENT_PR_REFERENCE")
+        self.assertEqual(result["reason"], "NO_PR_OR_OWNER_REFERENCE")
         check.assert_not_called()
 
     def test_owner_link_without_pr_anchor_requires_review_not_mismatch(self):
