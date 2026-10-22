@@ -78,6 +78,31 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertTrue(data["has_unknown_work"])
         self.assertEqual(service.calls[0][0], "inbox")
 
+
+    def test_main_non_ascii_json_is_portable_to_windows_cp932_stdout(self):
+        import io
+
+        service = FakeService()
+        service.bootstrap_repository = lambda repository: {
+            "repository": repository,
+            "label": "\u65e5\u672c\u8a9e \U0001f3b5",
+        }
+        output_buffer = io.BytesIO()
+        # Simulates an ordinary Windows redirected Python stdout using cp932.
+        encoded_stdout = io.TextIOWrapper(
+            output_buffer, encoding="cp932", write_through=True,
+        )
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("sys.stdout", encoded_stdout):
+                result = cli.main(["bootstrap", "--repository", self.REPOSITORY])
+        self.assertEqual(result, 0)
+        # The wire JSON stays ASCII-safe regardless of the host locale.
+        wire_output = output_buffer.getvalue().decode("ascii")
+        self.assertEqual(
+            json.loads(wire_output),
+            {"repository": self.REPOSITORY, "label": "\u65e5\u672c\u8a9e \U0001f3b5"},
+        )
+
     def test_invalid_cli_options_rejected_before_service_access(self):
         cases = [
             ["bootstrap", "--repository", ""],
