@@ -117,6 +117,48 @@ class DiscoveryNoticeTests(unittest.TestCase):
         self.assertEqual(fetched, [(REPO, ISSUE)])
         self.assertFalse(observed["peer_identity_verified"])
 
+    def test_explicit_approved_789_live_route_reuses_canonical_writer(self):
+        root = root_request()
+        with patch("tools.kaep_route_notice.verify_public_source") as public, patch(
+                "tools.kaep_route_notice.fetch_gh_pages",
+                return_value=pages([comment(67, root)])) as gh, patch(
+                "tools.kaep_route_notice.send_request",
+                return_value={"status": "SENT_AND_READ_BACK", "posted_comment_id": 301}) as send:
+            out = route_request(
+                repository=REPO, issue=ISSUE,
+                message_id=root["message_id"], expected_source_actor=ACTOR,
+                expected_notice_actor=ACTOR, do_send=True,
+                discovery_issue=789,
+            )
+        public.assert_called_once_with(REPO)
+        gh.assert_called_once_with(REPO, ISSUE)
+        self.assertEqual(send.call_args.kwargs["issue"], 789)
+        self.assertTrue(send.call_args.kwargs["do_send"])
+        self.assertEqual(send.call_args.kwargs["recipient"], "claude-code")
+        self.assertEqual(send.call_args.kwargs["intent"], "REPORT")
+        self.assertNotIn("Confidential payload", send.call_args.kwargs["request_text"])
+        self.assertEqual(out["status"], "SENT_AND_READ_BACK")
+        self.assertEqual(out["discovery_comment_id"], 301)
+        self.assertEqual(out["discovery_issue"], "kinoko34077/devflow#789")
+        self.assertFalse(out["delivery_confirmed"])
+        self.assertFalse(out["agent_woken"])
+
+    def test_public_successor_index_cannot_appear_as_original(self):
+        root = root_request()
+        with patch("tools.kaep_route_notice.fetch_gh_pages") as fetch, patch(
+                "tools.kaep_route_notice.send_request") as send, patch(
+                "tools.kaep_route_notice.verify_public_source") as visibility:
+            with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
+                route_request(
+                    repository=DISCOVERY_REPOSITORY, issue=789,
+                    message_id=root["message_id"], expected_source_actor=ACTOR,
+                    expected_notice_actor=ACTOR, do_send=True,
+                    discovery_issue=789,
+                )
+        fetch.assert_not_called()
+        send.assert_not_called()
+        visibility.assert_not_called()
+
     def test_successor_live_post_denied_before_visibility_or_writer(self):
         root = root_request()
         with patch("tools.kaep_route_notice.send_request") as send, patch(
