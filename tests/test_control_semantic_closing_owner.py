@@ -94,6 +94,24 @@ class ClosingIssueTests(TestCase):
             "repos/kinoko34077/devflow/issues/726",
         ])
 
+    def test_narrative_fixes_is_not_an_issue_declaration(self):
+        # Ordinary prose must not suppress existing single canonical owner.
+        candidate, _ = self.check(
+            pr_data=pr("- Owning-Issue: #726\n- Fixes the post-merge handler\n"),
+            issue_data=issue("open"),
+        )
+        self.assertEqual(
+            (candidate["status"], candidate["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        )
+        with_closing, _ = self.check(
+            pr_data=pr("- Closes #726\n- Fixes the source checks\n"),
+        )
+        self.assertEqual(
+            (with_closing["status"], with_closing["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "CLOSING_ISSUE_WITHOUT_PR_LINK"),
+        )
+
     def test_fixes_and_resolves_github_keyword_forms(self):
         for declaration in (
             "Fixes #726",
