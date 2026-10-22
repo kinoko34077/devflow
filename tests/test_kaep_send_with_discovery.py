@@ -107,6 +107,56 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
         writer.assert_not_called()
         notice.assert_not_called()
 
+    def test_approved_789_uses_clean_index_not_malformed_503(self):
+        with patch("tools.kaep_send_with_discovery.verify_public_source") as visibility, patch(
+                "tools.kaep_send_with_discovery.fetch_gh_pages",
+                return_value=json.dumps([[]])) as fetch, patch(
+                "tools.kaep_send_with_discovery.send_request",
+                return_value=source()) as sender, patch(
+                "tools.kaep_send_with_discovery.route_request",
+                return_value=pointer()) as route:
+            out = publish_source_and_route(**args(do_send=True, discovery_issue=789))
+        visibility.assert_called_once_with(REPO)
+        fetch.assert_called_once_with("kinoko34077/devflow", 789)
+        self.assertEqual(out["status"], "SOURCE_AND_POINTER_READBACK")
+        self.assertEqual(out["discovery_issue"], "kinoko34077/devflow#789")
+        self.assertEqual(route.call_args.kwargs["discovery_issue"], 789)
+        self.assertTrue(sender.call_args.kwargs["do_send"])
+        self.assertFalse(out["delivery_confirmed"])
+        self.assertFalse(out["recipient_pickup_proven"])
+
+    def test_malformed_789_preflight_stops_before_source_post(self):
+        malformed = "<!-- kaep:message:v0.2 -->" + "\n" + chr(96) * 3 + "json" + "\n{}\n" + chr(96) * 3 + "\n"
+        blob = json.dumps([[{"id": 55, "body": malformed, "user": {"login": ACTOR}}]])
+        with patch("tools.kaep_send_with_discovery.verify_public_source"), patch(
+                "tools.kaep_send_with_discovery.fetch_gh_pages",
+                return_value=blob) as fetch, patch(
+                "tools.kaep_send_with_discovery.send_request") as sender, patch(
+                "tools.kaep_send_with_discovery.route_request") as route:
+            out = publish_source_and_route(**args(do_send=True, discovery_issue=789))
+        self.assertEqual(out["status"], "DISCOVERY_PREFLIGHT_BLOCKED")
+        self.assertEqual(out["reason_code"], "INVALID_WRAPPER")
+        fetch.assert_called_once_with("kinoko34077/devflow", 789)
+        sender.assert_not_called()
+        route.assert_not_called()
+
+    def test_unapproved_target_and_successor_source_loop_prevent_writes(self):
+        for value in (True, 0, 9001, "789"):
+            with self.subTest(value=value), patch(
+                    "tools.kaep_send_with_discovery.verify_public_source") as visibility, patch(
+                    "tools.kaep_send_with_discovery.send_request") as sender:
+                with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_INDEX_NOT_APPROVED"):
+                    publish_source_and_route(**args(do_send=True, discovery_issue=value))
+                visibility.assert_not_called()
+                sender.assert_not_called()
+        with patch("tools.kaep_send_with_discovery.verify_public_source") as visibility, patch(
+                "tools.kaep_send_with_discovery.send_request") as sender:
+            with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
+                publish_source_and_route(**args(repository="kinoko34077/devflow", issue=789,
+                                                 do_send=True, discovery_issue=789))
+            visibility.assert_not_called()
+            sender.assert_not_called()
+
     def test_fresh_dry_run_only_prepares_source_and_never_routes(self):
         with patch("tools.kaep_send_with_discovery.send_request",
                    return_value=source("PREPARED", None)) as send, patch(
