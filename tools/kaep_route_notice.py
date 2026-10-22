@@ -20,6 +20,7 @@ from tools.kaep_request_sender import send_request
 
 DISCOVERY_REPOSITORY = "kinoko34077/devflow"
 DISCOVERY_ISSUE = 503
+APPROVED_SUCCESSOR_ISSUE = 789  # Explicitly user-approved public index; NOT an arbitrary target
 POINTER_VERSION = "kaep.discovery-pointer.v1"
 
 
@@ -87,17 +88,19 @@ def route_request(
     offline_discovery_pages: str | None = None,
     discovery_issue: int = DISCOVERY_ISSUE,
 ) -> dict[str, Any]:
-    # Successor issue support is ONLY a code/offline contract until the
-    # protocol owner authorizes a public index. Never make this a free-form
-    # GitHub comment target: the only live writer remains #503.
+    # Live successor write is permitted ONLY to the concrete, approved #789
+    # when explicitly selected by the caller. The default remains legacy #503.
+    # Arbitrary IDs remain offline fixtures only; never become live targets.
     if type(discovery_issue) is not int or discovery_issue < 1:
         _fail("INVALID_DISCOVERY_INDEX")
-    if discovery_issue != DISCOVERY_ISSUE:
+    if discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
         if do_send:
             _fail("SUCCESSOR_INDEX_NOT_APPROVED")
         if offline_source_pages is None or offline_discovery_pages is None:
             _fail("SUCCESSOR_REQUIRES_OFFLINE_FIXTURE")
-    if repository == DISCOVERY_REPOSITORY and issue == discovery_issue:
+    # Neither old nor new public discovery index can be an original source.
+    if repository == DISCOVERY_REPOSITORY and issue in (
+            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, discovery_issue):
         _fail("DISCOVERY_LOOP")
     if do_send and (offline_source_pages is not None or offline_discovery_pages is not None):
         _fail("OFFLINE_POST_FORBIDDEN")
@@ -140,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offline-source-pages", type=Path)
     parser.add_argument("--offline-discovery-pages", type=Path)
     parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
-                        help="Offline successor fixture only; live --send remains locked to #503")
+                        help="Default legacy #503; opt-in live successor #789; other IDs offline only")
     parser.add_argument("--send", action="store_true",
                         help="Opt-in, ordinary GitHub Issue comment on the discovery mailbox")
     args = parser.parse_args(argv)
