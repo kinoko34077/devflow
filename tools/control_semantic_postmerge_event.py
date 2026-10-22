@@ -173,7 +173,7 @@ def _owner_reconciliation_candidate(
         repo_name = owner_repository.split("/", 1)[1]
         scoped_text = (
             re.search(
-                rf"(?<![A-Za-z0-9_.-])(?:{re.escape(owner_repository)}|"
+                rf"(?<![A-Za-z0-9_./-])(?:{re.escape(owner_repository)}|"
                 rf"{re.escape(repo_name)})#{owner}(?![0-9])",
                 current,
             ) is not None
