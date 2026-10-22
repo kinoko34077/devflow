@@ -52,6 +52,13 @@ python -m tools.kaep_discovery_reader --dual-shadow --expect-notice-actor kinoko
 
 `--dual-shadow` only compares bounded index cohorts and retains unknown coverage even when indexes are empty; it is not a recipient session or B5 total source-universe proof.
 
+### Approved #789 producer admission contract (S2 code-only; live REQUEST not sent)
+
+The existing `tools.kaep_route_notice.route_request` retains its historical **default #503** and accepts **explicit** `--discovery-issue 789` for the only user-approved public successor Issue. Every *other* target remains denied for live `--send` (synthetic targets are usable only with offline fixtures); either #503 or #789 cannot be used as an original. The existing strict source verification and `send_request` pointer writer are reused, not forked.
+
+The existing `tools.kaep_send_with_discovery` two-stage producer also retains default #503 and optionally accepts exactly `--discovery-issue 789`. A shared strict target-index GET/_mailbox preflight now checks the **selected** destination before any original source POST. Thus the historical malformed #503 blocks legacy target, but its corruption does **not** block a clean #789; if #789 later becomes malformed or its GET is unavailable, the original is not posted. `--send` remains explicit and requires a public source repo; route_request re-checks public source visibility before posting the pointer.
+
+This staged implementation grants **no** automatic task dispatch, auto-ACK/ANSWER, other Issue write destination or private source publication. No new REQUEST or pointer comment is posted during the code/test PR. Tests must verify: positive mock #789 POST/readback; clean #789 preflight (without reading corrupt #503); #789 malformed/transport failure prevents original writes; invalid arbitrary destination and loop denied before any remote write; legacy default and preflight preserved; real model pickup remains unproven. The user authorized the new public index, not an arbitrary new KAEP task.
 ## 3. Proposed phased acceptance, independent evidence and rollback
 
 1. **R2.1 — Source evidence + authority.** Re-read live `#503` and owning Issue at the exact test time; record total/pagination, every rejected marker ID, raw-body digest metadata (no request prose in reports), actor and edit/time provenance. Confirm old pointer and original identities under canonical validators; distinguish a GitHub transport account from an authenticated worker identity. Pick A or B *explicitly at #503*, recording why the other's risk is unacceptable.
