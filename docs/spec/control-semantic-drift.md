@@ -274,7 +274,7 @@ holds the exact evidence and remaining gates.
 
 Exit/rollback: delete this isolated comparator and tests if it gives false confidence or overlaps the existing M3 source; no runtime job, schedule, remote service or authorization state is changed.
 
-## M2 immutable reusable source with a second Public caller — code pilot only
+## M2 immutable reusable source with a second Public caller — accepted one-repository live pilot
 
 Cross-repository installation is NOT achieved by copying the devflow-only
 postmerge workflow or by changing an author's free-form prose. The existing
@@ -303,7 +303,27 @@ or close Issues, deploy, grant permissions or authorize a hosted Private
 runner. Note: reusable workflow token permissions and hosted runner billing
 belong to caller, so Private Actions #752 restrictions still apply.
 
-**Acceptance split:** devflow code/CI/review/main is one stage. Calling
-Public repo installation, actual native event run, case-specific signal,
-producer-owned reconciliation and post-main readback are separate stages;
-full 57-repo M2, Issue Close, and M3/M4 remain unaccepted.
+**Verified distinct acceptance stages (2026-10-22):**
+- [devflow PR #784](https://github.com/kinoko34077/devflow/pull/784)
+  merged as `891db0cc774d352ec5067ad86cb187534b1409c9`, Required 2,158
+  tests and postmain Required #39711460985 SUCCESS; formal review/readiness
+  accepted. Initial extra comparator argument was fixed after failing CI.
+- [2bit-cell-automaton PR #14](https://github.com/kinoko34077/2bit-cell-automaton/pull/14)
+  merged as `a6d166fc1580d6866c0379f64a2cbf67ae3f7010`; caller source
+  SHA exactly pinned to immutable devflow main. Target's PR and postmain
+  Verify passed; application code was untouched.
+- [Actual automatically triggered caller run #39711791438](https://github.com/kinoko34077/2bit-cell-automaton/actions/runs/39711791438)
+  checked out shared devflow source and first job exited 4: the existing
+  template owner marker `- Owning-Issue: #726` linked a relevant current
+  Control #6 owner without a direct merged PR stage. This was a **review
+  candidate**, not a confirmed contradiction. The producing worker verified
+  merged PR and updated only Control #6's affected field. Same run attempt
+  2 SUCCEEDED. No workflow-owned Issue mutation was performed.
+- [Durable evidence on #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6331292004).
+
+**Unaccepted:** no guarantee when author omits or misidentifies the owner
+field, no general relevance proof from an issue reference alone, no
+57-repository distribution or Issue Close coverage, no Private hosted
+runner assumption, no auto Control writer, and no M3/M4 program completion.
+Every further caller must clear its own rules, protected workflows,
+billing and independent real runtime acceptance.
