@@ -40,14 +40,14 @@ def control(body="The current owner #726 needs follow-up."):
     }
 
 
-def pr(body="- Closes #726\n- Owning-Issue:\n", base="main"):
+def pr(body="- Closes #726\n- Owning-Issue:\n", base="main", default="main"):
     return {
         "number": PR_NO,
         "html_url": f"https://github.com/{OWNER}/pull/{PR_NO}",
         "state": "closed",
         "merged": True,
         "merged_at": "2026-10-22T06:00:00Z",
-        "base": {"ref": base, "repo": {"full_name": OWNER}},
+        "base": {"ref": base, "repo": {"full_name": OWNER, "default_branch": default}},
         "body": body,
     }
 
@@ -129,6 +129,17 @@ class ClosingIssueTests(TestCase):
         self.assertEqual((result["status"], result["reason"]),
                          ("UNKNOWN", "CLOSING_RELATION_BASE_NOT_PROVEN"))
         self.assertEqual(len(paths), 2)
+
+    def test_default_branch_is_from_provider_not_assumed_main(self):
+        # Shared caller may use master; a nondefault main is not a valid
+        # GitHub closing-issue relation for that caller.
+        accepted, _ = self.check(pr_data=pr(base="master", default="master"))
+        self.assertEqual(accepted["status"], "RECONCILIATION_REVIEW_REQUIRED")
+        rejected, _ = self.check(pr_data=pr(base="main", default="master"))
+        self.assertEqual((rejected["status"], rejected["reason"]),
+                         ("UNKNOWN", "CLOSING_RELATION_BASE_NOT_PROVEN"))
+        missing, _ = self.check(pr_data=pr(default=""))
+        self.assertEqual(missing["status"], "UNKNOWN")
 
     def test_multiple_ownership_sources_agree_or_hold(self):
         good = "- Closes #726\n- Owning-Issue: #726\n"
