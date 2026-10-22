@@ -429,23 +429,49 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--after-id", type=int, default=0)
     parser.add_argument("--shadow-all", action="store_true",
-                        help="GET-only bounded #503 index shadow; never promotes authority")
+                        help="GET-only bounded selected-index shadow; never promotes authority")
+    parser.add_argument("--index-issue", type=int, default=DISCOVERY_ISSUE,
+                        help="Read only approved #503 legacy or #789 successor")
+    parser.add_argument("--dual-shadow", action="store_true",
+                        help="GET-only #503 + approved #789 original-verifying bounded union")
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--expect-source-actor", required=True)
     args = parser.parse_args(argv)
     try:
-        index_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
+        # Public Issue #789 is approved for successor READ. This is NOT
+        # authority to write any new KAEP requests, mark work complete, or
+        # retire legacy #503. Other caller-provided Issue IDs are rejected.
+        if args.index_issue not in (DISCOVERY_ISSUE, 789) or type(args.index_issue) is not int:
+            _fail("DISCOVERY_INDEX_NOT_APPROVED")
+        if args.dual_shadow:
+            if args.index_issue != DISCOVERY_ISSUE or args.after_id != 0 or args.shadow_all:
+                _fail("INVALID_DUAL_INDEX_ARGUMENTS")
+            legacy_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
+            successor_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, 789)
+            result = discover_dual_index_shadow(
+                legacy_pages, successor_pages, successor_issue=789,
+                expected_notice_actor=args.expect_notice_actor,
+                expected_source_actor=args.expect_source_actor,
+                fetch_source=fetch_gh_pages,
+            )
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            return 0 if result["status"] == "BOUNDED_DUAL_INDEX_READ" else 2
+        index_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, args.index_issue)
         if args.shadow_all:
             result = discover_index_shadow(
                 index_pages, expected_notice_actor=args.expect_notice_actor,
                 expected_source_actor=args.expect_source_actor,
-                fetch_source=fetch_gh_pages, after_id=args.after_id)
+                fetch_source=fetch_gh_pages, after_id=args.after_id,
+                index_issue=args.index_issue,
+                additional_forbidden_issue=(789 if args.index_issue == DISCOVERY_ISSUE else DISCOVERY_ISSUE))
             print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
             return 0 if result["status"] == "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY" else 2
         result = discover_batch(
             index_pages, expected_notice_actor=args.expect_notice_actor,
             expected_source_actor=args.expect_source_actor,
-            fetch_source=fetch_gh_pages, after_id=args.after_id)
+            fetch_source=fetch_gh_pages, after_id=args.after_id,
+            index_issue=args.index_issue,
+            additional_forbidden_issue=(789 if args.index_issue == DISCOVERY_ISSUE else DISCOVERY_ISSUE))
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except (InvalidMessage, OSError, UnicodeError) as exc:
