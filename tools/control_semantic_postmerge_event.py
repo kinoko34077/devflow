@@ -78,6 +78,75 @@ def _current_next_action(issue: dict[str, Any]) -> str | None:
     return sections[0].split("**HISTORICAL", 1)[0]
 
 
+
+OWNER_MARKER = re.compile(
+    r"^Owning-Issue: https://github\.com/kinoko34077/devflow/issues/"
+    r"([1-9][0-9]{0,8})[ \t]*$", re.MULTILINE,
+)
+
+
+def _owner_reconciliation_candidate(
+    current: str, number: int, merged_at: str,
+) -> dict[str, str]:
+    """Human-authored ownership yields a read-only review candidate, not proof."""
+    receipt = pilot._read_json(f"repos/kinoko34077/devflow/pulls/{number}")
+    if receipt is None:
+        return _result("UNKNOWN", "PR_SOURCE_READ_FAILED", number)
+    pr, _time = receipt
+    if (
+        type(pr.get("number")) is not int or pr["number"] != number
+        or pr.get("html_url") != f"https://github.com/{REPOSITORY}/pull/{number}"
+        or pr.get("state") != "closed"
+        or pr.get("merged") is not True
+        or pr.get("merged_at") != merged_at
+        or type(pr.get("base")) is not dict
+        or type(pr["base"].get("repo")) is not dict
+        or pr["base"]["repo"].get("full_name") != REPOSITORY
+    ):
+        return _result("UNKNOWN", "MERGED_PR_SOURCE_NOT_PROVEN", number)
+    body = pr.get("body")
+    if body is None:
+        body = ""
+    if type(body) is not str:
+        return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number)
+    markers = OWNER_MARKER.findall(body)
+    if not markers:
+        if "Owning-Issue:" in body:
+            return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number)
+        return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number)
+    if len(markers) != 1 or body.count("Owning-Issue:") != 1:
+        return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number)
+    owner = int(markers[0])
+    owner_receipt = pilot._read_json(
+        f"repos/kinoko34077/devflow/issues/{owner}"
+    )
+    if owner_receipt is None:
+        return _result("UNKNOWN", "OWNER_ISSUE_READ_FAILED", number)
+    issue, _at = owner_receipt
+    if (
+        type(issue.get("number")) is not int or issue["number"] != owner
+        or issue.get("html_url")
+        != f"https://github.com/kinoko34077/devflow/issues/{owner}"
+        or issue.get("state") != "open"
+        or type(issue.get("pull_request")) is dict
+    ):
+        return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number)
+    exact_link = f"https://github.com/kinoko34077/devflow/issues/{owner}"
+    mentioned = (
+        exact_link in current
+        or re.search(rf"(?<![A-Za-z0-9])#{owner}(?![0-9])", current)
+        is not None
+    )
+    if not mentioned:
+        return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number)
+    answer = _result(
+        "RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK", number
+    )
+    answer["owner_issue_url"] = exact_link
+    return answer
+
+
+
 def check_native_postmerge_once(
     event: dict[str, Any], repository_env: str
 ) -> dict[str, str]:
@@ -101,7 +170,9 @@ def check_native_postmerge_once(
         if re.search(rf"\bPR\s*#{number}(?!\d)", current):
             return _result("UNKNOWN", "UNCANONICAL_CURRENT_PR_REFERENCE", number)
         # No reference is NOT confirmation that the Control is consistent.
-        return _result("NOT_APPLICABLE", "NO_EXPLICIT_CURRENT_PR_REFERENCE", number)
+        return _owner_reconciliation_candidate(
+            current, number, event["pull_request"]["merged_at"]
+        )
     checked = pilot.check_pr_transition_once(CONTROL_NUMBER, REPOSITORY, number)
     if checked.get("status") == "UNKNOWN":
         checked["reason"] = "EXPLICIT_REFERENCE_BUT_STAGE_NOT_PROVEN"
@@ -126,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if result["status"] == "POTENTIAL_MISMATCH":
         return 2
+    if result["status"] == "RECONCILIATION_REVIEW_REQUIRED":
+        return 4
     return 3
 
 
