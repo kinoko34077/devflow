@@ -129,7 +129,8 @@ class PostMergeEventTests(unittest.TestCase):
             "merged_at": case["pull_request"]["merged_at"],
             "base": {"repo": {"full_name": target.REPOSITORY}},
             "body": (
-                "### Context\nOwning-Issue: "
+                "### Context\nThis PR explains the `Owning-Issue:` marker.\n"
+                "Owning-Issue: "
                 "https://github.com/kinoko34077/devflow/issues/726\n"
             ),
         }
@@ -185,6 +186,7 @@ class PostMergeEventTests(unittest.TestCase):
         }
         variants = [
             ({"body": basic["body"] + "\n" + basic["body"]}, {}, {}, "UNKNOWN"),
+            ({"body": basic["body"] + "\nOwning-Issue: https://invalid.example/issues/726"}, {}, {}, "UNKNOWN"),
             ({"body": "Owning-Issue: https://other.invalid/issues/726"}, {}, {}, "UNKNOWN"),
             ({"body": basic["body"].replace("/726", "/7260")}, {}, {}, "UNKNOWN"),
             ({"merged": False}, {}, {}, "UNKNOWN"),
