@@ -273,3 +273,37 @@ holds the exact evidence and remaining gates.
 4. Validate against a bounded real pilot, independent review, exact-head regression/CI, and independently re-read any later approved Control correction; do not mutate Controls based on this candidate alone.
 
 Exit/rollback: delete this isolated comparator and tests if it gives false confidence or overlaps the existing M3 source; no runtime job, schedule, remote service or authorization state is changed.
+
+## M2 immutable reusable source with a second Public caller — code pilot only
+
+Cross-repository installation is NOT achieved by copying the devflow-only
+postmerge workflow or by changing an author's free-form prose. The existing
+`tools/control_semantic_postmerge_event.py` is parameterized with an exact
+caller `kinoko34077/<repository>` and a verified devflow `[REPO]` Control
+Issue number. The one-source parser and M1 comparator remain shared.
+
+`.github/workflows/control-semantic-reusable.yml` is a public `workflow_call`
+entrypoint. A separately approved **Public** caller must select an
+immutable 40-character devflow `source_sha`, exact `control_issue`, and
+invoke it from a local PR-closed/merged event. The called job validates
+the caller's event repository/PR identity, checks out the selected devflow
+source (not the caller's untrusted PR branch), and uses the caller's
+read-only `GITHUB_TOKEN` to request exactly the specific public Control,
+PR and explicitly marked owning Issue. Only read permissions are supplied.
+
+An explicit canonical current Control PR stage yields the existing
+`ALIGNED` or `POTENTIAL_MISMATCH` semantics. Without a PR link, one
+template-compatible `- Owning-Issue: #N` or devflow Issue URL can yield
+`RECONCILIATION_REVIEW_REQUIRED` **only** when a verified open owner
+Issue is referenced by current Control Next Action; this is a review
+candidate, never proof that a Control correction is required.
+Missing owner/PR yields `NOT_APPLICABLE`, not full consistency; bad identity,
+unavailable source and ambiguous data yield UNKNOWN. This cannot write
+or close Issues, deploy, grant permissions or authorize a hosted Private
+runner. Note: reusable workflow token permissions and hosted runner billing
+belong to caller, so Private Actions #752 restrictions still apply.
+
+**Acceptance split:** devflow code/CI/review/main is one stage. Calling
+Public repo installation, actual native event run, case-specific signal,
+producer-owned reconciliation and post-main readback are separate stages;
+full 57-repo M2, Issue Close, and M3/M4 remain unaccepted.
