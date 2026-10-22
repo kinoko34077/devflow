@@ -409,6 +409,28 @@ class PostMergeEventTests(unittest.TestCase):
         self.assertEqual(value["status"], "UNKNOWN")
         self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
 
+        # Another account's same-named repo is NOT the caller's owner.
+        c["body"] = (
+            "## Next Action\n"
+            "other-owner/2bit-cell-automaton#15 is unrelated.\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "UNKNOWN")
+        self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+
+        # Unqualified short repo identity without an account is allowed
+        # only when NOT embedded inside somebody else's account/repo.
+        c["body"] = (
+            "## Next Action\n"
+            "2bit-cell-automaton#15 is the current local task.\n"
+            "## Canonical Entry Points\nREADME.md\n"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            value = target.check_native_postmerge_once(e, caller, 6)
+        self.assertEqual(value["status"], "RECONCILIATION_REVIEW_REQUIRED")
+
     def test_owner_source_missing_fails_closed(self):
         c = control(number=775)
         c["body"] = c["body"].replace(
