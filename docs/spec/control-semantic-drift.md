@@ -216,6 +216,17 @@ owner reference, invalid response or failed GET → `UNKNOWN` (exit 3).
 Exact current PR stage link continues to use the original M1 comparator.
 Never infer owner scope from a similarly numbered Issue or broad prose.
 
+**Existing input contract (devflow only):** author one owner reference in the
+existing PR template's `- Owning-Issue:` field under Implementer Provenance:
+`- Owning-Issue: #726` or the canonical full URL. The earlier unbulleted
+`Owning-Issue: <canonical URL>` remains backward compatible. A blank
+template field is unclaimed/not applicable, never proof that no current
+Control was affected. More than one populated declaration, invalid value,
+wrong Issue identity or failed native GET remains UNKNOWN. Prose and inline
+code quoting the field name do not count as extra declarations. Do not
+create an additional PR metadata field, and do not use `Closes #726` as a
+substitute unless the Work Order should **actually close on merge**.
+
 The owner marker is author-supplied and not an authority grant. It only
 raises a review signal, which requires the producer to compare actual
 accepted scope against the Control's Current Action and update only truly
