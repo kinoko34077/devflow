@@ -81,7 +81,7 @@ def _current_next_action(issue: dict[str, Any]) -> str | None:
 
 OWNER_MARKER = re.compile(
     r"^Owning-Issue: https://github\.com/kinoko34077/devflow/issues/"
-    r"([1-9][0-9]{0,8})[ \t]*$", re.MULTILINE,
+    r"([1-9][0-9]{0,8})[ \t]*\r?$", re.MULTILINE,
 )
 
 
@@ -133,7 +133,8 @@ def _owner_reconciliation_candidate(
         return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number)
     exact_link = f"https://github.com/kinoko34077/devflow/issues/{owner}"
     mentioned = (
-        exact_link in current
+        re.search(re.escape(exact_link) + r"(?=$|[\s)\],;.!?])", current)
+        is not None
         or re.search(rf"(?<![A-Za-z0-9])#{owner}(?![0-9])", current)
         is not None
     )
