@@ -162,7 +162,13 @@ def _owner_reconciliation_candidate(
     closing_owner = None
     if valid_closings:
         # GitHub interprets PR closing keywords for the default branch only.
-        if pr["base"].get("ref") != "main":
+        base = pr["base"]
+        default = base["repo"].get("default_branch")
+        if (
+            type(default) is not str or not default
+            or type(base.get("ref")) is not str
+            or base["ref"] != default
+        ):
             return _result("UNKNOWN", "CLOSING_RELATION_BASE_NOT_PROVEN", number, repository)
         closing_owner = _parse_closing_issue(valid_closings[0], repository)
         if closing_owner is None:
