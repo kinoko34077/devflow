@@ -83,6 +83,15 @@ to read their full required histories. For an existing scheduled Claude
 check-in, keep using the established `tools.kaep_agent_inbox_cli` and its
 `--pending-only` behavior; this CLI does not start a check-in or manage timers.
 
+### Approved #789 public pointer discovery (already-running Claude only)
+
+Physical successor [devflow #789](https://github.com/kinoko34077/devflow/issues/789) is an approved, publicly readable KAEP pointer index; old #503 remains read-only fallback. The machine-TASK `get_agent_inbox`/native Inbox and default `kaep_live_union_cli` do **not** by themselves consume new #789 index comments. If an **already-active Claude recipient** sees `INCOMPLETE`/unknown machine coverage or needs new public Claude pointers, use the accepted read-only, canonical A3 two-index CLI:
+
+```sh
+python -m tools.kaep_discovery_reader --dual-shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
+```
+
+This reuses the strict original source verifier against bounded #503 + #789 inputs, not a second Inbox. The malformed old #503 may produce `PARTIAL_UNKNOWN` with **exit code 2** even when verified `source_verified_roots` are present; parse and inspect the returned JSON instead of discarding those candidates based solely on the exit status. `index_diagnostics`/`index_status` preserve rejected/blocked/unknown information. Empty #789 does not prove no work; no pointer proves model pickup or current HEAD. Re-read candidate original Issue/actor/recipient/current HEAD and owning Control before any work. This is **not** a scheduled check-in, CLI/agent launch, token setup, permission grant or automatic ACK/ANSWER. No live Claude runtime invocation of #789 has been verified yet. Protocol owner #503, producer #771, recipient/B6 #680.
 Exit code 0 means the read method returned structured data; it does **not**
 mean that every Issue was classified or that any agent was assigned work.
 `INCOMPLETE`, `has_unknown_work=true`, `UNAVAILABLE` and empty filtered
