@@ -79,9 +79,14 @@ def _current_next_action(issue: dict[str, Any]) -> str | None:
 
 
 
-OWNER_MARKER = re.compile(
-    r"^Owning-Issue: https://github\.com/kinoko34077/devflow/issues/"
-    r"([1-9][0-9]{0,8})[ \t]*\r?$", re.MULTILINE,
+# Reuse the existing PR template's single "- Owning-Issue:" field.
+# Accept legacy unbulleted owner lines but never guess owner from loose prose.
+OWNER_LINE = re.compile(
+    r"^(?:- )?Owning-Issue:[ \t]*([^\r\n]*)\r?$", re.MULTILINE,
+)
+OWNER_VALUE = re.compile(
+    r"(?:#([1-9][0-9]{0,8})|"
+    r"https://github\.com/kinoko34077/devflow/issues/([1-9][0-9]{0,8}))"
 )
 
 
@@ -109,17 +114,18 @@ def _owner_reconciliation_candidate(
         body = ""
     if type(body) is not str:
         return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number)
-    markers = OWNER_MARKER.findall(body)
-    if not markers:
-        if "Owning-Issue:" in body:
-            return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number)
+    declarations = [part.strip() for part in OWNER_LINE.findall(body)]
+    # Empty template placeholders are not evidence of ownership.
+    # Ignore inline code/prose mentioning the field name entirely.
+    filled = [part for part in declarations if part]
+    if not filled:
         return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number)
-    # Only top-level declaration lines count. An inline code quotation
-    # elsewhere in PR prose does not create a second owner declaration.
-    declarations = re.findall(r"^Owning-Issue:[^\r\n]*", body, re.MULTILINE)
-    if len(markers) != 1 or len(declarations) != 1:
+    if len(filled) != 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number)
-    owner = int(markers[0])
+    marker = OWNER_VALUE.fullmatch(filled[0])
+    if marker is None:
+        return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number)
+    owner = int(marker.group(1) or marker.group(2))
     owner_receipt = pilot._read_json(
         f"repos/kinoko34077/devflow/issues/{owner}"
     )
