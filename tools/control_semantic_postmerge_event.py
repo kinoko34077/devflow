@@ -85,9 +85,24 @@ OWNER_LINE = re.compile(
     r"^(?:- )?Owning-Issue:[ \t]*([^\r\n]*)\r?$", re.MULTILINE,
 )
 OWNER_VALUE = re.compile(
-    r"(?:#([1-9][0-9]{0,8})|"
-    r"https://github\.com/kinoko34077/devflow/issues/([1-9][0-9]{0,8}))"
+    r"(?:#(?P<relative>[1-9][0-9]{0,8})|"
+    r"https://github\.com/(?P<absolute_repo>kinoko34077/[A-Za-z0-9_.-]{1,100})"
+    r"/issues/(?P<absolute_number>[1-9][0-9]{0,8}))"
 )
+
+
+def _parse_owner_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
+    """GitHub relative #N names the *caller* Issue, never devflow by default."""
+    marker = OWNER_VALUE.fullmatch(value)
+    if marker is None:
+        return None
+    if marker.group("relative") is not None:
+        return (caller_repository, int(marker.group("relative")))
+    absolute = marker.group("absolute_repo")
+    # No arbitrary GitHub account/repository issue fetches from user PR text.
+    if absolute not in (caller_repository, REPOSITORY):
+        return None
+    return (absolute, int(marker.group("absolute_number")))
 
 
 def _owner_reconciliation_candidate(
@@ -122,12 +137,12 @@ def _owner_reconciliation_candidate(
         return _result("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE", number, repository)
     if len(filled) != 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number, repository)
-    marker = OWNER_VALUE.fullmatch(filled[0])
-    if marker is None:
+    scoped_owner = _parse_owner_issue(filled[0], repository)
+    if scoped_owner is None:
         return _result("UNKNOWN", "UNCANONICAL_OWNER_MARKER", number, repository)
-    owner = int(marker.group(1) or marker.group(2))
+    owner_repository, owner = scoped_owner
     owner_receipt = pilot._read_json(
-        f"repos/kinoko34077/devflow/issues/{owner}"
+        f"repos/{owner_repository}/issues/{owner}"
     )
     if owner_receipt is None:
         return _result("UNKNOWN", "OWNER_ISSUE_READ_FAILED", number, repository)
@@ -135,18 +150,35 @@ def _owner_reconciliation_candidate(
     if (
         type(issue.get("number")) is not int or issue["number"] != owner
         or issue.get("html_url")
-        != f"https://github.com/kinoko34077/devflow/issues/{owner}"
+        != f"https://github.com/{owner_repository}/issues/{owner}"
         or issue.get("state") != "open"
         or type(issue.get("pull_request")) is dict
     ):
         return _result("UNKNOWN", "OWNER_ISSUE_IDENTITY_NOT_PROVEN", number, repository)
-    exact_link = f"https://github.com/kinoko34077/devflow/issues/{owner}"
-    mentioned = (
+    exact_link = f"https://github.com/{owner_repository}/issues/{owner}"
+    explicit_url = (
         re.search(re.escape(exact_link) + r"(?=$|[\s)\],;.!?])", current)
         is not None
-        or re.search(rf"(?<![A-Za-z0-9])#{owner}(?![0-9])", current)
-        is not None
     )
+    if owner_repository == REPOSITORY:
+        # Control lives in devflow; bare #N there means a devflow Issue.
+        scoped_text = (
+            re.search(
+                rf"(?<![A-Za-z0-9])(?:devflow)?#{owner}(?![0-9])",
+                current,
+            ) is not None
+        )
+    else:
+        # A caller-local #N must not accidentally match devflow's #N.
+        repo_name = owner_repository.split("/", 1)[1]
+        scoped_text = (
+            re.search(
+                rf"(?<![A-Za-z0-9_.-])(?:{re.escape(owner_repository)}|"
+                rf"{re.escape(repo_name)})#{owner}(?![0-9])",
+                current,
+            ) is not None
+        )
+    mentioned = explicit_url or scoped_text
     if not mentioned:
         return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number, repository)
     answer = _result(
