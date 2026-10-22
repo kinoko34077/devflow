@@ -62,7 +62,7 @@ def _current_next_action(issue: dict[str, Any], control_id: int = CONTROL_NUMBER
     if (
         type(issue.get("number")) is not int
         or issue.get("number") != control_id
-        or issue.get("title") != f"[REPO] {repository.split("/", 1)[1]}"
+        or issue.get("title") != f"[REPO] {repository.partition(chr(47))[2]}"
         or issue.get("html_url") != f"https://github.com/kinoko34077/devflow/issues/{control_id}"
         or issue.get("state") != "open"
         or type(issue.get("body")) is not str
