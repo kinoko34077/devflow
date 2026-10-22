@@ -16,7 +16,8 @@ from typing import Any
 from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_request_sender import send_request
 from tools.kaep_route_notice import (
-    DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, route_request, verify_public_source,
+    DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE,
+    route_request, verify_public_source,
 )
 from tools.kaep_reply_sender import ACTOR, _mailbox
 
@@ -43,7 +44,7 @@ def _base() -> dict[str, Any]:
     }
 
 
-def _discovery_read_preflight(offline_pages: str | None) -> None:
+def _discovery_read_preflight(offline_pages: str | None, discovery_issue: int = DISCOVERY_ISSUE) -> None:
     """Prove the current #503 mailbox can be read by the existing strict writer.
 
     Before the first source POST, reject malformed trusted/untrusted KAEP
@@ -51,8 +52,8 @@ def _discovery_read_preflight(offline_pages: str | None) -> None:
     transport errors. This does not relax the codec or repair old comments.
     """
     pages = (offline_pages if offline_pages is not None else
-             fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE))
-    _mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE)
+             fetch_gh_pages(DISCOVERY_REPOSITORY, discovery_issue))
+    _mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=discovery_issue)
 
 
 def publish_source_and_route(
@@ -66,6 +67,7 @@ def publish_source_and_route(
     expected_notice_actor: str,
     expected_head: str | None = None,
     do_send: bool = False,
+    discovery_issue: int = DISCOVERY_ISSUE,
     offline_source_pages: str | None = None,
     offline_discovery_pages: str | None = None,
 ) -> dict[str, Any]:
@@ -78,12 +80,17 @@ def publish_source_and_route(
     """
     if type(do_send) is not bool:
         raise InvalidMessage("INVALID_SEND_MODE")
+    # Never allow a free-form public destination, including for dry-run.
+    if (type(discovery_issue) is not int or discovery_issue not in
+            (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
+        raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
     # Route eligibility must be checked before the original Issue POST.
     # Once the source is written an invalid target cannot be rolled back.
     if (type(repository) is not str or REPOSITORY.fullmatch(repository) is None
             or type(issue) is not int or issue < 1):
         raise InvalidMessage("INVALID_TARGET")
-    if repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE:
+    if repository == DISCOVERY_REPOSITORY and issue in (
+            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
         raise InvalidMessage("DISCOVERY_LOOP")
     if (type(expected_notice_actor) is not str
             or ACTOR.fullmatch(expected_notice_actor) is None):
@@ -100,11 +107,12 @@ def publish_source_and_route(
         verify_public_source(repository)
 
     out = _base()
+    out["discovery_issue"] = f"{DISCOVERY_REPOSITORY}#{discovery_issue}"
     try:
-        # Existing route_request later invokes the strict #503 mailbox writer.
+        # Existing route_request invokes the strict selected-index mailbox writer.
         # That same mailbox MUST be readable before the first original POST;
         # otherwise a known bad index produces a preventable partial write.
-        _discovery_read_preflight(offline_discovery_pages)
+        _discovery_read_preflight(offline_discovery_pages, discovery_issue)
     except (InvalidMessage, OSError, UnicodeError) as exc:
         out["status"] = "DISCOVERY_PREFLIGHT_BLOCKED"
         out["reason_code"] = (str(exc) if isinstance(exc, InvalidMessage)
@@ -145,7 +153,7 @@ def publish_source_and_route(
             message_id=out["source_message_id"],
             expected_source_actor=expected_source_actor,
             expected_notice_actor=expected_notice_actor,
-            do_send=do_send,
+            do_send=do_send, discovery_issue=discovery_issue,
             offline_source_pages=offline_source_pages,
             offline_discovery_pages=offline_discovery_pages,
         )
@@ -180,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-head")
     parser.add_argument("--offline-source-pages", type=Path)
     parser.add_argument("--offline-discovery-pages", type=Path)
+    parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
+                        help="Default legacy #503; explicit approved #789 only for successor")
     parser.add_argument("--send", action="store_true", help="Explicitly opt in to two existing Issue POSTs")
     args = parser.parse_args(argv)
     try:
@@ -190,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_source_actor=args.expect_source_actor,
             expected_notice_actor=args.expect_notice_actor,
             expected_head=args.expected_head,
-            do_send=args.send,
+            do_send=args.send, discovery_issue=args.discovery_issue,
             offline_source_pages=args.offline_source_pages.read_text(encoding="utf-8")
             if args.offline_source_pages else None,
             offline_discovery_pages=args.offline_discovery_pages.read_text(encoding="utf-8")
