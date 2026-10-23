@@ -102,7 +102,9 @@ def main(argv: list[str] | None = None) -> int:
             work_status=args.work_status)
         # Preserve the native MCP core's exact data, including partial/unknown
         # coverage diagnostics and null-valued unavailable sources.
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        # JSON semantics are unchanged; ASCII escapes prevent cp932 stdout
+        # from raising UnicodeEncodeError on non-ASCII Issue content.
+        print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
         return 0
     except (DevflowMCPError, ValueError) as exc:
         # Do not expose GitHub response bodies, headers, private Issues or tokens.
