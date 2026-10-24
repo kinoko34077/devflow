@@ -578,7 +578,7 @@ jobs:
               print("supply-credential-check: NETWORK_FAILURE", file=sys.stderr)
               sys.exit(1)
 
-          if identity.get("login") != "kinoko34077":
+          if identity.get("id") != 79015263:
               print("supply-credential-check: UNEXPECTED_IDENTITY", file=sys.stderr)
               sys.exit(1)
           print("supply-credential-check: VALID_AUTHENTICATED_IDENTITY")

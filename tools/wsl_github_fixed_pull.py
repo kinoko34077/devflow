@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from tools.safe_dispatch_contract import parse_json_object
+from tools.github_issue_trust import is_trusted_principal
 from tools.shared_execution_safety_contract import project_f3c_candidate
 from tools.wsl_fixed_public_bridge import run_once as run_fixed_public
 
@@ -65,6 +66,7 @@ def _validate(comment: dict | None, comment_id: int) -> str | None:
     author = comment.get("user")
     if (type(comment.get("id")) is not int or comment["id"] != comment_id
             or comment.get("issue_url") != _ISSUE_URL or type(author) is not dict
+            or not is_trusted_principal(comment)
             or author.get("login") != "kinoko34077" or author.get("type") != "User"
             or comment.get("created_at") is None
             or comment.get("created_at") != comment.get("updated_at")):

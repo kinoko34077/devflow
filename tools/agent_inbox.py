@@ -11,8 +11,10 @@ import re
 
 try:
     from .kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from .github_issue_trust import is_trusted_principal
 except ImportError:  # direct stdio script from the tools directory
     from kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from github_issue_trust import is_trusted_principal
 
 MAX_INBOX_TASKS = 20
 MAX_ISSUE_COMMENTS = 500
@@ -108,6 +110,7 @@ def _issue_messages(
         raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
     task_ref = f"{repository}#{issue_number}"
     actors: dict[int, str] = {}
+    trusted_actor_ids: set[int] = set()
     trusted_comments: list[Mapping[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     for comment in comments:
@@ -121,11 +124,17 @@ def _issue_messages(
         body = comment.get("body")
         if type(body) is not str:
             raise InvalidMessage("INVALID_GITHUB_COMMENT")
-        if body.startswith(MARKER) and login.casefold() != expected_actor.casefold():
+        trusted_principal = (
+            login.casefold() == expected_actor.casefold()
+            and is_trusted_principal(comment)
+        )
+        if body.startswith(MARKER) and not trusted_principal:
             # Never let outsider-authored data participate in the global
             # mailbox collision/codec check, or hide legitimate owner roots.
             warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_MARKER_COMMENT"})
             continue
+        if trusted_principal:
+            trusted_actor_ids.add(cid)
         trusted_comments.append(comment)
     parsed = read_mailbox(trusted_comments, task_ref=task_ref)
     roots: dict[str, tuple[int, dict[str, Any]]] = {}
@@ -134,7 +143,7 @@ def _issue_messages(
             continue
         if msg["recipient"] != recipient or msg["scope"]["effect"] != "READ_ONLY":
             continue
-        if actors[cid].casefold() != expected_actor.casefold():
+        if cid not in trusted_actor_ids:
             warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_ROOT_ACTOR"})
             continue
         roots[msg["message_id"]] = (cid, msg)
@@ -149,7 +158,7 @@ def _issue_messages(
             and msg["intent"] == root["intent"]
             and msg["kind"] in KNOWN_REPLY_KINDS
             and msg["recipient"] == "chatgpt"
-            and actors[reply_id].casefold() == expected_actor.casefold()
+            and reply_id in trusted_actor_ids
         })
         out.append({
             "source_comment_id": cid,

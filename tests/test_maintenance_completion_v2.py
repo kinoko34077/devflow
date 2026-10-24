@@ -139,6 +139,7 @@ class V2IntegrationWriteTests(unittest.TestCase):
         transport.comments.append({
             "body": prepared_v2_comment(),
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         })
         with self.assertRaisesRegex(Exception, "duplicate trusted Ledger run ID"):
             execute(transport, attempt="attempt-next")

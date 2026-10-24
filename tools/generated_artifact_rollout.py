@@ -177,7 +177,11 @@ def producer_admission(
         if runner.get(field) != expected:
             raise ArtifactRejected(f"unexpected producer context: {field}")
     actor = runner.get("GITHUB_ACTOR")
-    if actor != "kinoko34077" or runner.get("GITHUB_TRIGGERING_ACTOR") != actor:
+    if (
+        actor != "kinoko34077"
+        or runner.get("GITHUB_ACTOR_ID") != "79015263"
+        or runner.get("GITHUB_TRIGGERING_ACTOR") != actor
+    ):
         raise ArtifactRejected("untrusted or re-run actor")
     workflow_sha = _sha(runner.get("GITHUB_WORKFLOW_SHA"), "workflow_sha")
     if p["producer_workflow_ref"] != f"{recipe.repository}/{CALLER_PATH}@{workflow_sha}":

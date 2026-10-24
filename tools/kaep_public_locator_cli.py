@@ -95,6 +95,7 @@ def discover(
                 account = item.get("owner")
                 if (type(full) is not str or not REPO_NAME.fullmatch(full)
                         or type(account) is not dict
+                        or account.get("id") != 79015263
                         or account.get("login") != OWNER
                         or item.get("private") is not False):
                     _fail("INVALID_PUBLIC_REPOSITORY_PAGE")

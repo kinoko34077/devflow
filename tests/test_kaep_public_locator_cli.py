@@ -12,7 +12,8 @@ OWNER = "kinoko34077"
 
 
 def repo(name: str, *, private: bool = False):
-    return {"full_name": f"{OWNER}/{name}", "owner": {"login": OWNER},
+    return {"full_name": f"{OWNER}/{name}",
+            "owner": {"id": 79015263, "login": OWNER},
             "private": private}
 
 
@@ -87,7 +88,7 @@ class PublicLocatorsTests(TestCase):
     def test_private_or_mismatched_repo_metadata_is_never_scanned(self):
         for item in [repo("hidden", private=True),
                      {"full_name": "someone-else/project",
-                      "owner": {"login": "someone-else"}, "private": False}]:
+                      "owner": {"id": 123456789, "login": "someone-else"}, "private": False}]:
             with self.subTest(item=item):
                 calls = []
                 def fetch(path):

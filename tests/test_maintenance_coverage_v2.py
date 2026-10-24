@@ -22,7 +22,12 @@ def attested(author="OWNER", **changes):
         coverage_key=changes.pop("coverage_key", "common.correctness"),
         catalog_digest=changes.pop("catalog_digest", DIGEST),
     )
-    return AttestedLedgerEvidence(att, SOURCE, author)
+    user = (
+        {"id": 79015263, "login": "kinoko34077"}
+        if author in {"OWNER", "MEMBER", "COLLABORATOR"}
+        else {"id": 123456789, "login": "untrusted"}
+    )
+    return AttestedLedgerEvidence(att, SOURCE, author, user)
 
 
 def rows(v1=(), v2=(), fp=CURRENT, catalog=DIGEST, s=None):
