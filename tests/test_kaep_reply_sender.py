@@ -396,5 +396,15 @@ class ReplyContractTests(unittest.TestCase):
         self.assertIn("REPLY_TEXT_REQUIRED",output.call_args.args[0])
 
 
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_parent_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, parent())
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "PARENT_ACTOR_MISMATCH"):
+                    build(pages([original]))
+
+
 if __name__=="__main__":
     unittest.main()
