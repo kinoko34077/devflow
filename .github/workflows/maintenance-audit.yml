@@ -3,7 +3,8 @@ name: Maintenance audit
 on:
   schedule:
     - cron: '30 13 * * *'
-    - cron: '0 14 * * *'
+    # Renew every 12 hours while retaining the 24-hour signed trust validity.
+    - cron: '0 2,14 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -457,7 +458,7 @@ jobs:
           path: maintenance-completion-result.json
 
   projection-cache:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 2,14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -489,7 +490,10 @@ jobs:
             fi
           done
 
-          if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
+          # Retry only through the same verified producer and fenced write path.
+          # Fail closed if the second attempt also fails; never trust stale data.
+          run_projection_cache() {
+            if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
             python scripts/repository_projection_cache.py \
               --fleet \
               --read-token-env MAINTENANCE_AUDIT_TOKEN \
@@ -504,9 +508,15 @@ jobs:
               --write-token-env GITHUB_TOKEN \
               --apply \
               --output repository-projection-cache-result.json
-          else
-            echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
-            exit 2
+            else
+              echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
+              return 2
+            fi
+          }
+          if ! run_projection_cache; then
+            echo "projection-cache failed; retrying the same fenced producer once" >&2
+            sleep 10
+            run_projection_cache
           fi
       - name: Upload projection cache result
         if: always() && hashFiles('repository-projection-cache-result.json') != ''
