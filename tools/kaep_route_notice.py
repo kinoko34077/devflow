@@ -17,6 +17,7 @@ from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_mailbox_codec import matches
 from tools.kaep_reply_sender import ACTOR, _mailbox
 from tools.kaep_request_sender import send_request
+from tools.github_issue_trust import is_trusted_principal
 
 DISCOVERY_REPOSITORY = "kinoko34077/devflow"
 DISCOVERY_ISSUE = 503
@@ -65,8 +66,15 @@ def verify_source_request(
     if len(matches_found) != 1:
         _fail("SOURCE_MESSAGE_NOT_UNIQUE")
     cid, root = matches_found[0]
-    actors = {comment["id"]: comment["actor_login"] for comment in comments}
-    if actors[cid].casefold() != expected_actor.casefold():
+    actors = {comment["id"]: comment for comment in comments}
+    actor = actors[cid]
+    if expected_actor.casefold() == "kinoko34077":
+        trusted = is_trusted_principal({
+            "user": {"id": actor.get("actor_id"), "login": actor.get("actor_login")}
+        })
+    else:
+        trusted = actor["actor_login"].casefold() == expected_actor.casefold()
+    if not trusted:
         _fail("SOURCE_ACTOR_MISMATCH")
     if (root["kind"] != "REQUEST" or root["in_reply_to"] is not None
             or root["recipient"] != "claude-code"

@@ -24,6 +24,7 @@ class HumanPortfolioMCPTests(unittest.TestCase):
             "updated_at": "2026-10-05T21:00:00Z",
             "html_url": "https://github.com/kinoko34077/demo/issues/7",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
 
     def _publication(self, task):
@@ -76,6 +77,7 @@ class HumanPortfolioMCPTests(unittest.TestCase):
             "html_url": "https://github.com/kinoko34077/devflow/issues/70",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": body,
         }
 
@@ -160,7 +162,9 @@ class HumanPortfolioMCPTests(unittest.TestCase):
         original = self._task()
         publication = self._publication(original)
         cases = (
-            ({**original, "author_association": "NONE"}, "owning task author is untrusted"),
+            ({**original, "author_association": "NONE",
+              "user": {"id": 123456789, "login": "untrusted"}},
+             "owning task author is untrusted"),
             ({**original, "body": "   \n"}, "owning task body is empty"),
         )
         for task, expected_error in cases:

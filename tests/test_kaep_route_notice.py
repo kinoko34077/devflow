@@ -25,7 +25,10 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {
+        "id": 79015263 if actor == ACTOR else 123456789,
+        "login": actor,
+    }}
 
 
 def root_request():

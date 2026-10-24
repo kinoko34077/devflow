@@ -200,7 +200,8 @@ def build_search_list(
             # source of task authority.
             trusted = [
                 {"id": c["id"], "body": c["body"],
-                 "user": {"login": c["actor_login"]}}
+                 "user": {"id": c.get("actor_id"),
+                          "login": c["actor_login"]}}
                 for c in pages
                 if not c["body"].startswith(MARKER)
                 or c["actor_login"].casefold() == expected_actor.casefold()

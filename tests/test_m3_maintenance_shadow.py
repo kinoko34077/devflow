@@ -138,6 +138,7 @@ class M3OwnerShadowTests(unittest.TestCase):
                         "number": 32, "title": "[REPO] testapp", "state": "open",
                         "html_url": CONTROL_URL, "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-10-12T07:00:00Z",
                     }
                 if path.endswith("/issues/30"):
@@ -146,6 +147,7 @@ class M3OwnerShadowTests(unittest.TestCase):
                         "html_url": f"https://github.com/{REPOSITORY}/issues/30",
                         "body": "## Work Status\n\n`AWAITING_REVIEW`\n",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-10-12T07:00:00Z",
                     }
                 raise AssertionError(path)
@@ -178,6 +180,7 @@ class M3OwnerShadowTests(unittest.TestCase):
                 if path.endswith("/issues/32"):
                     return {"number": 32, "title": "[REPO] testapp", "state": "open",
                             "html_url": CONTROL_URL, "author_association": "OWNER",
+                            "user": {"id": 79015263, "login": "kinoko34077"},
                             "body": control, "updated_at": "2026-10-12T07:00:00Z"}
                 raise AssertionError(path)
         out = mg.collect_repository(Transport(), REPOSITORY, CONTROL_REF,

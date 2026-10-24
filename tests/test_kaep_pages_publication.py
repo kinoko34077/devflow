@@ -36,7 +36,7 @@ class KaepPagesPublicationTests(unittest.TestCase):
 
     def test_pages_build_and_deploy_require_both_owner_actors(self):
         w = self.workflow
-        self.assertEqual(w.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(w.count("github.actor_id == '79015263'"), 2)
         self.assertEqual(w.count("github.triggering_actor == 'kinoko34077'"), 2)
         self.assertGreaterEqual(w.count("github.repository == 'kinoko34077/devflow'"), 2)
         self.assertGreaterEqual(w.count("github.ref == 'refs/heads/main'"), 2)

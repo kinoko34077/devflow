@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 import re
 from typing import Mapping, Sequence
 
+from tools.github_issue_trust import is_trusted_principal
+
 
 SENTINEL = "<!-- devflow-task-checkpoint-cursor:v1 -->"
 
-_TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 _ALLOWED_KEYS = (
     "schema_version",
     "task",
@@ -249,8 +250,7 @@ def _comment_login(comment: Mapping[str, object]) -> str | None:
 
 
 def _is_trusted_comment(comment: Mapping[str, object]) -> bool:
-    association = comment.get("author_association")
-    if isinstance(association, str) and association in _TRUSTED_ASSOCIATIONS:
+    if is_trusted_principal(comment):
         return True
     return _comment_login(comment) == "github-actions[bot]"
 
