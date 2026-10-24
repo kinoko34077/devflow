@@ -1,0 +1,59 @@
+name: KiNoTch Identity fixed read-only OIDC recipient pilot
+on:
+  workflow_call:
+permissions: {}
+jobs:
+  recipient-check:
+    if: >-
+      github.repository == 'kinoko34077/testapp' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'kinoko34077'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      id-token: write
+    steps:
+      - name: Verify fixed Identity Gateway read and replay denial
+        shell: bash
+        env:
+          EXPECTED_AUDIENCE: urn:kinotch:identity-read-pilot:v1
+          IDENTITY_ENDPOINT: https://api.kinotch.workers.dev/v1/identity/catalog/read
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const deny = () => { throw Error('IDENTITY_RECIPIENT_E2E_DENIED'); };
+          try {
+            const issuance = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const credential = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (!issuance || !credential || process.env.EXPECTED_AUDIENCE !== 'urn:kinotch:identity-read-pilot:v1') deny();
+            const url = new URL(issuance);
+            if (url.protocol !== 'https:' || !url.hostname.endsWith('.actions.githubusercontent.com')) deny();
+            url.searchParams.set('audience', process.env.EXPECTED_AUDIENCE);
+            const response = await fetch(url, {
+              headers: { Authorization: 'Bearer ' + credential, Accept: 'application/json' },
+              redirect: 'error', signal: AbortSignal.timeout(10000),
+            });
+            if (!response.ok) deny();
+            const token = (await response.json())?.value;
+            if (typeof token !== 'string' || token.length < 60 || token.length > 8000 || token.split('.').length !== 3) deny();
+            const target = process.env.IDENTITY_ENDPOINT;
+            if (target !== 'https://api.kinotch.workers.dev/v1/identity/catalog/read') deny();
+            const attempt = async () => {
+              const result = await fetch(target, {
+                method: 'POST', redirect: 'error',
+                headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+                signal: AbortSignal.timeout(15000),
+              });
+              // Never print response bodies, request URLs, JWTs, headers or claims.
+              return result.status;
+            };
+            const first = await attempt();
+            const replay = await attempt();
+            if (first !== 200 || replay !== 403) deny();
+            process.stdout.write('IDENTITY_E2E_FIXED_READ_200_REPLAY_403_CONFIRMED\n');
+          } catch {
+            process.stderr.write('IDENTITY_E2E_FAILED_NO_CREDENTIAL_DETAILS\n');
+            process.exitCode = 1;
+          }
+          NODE
