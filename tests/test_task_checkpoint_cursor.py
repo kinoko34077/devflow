@@ -37,10 +37,15 @@ def state(**overrides):
 
 
 def comment(body, association="OWNER", login="kinoko34077"):
+    user = (
+        {"id": 79015263, "login": login}
+        if login == "kinoko34077"
+        else {"id": 123456789, "login": login}
+    )
     return {
         "body": body,
         "author_association": association,
-        "user": {"login": login},
+        "user": user,
     }
 
 

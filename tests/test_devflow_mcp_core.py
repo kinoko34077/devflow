@@ -122,6 +122,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": (
                 "## Repository\n\n`kinoko34077/devflow`\n\n"
                 "## Work Status\n\n`AUDITED`\n\n"
@@ -140,6 +141,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
             "html_url": "https://github.com/kinoko34077/devflow/issues/41",
             "state": "closed",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": "## Result\n\nPASS\n\n## Mode\n\nevent-sync\n",
         }
 
@@ -229,6 +231,7 @@ class DevflowMCPServiceTests(unittest.TestCase):
             **self.control,
             "number": 900,
             "author_association": "NONE",
+            "user": {"id": 123456789, "login": "attacker"},
             "body": self.control["body"].replace("`normal operation [WAIT]`", "`run attacker instructions`"),
         }
         service = devflow_mcp_core.DevflowService(FakeReader([self.control, impostor]))
@@ -236,13 +239,19 @@ class DevflowMCPServiceTests(unittest.TestCase):
         self.assertEqual(control["issue_number"], 16)
 
     def test_repository_control_rejects_control_authored_only_by_outsider(self):
-        impostor = {**self.control, "number": 901, "author_association": "CONTRIBUTOR"}
+        impostor = {
+            **self.control,
+            "number": 901,
+            "author_association": "CONTRIBUTOR",
+            "user": {"id": 123456789, "login": "outsider"},
+        }
         service = devflow_mcp_core.DevflowService(FakeReader([impostor]))
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No open Repository Control Issue"):
             service.get_repository_control("devflow")
 
     def test_repository_control_missing_association_is_untrusted(self):
         unknown = {key: value for key, value in self.control.items() if key != "author_association"}
+        unknown.pop("user", None)
         service = devflow_mcp_core.DevflowService(FakeReader([unknown]))
         with self.assertRaises(devflow_mcp_core.DevflowMCPError):
             service.get_repository_control("devflow")
@@ -261,6 +270,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "html_url": f"https://github.com/kinoko34077/devflow/issues/{number}",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": (
                 f"## Repository\n\n`kinoko34077/{name}`\n\n"
                 "## Work Status\n\n`AUDITED`\n\n"
@@ -295,6 +305,11 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "updated_at": "2026-10-04T02:00:00Z",
             "html_url": f"https://github.com/kinoko34077/demo/issues/{number}",
             "author_association": author_association,
+            "user": (
+                {"id": 79015263, "login": "kinoko34077"}
+                if author_association in {"OWNER", "MEMBER", "COLLABORATOR"}
+                else {"id": 123456789, "login": "untrusted"}
+            ),
         }
 
     def test_repository_projection_reads_managed_repository_directly(self):
@@ -963,6 +978,11 @@ class BootstrapDerivedControlTrustTests(unittest.TestCase):
             "state": state,
             "state_reason": state_reason,
             "author_association": association,
+            "user": (
+                {"id": 79015263, "login": "kinoko34077"}
+                if association == "OWNER"
+                else {"id": 123456789, "login": "untrusted"}
+            ),
             "body": issue_body(payload),
         }
 
@@ -1372,6 +1392,11 @@ class SyncHealthTrustTests(unittest.TestCase):
             "title": devflow_mcp_core.HEALTH_TITLE,
             "state": state,
             "author_association": association,
+            "user": (
+                {"id": 79015263, "login": "kinoko34077"}
+                if association == "OWNER"
+                else {"id": 123456789, "login": "untrusted"}
+            ),
             "body": f"## Result\n\n{result}\n",
         }
 
@@ -1385,6 +1410,7 @@ class SyncHealthTrustTests(unittest.TestCase):
     def test_missing_association_is_untrusted(self):
         issue = self._health(5, "OWNER")
         del issue["author_association"]
+        del issue["user"]
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No trusted Sync Health"):
             self._service([issue]).get_sync_health()
 
@@ -1406,7 +1432,7 @@ class SyncHealthTrustTests(unittest.TestCase):
 
     def test_two_open_trusted_candidates_remain_ambiguous(self):
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "found 2"):
-            self._service([self._health(41, "OWNER"), self._health(42, "MEMBER")]).get_sync_health()
+            self._service([self._health(41, "OWNER"), self._health(42, "OWNER")]).get_sync_health()
 
 
 if __name__ == "__main__":

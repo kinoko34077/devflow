@@ -19,6 +19,7 @@ def runner(**updates):
     result = {
         "GITHUB_REPOSITORY": REPO,
         "GITHUB_ACTOR": "kinoko34077",
+        "GITHUB_ACTOR_ID": "79015263",
         "GITHUB_TRIGGERING_ACTOR": "kinoko34077",
         "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_REF": "refs/heads/main",

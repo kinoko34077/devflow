@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 try:
-    from tools import devflow_mcp_core, workflow_contract
+    from tools import devflow_mcp_core, github_issue_trust, workflow_contract
     from tools.maintenance_catalog import (
         MaintenanceCatalogError,
         canonical_catalog_digest,
@@ -37,6 +37,7 @@ try:
     )
 except ImportError:  # direct module execution
     import devflow_mcp_core
+    import github_issue_trust
     import workflow_contract
     from maintenance_catalog import (
         MaintenanceCatalogError,
@@ -731,8 +732,7 @@ def _control_is_trusted(
     control: dict[str, Any],
     repository: str,
 ) -> bool:
-    association = str(control.get("author_association") or "").upper()
-    if association in TRUSTED_ASSOCIATIONS:
+    if github_issue_trust.is_trusted_issue_author(control):
         return True
     try:
         return devflow_mcp_core.DevflowService(
@@ -906,10 +906,7 @@ def collect_repository(
         }
         source_status = "UNAVAILABLE"
 
-    owner_association = str(
-        owner.get("author_association") or ""
-    ).upper()
-    if owner_association not in TRUSTED_ASSOCIATIONS:
+    if not github_issue_trust.is_trusted_issue_author(owner):
         source_status = "UNAVAILABLE"
 
     owner_sections = _sections(str(owner.get("body") or ""))
@@ -1213,7 +1210,7 @@ def collect_maintenance_catalog(
 
 
 def _trusted_issue(issue: Mapping[str, object]) -> bool:
-    return str(issue.get("author_association") or "").upper() in TRUSTED_ASSOCIATIONS
+    return github_issue_trust.is_trusted_issue_author(issue)
 
 
 def find_maintenance_ledger(
@@ -1251,7 +1248,7 @@ def collect_maintenance_history(
         body = comment.get("body")
         if not isinstance(body, str):
             continue
-        if str(comment.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
+        if not github_issue_trust.is_trusted_issue_author(comment):
             continue
         # Every completion format is one authoritative generation: a trusted
         # malformed or dual-sentinel record is not safely ignorable.

@@ -13,6 +13,7 @@ from tools.task_checkpoint_cursor import (
     inspect_cursor_comments, render_cursor_comment,
     verify_initialization, verify_post_write,
 )
+from tools.github_issue_trust import is_trusted_principal
 
 
 class IssueCommentTransport(Protocol):
@@ -32,9 +33,8 @@ def _trusted_cursor_id(comments: Sequence[Mapping[str, object]]) -> int | None:
             continue
         # This historical trust rule mirrors the v1 reader. Caller must
         # independently authenticate its write token and repository scope.
-        association = comment.get("author_association")
         login = (comment.get("user") or {}).get("login") if isinstance(comment.get("user"), Mapping) else None
-        if association in ("OWNER", "MEMBER", "COLLABORATOR") or login == "github-actions[bot]":
+        if is_trusted_principal(comment) or login == "github-actions[bot]":
             cid = comment.get("id")
             if not isinstance(cid, int) or cid <= 0:
                 raise ValueError("trusted cursor comment missing GitHub ID")

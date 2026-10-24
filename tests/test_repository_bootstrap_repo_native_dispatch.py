@@ -26,7 +26,7 @@ class RepoNativeBootstrapTests(unittest.TestCase):
         self.assertEqual(seeded, (ROOT / "templates/bootstrap/kinotch-repo-command.yml").read_text())
         self.assertIn("issue_comment:", seeded)
         self.assertIn("github.event.comment.body == '/kinotch status'", seeded)
-        self.assertIn("github.event.issue.user.login == 'kinoko34077'", seeded)
+        self.assertIn("github.event.issue.user.id == 79015263", seeded)
         self.assertIn("github.event.issue.pull_request == null", seeded)
         self.assertIn("permissions: {}", seeded)
         self.assertNotIn("actions: read", seeded)

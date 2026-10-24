@@ -529,6 +529,7 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
                     "body": "",
                     "html_url": "https://github.com/o/r/issues/7",
                     "author_association": "OWNER",
+                    "user": {"id": 79015263, "login": "kinoko34077"},
                 }
 
             def assertEqual(self, left, right):
@@ -563,6 +564,7 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
                         "body": "owner body",
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("kinoko34077/devflow", 9):
                     return dict(self.work_order)
@@ -574,6 +576,7 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
                 "title": "[WORK ORDER] test",
                 "body": "x",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             },
             {
                 "state": "open",
@@ -586,12 +589,14 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
                 "title": "not a work order",
                 "body": "x",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             },
             {
                 "state": "open",
                 "title": "[WORK ORDER] test",
                 "body": "x",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
                 "pull_request": {},
             },
         )
@@ -610,6 +615,7 @@ class MaintenanceSupplyPublisherProvenanceTests(unittest.TestCase):
             "title": "[WORK ORDER] test",
             "body": "x",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
         snapshot = cli._owner_supply_snapshot(
             Transport(valid),
@@ -704,6 +710,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "title": "[REPO] r",
                         "body": self.body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("o/r", 7):
                     return {
@@ -713,6 +720,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "body": self.owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError((repository, number))
 
@@ -834,6 +842,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "title": "[REPO] r",
                         "body": self.body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("o/r", 7):
                     return {
@@ -843,6 +852,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "body": self.owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError((repository, number))
 
@@ -990,6 +1000,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                             "devflow/issues/1"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("o/r", 7):
                     return {
@@ -998,6 +1009,7 @@ class MaintenanceSupplyApplyPathTests(unittest.TestCase):
                         "body": self.owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError((repository, number))
 
@@ -1162,6 +1174,7 @@ class MaintenanceSupplyTransitionTransportTests(unittest.TestCase):
                         ),
                         "body": control_body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("o/r", 7):
                     return {
@@ -1169,6 +1182,7 @@ class MaintenanceSupplyTransitionTransportTests(unittest.TestCase):
                         "body": owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError((repository, number))
 
@@ -1284,6 +1298,7 @@ class MaintenanceSupplyReportingFailureTests(unittest.TestCase):
                         "title": "[REPO] r",
                         "body": self.body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 if (repository, number) == ("o/r", 7):
                     return {
@@ -1292,6 +1307,7 @@ class MaintenanceSupplyReportingFailureTests(unittest.TestCase):
                         "body": owner_body,
                         "html_url": "https://github.com/o/r/issues/7",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError((repository, number))
 
@@ -1722,6 +1738,7 @@ class CatalogMaintenancePublicationApplyTests(unittest.TestCase):
                     "body": self.ledger_body,
                     "html_url": "https://github.com/o/r/issues/7",
                     "author_association": "OWNER",
+                    "user": {"id": 79015263, "login": "kinoko34077"},
                 }
             if (repository, number) == ("kinoko34077/devflow", 1):
                 return {
@@ -1730,6 +1747,7 @@ class CatalogMaintenancePublicationApplyTests(unittest.TestCase):
                     "title": "[REPO] r",
                     "body": self.control_body,
                     "author_association": "OWNER",
+                    "user": {"id": 79015263, "login": "kinoko34077"},
                 }
             raise AssertionError((repository, number))
 

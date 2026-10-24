@@ -22,7 +22,7 @@ class MemoryTransport:
     def create_comment(self, task, body):
         self.calls.append("create")
         self.comments.append({"id": 19, "body": body, "author_association": "OWNER",
-                              "user": {"login": "kinoko34077"}})
+                              "user": {"id": 79015263, "login": "kinoko34077"}})
     def update_comment(self, task, comment_id, body):
         self.calls.append(("update", comment_id))
         for c in self.comments:
@@ -34,7 +34,8 @@ class MemoryTransport:
 
 def saved(cursor):
     return {"id": 19, "body": render_cursor_comment(cursor),
-            "author_association": "OWNER", "user": {"login": "kinoko34077"}}
+            "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"}}
 
 
 class TransportTests(unittest.TestCase):
