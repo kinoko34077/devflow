@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
-from tools.kaep_reply_sender import _mailbox, post_comment, post_and_verify, ACTOR
+from tools.kaep_reply_sender import _mailbox, post_comment, post_and_verify, ACTOR, _matching_actor
 from tools.kaep_mailbox_codec import encode_comment, fingerprint, matches
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
@@ -60,7 +60,7 @@ def make_request(
     }
     encode_comment(req)
     comments, items = _mailbox(text, repository=repository, issue=issue)
-    actors = {c["id"]: c["actor_login"] for c in comments}
+    actors = {c["id"]: c for c in comments}
     matching = [
         (cid, msg) for cid, msg in items
         if msg["idempotency_key"] == request_key or msg["message_id"] == req["message_id"]
@@ -69,7 +69,7 @@ def make_request(
         cid, existing = matching[0]
         if fingerprint(existing) != fingerprint(req):
             _fail("REQUEST_KEY_COLLISION")
-        if actors[cid].casefold() != expect_existing_actor.casefold():
+        if not _matching_actor(actors[cid], expect_existing_actor):
             _fail("EXISTING_ACTOR_MISMATCH")
         return req, cid
     return req, None
