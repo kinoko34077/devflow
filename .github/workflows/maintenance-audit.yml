@@ -494,20 +494,20 @@ jobs:
           # Fail closed if the second attempt also fails; never trust stale data.
           run_projection_cache() {
             if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
-            python scripts/repository_projection_cache.py \
-              --fleet \
-              --read-token-env MAINTENANCE_AUDIT_TOKEN \
-              --write-token-env GITHUB_TOKEN \
-              --apply \
-              --output repository-projection-cache-result.json
-          elif [[ -n "$CACHE_REPOSITORY" && -n "$CACHE_CONTROL" ]]; then
-            python scripts/repository_projection_cache.py \
-              --repository "$CACHE_REPOSITORY" \
-              --control "$CACHE_CONTROL" \
-              --read-token-env MAINTENANCE_AUDIT_TOKEN \
-              --write-token-env GITHUB_TOKEN \
-              --apply \
-              --output repository-projection-cache-result.json
+              python scripts/repository_projection_cache.py \
+                --fleet \
+                --read-token-env MAINTENANCE_AUDIT_TOKEN \
+                --write-token-env GITHUB_TOKEN \
+                --apply \
+                --output repository-projection-cache-result.json
+            elif [[ -n "$CACHE_REPOSITORY" && -n "$CACHE_CONTROL" ]]; then
+              python scripts/repository_projection_cache.py \
+                --repository "$CACHE_REPOSITORY" \
+                --control "$CACHE_CONTROL" \
+                --read-token-env MAINTENANCE_AUDIT_TOKEN \
+                --write-token-env GITHUB_TOKEN \
+                --apply \
+                --output repository-projection-cache-result.json
             else
               echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
               return 2
