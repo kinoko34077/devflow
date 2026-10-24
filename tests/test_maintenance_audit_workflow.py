@@ -53,13 +53,13 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("--apply", self.audit)
 
     def test_projection_cache_has_distinct_central_schedule_and_non_cancelling_concurrency(self):
-        self.assertIn("- cron: '0 14 * * *'", self.text)
+        self.assertIn("- cron: '0 2,14 * * *'", self.text)
         self.assertIn(
             "github.event.schedule == '30 13 * * *'",
             self.audit,
         )
         self.assertIn(
-            "github.event.schedule == '0 14 * * *'",
+            "github.event.schedule == '0 2,14 * * *'",
             self.projection_cache,
         )
         self.assertIn(
@@ -68,6 +68,15 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )
         self.assertIn("cancel-in-progress: false", self.projection_cache)
         self.assertNotIn("schedule:", self.publish)
+
+    def test_projection_cache_retries_only_same_fenced_producer_once(self):
+        self.assertIn("run_projection_cache() {", self.projection_cache)
+        self.assertIn("if ! run_projection_cache; then", self.projection_cache)
+        self.assertIn("sleep 10", self.projection_cache)
+        self.assertIn("run_projection_cache\n          fi", self.projection_cache)
+        self.assertEqual(self.projection_cache.count("--apply"), 2)
+        self.assertNotIn("continue-on-error:", self.projection_cache)
+        self.assertNotIn("repository_dispatch", self.projection_cache)
 
     def test_scheduled_projection_cache_uses_fleet_mode_without_target_inputs(self):
         self.assertIn("--fleet", self.projection_cache)
