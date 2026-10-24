@@ -157,6 +157,7 @@ class MembershipReadbackTests(unittest.TestCase):
         issue = {
             "number": 406, "node_id": "SOURCE", "title": "[BUG] test",
             "state": "open", "author_association": "OWNER", "body": "",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
         prior = ""
         if memory:

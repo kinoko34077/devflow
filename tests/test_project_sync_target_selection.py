@@ -29,6 +29,7 @@ class TargetSelectionTests(unittest.TestCase):
             "title": "Bug: example",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": "## Priority\n\nP2",
         }
 

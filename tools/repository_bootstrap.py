@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
+    from .github_issue_trust import is_trusted_issue_author
+except ImportError:  # direct module execution
+    from github_issue_trust import is_trusted_issue_author
+
+try:
     from .github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
 except ImportError:  # direct script execution
     from github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
@@ -114,6 +119,7 @@ class BootstrapContext:
     request_issue_number: int
     request_title: str
     author_association: str
+    author: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -308,6 +314,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
 
 
 def is_trusted_association(value: str) -> bool:
+    """Legacy metadata helper; association is not an authorization grant."""
     return value in TRUSTED_ASSOCIATIONS
 
 
@@ -518,7 +525,7 @@ class BootstrapExecutor:
 
     def execute(self, request: BootstrapRequest, context: BootstrapContext) -> BootstrapResult:
         resources: list[str] = []
-        if not is_trusted_association(context.author_association):
+        if not is_trusted_issue_author({"user": context.author}):
             self._raise_failure(
                 context,
                 "VALIDATION",
@@ -916,8 +923,8 @@ class GitHubApi:
         if owner != ALLOWED_OWNER:
             raise BootstrapError(f"unsupported repository owner: {owner}")
         identity = self._request("GET", "/user")
-        login = identity.get("login") if isinstance(identity, dict) else None
-        if not isinstance(login, str) or login.lower() != owner.lower():
+        principal_id = identity.get("id") if isinstance(identity, dict) else None
+        if principal_id != 79015263:
             raise BootstrapError("repository bootstrap credential owner does not match requested owner")
         result = self._request(
             "POST",

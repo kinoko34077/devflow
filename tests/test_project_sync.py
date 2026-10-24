@@ -260,8 +260,8 @@ class ClientAndSyncTests(unittest.TestCase):
 
     def test_select_canonical_issues_includes_open_plus_project_tracked_closed(self):
         issues = [
-            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": "", "author_association": "OWNER"},
-            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": "", "author_association": "MEMBER"},
+            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": "", "author_association": "OWNER", "user": {"id": 79015263, "login": "kinoko34077"}},
+            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": "", "author_association": "MEMBER", "user": {"id": 79015263, "login": "kinoko34077"}},
             {"number": 3, "node_id": "C", "title": "not tracked", "state": "closed", "body": "", "author_association": "OWNER"},
             {"number": 4, "node_id": "D", "title": project_sync.HEALTH_TITLE, "state": "open", "body": "", "author_association": "OWNER"},
             {"number": 5, "node_id": "E", "title": "[REPO] spoof", "state": "open", "body": "", "author_association": "NONE"},
@@ -330,6 +330,7 @@ class ClientAndSyncTests(unittest.TestCase):
             "title": "[WORK ORDER] accepted",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
         self.assertTrue(
             project_sync.is_trusted_sync_issue(
@@ -850,6 +851,7 @@ class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
             "number": 59,
             "title": "[REPO] demo",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "labels": [{"name": "devflow:audit-freshness:unknown"}],
         }
         class FakeREST:
@@ -863,6 +865,7 @@ class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
             "number": 59,
             "title": "[REPO] demo",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "labels": [{"name": "devflow:audit-freshness:current"}],
         }
         observed = project_sync.reread_event_issue(rest, event_issue)

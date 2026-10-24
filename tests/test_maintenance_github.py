@@ -382,6 +382,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-10-01T00:00:00Z",
                     }
                 raise AssertionError(
@@ -453,6 +454,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": control_body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-09-30T02:06:31Z",
                     }
                 if path.endswith("/issues/35"):
@@ -465,6 +467,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": owner_body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-09-30T00:00:00Z",
                     }
                 raise AssertionError(path)
@@ -515,6 +518,7 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
             "html_url": self.request_url,
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": issue_body(payload),
         }
 
@@ -726,6 +730,7 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
             "repository_url": f"https://api.github.com/repos/{self.repository}",
             "html_url": f"https://github.com/{self.repository}/issues/7",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "updated_at": "2026-10-03T00:01:00Z",
             "body": "## Work Status\n\n`READY_FOR_IMPLEMENTATION`\n",
         }
@@ -783,6 +788,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
             "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "updated_at": "2026-10-04T00:00:00Z",
             "body": (
                 "## Repository\n\n`kinoko34077/example`\n\n"
@@ -822,6 +828,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
             "state": "open",
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": (
                 "## Repository\n\n"
                 "`kinoko34077/example`\n\n"
@@ -865,6 +872,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -881,6 +889,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/8"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Work Status\n\n"
                             "`READY_FOR_IMPLEMENTATION`\n"
@@ -915,6 +924,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -998,6 +1008,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -1044,6 +1055,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -1062,6 +1074,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/7"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": "## Work Status\n\n`DONE`\n",
                     }
                 raise AssertionError(path)
@@ -1108,6 +1121,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError(path)
 
@@ -1155,6 +1169,7 @@ class MaintenanceGitHubP6PilotRegressionTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 self.owner_reads += 1
                 raise AssertionError(
@@ -1201,6 +1216,7 @@ class MaintenanceGitHubP6PilotRegressionTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError(path)
 

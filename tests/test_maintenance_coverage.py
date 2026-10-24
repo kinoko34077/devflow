@@ -51,7 +51,12 @@ def record(**changes):
 
 
 def evidence(author="OWNER", source=SOURCE, **changes):
-    return LedgerEvidence(record(**changes), source, author)
+    user = (
+        {"id": 79015263, "login": "kinoko34077"}
+        if author in {"OWNER", "MEMBER", "COLLABORATOR"}
+        else {"id": 123456789, "login": "untrusted"}
+    )
+    return LedgerEvidence(record(**changes), source, author, user)
 
 
 def status(items=(), fp=CURRENT, s=None, depths=("STANDARD",)):

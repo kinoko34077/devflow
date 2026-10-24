@@ -145,7 +145,7 @@ LIVE_JS = r"""
       for(const c of comments){
         if(!c||typeof c.body!=="string"||!c.body.startsWith("<!-- kaep:message:v0.2 -->"))continue;
         eligible++;
-        if(!c.user||c.user.login!=="kinoko34077")continue;
+        if(!c.user||c.user.id!==79015263||c.user.login!=="kinoko34077")continue;
         if(!Number.isSafeInteger(c.id)||c.id<=0)continue;
         const match=typeof c.issue_url==="string" && /^https:\/\/api\.github\.com\/repos\/kinoko34077\/devflow\/issues\/[1-9][0-9]*$/.exec(c.issue_url);
         if(!match)continue;

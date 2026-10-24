@@ -45,7 +45,11 @@ def attest_producer(
     if _required(runner, "repository") != REPO:
         raise ArtifactRejected("runner repository differs from fixed admission")
     actor = _required(runner, "actor")
-    if actor not in policy["allowed_actors"] or _required(runner, "triggering_actor") != actor:
+    if (
+        actor not in policy["allowed_actors"]
+        or _required(runner, "actor_id") != "79015263"
+        or _required(runner, "triggering_actor") != actor
+    ):
         raise ArtifactRejected("untrusted actor or different-actor re-run")
     if _required(runner, "event") != "workflow_dispatch":
         raise ArtifactRejected("untrusted workflow trigger")
@@ -75,6 +79,7 @@ def attest_producer(
         or run.get("head_sha") != workflow_sha
         or run.get("head_branch") != branch
         or run.get("path") != CALLER_PATH
+        or (run.get("actor") or {}).get("id") != 79015263
         or (run.get("actor") or {}).get("login") != actor
         or (run.get("repository") or {}).get("full_name") != REPO
         or not isinstance(run.get("workflow_id"), int)

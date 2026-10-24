@@ -31,8 +31,8 @@ class FakeGitHubReader:
             "id": 501, "run_attempt": 1, "event": "workflow_dispatch",
             "status": "in_progress", "head_sha": CALLER_SHA,
             "head_branch": "main", "path": auth.CALLER_PATH,
-            "actor": {"login": "kinoko34077"},
-            "triggering_actor": {"login": "kinoko34077"},
+            "actor": {"id": 79015263, "login": "kinoko34077"},
+            "triggering_actor": {"id": 79015263, "login": "kinoko34077"},
             "repository": {"full_name": REPO}, "workflow_id": 89,
         }
         self.run.update(run or {})
