@@ -20,6 +20,7 @@ def task(number=21, status="AWAITING_REVIEW", author="OWNER"):
     }
     return {
         "number": number, "state": "open", "author_association": author,
+        "user": {"id": 79015263, "login": OWNER},
         "title": f"[TASK] audited {number}",
         "html_url": f"https://github.com/{REPO}/issues/{number}",
         "created_at": "2026-10-14T00:00:00Z",
@@ -31,6 +32,7 @@ def task(number=21, status="AWAITING_REVIEW", author="OWNER"):
 def control():
     return {
         "number": 90, "state": "open", "author_association": "OWNER",
+        "user": {"id": 79015263, "login": OWNER},
         "title": "[REPO] demo", "html_url":
         "https://github.com/kinoko34077/devflow/issues/90",
         "body": (
@@ -59,7 +61,7 @@ def message(issue=21):
 
 def issue_comment(cid, msg, login=OWNER):
     return {"id": cid, "body": encode_comment(msg),
-            "user": {"login": login}}
+            "user": {"id": 79015263 if login == OWNER else 123456789, "login": login}}
 
 
 def fixture_reader(issues, comments=None):
@@ -241,7 +243,7 @@ class AgentInboxProjectionTests(unittest.TestCase):
 
     def test_invalid_kaep_envelope_does_not_promote_work(self):
         invalid = {"id": 12, "body": "<!-- kaep:message:v0.2 -->bad",
-                   "user": {"login": OWNER}}
+                   "user": {"id": 79015263, "login": OWNER}}
         result = agent_inbox.build_agent_inbox(
             fake_work_view([task()]), recipient="claude-code",
             comments_by_issue={21:[invalid]})

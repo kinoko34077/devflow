@@ -118,6 +118,7 @@ def _runner_from_env(env: Mapping[str, str]) -> dict[str, str]:
     keys = {
         "repository": "GITHUB_REPOSITORY",
         "actor": "GITHUB_ACTOR",
+        "actor_id": "GITHUB_ACTOR_ID",
         "triggering_actor": "GITHUB_TRIGGERING_ACTOR",
         "event": "GITHUB_EVENT_NAME",
         "ref": "GITHUB_REF",

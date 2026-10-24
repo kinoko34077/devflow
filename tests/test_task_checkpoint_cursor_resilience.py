@@ -12,7 +12,12 @@ STATE = CursorState(1, TASK, 7, "M0", "M1", "a" * 40,
 
 
 def comment(body, association="OWNER", login="kinoko34077"):
-    return {"body": body, "author_association": association, "user": {"login": login}}
+    return {
+        "body": body,
+        "author_association": association,
+        "user": {"id": 79015263 if login == "kinoko34077" else 123456789,
+                 "login": login},
+    }
 
 
 class CompatibleCursorTests(unittest.TestCase):

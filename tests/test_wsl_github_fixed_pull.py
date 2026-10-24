@@ -25,7 +25,7 @@ def comment(comment_id=6199999911, nonce="f3c-0123456789abcdefghij", **mutations
     }, sort_keys=True)
     data = dict(
         id=comment_id, issue_url=pull._ISSUE_URL,
-        user={"login": "kinoko34077", "type": "User"},
+        user={"id": 79015263, "login": "kinoko34077", "type": "User"},
         created_at="2026-10-15T18:00:00Z",
         updated_at="2026-10-15T18:00:00Z",
         body=body,

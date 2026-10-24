@@ -38,6 +38,7 @@ class Transport(cli._SyncCheckGitHubTransport):
             "number": 7,
             "title": "[REPO] sample",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "state": "open",
             "updated_at": "2026-10-16T00:00:00Z",
             "body": BEFORE,
@@ -90,8 +91,9 @@ class ExistingControlWriterIntegrationTests(unittest.TestCase):
     def test_live_identity_and_permission_changes_fail_closed(self):
         variants = (
             {"number": 8}, {"number": True}, {"state": "closed"},
-            {"title": "[REPO] other"}, {"author_association": "NONE"},
-            {"author_association": "CONTRIBUTOR"},
+            {"title": "[REPO] other"},
+            {"author_association": "NONE", "user": {"id": 123456789, "login": "untrusted"}},
+            {"author_association": "CONTRIBUTOR", "user": {"id": 123456789, "login": "untrusted"}},
             {"updated_at": "bad date"}, {"updated_at": None},
             {"body": BEFORE.replace(REPOSITORY, "kinoko34077/other")},
             {"body": None},

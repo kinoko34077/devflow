@@ -33,13 +33,15 @@ def issue_object(n=576, state="open"):
         "html_url": f"https://github.com/{REPO}/issues/{n}",
         "title": "[SPEC] Non-TASK historical root", "body": "No metadata",
         "created_at": "2026-10-16T00:00:00Z", "updated_at": "2026-10-16T00:00:00Z",
-        "author_association": "OWNER", "user": {"login": "kinoko34077"},
+        "author_association": "OWNER",
+        "user": {"id": 79015263, "login": "kinoko34077"},
     }
 
 
 def source_page(*elements):
     return json.dumps([[{"id": n, "body": encode_comment(msg),
-                         "user": {"login": actor}}
+                         "user": {"id": 79015263 if actor == "kinoko34077" else 123456789,
+                                  "login": actor}}
                         for n, msg, actor in elements]])
 
 

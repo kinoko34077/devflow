@@ -29,7 +29,7 @@ jobs:
     if: >-
       github.repository == 'kinoko34077/devflow' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'kinoko34077' &&
+      github.actor_id == '79015263' &&
       github.triggering_actor == 'kinoko34077'
     runs-on: ubuntu-latest
     permissions:
@@ -151,7 +151,7 @@ jobs:
     if: >-
       github.repository == 'kinoko34077/devflow' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'kinoko34077' &&
+      github.actor_id == '79015263' &&
       github.triggering_actor == 'kinoko34077'
     runs-on: ubuntu-latest
     permissions:

@@ -18,14 +18,19 @@ from tools.kaep_route_notice import DISCOVERY_REPOSITORY, DISCOVERY_ISSUE
 SOURCE_REPO = "kinoko34077/UniverseGenome"
 SOURCE_ISSUE = 336
 ACTOR = "kinoko34077"
+ACTOR_ID = 79015263
 
 
 def pages(*groups):
     return json.dumps(list(groups))
 
 
+def actor_user(actor=ACTOR):
+    return {"login": actor, "id": ACTOR_ID if actor == ACTOR else 999999999}
+
+
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": actor_user(actor)}
 
 
 def fixtures():
@@ -246,7 +251,7 @@ class DiscoveryReaderTests(unittest.TestCase):
         index = pages([
             comment(1000 + n, hints[n]) if n in hints
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(65)
         ])
         reads = []
@@ -276,7 +281,7 @@ class DiscoveryReaderTests(unittest.TestCase):
         index = pages([
             comment(1000 + n, hint) if n in (0, 35)
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(42)
         ])
         read = lambda repo, issue: pages([comment(77, root)])
@@ -304,12 +309,12 @@ class DiscoveryReaderTests(unittest.TestCase):
         index = pages([
             comment(1021, hint) if n == 21
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(42)
         ])
         bad_source = pages([
             {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-             "user": {"login": ACTOR}},
+             "user": actor_user()},
             comment(77, root)
         ])
         out = discover_index_shadow(
@@ -396,7 +401,7 @@ class DiscoveryReaderTests(unittest.TestCase):
     def test_malformed_marker_cannot_hide_later_valid_pointer(self):
         root, hint, _ = fixtures()
         malformed = {"id": 86, "body": "<!-- kaep:message:v0.2 -->malformed",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         result = discover_batch(pages([malformed, comment(88, hint)]),
                                 expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
                                 fetch_source=lambda r, i: pages([comment(77, root)]))
@@ -417,7 +422,7 @@ class DiscoveryReaderTests(unittest.TestCase):
 
     def test_bounded_scan_has_explicit_cursor_and_continuation(self):
         root, hint, _ = fixtures()
-        boring = [{"id": i, "body": "ordinary update", "user": {"login": ACTOR}}
+        boring = [{"id": i, "body": "ordinary update", "user": actor_user()}
                   for i in range(100, 100 + MAX_INDEX_BATCH)]
         index = pages(boring + [comment(100 + MAX_INDEX_BATCH, hint)])
         fetch = lambda r, i: pages([comment(77, root)])
@@ -455,7 +460,7 @@ class DiscoveryReaderTests(unittest.TestCase):
     def test_malformed_source_wrapper_blocks_safe_cursor_not_other_sources(self):
         root, hint, _ = fixtures()
         malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         corrupt_source = pages([malformed, comment(77, root)])
         index = pages([comment(88, hint)])
         out = discover_batch(index, expected_notice_actor=ACTOR,
@@ -533,9 +538,9 @@ class DiscoveryReaderTests(unittest.TestCase):
         }
         second = other_notice(json.dumps(other_ptr), "kaep.discovery.secondindex0001")
         malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         index = pages([
-            {"id": 85, "body": "ordinary", "user": {"login": ACTOR}},
+            {"id": 85, "body": "ordinary", "user": actor_user()},
             comment(88, hint), comment(89, second),
         ])
         def fetch(repo, issue):
@@ -555,9 +560,9 @@ class DiscoveryReaderTests(unittest.TestCase):
 
     def test_bad_index_pagination_still_fatal_and_no_cursor_returned(self):
         bad = json.dumps([[{"id": 2, "body": "ordinary",
-                            "user": {"login": ACTOR}},
+                            "user": actor_user()},
                            {"id": 1, "body": "ordinary",
-                            "user": {"login": ACTOR}}]])
+                            "user": actor_user()} ]])
         with self.assertRaisesRegex(InvalidMessage, "INVALID_COMMENT_SEQUENCE"):
             discover_batch(bad, expected_notice_actor=ACTOR,
                            expected_source_actor=ACTOR,
