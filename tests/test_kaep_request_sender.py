@@ -306,5 +306,16 @@ class RequestSenderTests(unittest.TestCase):
             self.assertIn("OFFLINE_POST_FORBIDDEN",out.call_args.args[0])
 
 
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_existing_request_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        request, _ = prepare()
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, request)
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "EXISTING_ACTOR_MISMATCH"):
+                    prepare(pages([original]))
+
+
 if __name__=="__main__":
     unittest.main()
