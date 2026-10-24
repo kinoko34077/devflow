@@ -588,5 +588,19 @@ class DiscoveryReaderTests(unittest.TestCase):
                      expected_source_actor=ACTOR, fetch_source=unavailable)
 
 
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_index_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        _, hint, _ = fixtures()
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(88, hint)
+                original["user"] = {"login": ACTOR, **identity}
+                result = discover_batch(
+                    pages([original]), expected_notice_actor=ACTOR,
+                    expected_source_actor=ACTOR,
+                    fetch_source=lambda _r, _i: pages([]))
+                self.assertEqual(result["rejected"][0]["reason_code"], "UNTRUSTED_DISCOVERY_ACTOR")
+
+
 if __name__ == "__main__":
     unittest.main()
