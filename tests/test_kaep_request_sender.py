@@ -22,7 +22,7 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor="kinoko34077"):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor, "id": 79015263 if actor == "kinoko34077" else 999999999}}
 
 
 def prepare(text=None, **kw):
@@ -162,7 +162,7 @@ class RequestSenderTests(unittest.TestCase):
     def test_unrelated_comments_ignored(self):
         a,_=prepare()
         b,existing=prepare(pages([{"id":9,"body":"ordinary discussion",
-                                   "user":{"login":"kinoko34077"}}]))
+                                   "user":{"login":"kinoko34077", "id":79015263}}]))
         self.assertEqual(a,b)
         self.assertIsNone(existing)
 
