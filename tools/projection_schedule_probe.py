@@ -45,6 +45,8 @@ def classify_run(payload: object, *, expected_utc: str) -> dict[str, object]:
             matches.append((instant, item))
     if not matches:
         return {"status": "UNKNOWN", "reason": "NO_SCHEDULE_RUN_IN_WINDOW"}
+    if len(matches) != 1:
+        return {"status": "UNKNOWN", "reason": "AMBIGUOUS_SCHEDULE_RUNS"}
     _, latest = max(matches, key=lambda pair: pair[0])
     status = latest.get("status")
     conclusion = latest.get("conclusion")
@@ -72,7 +74,7 @@ def classify_projection_job(payload: object) -> dict[str, object]:
         status = "IN_PROGRESS"
     elif job.get("conclusion") == "success":
         status = "PRODUCER_JOB_SUCCESS_ONLY"
-    elif job.get("conclusion") in ("failure", "cancelled", "timed_out", "skipped"):
+    elif job.get("conclusion") in ("failure", "cancelled", "timed_out"):
         status = "PRODUCER_JOB_FAILED"
     else:
         status = "UNKNOWN"
