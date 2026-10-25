@@ -1,5 +1,4 @@
 """Keep the production renewal schedule aligned with the producer job gate."""
-import re
 import unittest
 from pathlib import Path
 
