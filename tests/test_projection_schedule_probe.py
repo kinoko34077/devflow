@@ -92,6 +92,28 @@ class ProjectionScheduleProbeTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["status"], "UNKNOWN")
         get.assert_called_once()
 
+    def test_four_hour_late_run_is_not_a_success(self):
+        late = data(created_at="2026-10-25T06:36:35Z")
+        result = classify_run(late, expected_utc=SLOT)
+        self.assertEqual(result["status"], "LATE_SCHEDULE_RUN")
+        self.assertEqual(result["lateness_seconds"], 4 * 3600 + 36 * 60 + 35)
+
+    def test_main_late_job_success_still_exits_nonzero(self):
+        late = data(created_at="2026-10-25T06:36:35Z")
+        jobs = {"jobs": [{"name": "projection-cache", "status": "completed",
+                           "conclusion": "success", "id": 77}]}
+        output = io.StringIO()
+        source = [io.BytesIO(json.dumps(payload).encode("utf-8"))
+                  for payload in (late, jobs)]
+        with patch("tools.projection_schedule_probe.urllib.request.urlopen",
+                   side_effect=source), contextlib.redirect_stdout(output):
+            code = main(["--expected-utc", SLOT])
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(result["status"], "LATE_SCHEDULE_RUN")
+        self.assertEqual(result["reason"], "SCHEDULE_TOO_LATE")
+        self.assertEqual(result["job_id"], 77)
+
     def test_malformed_payload_unknown(self):
         self.assertEqual(classify_run({}, expected_utc=SLOT)["status"], "UNKNOWN")
 
