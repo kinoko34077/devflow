@@ -3,8 +3,8 @@ name: Maintenance audit
 on:
   schedule:
     - cron: '30 13 * * *'
-    # Renew every 12 hours while retaining the 24-hour signed trust validity.
-    - cron: '0 2,14 * * *'
+    # Renew every 12 hours off the top of hour; retain 24-hour signed trust validity.
+    - cron: '17 2,14 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -458,7 +458,7 @@ jobs:
           path: maintenance-completion-result.json
 
   projection-cache:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 2,14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 2,14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
