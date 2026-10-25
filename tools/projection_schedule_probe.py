@@ -60,6 +60,26 @@ def classify_run(payload: object, *, expected_utc: str) -> dict[str, object]:
             "conclusion": conclusion, "note": "This does not verify the projection-cache job, all markers, or downstream Pages."}
 
 
+
+def classify_projection_job(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+        return {"status": "UNKNOWN", "reason": "INVALID_JOBS"}
+    jobs = [j for j in payload["jobs"] if isinstance(j, dict) and j.get("name") == "projection-cache"]
+    if len(jobs) != 1:
+        return {"status": "UNKNOWN", "reason": "MISSING_OR_DUPLICATE_JOB"}
+    job = jobs[0]
+    if job.get("status") != "completed":
+        status = "IN_PROGRESS"
+    elif job.get("conclusion") == "success":
+        status = "PRODUCER_JOB_SUCCESS_ONLY"
+    elif job.get("conclusion") in ("failure", "cancelled", "timed_out", "skipped"):
+        status = "PRODUCER_JOB_FAILED"
+    else:
+        status = "UNKNOWN"
+    return {"status": status, "job_id": job.get("id"),
+            "note": "Marker freshness and downstream publication unverified."}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--expected-utc", required=True)
@@ -74,10 +94,21 @@ def main(argv: list[str] | None = None) -> int:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.load(response)
         result = classify_run(payload, expected_utc=a.expected_utc)
+        if result["status"] == "WORKFLOW_SUCCESS_ONLY" and isinstance(result.get("run_id"), int):
+            jobs_url = ("https://api.github.com/repos/kinoko34077/devflow/actions/runs/"
+                        + str(result["run_id"]) + "/jobs?per_page=100")
+            jobs_request = urllib.request.Request(jobs_url, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "devflow-projection-schedule-probe",
+            })
+            if token:
+                jobs_request.add_header("Authorization", "Bearer " + token)
+            with urllib.request.urlopen(jobs_request, timeout=15) as response:
+                result = {**result, **classify_projection_job(json.load(response))}
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         result = {"status": "UNKNOWN", "reason": type(exc).__name__}
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["status"] == "WORKFLOW_SUCCESS_ONLY" else 1
+    return 0 if result["status"] == "PRODUCER_JOB_SUCCESS_ONLY" else 1
 
 
 if __name__ == "__main__":
