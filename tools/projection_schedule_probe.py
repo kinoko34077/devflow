@@ -41,13 +41,14 @@ def classify_run(payload: object, *, expected_utc: str) -> dict[str, object]:
             continue
         # Scheduled workflows can run late. Associate by a bounded forward
         # observation window; never use runs from before the expected slot.
-        if 0 <= (instant - target).total_seconds() < 3600:
+        if 0 <= (instant - target).total_seconds() < 8 * 3600:
             matches.append((instant, item))
     if not matches:
         return {"status": "UNKNOWN", "reason": "NO_SCHEDULE_RUN_IN_WINDOW"}
     if len(matches) != 1:
         return {"status": "UNKNOWN", "reason": "AMBIGUOUS_SCHEDULE_RUNS"}
-    _, latest = max(matches, key=lambda pair: pair[0])
+    observed_at, latest = max(matches, key=lambda pair: pair[0])
+    lateness_seconds = int((observed_at - target).total_seconds())
     status = latest.get("status")
     conclusion = latest.get("conclusion")
     if status != "completed":
@@ -58,7 +59,7 @@ def classify_run(payload: object, *, expected_utc: str) -> dict[str, object]:
         observed = "WORKFLOW_FAILED"
     else:
         observed = "UNKNOWN"
-    return {"status": observed, "run_id": latest.get("id"), "run_url": latest.get("html_url"),
+    if lateness_seconds >= 3600:\n        observed = "LATE_SCHEDULE_RUN"\n    return {"status": observed, "lateness_seconds": lateness_seconds, "run_id": latest.get("id"), "run_url": latest.get("html_url"),
             "conclusion": conclusion, "note": "This does not verify the projection-cache job, all markers, or downstream Pages."}
 
 
@@ -96,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.load(response)
         result = classify_run(payload, expected_utc=a.expected_utc)
-        if result["status"] in ("WORKFLOW_SUCCESS_ONLY", "WORKFLOW_FAILED", "IN_PROGRESS") and isinstance(result.get("run_id"), int):
+        if result["status"] in ("WORKFLOW_SUCCESS_ONLY", "WORKFLOW_FAILED", "IN_PROGRESS", "LATE_SCHEDULE_RUN") and isinstance(result.get("run_id"), int):
             jobs_url = ("https://api.github.com/repos/kinoko34077/devflow/actions/runs/"
                         + str(result["run_id"]) + "/jobs?per_page=100")
             jobs_request = urllib.request.Request(jobs_url, headers={
