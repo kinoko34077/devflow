@@ -98,6 +98,7 @@ def context():
         request_issue_number=181,
         request_title="[REPO CREATE] example-repo",
         author_association="OWNER",
+        author={"id": 79015263, "login": "kinoko34077"},
     )
 
 
@@ -301,6 +302,7 @@ class RepositoryBootstrapExecutorTests(unittest.TestCase):
             request_issue_number=181,
             request_title="[REPO CREATE] example-repo",
             author_association="CONTRIBUTOR",
+            author={"id": 123456789, "login": "untrusted"},
         )
 
         with self.assertRaises(rb.BootstrapFailure) as caught:

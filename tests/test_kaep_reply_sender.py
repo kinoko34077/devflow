@@ -37,7 +37,7 @@ def parent(*, effect="READ_ONLY", intent="PING", kind="REQUEST",
 
 
 def comment(cid, message, actor="kinoko34077"):
-    return {"id": cid, "body": encode_comment(message), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(message), "user": {"login": actor, "id": 79015263 if actor == "kinoko34077" else 999999999}}
 
 
 def pages(*pages_):
@@ -116,7 +116,7 @@ class ReplyContractTests(unittest.TestCase):
 
     def test_malformed_parent(self):
         with self.assertRaisesRegex(InvalidMessage, "PARENT_NOT_FOUND"):
-            build(pages([{"id": 11, "body": "ordinary", "user": {"login":"kinoko34077"}}]))
+            build(pages([{"id": 11, "body": "ordinary", "user": {"login":"kinoko34077", "id":79015263}}]))
 
     def test_wrong_target_recipient(self):
         src = pages([comment(11, parent(recipient="codex"))])
@@ -394,6 +394,16 @@ class ReplyContractTests(unittest.TestCase):
                        "--expect-actor","kinoko34077"])
         self.assertEqual(code,2)
         self.assertIn("REPLY_TEXT_REQUIRED",output.call_args.args[0])
+
+
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_parent_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, parent())
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "PARENT_ACTOR_MISMATCH"):
+                    build(pages([original]))
 
 
 if __name__=="__main__":

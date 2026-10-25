@@ -21,6 +21,8 @@ def issue(number, body, author="OWNER"):
         "created_at": "2026-10-12T00:00:00Z",
         "updated_at": "2026-10-12T01:00:00Z",
         "author_association": author,
+        "user": ({"id": 79015263, "login": "kinoko34077"}
+                 if author == "OWNER" else {"id": 123456789, "login": "untrusted"}),
         "html_url": f"https://github.com/kinoko34077/demo/issues/{number}",
     }
 

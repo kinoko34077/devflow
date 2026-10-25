@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from tools.github_issue_trust import is_trusted_principal
 from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, parse_pages, REPOSITORY, MAX_RESPONSE_BYTES,
 )
@@ -33,6 +34,20 @@ FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt onl
 
 def _fail(code: str) -> None:
     raise InvalidMessage(code)
+
+
+def _matching_actor(comment: dict[str, Any], expected_login: str) -> bool:
+    """Require stable numeric identity for the trusted human actor.
+
+    Other expected logins are read-only transport observations, never authority.
+    """
+    if comment["actor_login"].casefold() != expected_login.casefold():
+        return False
+    if expected_login.casefold() == "kinoko34077":
+        return is_trusted_principal({"user": {
+            "id": comment.get("actor_id"), "login": comment["actor_login"]
+        }})
+    return True
 
 
 def _mailbox(text: str, *, repository: str, issue: int) -> tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]:
@@ -67,12 +82,12 @@ def make_reply(
     if type(effective_reply_actor) is not str or not ACTOR.fullmatch(effective_reply_actor):
         _fail("INVALID_REPLY_ACTOR")
     comments, items = _mailbox(text, repository=repository, issue=issue)
-    actor_map = {item["id"]: item["actor_login"] for item in comments}
+    actor_map = {item["id"]: item for item in comments}
     matching = [(cid, msg) for cid, msg in items if msg["message_id"] == parent_message_id]
     if len(matching) != 1:
         _fail("PARENT_NOT_FOUND")
     cid, parent = matching[0]
-    if actor_map[cid].casefold() != expect_actor.casefold():
+    if not _matching_actor(actor_map[cid], expect_actor):
         _fail("PARENT_ACTOR_MISMATCH")
     if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
         _fail("INVALID_PARENT_INTENT")
@@ -108,7 +123,7 @@ def make_reply(
         existing_id, existing_msg = existing[0]
         if fingerprint(existing_msg) != fingerprint(reply):
             _fail("REPLY_COLLISION")
-        if actor_map[existing_id].casefold() != effective_reply_actor.casefold():
+        if not _matching_actor(actor_map[existing_id], effective_reply_actor):
             _fail("EXISTING_REPLY_ACTOR_MISMATCH")
         # Identical reply is already durable from the expected transport actor.
         # Shared GitHub login is still not model/session identity.
@@ -165,8 +180,8 @@ def post_and_verify(
              fingerprint(msg) == fingerprint(message)]
     if len(exact) != 1:
         _fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
-    actors = {c["id"]: c["actor_login"] for c in comments}
-    if actors[posted_id].casefold() != expected_post_actor.casefold():
+    actors = {c["id"]: c for c in comments}
+    if not _matching_actor(actors[posted_id], expected_post_actor):
         _fail("READBACK_ACTOR_MISMATCH")
     return posted_id
 

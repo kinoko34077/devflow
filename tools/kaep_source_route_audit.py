@@ -19,6 +19,7 @@ from tools.kaep_route_notice import (
     DISCOVERY_ISSUE, DISCOVERY_REPOSITORY, verify_source_request,
 )
 from tools.kaep_reply_sender import ACTOR
+from tools.github_issue_trust import is_trusted_principal
 
 MAX_INDEX_COMMENTS = 500
 
@@ -61,7 +62,17 @@ def audit_route(
         if not body.startswith(MARKER):
             continue
         cid = comment["id"]
-        if comment["actor_login"].casefold() != expected_notice_actor.casefold():
+        if expected_notice_actor.casefold() == "kinoko34077":
+            trusted_notice = is_trusted_principal({
+                "user": {"id": comment.get("actor_id"),
+                         "login": comment["actor_login"]}
+            })
+        else:
+            trusted_notice = (
+                comment["actor_login"].casefold()
+                == expected_notice_actor.casefold()
+            )
+        if not trusted_notice:
             warnings.append({"index_comment_id": cid, "reason_code": "UNTRUSTED_DISCOVERY_ACTOR"})
             continue
         try:

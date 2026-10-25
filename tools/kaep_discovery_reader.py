@@ -18,7 +18,7 @@ from tools.kaep_mailbox_codec import (
     MARKER, decode_comment, fingerprint, reject_constant, unique_pairs,
     matches,
 )
-from tools.kaep_reply_sender import ACTOR, _mailbox
+from tools.kaep_reply_sender import ACTOR, _mailbox, _matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
     verify_source_request,
@@ -77,7 +77,7 @@ def _source_context(
     if len(matches_found) != 1:
         _fail("SOURCE_MESSAGE_NOT_UNIQUE")
     _, root = matches_found[0]
-    actors = {comment["id"]: comment["actor_login"] for comment in comments}
+    actors = {comment["id"]: comment for comment in comments}
     replies = sorted({
         msg["kind"] for cid, msg in items
         if msg["in_reply_to"] == message_id
@@ -86,7 +86,7 @@ def _source_context(
         and msg["intent"] == root["intent"]
         and msg["scope"] == root["scope"]
         and msg["kind"] in REPLY_KINDS
-        and actors[cid].casefold() == expected_actor.casefold()
+        and _matching_actor(actors[cid], expected_actor)
     })
     return {"expected_head": root["scope"]["expected_head"],
             "observed_reply_kinds": replies}
@@ -136,7 +136,7 @@ def discover_batch(
         body = comment["body"]
         if not body.startswith(MARKER):
             continue
-        if comment["actor_login"].casefold() != expected_notice_actor.casefold():
+        if not _matching_actor(comment, expected_notice_actor):
             result["rejected"].append({"index_comment_id": cid,
                                        "reason_code": "UNTRUSTED_DISCOVERY_ACTOR"})
             continue

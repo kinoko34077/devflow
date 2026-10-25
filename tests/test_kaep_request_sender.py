@@ -22,7 +22,7 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor="kinoko34077"):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor, "id": 79015263 if actor == "kinoko34077" else 999999999}}
 
 
 def prepare(text=None, **kw):
@@ -162,7 +162,7 @@ class RequestSenderTests(unittest.TestCase):
     def test_unrelated_comments_ignored(self):
         a,_=prepare()
         b,existing=prepare(pages([{"id":9,"body":"ordinary discussion",
-                                   "user":{"login":"kinoko34077"}}]))
+                                   "user":{"login":"kinoko34077", "id":79015263}}]))
         self.assertEqual(a,b)
         self.assertIsNone(existing)
 
@@ -304,6 +304,17 @@ class RequestSenderTests(unittest.TestCase):
                 ])
             self.assertEqual(code,2)
             self.assertIn("OFFLINE_POST_FORBIDDEN",out.call_args.args[0])
+
+
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_existing_request_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        request, _ = prepare()
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, request)
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "EXISTING_ACTOR_MISMATCH"):
+                    prepare(pages([original]))
 
 
 if __name__=="__main__":

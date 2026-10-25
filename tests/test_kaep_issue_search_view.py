@@ -24,7 +24,7 @@ def issue(repo=DEV, n=576, title="[SPEC] Fixture", *, state="open"):
         "created_at": "2026-10-16T00:00:00Z",
         "updated_at": "2026-10-16T00:00:00Z",
         "author_association": "OWNER",
-        "user": {"login": OWNER},
+        "user": {"id": 79015263, "login": OWNER},
     }
 
 
@@ -53,7 +53,9 @@ def root(repo=DEV, n=576, number=1):
 
 
 def comment(cid, msg, actor=OWNER):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg),
+            "user": {"id": 79015263 if actor == OWNER else 123456789,
+                     "login": actor}}
 
 
 class SearchListTests(unittest.TestCase):

@@ -22,7 +22,7 @@ class F8ManualWorkflowContractTests(unittest.TestCase):
     def test_single_known_target_no_dynamic_operator_shell_splicing(self):
         self.assertIn("'kinoko34077/devflow#554'", self.text)
         self.assertIn("github.repository == 'kinoko34077/devflow'", self.text)
-        self.assertIn("github.actor == 'kinoko34077'", self.text)
+        self.assertIn("github.actor_id == '79015263'", self.text)
         self.assertIn("github.ref == 'refs/heads/main'", self.text)
         self.assertIn("inputs.operation == 'send'", self.text)
         self.assertIn("inputs.confirm_mailbox == 'kinoko34077/devflow#554'", self.text)
@@ -39,11 +39,10 @@ class F8ManualWorkflowContractTests(unittest.TestCase):
             self.assertIn("github.event_name == 'workflow_dispatch'", guard)
             self.assertIn("github.ref == 'refs/heads/main'", guard)
             self.assertIn("github.repository == 'kinoko34077/devflow'", guard)
-            self.assertIn("github.actor == 'kinoko34077'", guard)
+            self.assertIn("github.actor_id == '79015263'", guard)
             self.assertIn("github.triggering_actor == 'kinoko34077'", guard)
-        self.assertEqual(self.text.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(self.text.count("github.actor_id == '79015263'"), 2)
         self.assertEqual(self.text.count("github.triggering_actor == 'kinoko34077'"), 2)
-        self.assertNotIn("github.actor_id", self.text)
 
     def test_preview_cannot_write_send_receives_narrow_issue_rights(self):
         top, body = self.text.split("\njobs:\n", 1)

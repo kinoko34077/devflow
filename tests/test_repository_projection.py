@@ -211,6 +211,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                         "created_at": "2026-10-04T00:00:00Z",
                         "updated_at": "2026-10-04T01:00:00Z",
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 )
                 self.assertEqual(record.source_kind, "LEGACY_HINT")
@@ -250,6 +251,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "created_at": "2026-10-04T00:00:00Z",
                 "updated_at": "2026-10-04T01:00:00Z",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }
         )
         self.assertEqual(record.source_kind, "INVALID_METADATA")
@@ -267,13 +269,14 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "created_at": "2026-10-04T00:00:00Z",
                 "updated_at": "2026-10-04T01:00:00Z",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }
         )
         self.assertEqual(record.source_kind, "MACHINE")
         self.assertEqual(record.type, "BUG")
         self.assertTrue(record.is_task)
 
-    def test_only_trusted_author_associations_can_supply_machine_metadata(self):
+    def test_only_allowlisted_numeric_identity_can_supply_machine_metadata(self):
         for association in ("OWNER", "MEMBER", "COLLABORATOR"):
             with self.subTest(association=association):
                 record = repository_projection.classify_issue(
@@ -285,10 +288,19 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                         "created_at": "2026-10-04T00:00:00Z",
                         "updated_at": "2026-10-04T01:00:00Z",
                         "author_association": association,
+                        "user": (
+                            {"id": 79015263, "login": "kinoko34077"}
+                            if association == "OWNER"
+                            else {"id": 123456789, "login": "collaborator"}
+                        ),
                     }
                 )
-                self.assertEqual(record.source_kind, "MACHINE")
-                self.assertTrue(record.is_task)
+                if association == "OWNER":
+                    self.assertEqual(record.source_kind, "MACHINE")
+                    self.assertTrue(record.is_task)
+                else:
+                    self.assertEqual(record.source_kind, "UNTRUSTED_METADATA")
+                    self.assertFalse(record.is_task)
 
     def test_untrusted_or_missing_author_association_never_becomes_task(self):
         for association in ("NONE", "CONTRIBUTOR", None):
@@ -337,6 +349,7 @@ class RepositoryIssueClassificationTests(unittest.TestCase):
                 "updated_at": "2026-10-04T03:00:00Z",
                 "html_url": "https://github.com/o/r/issues/11",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }
         )
         self.assertEqual(record.number, 11)
@@ -369,6 +382,11 @@ class RepositoryProjectionCoreTests(unittest.TestCase):
             "updated_at": updated_at,
             "html_url": f"https://github.com/o/r/issues/{number}",
             "author_association": author_association,
+            "user": (
+                {"id": 79015263, "login": "kinoko34077"}
+                if author_association == "OWNER"
+                else {"id": 123456789, "login": "untrusted"}
+            ),
         }
 
     def _machine(self, **replacements):

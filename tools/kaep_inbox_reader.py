@@ -86,7 +86,12 @@ def parse_pages(text: str, *, repository: str, issue: int) -> list[dict[str, Any
                 # Ordinary discussion is not agent instruction and is not emitted.
                 pass
             prev = cid
-            output.append({"id": cid, "body": body, "actor_login": user["login"]})
+            output.append({
+                "id": cid,
+                "body": body,
+                "actor_login": user["login"],
+                "actor_id": user.get("id"),
+            })
     return output
 
 
