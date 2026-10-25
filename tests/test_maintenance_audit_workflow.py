@@ -53,13 +53,13 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("--apply", self.audit)
 
     def test_projection_cache_has_distinct_central_schedule_and_non_cancelling_concurrency(self):
-        self.assertIn("- cron: '17 2,14 * * *'", self.text)
+        self.assertIn("- cron: '10 5,17 * * *'", self.text)
         self.assertIn(
             "github.event.schedule == '30 13 * * *'",
             self.audit,
         )
         self.assertIn(
-            "github.event.schedule == '17 2,14 * * *'",
+            "github.event.schedule == '10 5,17 * * *'",
             self.projection_cache,
         )
         self.assertIn(
