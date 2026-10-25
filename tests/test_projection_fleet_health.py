@@ -14,17 +14,26 @@ NOW = "2026-10-04T06:00:00Z"
 
 
 class Fleet:
-    def __init__(self, body, *, trusted=True, extra=False, discovery_fails=False):
+    def __init__(self, body, *, trusted=True, extra=False, discovery_fails=False, hidden_cached=False):
         self.reader = self
         self.body = body
         self.trusted = trusted
         self.extra = extra
         self.discovery_fails = discovery_fails
+        self.hidden_cached = hidden_cached
 
     def list_managed_repositories(self):
         if self.discovery_fails:
             raise RuntimeError("simulated discovery outage")
         return [REPOSITORY, "kinoko34077/other"] if self.extra else [REPOSITORY]
+
+    def list_issues(self, repository, state="open"):
+        issues = [{"title": "[REPO] demo", "body": self.body}]
+        if self.extra:
+            issues.append({"title": "[REPO] other", "body": CONTROL_BODY})
+        if self.hidden_cached:
+            issues.append({"title": "[REPO] hidden", "body": self.body})
+        return issues
 
     def get_repository_control(self, repository):
         return {"issue_number": CONTROL_NUMBER if repository == REPOSITORY else 8}
@@ -75,6 +84,11 @@ class ProjectionFleetHealthTests(unittest.TestCase):
         self.assertEqual(result["current_count"], 1)
         self.assertEqual(result["unknown_count"], 1)
         self.assertEqual(result["status"], "UNKNOWN")
+
+    def test_previously_cached_control_filtered_out_of_roster_is_unknown(self):
+        result = health.assess_fleet(Fleet(self.valid, hidden_cached=True), now=NOW)
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "CACHED_CONTROL_ROSTER_MISMATCH")
 
     def test_discovery_failure_is_unknown_not_empty_success(self):
         result = health.assess_fleet(Fleet(self.valid, discovery_fails=True), now=NOW)
