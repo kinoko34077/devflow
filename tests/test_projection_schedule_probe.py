@@ -33,6 +33,13 @@ class ProjectionScheduleProbeTests(unittest.TestCase):
         result = classify_projection_job({"jobs": [{"name": "projection-cache", "status": "completed", "conclusion": "success", "id": 2}]})
         self.assertEqual(result["status"], "PRODUCER_JOB_SUCCESS_ONLY")
 
+    def test_failed_producer_job_is_not_hidden_by_other_workflow_jobs(self):
+        result = classify_projection_job({"jobs": [
+            {"name": "audit", "status": "completed", "conclusion": "success"},
+            {"name": "projection-cache", "status": "completed", "conclusion": "failure", "id": 7},
+        ]})
+        self.assertEqual(result["status"], "PRODUCER_JOB_FAILED")
+
     def test_audit_only_workflow_is_not_producer_success(self):
         result = classify_projection_job({"jobs": [{"name": "audit", "status": "completed", "conclusion": "success"}]})
         self.assertEqual(result["status"], "UNKNOWN")
