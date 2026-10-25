@@ -72,6 +72,43 @@ def assess_fleet(service: Any, *, now: str) -> dict[str, object]:
     except Exception:
         return {"status": "UNKNOWN", "reason": "MANAGED_FLEET_DISCOVERY_FAILED",
                 "repository_count": None, "results": []}
+    # Reconcile the filtered managed roster against all open Controls that
+    # already carry a canonical cache marker. A previously accepted bot
+    # Control can disappear from list_managed_repositories if bootstrap
+    # provenance becomes unavailable; the remaining fresh entries must not
+    # produce a false fleet-wide CURRENT result.
+    try:
+        issues = service.reader.list_issues(devflow_mcp_core.DEVFLOW_REPOSITORY, state="open")
+        if not isinstance(issues, list):
+            raise ValueError("invalid Control listing")
+        cached_candidates: list[str] = []
+        for issue in issues:
+            if not isinstance(issue, dict) or "pull_request" in issue:
+                continue
+            title = issue.get("title")
+            body = issue.get("body")
+            if not isinstance(title, str) or not title.startswith("[REPO] "):
+                continue
+            if not isinstance(body, str) or not (
+                repository_projection_cache.CACHE_MARKER_BEGIN in body
+                or human_portfolio_cache.CACHE_MARKER_BEGIN in body
+            ):
+                continue
+            cached_candidates.append("kinoko34077/" + title.removeprefix("[REPO] ").strip())
+    except Exception:
+        return {"status": "UNKNOWN", "reason": "UNFILTERED_CONTROL_DISCOVERY_FAILED",
+                "repository_count": None, "results": []}
+
+    if (
+        len(cached_candidates) != len(set(cached_candidates))
+        or any(_REPOSITORY_PATTERN.fullmatch(repository) is None for repository in cached_candidates)
+        or not set(cached_candidates).issubset(set(repositories))
+    ):
+        return {"status": "UNKNOWN", "reason": "CACHED_CONTROL_ROSTER_MISMATCH",
+                "repository_count": len(repositories),
+                "candidate_cache_count": len(cached_candidates),
+                "results": []}
+
     if (
         not repositories
         or any(not isinstance(repo, str) or _REPOSITORY_PATTERN.fullmatch(repo) is None
