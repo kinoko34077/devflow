@@ -39,7 +39,14 @@ class ProjectionScheduleProbeTests(unittest.TestCase):
 
     def test_skipped_producer_job_not_success(self):
         result = classify_projection_job({"jobs": [{"name": "projection-cache", "status": "completed", "conclusion": "skipped"}]})
-        self.assertEqual(result["status"], "PRODUCER_JOB_FAILED")
+        self.assertEqual(result["status"], "UNKNOWN")
+
+    def test_audit_delay_overlaps_renewal_returns_unknown(self):
+        payload = data()
+        payload["workflow_runs"].append({**payload["workflow_runs"][0], "id": 124, "created_at": "2026-10-25T02:20:00Z"})
+        result = classify_run(payload, expected_utc=SLOT)
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "AMBIGUOUS_SCHEDULE_RUNS")
 
     def test_malformed_payload_unknown(self):
         self.assertEqual(classify_run({}, expected_utc=SLOT)["status"], "UNKNOWN")
