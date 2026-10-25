@@ -7,6 +7,7 @@ from tools import human_portfolio_cache
 from tools import maintenance_sync_check
 from tools import repository_projection_cache as cache
 from tools import repository_projection_cache_producer as producer
+from scripts import repository_projection_cache as cache_script
 
 
 REPOSITORY = "kinoko34077/demo"
@@ -530,6 +531,20 @@ class ProjectionCacheFleetProducerTests(unittest.TestCase):
 
 
 class ProjectionCacheScriptTests(unittest.TestCase):
+    def test_fleet_partial_result_fails(self):
+        self.assertEqual(cache_script._fleet_exit_code(
+            {"repository_count": 2, "success_count": 1, "failure_count": 1}), 1)
+
+    def test_fleet_complete_result_succeeds(self):
+        self.assertEqual(cache_script._fleet_exit_code(
+            {"repository_count": 2, "success_count": 2, "failure_count": 0}), 0)
+
+    def test_fleet_inconsistent_or_missing_counters_fail_closed(self):
+        self.assertEqual(cache_script._fleet_exit_code(
+            {"repository_count": 2, "success_count": 1, "failure_count": 0}), 1)
+        self.assertEqual(cache_script._fleet_exit_code({}), 1)
+
+
     def test_direct_script_help_is_import_safe(self):
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
