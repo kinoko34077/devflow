@@ -106,7 +106,11 @@ def main(argv: list[str] | None = None) -> int:
             if token:
                 jobs_request.add_header("Authorization", "Bearer " + token)
             with urllib.request.urlopen(jobs_request, timeout=15) as response:
-                result = {**result, **classify_projection_job(json.load(response))}
+                job_result = classify_projection_job(json.load(response))
+                result = {**result, "run_status": result["status"], **job_result}
+                if result["run_status"] != "WORKFLOW_SUCCESS_ONLY":
+                    result["status"] = "UNKNOWN"
+                    result["reason"] = "WORKFLOW_NOT_SUCCESSFUL"
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         result = {"status": "UNKNOWN", "reason": type(exc).__name__}
     print(json.dumps(result, sort_keys=True))
