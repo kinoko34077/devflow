@@ -1,6 +1,10 @@
+import contextlib
+import io
+import json
 import unittest
+from unittest.mock import patch
 
-from tools.projection_schedule_probe import classify_run, classify_projection_job
+from tools.projection_schedule_probe import classify_run, classify_projection_job, main
 
 
 SLOT = "2026-10-25T02:00:00Z"
@@ -54,6 +58,39 @@ class ProjectionScheduleProbeTests(unittest.TestCase):
         result = classify_run(payload, expected_utc=SLOT)
         self.assertEqual(result["status"], "UNKNOWN")
         self.assertEqual(result["reason"], "AMBIGUOUS_SCHEDULE_RUNS")
+
+    def test_main_requires_both_workflow_and_job_success(self):
+        jobs = {"jobs": [{"name": "projection-cache", "status": "completed",
+                           "conclusion": "success", "id": 77}]}
+        for run_conclusion, expected_code, expected_status in (
+            ("success", 0, "PRODUCER_JOB_SUCCESS_ONLY"),
+            ("failure", 1, "UNKNOWN"),
+        ):
+            with self.subTest(run_conclusion=run_conclusion):
+                runs = data(conclusion=run_conclusion)
+                source = [io.BytesIO(json.dumps(payload).encode("utf-8"))
+                          for payload in (runs, jobs)]
+                output = io.StringIO()
+                with patch("tools.projection_schedule_probe.urllib.request.urlopen",
+                           side_effect=source) as get, contextlib.redirect_stdout(output):
+                    code = main(["--expected-utc", SLOT])
+                response = json.loads(output.getvalue())
+                self.assertEqual(code, expected_code)
+                self.assertEqual(response["status"], expected_status)
+                self.assertEqual(get.call_count, 2)
+                if run_conclusion == "failure":
+                    self.assertEqual(response["run_status"], "WORKFLOW_FAILED")
+                    self.assertEqual(response["reason"], "WORKFLOW_NOT_SUCCESSFUL")
+
+    def test_main_missing_scheduled_run_is_unknown_without_job_request(self):
+        output = io.StringIO()
+        source = io.BytesIO(json.dumps({"workflow_runs": []}).encode("utf-8"))
+        with patch("tools.projection_schedule_probe.urllib.request.urlopen",
+                   return_value=source) as get, contextlib.redirect_stdout(output):
+            code = main(["--expected-utc", SLOT])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output.getvalue())["status"], "UNKNOWN")
+        get.assert_called_once()
 
     def test_malformed_payload_unknown(self):
         self.assertEqual(classify_run({}, expected_utc=SLOT)["status"], "UNKNOWN")
