@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.load(response)
         result = classify_run(payload, expected_utc=a.expected_utc)
-        if result["status"] == "WORKFLOW_SUCCESS_ONLY" and isinstance(result.get("run_id"), int):
+        if result["status"] in ("WORKFLOW_SUCCESS_ONLY", "WORKFLOW_FAILED", "IN_PROGRESS") and isinstance(result.get("run_id"), int):
             jobs_url = ("https://api.github.com/repos/kinoko34077/devflow/actions/runs/"
                         + str(result["run_id"]) + "/jobs?per_page=100")
             jobs_request = urllib.request.Request(jobs_url, headers={
