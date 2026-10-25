@@ -111,7 +111,10 @@ def main(argv: list[str] | None = None) -> int:
             with urllib.request.urlopen(jobs_request, timeout=15) as response:
                 job_result = classify_projection_job(json.load(response))
                 result = {**result, "run_status": result["status"], **job_result}
-                if result["run_status"] != "WORKFLOW_SUCCESS_ONLY":
+                if result["run_status"] == "LATE_SCHEDULE_RUN":
+                    result["status"] = "LATE_SCHEDULE_RUN"
+                    result["reason"] = "SCHEDULE_TOO_LATE"
+                elif result["run_status"] != "WORKFLOW_SUCCESS_ONLY":
                     result["status"] = "UNKNOWN"
                     result["reason"] = "WORKFLOW_NOT_SUCCESSFUL"
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
