@@ -24,25 +24,28 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
+  actor-admission:
+    # Untrusted issue/dispatch events see only this no-secret, read-only job.
+    # Its output is NOT Control provenance; the sync script verifies that separately.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      admitted: ${{ steps.check.outputs.admitted }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify exact event initiator before Project token allocation
+        id: check
+        run: python tools/project_sync_event_admission.py
+
   sync:
-    # No Project secret or runner allocation for untrusted comments.
-    # Identity is from GitHub's signed event payload, not comment text.
-    if: >-
-      github.event_name != 'issue_comment' ||
-      (
-        github.repository == 'kinoko34077/devflow' &&
-        github.event.issue.pull_request == null &&
-        github.event.issue.user.id == 79015263 &&
-        github.event.comment.user.id == 79015263 &&
-        github.event.sender.id == 79015263 &&
-        (
-          github.event.comment.body == '/kinotch sync verify' ||
-          github.event.comment.body == '/kinotch sync reconcile'
-        )
-      )
+    needs: actor-admission
+    if: ${{ needs.actor-admission.outputs.admitted == 'true' }}
+    permissions:
+      contents: read
+      issues: write
     # Only admitted jobs join the shared Project mutator queue; untrusted
     # public Issue comments cannot occupy slots before being skipped.
     # Job-level serialization preserves the same cross-run mutator fence.
