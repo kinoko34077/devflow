@@ -27,7 +27,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
             job,
         )
         self.assertIn("github.event_name == 'schedule'", job)
-        self.assertIn("github.event.schedule == '0 2,14 * * *'", job)
+        self.assertIn("github.event.schedule == '17 2,14 * * *'", job)
 
     def test_cache_job_has_bounded_issue_write_permission(self):
         job = self._cache_job()
