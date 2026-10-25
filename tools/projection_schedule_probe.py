@@ -59,7 +59,9 @@ def classify_run(payload: object, *, expected_utc: str) -> dict[str, object]:
         observed = "WORKFLOW_FAILED"
     else:
         observed = "UNKNOWN"
-    if lateness_seconds >= 3600:\n        observed = "LATE_SCHEDULE_RUN"\n    return {"status": observed, "lateness_seconds": lateness_seconds, "run_id": latest.get("id"), "run_url": latest.get("html_url"),
+    if lateness_seconds >= 3600:
+        observed = "LATE_SCHEDULE_RUN"
+    return {"status": observed, "lateness_seconds": lateness_seconds, "run_id": latest.get("id"), "run_url": latest.get("html_url"),
             "conclusion": conclusion, "note": "This does not verify the projection-cache job, all markers, or downstream Pages."}
 
 
