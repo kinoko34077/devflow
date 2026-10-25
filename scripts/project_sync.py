@@ -1657,6 +1657,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("mode", choices=["event-sync", "verify", "reconcile"])
     parser.add_argument("--issue-number", type=int)
     args = parser.parse_args(argv)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # Defense in depth: retain actor admission even if another Actions
+        # entrypoint calls this script without the workflow's first job.
+        from tools import project_sync_event_admission
+        if not project_sync_event_admission.admitted_from_env():
+            print("Project sync run: current=SKIPPED; actor=UNTRUSTED; no Project access")
+            return 0
     cfg = RuntimeConfig.from_env()
     event_issue = load_event_issue(os.environ.get("GITHUB_EVENT_PATH", "")) if args.mode == "event-sync" else None
     return run_sync(
