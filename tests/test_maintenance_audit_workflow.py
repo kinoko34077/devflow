@@ -44,7 +44,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             self.audit,
         )
         self.assertIn(
-            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}",
+            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}",
             self.publish,
         )
         self.assertIn("MAINTENANCE_AUDIT_TOKEN:", self.audit)
