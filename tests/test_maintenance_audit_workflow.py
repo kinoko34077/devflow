@@ -44,7 +44,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             self.audit,
         )
         self.assertIn(
-            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' }}",
+            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}",
             self.publish,
         )
         self.assertIn("MAINTENANCE_AUDIT_TOKEN:", self.audit)
@@ -68,6 +68,31 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )
         self.assertIn("cancel-in-progress: false", self.projection_cache)
         self.assertNotIn("schedule:", self.publish)
+
+    def test_privileged_manual_modes_require_owner_numeric_actor(self):
+        jobs = {
+            "publish": ("\n  publish:\\n", "\n  catalog-maintenance-publish:\\n"),
+            "catalog-maintenance-publish": ("\n  catalog-maintenance-publish:\\n", "\n  catalog-maintenance-complete:\\n"),
+            "catalog-maintenance-complete": ("\n  catalog-maintenance-complete:\\n", "\n  projection-cache:\\n"),
+            "supply-credential-check": ("\n  supply-credential-check:\\n", None),
+        }
+        for name, (start, end) in jobs.items():
+            with self.subTest(job=name):
+                section = self.text.split(start.replace("\\\\n", "\\n"), 1)[1]
+                if end is not None:
+                    section = section.split(end.replace("\\\\n", "\\n"), 1)[0]
+                condition = section.split("\n", 1)[0]
+                self.assertIn("github.actor_id == '79015263'", condition)
+                self.assertIn("github.ref == 'refs/heads/main'", condition)
+                self.assertIn("environment:", section)
+                self.assertIn("name: maintenance-supply", section)
+
+    def test_projection_cache_manual_gate_preserves_unattended_schedule(self):
+        condition = self.projection_cache.split("\n", 2)[1]
+        self.assertIn("github.event_name == 'schedule'", condition)
+        self.assertIn("github.event.schedule == '10 5,17 * * *'", condition)
+        self.assertIn("inputs.mode == 'projection-cache' && github.actor_id == '79015263'", condition)
+        self.assertIn("||", condition)
 
     def test_projection_cache_retries_only_same_fenced_producer_once(self):
         self.assertIn("run_projection_cache() {", self.projection_cache)
