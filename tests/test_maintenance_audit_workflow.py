@@ -73,14 +73,14 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         for name in ("publish", "catalog-maintenance-publish", "catalog-maintenance-complete", "supply-credential-check"):
             with self.subTest(job=name):
                 section = self.text.split("\n  " + name + ":\n", 1)[1]
-                section = section.split("\n  ", 1)[0]
+                section = re.split(r"\n  [a-z][a-z-]*:\n", section, maxsplit=1)[0]
                 self.assertIn("github.actor_id == '79015263'", section)
                 self.assertIn("github.ref == 'refs/heads/main'", section)
                 self.assertIn("environment:", section)
                 self.assertIn("name: maintenance-supply", section)
 
     def test_projection_cache_manual_gate_preserves_unattended_schedule(self):
-        condition = self.projection_cache.split("\n", 2)[1]
+        condition = next(line for line in self.projection_cache.splitlines() if line.strip().startswith("if:"))
         self.assertIn("github.event_name == 'schedule'", condition)
         self.assertIn("github.event.schedule == '10 5,17 * * *'", condition)
         self.assertIn("inputs.mode == 'projection-cache' && github.actor_id == '79015263'", condition)
