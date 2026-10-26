@@ -72,9 +72,14 @@ class GitHubIssueTrustTests(unittest.TestCase):
     def test_project_sync_workflow_uses_numeric_principal_gate(self):
         workflow = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
         text = workflow.read_text(encoding="utf-8")
-        self.assertIn("github.event.issue.user.id == 79015263", text)
-        self.assertIn("github.event.comment.user.id == 79015263", text)
-        self.assertIn("github.event.sender.id == 79015263", text)
+        # Human allowlisting is centralized in github_issue_trust rather than
+        # repeated as a second independent list in workflow YAML.
+        admission = (Path(__file__).parents[1] / "tools" / "project_sync_event_admission.py").read_text(encoding="utf-8")
+        self.assertIn("needs: actor-admission", text)
+        self.assertIn("needs.actor-admission.outputs.admitted == 'true'", text)
+        self.assertIn("github_issue_trust.TRUSTED_PRINCIPAL_IDS", admission)
+        self.assertIn('event.get("sender")', admission)
+        self.assertIn("actor_id", admission)
 
 
 if __name__ == "__main__":
