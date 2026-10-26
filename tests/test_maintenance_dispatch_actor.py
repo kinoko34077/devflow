@@ -7,7 +7,7 @@ WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/maintenance
 
 
 def job_condition(job):
-    match = re.search(r"^  " + re.escape(job) + r":\n    if: (.+)$", WORKFLOW, re.MULTILINE)
+    match = re.search(r"^  " + re.escape(job) + r":\n(?:(?:    #[^\n]*|)\n)*    if: (.+)$", WORKFLOW, re.MULTILINE)
     if not match:
         raise AssertionError("Missing job condition: " + job)
     return match.group(1)
