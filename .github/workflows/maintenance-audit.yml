@@ -269,7 +269,7 @@ jobs:
 
 
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -332,7 +332,7 @@ jobs:
           path: maintenance-supply-result.json
 
   catalog-maintenance-publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -383,7 +383,7 @@ jobs:
           path: maintenance-catalog-publication-result.json
 
   catalog-maintenance-complete:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -458,7 +458,7 @@ jobs:
           path: maintenance-completion-result.json
 
   projection-cache:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '10 5,17 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '10 5,17 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache' && github.actor_id == '79015263') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -527,7 +527,7 @@ jobs:
 
   supply-credential-check:
     # Non-mutating PAT authentication probe. Never publish supply or print credentials.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'supply-credential-check' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'supply-credential-check' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' }}
     environment:
       name: maintenance-supply
       deployment: false
