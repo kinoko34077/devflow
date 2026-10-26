@@ -70,20 +70,12 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("schedule:", self.publish)
 
     def test_privileged_manual_modes_require_owner_numeric_actor(self):
-        jobs = {
-            "publish": ("\n  publish:\\n", "\n  catalog-maintenance-publish:\\n"),
-            "catalog-maintenance-publish": ("\n  catalog-maintenance-publish:\\n", "\n  catalog-maintenance-complete:\\n"),
-            "catalog-maintenance-complete": ("\n  catalog-maintenance-complete:\\n", "\n  projection-cache:\\n"),
-            "supply-credential-check": ("\n  supply-credential-check:\\n", None),
-        }
-        for name, (start, end) in jobs.items():
+        for name in ("publish", "catalog-maintenance-publish", "catalog-maintenance-complete", "supply-credential-check"):
             with self.subTest(job=name):
-                section = self.text.split(start.replace("\\\\n", "\\n"), 1)[1]
-                if end is not None:
-                    section = section.split(end.replace("\\\\n", "\\n"), 1)[0]
-                condition = section.split("\n", 1)[0]
-                self.assertIn("github.actor_id == '79015263'", condition)
-                self.assertIn("github.ref == 'refs/heads/main'", condition)
+                section = self.text.split("\n  " + name + ":\n", 1)[1]
+                section = section.split("\n  ", 1)[0]
+                self.assertIn("github.actor_id == '79015263'", section)
+                self.assertIn("github.ref == 'refs/heads/main'", section)
                 self.assertIn("environment:", section)
                 self.assertIn("name: maintenance-supply", section)
 
