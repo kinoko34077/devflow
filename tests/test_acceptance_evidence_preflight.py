@@ -1,5 +1,6 @@
 import hashlib
 import unittest
+from datetime import datetime, timezone
 
 from tools.acceptance_evidence_preflight import acceptance_preflight
 from tools.development_reconciler import evaluate_pr
@@ -25,12 +26,13 @@ def proof(**overrides):
 
 class AcceptanceEvidenceTests(unittest.TestCase):
     def check(self, value):
-        return acceptance_preflight(value, task_ref=TASK, observed_issue_body_sha256=SHA)
+        return acceptance_preflight(value, task_ref=TASK, observed_issue_body_sha256=SHA, now=datetime(2026, 10, 27, 0, 5, tzinfo=timezone.utc))
 
     def test_bounded_current_issue_acceptance_passes_without_overclaim(self):
         result = self.check(proof())
         self.assertEqual(result["status"], "VERIFIED_SCOPE_DECISION")
-        self.assertTrue(result["acceptance_satisfied"])
+        self.assertTrue(result["scope_acceptance_satisfied"])
+        self.assertFalse(result["acceptance_satisfied"])
         self.assertEqual(result["excluded_scopes"], ("global Inbox completeness", "original historical failure cause"))
 
     def test_older_pr_claim_cannot_override_current_issue_revision(self):
@@ -50,10 +52,25 @@ class AcceptanceEvidenceTests(unittest.TestCase):
     def test_rejected_scope_is_not_positive_acceptance(self):
         result = self.check(proof(status="UNSATISFIED"))
         self.assertTrue(result["evidence_complete"])
+        self.assertFalse(result["scope_acceptance_satisfied"])
         self.assertFalse(result["acceptance_satisfied"])
 
+    def test_scoped_satisfied_never_closes_whole_task(self):
+        result = self.check(proof())
+        self.assertTrue(result["evidence_complete"])
+        self.assertFalse(result["acceptance_satisfied"])
+
+    def test_rejects_old_freshness_and_unanchored_or_duplicate_refs(self):
+        for p in ({"issue_read_at": "2026-10-26T23:00:00Z"},
+                  {"issue_read_at": "invalid"},
+                  {"evidence_refs": ["https://github.com/kinoko34077/devflow/issues/531"]},
+                  {"evidence_refs": ["https://github.com/kinoko34077/other/issues/531?x=1"]},
+                  {"evidence_refs": ["https://github.com/kinoko34077/devflow/issues/531#issuecomment-1"] * 2}):
+            with self.subTest(p=p):
+                self.assertFalse(self.check(proof(**p))["evidence_complete"])
+
     def test_untrusted_or_incomplete_proof_cannot_trigger_existing_reconciler(self):
-        result = self.check(proof(source_verified=False))
+        result = self.check(proof())
         pr = {
             "task_ref": TASK, "task_kind": "FINITE", "task_open": True,
             "acceptance_satisfied": result["acceptance_satisfied"],
@@ -66,7 +83,7 @@ class AcceptanceEvidenceTests(unittest.TestCase):
             "control_changed": True, "evidence_complete": result["evidence_complete"],
         }
         decision = evaluate_pr(pr)
-        self.assertEqual(decision.disposition, "NEEDS_EVIDENCE")
+        self.assertEqual(decision.disposition, "NO_ACTION")
         self.assertIsNone(decision.transition)
 
 
