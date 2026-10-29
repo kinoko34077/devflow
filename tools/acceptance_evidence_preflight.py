@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 _REF = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
+_COMMENT = re.compile(r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*#issuecomment-[1-9][0-9]*\Z")
 _ACCEPTED = frozenset({"SATISFIED", "UNSATISFIED", "UNKNOWN"})
 
 
