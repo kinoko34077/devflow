@@ -318,12 +318,39 @@ def fetch_public_issue(repository: str, issue_number: int) -> dict[str, Any]:
     except (OSError, urllib.error.URLError, json.JSONDecodeError, TypeError, ValueError):
         raise PlanAssessmentError("SOURCE_UNAVAILABLE") from None
     if (not isinstance(payload, Mapping) or "pull_request" in payload
-            or payload.get("number") != issue_number):
+            or type(payload.get("number")) is not int or payload.get("number") != issue_number):
         raise PlanAssessmentError("SOURCE_IDENTITY_MISMATCH")
-    repo = payload.get("repository_url")
-    repo_url = urllib.parse.urlsplit(repo) if isinstance(repo, str) else None
-    if (repo_url is None or repo_url.scheme != "https" or repo_url.hostname != "api.github.com"
-            or repo_url.path.casefold() != f"/repos/{repository}".casefold()):
+
+    def matches_url(value: object, *, host: str, path: str) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            parsed = urllib.parse.urlsplit(value)
+            port = parsed.port
+        except ValueError:
+            return False
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname == host
+            and port in {None, 443}
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.path.casefold() == path.casefold()
+        )
+
+    expected_repo = f"/repos/{repository}"
+    expected_issue_api = f"/repos/{repository}/issues/{issue_number}"
+    expected_issue_html = f"/{repository}/issues/{issue_number}"
+    if (not matches_url(payload.get("repository_url"), host="api.github.com", path=expected_repo)
+            or not matches_url(payload.get("url"), host="api.github.com", path=expected_issue_api)
+            or not matches_url(payload.get("html_url"), host="github.com", path=expected_issue_html)):
+        raise PlanAssessmentError("SOURCE_IDENTITY_MISMATCH")
+    body, updated_at = payload.get("body"), payload.get("updated_at")
+    if body is not None and not isinstance(body, str):
+        raise PlanAssessmentError("SOURCE_IDENTITY_MISMATCH")
+    if updated_at is not None and not isinstance(updated_at, str):
         raise PlanAssessmentError("SOURCE_IDENTITY_MISMATCH")
     return {
         "repository": repository,
@@ -331,8 +358,8 @@ def fetch_public_issue(repository: str, issue_number: int) -> dict[str, Any]:
         "title": str(payload.get("title") or ""),
         "state": str(payload.get("state") or ""),
         "url": f"https://github.com/{repository}/issues/{issue_number}",
-        "body": str(payload.get("body") or ""),
-        "updated_at": str(payload.get("updated_at") or ""),
+        "body": body or "",
+        "updated_at": updated_at or "",
     }
 
 

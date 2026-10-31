@@ -156,7 +156,9 @@ class GoalPlanAssessmentTests(unittest.TestCase):
     def test_public_reader_is_anonymous_and_checks_observed_issue_identity(self):
         payload = json.dumps({
             "number": 14, "title": "task", "state": "open", "body": "source",
+            "url": "https://api.github.com/repos/org/repo/issues/14",
             "repository_url": "https://api.github.com/repos/org/repo",
+            "html_url": "https://github.com/org/repo/issues/14",
         }).encode()
 
         class Response:
@@ -202,6 +204,31 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=PullRequestResponse()):
             with self.assertRaises(PlanAssessmentError):
                 fetch_public_issue("org/repo", 14)
+
+        for invalid_payload in (
+            {"number": True},
+            {"number": 14.0},
+            {"html_url": "https://github.com/other/repo/issues/14"},
+            {"url": "https://api.github.com/repos/org/repo/issues/15"},
+            {"body": {"text": "not source text"}},
+        ):
+            altered = {
+                "number": 14, "title": "task", "state": "open", "body": "source",
+                "url": "https://api.github.com/repos/org/repo/issues/14",
+                "repository_url": "https://api.github.com/repos/org/repo",
+                "html_url": "https://github.com/org/repo/issues/14",
+                **invalid_payload,
+            }
+            mutated_body = json.dumps(altered).encode()
+
+            class MismatchedIdentityResponse(Response):
+                def read(self, _size):
+                    return mutated_body
+
+            with self.subTest(invalid_payload=invalid_payload):
+                with patch("urllib.request.urlopen", return_value=MismatchedIdentityResponse()):
+                    with self.assertRaises(PlanAssessmentError):
+                        fetch_public_issue("org/repo", 14)
 
     def test_source_unavailable_is_unknown_and_non_blocking(self):
         result = assess_issue_plan(
