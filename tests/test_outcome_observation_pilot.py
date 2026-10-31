@@ -38,6 +38,16 @@ class OutcomeObservationPilotTests(unittest.TestCase):
     def test_missing_packet_is_an_explicit_skip(self):
         self.assertEqual(pilot.evaluate_event(event("ordinary PR")), (0, "SKIPPED_NO_OUTCOME_PACKET"))
 
+    def test_null_pr_body_is_an_explicit_skip_but_missing_event_shape_is_invalid(self):
+        self.assertEqual(
+            pilot.evaluate_event({"pull_request": {"body": None}}),
+            (0, "SKIPPED_NO_OUTCOME_PACKET"),
+        )
+        self.assertEqual(
+            pilot.evaluate_event({}),
+            (2, "OUTCOME_PILOT=INVALID_EVENT"),
+        )
+
     def test_duplicate_or_malformed_packet_fails_closed(self):
         for body in (
             f"{pilot.BEGIN}{{\"a\":1,\"a\":2}}{pilot.END}",

@@ -36,6 +36,8 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def parse_pr_packet(body: object) -> tuple[str, dict[str, Any] | None]:
+    if body is None:
+        return "SKIPPED_NO_OUTCOME_PACKET", None
     if not isinstance(body, str) or len(body) > _MAX_BODY:
         return "INVALID_PACKET", None
     if BEGIN not in body and END not in body:
@@ -81,7 +83,9 @@ def evaluate_event(event: object) -> tuple[int, str]:
     if not isinstance(event, dict):
         return 2, "OUTCOME_PILOT=INVALID_EVENT"
     pull_request = event.get("pull_request")
-    body = pull_request.get("body") if isinstance(pull_request, dict) else None
+    if not isinstance(pull_request, dict) or "body" not in pull_request:
+        return 2, "OUTCOME_PILOT=INVALID_EVENT"
+    body = pull_request["body"]
     parsed, packet = parse_pr_packet(body)
     if parsed == "SKIPPED_NO_OUTCOME_PACKET":
         return 0, parsed
