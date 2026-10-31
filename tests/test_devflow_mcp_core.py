@@ -1,5 +1,6 @@
 import ast
 import base64
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -929,6 +930,7 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
         self.assertIn("get_repository_projection", tools)
         self.assertIn("get_portfolio_projection", tools)
         self.assertIn("get_issue_goal_context", tools)
+        self.assertIn("assess_issue_plan", tools)
         self.assertFalse(
             any(
                 name.startswith(
@@ -967,6 +969,27 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIsInstance(calls[0].func.value, ast.Call)
         self.assertIsInstance(calls[0].func.value.func, ast.Name)
+        self.assertEqual(calls[0].func.value.func.id, "_service")
+
+    def test_plan_assessment_mcp_tool_delegates_to_shared_service_method(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tools"
+            / "devflow_mcp.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "assess_issue_plan"
+        )
+        calls = [
+            node for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "assess_issue_plan"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0].func.value, ast.Call)
         self.assertEqual(calls[0].func.value.func.id, "_service")
 
 
@@ -1351,17 +1374,65 @@ class EffectiveGoalContextServiceTests(unittest.TestCase):
         )
 
         effective = {(item["key"], item["scope"]): item for item in result["effective_specifications"]}
-        self.assertEqual(cli_result, result)
+        self.assertEqual({k: v for k, v in cli_result.items() if k != "observed_at"},
+                         {k: v for k, v in result.items() if k != "observed_at"})
         self.assertEqual(reader.calls, [
             (self.REPOSITORY, 14), (self.REPOSITORY, 11),
             (self.REPOSITORY, 14), (self.REPOSITORY, 11),
         ])
         self.assertEqual(result["parent_chain_status"], "COMPLETE")
+        self.assertRegex(result["observed_at"], r"^\d{4}-\d\d-\d\dT")
         self.assertEqual(effective[("runtime.mode", "default")]["value"], "fast")
         self.assertEqual(effective[("feature.enabled", "default")]["value"], False)
         self.assertEqual(effective[("runtime.mode", "default")]["source_issue"], "org/repo#14")
         self.assertEqual(result["source_contexts"][0]["url"], "https://github.com/org/repo/issues/11")
+        self.assertEqual(result["source_contexts"][0]["body_sha256"], hashlib.sha256(parent["body"].encode()).hexdigest())
+        self.assertEqual(result["source_contexts"][1]["body_sha256"], hashlib.sha256(child["body"].encode()).hexdigest())
         self.assertEqual(result["semantic_citation_verification"], "NOT_PERFORMED")
+
+    def test_plan_assessment_reuses_live_resolver_and_reports_declared_conflict_only(self):
+        parent = self._issue(11, self._context([
+            self._claim("mode-v1", "runtime.mode", "realtime", evidence_ref="https://sources.example/settings"),
+        ], request_ref="https://github.com/org/repo/issues/11"))
+        child = self._issue(14, self._context([
+            self._claim("mode-v2", "runtime.mode", "balanced", supersedes="org/repo#11:mode-v1"),
+        ], parent_goal_ref="org/repo#11", request_ref="https://github.com/org/repo/issues/14"))
+
+        class Reader:
+            def __init__(self):
+                self.calls = []
+
+            def get_issue(inner_self, repository, issue_number):
+                inner_self.calls.append((repository, issue_number))
+                return {11: parent, 14: child}[issue_number]
+
+        reader = Reader()
+        service = devflow_mcp_core.DevflowService(reader)
+        plan = {
+            "schema_version": 1,
+            "task_ref": "org/repo#14",
+            "steps": [{"id": "reuse-preview", "intent": "Switch to offline preview",
+                       "declared_effects": [{"key": "runtime.mode", "scope": "default",
+                                              "state": "set", "value": "offline"}]}],
+        }
+        result = service.assess_issue_plan(self.REPOSITORY, 14, plan)
+        self.assertEqual(reader.calls, [(self.REPOSITORY, 14), (self.REPOSITORY, 11)])
+        self.assertEqual(result["status"], "CONFLICTS_DETECTED")
+        self.assertEqual(result["mechanical_conflicts"][0]["claim_ref"], "org/repo#14:mode-v2")
+        self.assertFalse(result["blocks_execution"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertEqual(result["semantic_critique"], "NOT_PERFORMED")
+
+    def test_invalid_plan_is_returned_as_needs_evidence_before_live_reads(self):
+        class Reader:
+            def get_issue(self, *_args):
+                raise AssertionError("invalid plan must not trigger a source read")
+
+        result = devflow_mcp_core.DevflowService(Reader()).assess_issue_plan(
+            self.REPOSITORY, 14, {"schema_version": 1, "task_ref": "bad", "steps": []})
+        self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(result["reason_code"], "PLAN_INVALID")
+        self.assertFalse(result["blocks_execution"])
 
     def test_service_fails_closed_on_unavailable_parent_without_leaking_reader_details(self):
         child = self._issue(14, self._context([
@@ -1439,10 +1510,11 @@ class ObservedIssueIdentityTests(unittest.TestCase):
         return devflow_mcp_core.GitHubReader(token="", transport=lambda url, headers: issue)
 
     def test_matching_identity_is_returned(self):
-        service = devflow_mcp_core.DevflowService(self._reader(self._issue()))
+        service = devflow_mcp_core.DevflowService(self._reader(self._issue(updated_at="2026-10-31T19:00:00Z")))
         result = service.get_issue("SynTrail-LM", 7)
         self.assertEqual(result["repository"], "kinoko34077/SynTrail-LM")
         self.assertEqual(result["issue_number"], 7)
+        self.assertEqual(result["updated_at"], "2026-10-31T19:00:00Z")
 
     def test_non_github_repository_url_fails_closed(self):
         issue = self._issue(

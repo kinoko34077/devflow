@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 import json
 
@@ -47,6 +48,19 @@ class GoalContextTests(unittest.TestCase):
         ctx["higher_goals"] = self.full()["higher_goals"]
         with self.assertRaises(GoalContextError):
             normalize_goal_context(ctx)
+
+    def test_parent_and_supersedes_references_bound_issue_number_digits(self):
+        context = self.v2_context([], parent_goal_ref="org/repo#12345678901")
+        normalized = normalize_goal_context(context)
+        issue = self.make_issue("org/repo", 14, normalized)
+        result = issue_goal_context.resolve_goal_context(issue, lambda *_args: None)
+        self.assertEqual(result["unknowns"][0]["reason_code"], "PARENT_REF_INVALID")
+        context = self.v2_context([self.claim(
+            "child", "runtime.mode", "new",
+            supersedes="org/repo#12345678901:parent",
+        )])
+        with self.assertRaises(GoalContextError):
+            normalize_goal_context(context)
 
     def test_inferred_goal_requires_reason_and_does_not_become_explicit(self):
         ctx = self.full()
@@ -213,6 +227,18 @@ class GoalContextTests(unittest.TestCase):
         self.assertEqual(result["source_contexts"][-1]["context"]["parent_goal_ref"], "org/repo#11")
         self.assertEqual(result["source_contexts"][0]["context"]["fixed_constraints"][0]["evidence_ref"],
                          "https://sources.example/runtime-path")
+
+    def test_source_context_records_exact_body_revision_without_copying_issue_prose(self):
+        issue = self.make_issue("org/repo", 14, self.v2_context([
+            self.claim("mode", "runtime.mode", "realtime"),
+        ]))
+        issue["body"] = "Original owner text\n" + issue["body"]
+        issue["updated_at"] = "2026-10-31T19:00:00Z"
+        result = issue_goal_context.resolve_goal_context(issue, lambda _repo, _number: None)
+        source = result["source_contexts"][0]
+        self.assertEqual(source["body_sha256"], hashlib.sha256(issue["body"].encode()).hexdigest())
+        self.assertEqual(source["source_updated_at"], "2026-10-31T19:00:00Z")
+        self.assertNotIn("Original owner text", json.dumps(source))
 
     def test_latest_explicit_correction_supersedes_only_the_previous_source_claim(self):
         root = self.make_issue("org/repo", 11, self.v2_context([

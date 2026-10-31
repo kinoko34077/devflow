@@ -24,6 +24,7 @@ try:
         human_portfolio,
         agent_inbox,
         issue_goal_context,
+        goal_plan_assessment,
         maintenance_sync_check,
         reconciliation_publication,
         repository_projection,
@@ -47,6 +48,7 @@ except ImportError:  # direct script execution
     import human_portfolio
     import agent_inbox
     import issue_goal_context
+    import goal_plan_assessment
     import maintenance_sync_check
     import reconciliation_publication
     import repository_projection
@@ -1212,6 +1214,7 @@ class DevflowService:
             "state": str(issue.get("state") or ""),
             "url": _issue_url(issue),
             "body": body,
+            "updated_at": str(issue.get("updated_at") or ""),
             "sections": parse_sections(body),
         }
 
@@ -1224,7 +1227,25 @@ class DevflowService:
             )
         normalized = normalize_repository(repository)
         issue = self.get_issue(normalized, issue_number)
-        return issue_goal_context.resolve_goal_context(issue, self.get_issue)
+        context = issue_goal_context.resolve_goal_context(issue, self.get_issue)
+        return {"observed_at": self._observed_at_factory(), **context}
+
+    def assess_issue_plan(
+        self, repository: str, issue_number: int, plan: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Compare declared plan effects with source-resolved claims; never authorize work."""
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        try:
+            plan = goal_plan_assessment.normalize_plan_packet(plan)
+        except goal_plan_assessment.PlanAssessmentError:
+            return goal_plan_assessment.assess_plan({}, plan)
+        normalized = normalize_repository(repository)
+        context = self.get_issue_goal_context(normalized, issue_number)
+        return goal_plan_assessment.assess_plan(context, plan)
 
     def get_sync_health(self) -> dict[str, Any]:
         issues = self.reader.list_issues(self.devflow_repository, state="all")

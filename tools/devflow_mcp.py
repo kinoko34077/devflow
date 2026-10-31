@@ -109,6 +109,12 @@ def get_issue_goal_context(repository: str, issue_number: int) -> dict[str, Any]
 
 
 @mcp.tool()
+def assess_issue_plan(repository: str, issue_number: int, plan: dict[str, Any]) -> dict[str, Any]:
+    """Compare declared plan effects with adopted source-linked conditions; advisory and read-only."""
+    return _service().assess_issue_plan(repository, issue_number, plan)
+
+
+@mcp.tool()
 def get_sync_health() -> dict[str, Any]:
     """Return the machine-maintained devflow Project Sync Health record."""
     return _service().get_sync_health()

@@ -8,6 +8,7 @@ work, or modifies GitHub. The owning Issue/specification remains authoritative.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import urllib.parse
@@ -135,7 +136,7 @@ def _normalize_specification(value: object, name: str) -> dict[str, Any]:
         raise GoalContextError(f"{name}.supersedes is not allowed for proposals")
     if supersedes is not None:
         supersedes = _text(supersedes, f"{name}.supersedes", limit=500)
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*:[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", supersedes):
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]{0,9}:[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", supersedes):
             raise GoalContextError(f"{name}.supersedes must identify one source Issue claim")
     reason = item.get("reason")
     if state in {"unknown", "proposed"} and reason is None:
@@ -284,7 +285,7 @@ def upsert_goal_context(body: str, context: Mapping[str, Any]) -> str:
 
 def _parse_issue_reference(value: str) -> tuple[str, int]:
     text = value.strip()
-    match = re.fullmatch(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)", text)
+    match = re.fullmatch(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]{0,9})", text)
     if match:
         return match.group(1), int(match.group(2))
     try:
@@ -299,7 +300,7 @@ def _parse_issue_reference(value: str) -> tuple[str, int]:
         and not parsed.fragment
         and len(parts) == 4
         and parts[2] == "issues"
-        and re.fullmatch(r"[1-9][0-9]*", parts[3])
+        and re.fullmatch(r"[1-9][0-9]{0,9}", parts[3])
         and re.fullmatch(r"[A-Za-z0-9_.-]+", parts[0])
         and re.fullmatch(r"[A-Za-z0-9_.-]+", parts[1])
     ):
@@ -331,7 +332,16 @@ def _issue_record(value: Mapping[str, Any]) -> dict[str, Any]:
     body = value.get("body")
     if body is not None and not isinstance(body, str):
         raise GoalContextError("Issue body must be text")
-    return {"repository": repository, "issue_number": number, "url": canonical_url, "body": body or ""}
+    body_text = body or ""
+    updated_at = value.get("updated_at")
+    return {
+        "repository": repository,
+        "issue_number": number,
+        "url": canonical_url,
+        "body": body_text,
+        "body_sha256": hashlib.sha256(body_text.encode("utf-8")).hexdigest(),
+        "source_updated_at": updated_at if isinstance(updated_at, str) and updated_at.strip() else None,
+    }
 
 
 def _claim_reference(repository: str, issue_number: int, claim_id: str) -> str:
@@ -340,7 +350,7 @@ def _claim_reference(repository: str, issue_number: int, claim_id: str) -> str:
 
 def _claim_reference_identity(value: str) -> tuple[str, int, str] | None:
     match = re.fullmatch(
-        r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*):([A-Za-z0-9][A-Za-z0-9_.-]{0,119})",
+        r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]{0,9}):([A-Za-z0-9][A-Za-z0-9_.-]{0,119})",
         value,
     )
     if not match:
@@ -467,6 +477,8 @@ def resolve_goal_context(
         source_contexts.append({
             "issue_ref": issue_ref,
             "url": source_issue["url"],
+            "body_sha256": source_issue["body_sha256"],
+            "source_updated_at": source_issue["source_updated_at"],
             "schema_version": context["schema_version"],
             "context": context_projection,
         })
