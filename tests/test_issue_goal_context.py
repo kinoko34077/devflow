@@ -108,6 +108,7 @@ class GoalContextTests(unittest.TestCase):
         cases = (
             {"text": f"quoted {V2_END} marker"},
             {V2_START: "marker in object key"},
+            {"nested": [{"deeper": {"text": f"quoted {END} marker"}}]},
         )
         for value in cases:
             with self.subTest(value=value):
