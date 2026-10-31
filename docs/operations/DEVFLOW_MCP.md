@@ -22,9 +22,10 @@ The server exposes only read operations:
 - `get_human_portfolio(repository)`
 - `get_issue(repository, issue_number)`
 - `get_issue_goal_context(repository, issue_number)`
+- `assess_issue_plan(repository, issue_number, plan)`
 - `get_sync_health()`
 
-This list reflects the **currently exported** eleven functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
+This list reflects the **currently exported** twelve functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
@@ -58,6 +59,50 @@ preserves source contexts, citations, proposals, effective specifications and
 unknowns. It does not prove citation truth. If neither shared entry is available,
 read the exact Issue and explicit parents directly from GitHub; inaccessible or
 malformed sources remain unknown, not empty.
+
+For a candidate plan that explicitly lists typed effects, use the shared
+read-only comparison. Only an exact `key` + `scope` match against a complete,
+adopted Goal Context claim can produce `CONFLICTS_DETECTED`; inferred, proposed,
+removed, inaccessible, or unrepresented conditions remain unknown or unchecked.
+The result covers declared effects only, never claims the plan is complete,
+does not authenticate Issue authorship or authority labels, evaluate prose
+meaning or citation truth, or authorize work.
+
+```sh
+python -m tools.devflow_read_cli assess-issue-plan \
+  --repository kinoko34077/<repo> --issue-number <N> --plan-file plan.json
+```
+
+The MCP equivalent is `assess_issue_plan(repository, issue_number, plan)`. The
+optional `Declared goal plan assessment pilot` workflow runs the comparator for
+a single machine-readable plan packet embedded between
+`DEVFLOW_GOAL_PLAN_V1_BEGIN` / `_END` markers in a PR description. It reads
+public Issues anonymously and has no repository token scope; inaccessible or
+private source ancestry returns `NEEDS_EVIDENCE`. The workflow fails for a
+direct deterministic conflict in the declared packet, but is not a required
+branch-protection check. No packet is reported as skipped; neither this pilot
+nor an omitted packet proves that all PR plans were assessed.
+
+The packet is deliberately limited to intended typed effects; it is not a
+second Issue/specification record. A set effect must include `value` (including
+`false`, `0`, or `null`); a removal omits it. For example:
+
+```json
+{
+  "schema_version": 1,
+  "task_ref": "kinoko34077/<repo>#<issue>",
+  "steps": [{
+    "id": "change-runtime-path",
+    "intent": "Use the existing realtime settings path",
+    "declared_effects": [{
+      "key": "runtime.path",
+      "scope": "playback",
+      "state": "set",
+      "value": "existing-realtime"
+    }]
+  }]
+}
+```
 
 A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
 or `has_unknown_work=true` is *not* the end of a recipient message check:
@@ -146,6 +191,7 @@ For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
 | `CONTROL_SCHEMA_INVALID` / `CONTROL_REPOSITORY_MISMATCH` | The Control failed required sections or repository identity checks; do not bypass validation. |
 | `INVALID_ISSUE_NUMBER` | The Goal Context operation needs one positive Issue number; check the command arguments. |
 | `ISSUE_NUMBER_ON_NON_ISSUE_OPERATION` | `--issue-number` is valid only for `issue-goal-context`; remove it for other operations. |
+| `PLAN_ON_NON_ASSESSMENT_OPERATION` | `--plan-file` is valid only for `assess-issue-plan`. |
 | `DEVFLOW_READ_UNAVAILABLE` | Unclassified core failure; preserve manual Control and exact original Issue reads rather than infer no work. |
 
 Codes are not proof of the underlying cause (for example, 403 and 404 remain
@@ -156,7 +202,7 @@ tokens, client registration or system timers as an implicit read workaround.
 
 Cloud evidence on #531 separately establishes existing Agent Inbox CLI and
 public GitHub GET execution. It does not independently prove a fresh Cloud task
-has run the **new** three-operation adapter; real-task execution remains a
+has run each read-only adapter operation; real-task execution remains a
 separate acceptance check. Authentication verification and Cloud tool
 registration are independent of this read-only fallback.
 

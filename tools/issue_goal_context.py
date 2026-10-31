@@ -8,6 +8,7 @@ work, or modifies GitHub. The owning Issue/specification remains authoritative.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import urllib.parse
@@ -331,7 +332,16 @@ def _issue_record(value: Mapping[str, Any]) -> dict[str, Any]:
     body = value.get("body")
     if body is not None and not isinstance(body, str):
         raise GoalContextError("Issue body must be text")
-    return {"repository": repository, "issue_number": number, "url": canonical_url, "body": body or ""}
+    body_text = body or ""
+    updated_at = value.get("updated_at")
+    return {
+        "repository": repository,
+        "issue_number": number,
+        "url": canonical_url,
+        "body": body_text,
+        "body_sha256": hashlib.sha256(body_text.encode("utf-8")).hexdigest(),
+        "source_updated_at": updated_at if isinstance(updated_at, str) and updated_at.strip() else None,
+    }
 
 
 def _claim_reference(repository: str, issue_number: int, claim_id: str) -> str:
@@ -467,6 +477,8 @@ def resolve_goal_context(
         source_contexts.append({
             "issue_ref": issue_ref,
             "url": source_issue["url"],
+            "body_sha256": source_issue["body_sha256"],
+            "source_updated_at": source_issue["source_updated_at"],
             "schema_version": context["schema_version"],
             "context": context_projection,
         })

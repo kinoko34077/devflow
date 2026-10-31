@@ -1,5 +1,6 @@
 """Regression tests for the read-only Codex Cloud MCP-unavailable CLI."""
 import json
+import tempfile
 import unittest
 from urllib.error import HTTPError, URLError
 from unittest.mock import patch
@@ -46,6 +47,15 @@ class FakeService:
             "unknowns": [],
         }
 
+    def assess_issue_plan(self, repository, issue_number, plan):
+        self.calls.append(("assess-issue-plan", repository, issue_number, plan))
+        return {
+            "status": "NEEDS_EVIDENCE", "reason_code": "NO_MATCHING_ADOPTED_SPECIFICATION",
+            "mechanical_conflicts": [], "unchecked_effects": [],
+            "blocks_execution": False, "can_authorize_execution": False,
+            "asserts_plan_completeness": False, "semantic_critique": "NOT_PERFORMED",
+        }
+
 
 class CloudReadCLITests(unittest.TestCase):
     REPOSITORY = "kinoko34077/devflow"
@@ -88,6 +98,53 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(service.calls[-1], ("issue-goal-context", self.REPOSITORY, 14))
         self.assertEqual(cli_result["source_contexts"], [{"issue_ref": "kinoko34077/devflow#14"}])
         self.assertEqual(cli_result["effective_specifications"][0]["value"], "safe")
+
+    def test_plan_assessment_cli_operation_delegates_exact_packet_to_shared_service(self):
+        service = FakeService()
+        candidate = {"schema_version": 1, "task_ref": f"{self.REPOSITORY}#14",
+                     "steps": [{"id": "step-1", "intent": "Document the option"}]}
+        result = cli.read_operation(
+            service, operation="assess-issue-plan", repository=self.REPOSITORY,
+            issue_number=14, plan=candidate)
+        self.assertEqual(service.calls, [("assess-issue-plan", self.REPOSITORY, 14, candidate)])
+        self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+        self.assertFalse(result["blocks_execution"])
+        self.assertEqual(result["semantic_critique"], "NOT_PERFORMED")
+
+    def test_plan_is_rejected_on_non_assessment_cli_operation(self):
+        with self.assertRaisesRegex(ValueError, "PLAN_ON_NON_ASSESSMENT_OPERATION"):
+            cli.read_operation(
+                FakeService(), operation="issue-goal-context", repository=self.REPOSITORY,
+                issue_number=14, plan={})
+
+    def test_plan_file_cli_accepts_valid_json_and_keeps_invalid_input_non_blocking(self):
+        service = FakeService()
+        candidate = {"schema_version": 1, "task_ref": f"{self.REPOSITORY}#14",
+                     "steps": [{"id": "step-1", "intent": "Keep the declared runtime behavior"}]}
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as plan_file:
+            json.dump(candidate, plan_file)
+            plan_file.flush()
+            with patch("tools.devflow_read_cli.default_service", return_value=service):
+                with patch("builtins.print") as out:
+                    status = cli.main(["assess-issue-plan", "--repository", self.REPOSITORY,
+                                       "--issue-number", "14", "--plan-file", plan_file.name])
+        self.assertEqual(status, 0)
+        self.assertEqual(service.calls[0], (
+            "assess-issue-plan", self.REPOSITORY, 14,
+            {**candidate, "steps": [{**candidate["steps"][0], "declared_effects": []}]},
+        ))
+        self.assertEqual(json.loads(out.call_args.args[0])["status"], "NEEDS_EVIDENCE")
+
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as plan_file:
+            plan_file.write('{"schema_version":1,"schema_version":1}')
+            plan_file.flush()
+            with patch("tools.devflow_read_cli.default_service") as get_service:
+                with patch("builtins.print") as out:
+                    status = cli.main(["assess-issue-plan", "--repository", self.REPOSITORY,
+                                       "--issue-number", "14", "--plan-file", plan_file.name])
+        get_service.assert_not_called()
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(out.call_args.args[0])["reason_code"], "PLAN_INVALID")
 
     def test_issue_number_cli_arguments_are_validated_before_service_access(self):
         for arguments, expected in (

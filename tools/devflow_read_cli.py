@@ -12,8 +12,9 @@ from typing import Any
 
 from tools import agent_inbox
 from tools.devflow_mcp_core import DevflowMCPError, default_service
+from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
-OPERATIONS = ("bootstrap", "work-view", "inbox", "issue-goal-context")
+OPERATIONS = ("bootstrap", "work-view", "inbox", "issue-goal-context", "assess-issue-plan")
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
 
 # Never echo exception text or caller-controlled fields into machine-readable
@@ -43,6 +44,7 @@ SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_WORK_STATUS",
     "INVALID_ISSUE_NUMBER",
     "ISSUE_NUMBER_ON_NON_ISSUE_OPERATION",
+    "PLAN_ON_NON_ASSESSMENT_OPERATION",
 })
 
 
@@ -59,13 +61,20 @@ def read_operation(
     service: Any, *, operation: str, repository: str,
     recipient: str = "codex", limit: int = 20, offset: int = 0,
     work_status: str | None = None, issue_number: int | None = None,
+    plan: dict[str, Any] | None = None,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
-    if operation == "issue-goal-context":
+    if plan is not None and operation != "assess-issue-plan":
+        raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
+    if operation in {"issue-goal-context", "assess-issue-plan"}:
         if type(issue_number) is not int or issue_number < 1:
             raise ValueError("INVALID_ISSUE_NUMBER")
+        if operation == "assess-issue-plan" and plan is None:
+            return assess_plan({}, plan)
     elif issue_number is not None:
         raise ValueError("ISSUE_NUMBER_ON_NON_ISSUE_OPERATION")
+    elif plan is not None:
+        raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
     if operation == "bootstrap":
         return service.bootstrap_repository(repository)
     if operation == "work-view":
@@ -76,6 +85,8 @@ def read_operation(
             work_status=work_status)
     if operation == "issue-goal-context":
         return service.get_issue_goal_context(repository, issue_number)
+    if operation == "assess-issue-plan":
+        return service.assess_issue_plan(repository, issue_number, plan)
     raise ValueError("INVALID_OPERATION")
 
 
@@ -88,9 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--work-status", default=None)
     parser.add_argument("--issue-number", type=int, default=None)
+    parser.add_argument("--plan-file", default=None, help="JSON file containing a declared plan (assess-issue-plan only).")
     args = parser.parse_args(argv)
 
     try:
+        plan = None
         if not args.repository.strip():
             raise ValueError("INVALID_REPOSITORY")
         if not 1 <= args.limit <= MAX_INBOX_LIMIT or args.offset < 0:
@@ -105,16 +118,31 @@ def main(argv: list[str] | None = None) -> int:
             agent_inbox.validate_inbox_options(
                 args.recipient, args.limit, args.offset, args.work_status
             )
-        if args.operation == "issue-goal-context":
+        if args.operation in {"issue-goal-context", "assess-issue-plan"}:
             if args.issue_number is None or args.issue_number < 1:
                 raise ValueError("INVALID_ISSUE_NUMBER")
         elif args.issue_number is not None:
             raise ValueError("ISSUE_NUMBER_ON_NON_ISSUE_OPERATION")
+        if args.operation == "assess-issue-plan":
+            if args.plan_file is None:
+                plan = None
+            else:
+                try:
+                    with open(args.plan_file, encoding="utf-8") as plan_file:
+                        plan = parse_plan_json(plan_file.read(100_001))
+                except (OSError, PlanAssessmentError, UnicodeDecodeError):
+                    plan = None
+        elif args.plan_file is not None:
+            raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
+        if args.operation == "assess-issue-plan" and plan is None:
+            print(json.dumps(assess_plan({}, None), ensure_ascii=True, separators=(",", ":")))
+            return 0
         result = read_operation(
             default_service(), operation=args.operation,
             repository=args.repository, recipient=args.recipient,
             limit=args.limit, offset=args.offset,
-            work_status=args.work_status, issue_number=args.issue_number)
+            work_status=args.work_status, issue_number=args.issue_number,
+            plan=plan if args.operation == "assess-issue-plan" else None)
         # Preserve the native MCP core's exact data, including partial/unknown
         # coverage diagnostics and null-valued unavailable sources.
         # JSON semantics are unchanged; ASCII escapes prevent cp932 stdout

@@ -1,0 +1,28 @@
+name: Declared goal plan assessment pilot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+# This pilot uses public anonymous GETs and has no repository token scope.
+permissions: {}
+
+jobs:
+  assess-declared-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Fetch public PR source without credentials
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git fetch --depth=1 origin "${COMMIT_SHA}"
+          git checkout --detach FETCH_HEAD
+      - name: Assess declared source-bound plan effects
+        run: python -m tools.goal_plan_assessment
