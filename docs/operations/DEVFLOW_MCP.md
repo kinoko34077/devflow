@@ -67,6 +67,8 @@ removed, inaccessible, or unrepresented conditions remain unknown or unchecked.
 The result covers declared effects only, never claims the plan is complete,
 does not authenticate Issue authorship or authority labels, evaluate prose
 meaning or citation truth, or authorize work.
+Source authority in this contract is a declared Issue assertion; the checker
+does not authenticate its author.
 
 ```sh
 python -m tools.devflow_read_cli assess-issue-plan \
@@ -74,8 +76,9 @@ python -m tools.devflow_read_cli assess-issue-plan \
 ```
 
 The MCP equivalent is `assess_issue_plan(repository, issue_number, plan)`. The
-optional `Declared goal plan assessment pilot` workflow runs the comparator for
-a single machine-readable plan packet embedded between
+optional `Declared goal plan assessment pilot` workflow runs the comparator
+from the event-pinned base commit, not PR-supplied code, for a single
+machine-readable plan packet embedded between
 `DEVFLOW_GOAL_PLAN_V1_BEGIN` / `_END` markers in a PR description. It reads
 public Issues anonymously and has no repository token scope; inaccessible or
 private source ancestry returns `NEEDS_EVIDENCE`. The workflow fails for a

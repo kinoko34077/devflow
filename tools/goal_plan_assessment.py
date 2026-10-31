@@ -20,7 +20,7 @@ from typing import Any
 
 PLAN_MARKER_START = "<!-- DEVFLOW_GOAL_PLAN_V1_BEGIN -->"
 PLAN_MARKER_END = "<!-- DEVFLOW_GOAL_PLAN_V1_END -->"
-TASK_REF = re.compile(r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([1-9][0-9]*)\Z")
+TASK_REF = re.compile(r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([1-9][0-9]{0,9})\Z")
 ALLOWED_AUTHORITIES = frozenset({"explicit", "source_derived", "accepted_spec"})
 MAX_STEPS = 64
 MAX_EFFECTS = 128
@@ -317,7 +317,8 @@ def fetch_public_issue(repository: str, issue_number: int) -> dict[str, Any]:
             payload = json.loads(raw)
     except (OSError, urllib.error.URLError, json.JSONDecodeError, TypeError, ValueError):
         raise PlanAssessmentError("SOURCE_UNAVAILABLE") from None
-    if not isinstance(payload, Mapping) or payload.get("number") != issue_number:
+    if (not isinstance(payload, Mapping) or "pull_request" in payload
+            or payload.get("number") != issue_number):
         raise PlanAssessmentError("SOURCE_IDENTITY_MISMATCH")
     repo = payload.get("repository_url")
     repo_url = urllib.parse.urlsplit(repo) if isinstance(repo, str) else None

@@ -15,14 +15,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.x'
-      - name: Fetch public PR source without credentials
+      - name: Fetch event-pinned public base without credentials
         env:
           REPOSITORY: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git init .
           git remote add origin "https://github.com/${REPOSITORY}.git"
-          git fetch --depth=1 origin "${COMMIT_SHA}"
+          git fetch --depth=1 origin "${BASE_SHA}"
           git checkout --detach FETCH_HEAD
-      - name: Assess declared source-bound plan effects
+      - name: Assess declared source-bound plan effects with trusted base code
         run: python -m tools.goal_plan_assessment

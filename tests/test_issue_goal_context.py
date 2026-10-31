@@ -49,6 +49,19 @@ class GoalContextTests(unittest.TestCase):
         with self.assertRaises(GoalContextError):
             normalize_goal_context(ctx)
 
+    def test_parent_and_supersedes_references_bound_issue_number_digits(self):
+        context = self.v2_context([], parent_goal_ref="org/repo#12345678901")
+        normalized = normalize_goal_context(context)
+        issue = self.make_issue("org/repo", 14, normalized)
+        result = issue_goal_context.resolve_goal_context(issue, lambda *_args: None)
+        self.assertEqual(result["unknowns"][0]["reason_code"], "PARENT_REF_INVALID")
+        context = self.v2_context([self.claim(
+            "child", "runtime.mode", "new",
+            supersedes="org/repo#12345678901:parent",
+        )])
+        with self.assertRaises(GoalContextError):
+            normalize_goal_context(context)
+
     def test_inferred_goal_requires_reason_and_does_not_become_explicit(self):
         ctx = self.full()
         ctx["higher_goals"] = [{"statement": "Maybe easier audition", "kind": "inferred_hypothesis",

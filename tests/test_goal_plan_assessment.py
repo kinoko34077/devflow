@@ -127,6 +127,10 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         )
         self.assertEqual(wrong["status"], "NEEDS_EVIDENCE")
         self.assertEqual(wrong["mechanical_conflicts"], [])
+        huge_number = assess_issue_plan(
+            "org/repo#" + "9" * 5_000, plan([self.effect("runtime.mode", "offline")]),
+        )
+        self.assertEqual(huge_number["reason_code"], "TASK_REFERENCE_INVALID")
         for candidate in ({}, {"schema_version": 1, "task_ref": TASK, "steps": []}):
             with self.subTest(candidate=candidate):
                 result = assess_plan(context([adopted("runtime.mode", "realtime")]), candidate)
@@ -182,6 +186,20 @@ class GoalPlanAssessmentTests(unittest.TestCase):
                 return "https://example.invalid/repos/org/repo/issues/14"
 
         with patch("urllib.request.urlopen", return_value=Redirected()):
+            with self.assertRaises(PlanAssessmentError):
+                fetch_public_issue("org/repo", 14)
+
+        pull_request_payload = json.dumps({
+            "number": 14, "title": "PR", "state": "open", "body": "not an owning Issue",
+            "repository_url": "https://api.github.com/repos/org/repo",
+            "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/14"},
+        }).encode()
+
+        class PullRequestResponse(Response):
+            def read(self, _size):
+                return pull_request_payload
+
+        with patch("urllib.request.urlopen", return_value=PullRequestResponse()):
             with self.assertRaises(PlanAssessmentError):
                 fetch_public_issue("org/repo", 14)
 
@@ -243,6 +261,9 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         self.assertNotIn("project-sync-tests.yml", source)
         self.assertNotIn("issues: read", source)
         self.assertIn("Assess declared source-bound plan effects", source)
+        self.assertIn("Assess declared source-bound plan effects with trusted base code", source)
+        self.assertIn("BASE_SHA: ${{ github.event.pull_request.base.sha }}", source)
+        self.assertNotIn("${{ github.sha }}", source)
         self.assertIn("pull_request:", source)
 
 
