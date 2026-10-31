@@ -179,20 +179,23 @@ def assess_plan(effective_context: object, plan: object) -> dict[str, Any]:
         for effect in step["declared_effects"]:
             key = (effect["key"], effect["scope"])
             expected = keyed.get(key)
+            expected_state = expected.get("state") if expected is not None else None
+            expected_authority = expected.get("authority") if expected is not None else None
             if not complete_chain:
                 unchecked.append({"step_id": step["id"], "key": key[0], "scope": key[1],
                                   "reason_code": "PARENT_CHAIN_INCOMPLETE"})
                 continue
-            if (expected is None or expected.get("state") not in {"adopted", "removed"}
-                    or expected.get("authority") not in ALLOWED_AUTHORITIES
+            if (expected is None or not isinstance(expected_state, str)
+                    or expected_state not in {"adopted", "removed"}
+                    or not isinstance(expected_authority, str)
+                    or expected_authority not in ALLOWED_AUTHORITIES
                     or not _is_text(expected.get("claim_ref"))
                     or not _is_text(expected.get("source_issue"))
                     or not _is_text(expected.get("evidence_ref"))
-                    or (expected.get("state") == "adopted" and "value" not in expected)):
+                    or (expected_state == "adopted" and "value" not in expected)):
                 unchecked.append({"step_id": step["id"], "key": key[0], "scope": key[1],
                                   "reason_code": "NO_MATCHING_ADOPTED_SPECIFICATION"})
                 continue
-            expected_state = expected["state"]
             expected_plan_state = "set" if expected_state == "adopted" else "removed"
             mismatch = effect["state"] != expected_plan_state
             if not mismatch and effect["state"] == "set":

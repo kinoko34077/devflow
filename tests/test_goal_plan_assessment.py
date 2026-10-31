@@ -94,6 +94,19 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         self.assertEqual(result["mechanical_conflicts"], [])
         self.assertFalse(result["blocks_execution"])
 
+    def test_malformed_effective_state_or_authority_remains_unknown_without_crashing(self):
+        for field, malformed in (("state", []), ("authority", {})):
+            source = adopted("runtime.mode", "realtime")
+            source[field] = malformed
+            with self.subTest(field=field):
+                result = assess_plan(
+                    context([source]),
+                    plan([self.effect("runtime.mode", "offline")]),
+                )
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["mechanical_conflicts"], [])
+                self.assertFalse(result["blocks_execution"])
+
     def test_missing_parent_source_stays_unknown_even_when_visible_claim_disagrees(self):
         result = assess_plan(
             context([adopted("runtime.mode", "realtime")], parent_chain_status="PARTIAL_UNKNOWN"),
