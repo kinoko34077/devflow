@@ -153,6 +153,16 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         with self.assertRaises(PlanAssessmentError):
             parse_plan_json('{"schema_version":1,"schema_version":1}')
 
+    def test_non_string_effect_state_is_invalid_and_never_raises_type_error(self):
+        for state in ([], {}, None, 1):
+            candidate = plan([{"key": "runtime.mode", "scope": "default", "state": state}])
+            with self.subTest(state=state):
+                result = assess_plan(context([adopted("runtime.mode", "realtime")]), candidate)
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["reason_code"], "PLAN_INVALID")
+                with self.assertRaises(PlanAssessmentError):
+                    parse_plan_json(json.dumps(candidate))
+
     def test_public_reader_is_anonymous_and_checks_observed_issue_identity(self):
         payload = json.dumps({
             "number": 14, "title": "task", "state": "open", "body": "source",

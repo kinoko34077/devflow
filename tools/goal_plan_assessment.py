@@ -95,8 +95,10 @@ def _normalize_plan(plan: object) -> dict[str, Any]:
             if effect_count > MAX_EFFECTS or not isinstance(effect, Mapping):
                 raise PlanAssessmentError("PLAN_INVALID")
             state = effect.get("state")
+            if not isinstance(state, str) or state not in {"set", "removed"}:
+                raise PlanAssessmentError("PLAN_INVALID")
             required = {"key", "scope", "state"} | ({"value"} if state == "set" else set())
-            if set(effect) != required or state not in {"set", "removed"}:
+            if set(effect) != required:
                 raise PlanAssessmentError("PLAN_INVALID")
             if not _is_text(effect.get("key"), limit=200) or not _is_text(effect.get("scope"), limit=200):
                 raise PlanAssessmentError("PLAN_INVALID")
