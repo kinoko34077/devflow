@@ -173,7 +173,7 @@ receipt records the deployed source target and a bounded set of browser checks:
 The packet below binds the comparison to the #839 Issue-body revision observed
 on 2026-10-31. Any later edit to that body requires a new hash.
 
-\`\`\`json
+```json
 {
   "task_ref": "kinoko34077/devflow#839",
   "issue_body_sha256": "d08d84941f2db9de48b0cac19d2a709ff12d85034bd9bbd20f19c13166479f74",
@@ -186,12 +186,12 @@ on 2026-10-31. Any later edit to that body requires a new hash.
     "https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106750343"
   ]
 }
-\`\`\`
+```
 
 That receipt is a past limited observation, not a fresh check of today's Pages
 content or proof that every #310 scenario works. The separate tokenWindow
 fixture witness in [#310 comment #6106079188](https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106079188)
-is \`FIXTURE_PARITY\`, so treating it as \`PUBLIC_BROWSER\` must produce a surface
+is `FIXTURE_PARITY`, so treating it as `PUBLIC_BROWSER` must produce a surface
 mismatch; it is a false-positive control, not a second browser success.
 Gesture IME [#203 comment #6116020441](https://github.com/kinoko34077/gesture-ime/issues/203#issuecomment-6116020441)
 preserves the reported physical failure while installed IPA identity remains
