@@ -115,6 +115,14 @@ def assess_issue_plan(repository: str, issue_number: int, plan: dict[str, Any]) 
 
 
 @mcp.tool()
+def assess_outcome_observation(
+    repository: str, issue_number: int, evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compare declared outcome identities to the current Issue revision; does not verify use or acceptance."""
+    return _service().assess_outcome_observation(repository, issue_number, evidence)
+
+
+@mcp.tool()
 def get_sync_health() -> dict[str, Any]:
     """Return the machine-maintained devflow Project Sync Health record."""
     return _service().get_sync_health()

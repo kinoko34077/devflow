@@ -931,6 +931,7 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
         self.assertIn("get_portfolio_projection", tools)
         self.assertIn("get_issue_goal_context", tools)
         self.assertIn("assess_issue_plan", tools)
+        self.assertIn("assess_outcome_observation", tools)
         self.assertFalse(
             any(
                 name.startswith(
@@ -987,6 +988,27 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "assess_issue_plan"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0].func.value, ast.Call)
+        self.assertEqual(calls[0].func.value.func.id, "_service")
+
+    def test_outcome_observation_mcp_tool_delegates_to_shared_service_method(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tools"
+            / "devflow_mcp.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "assess_outcome_observation"
+        )
+        calls = [
+            node for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "assess_outcome_observation"
         ]
         self.assertEqual(len(calls), 1)
         self.assertIsInstance(calls[0].func.value, ast.Call)
@@ -1422,6 +1444,89 @@ class EffectiveGoalContextServiceTests(unittest.TestCase):
         self.assertFalse(result["blocks_execution"])
         self.assertFalse(result["can_authorize_execution"])
         self.assertEqual(result["semantic_critique"], "NOT_PERFORMED")
+
+    def test_outcome_observation_binds_packet_to_exact_current_issue_revision(self):
+        issue = {
+            "number": 14,
+            "title": "Outcome task",
+            "state": "open",
+            "body": "## Purpose\n\nObserve the public browser path.\n",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/14",
+        }
+
+        class Reader:
+            def __init__(inner_self):
+                inner_self.calls = []
+
+            def get_issue(inner_self, repository, issue_number):
+                inner_self.calls.append((repository, issue_number))
+                return issue
+
+        reader = Reader()
+        body_sha256 = hashlib.sha256(issue["body"].encode()).hexdigest()
+        packet = {
+            "task_ref": "kinoko34077/devflow#14",
+            "issue_body_sha256": body_sha256,
+            "required_surface": "PUBLIC_BROWSER",
+            "required_target": "git:f38d562",
+            "observed_surface": "PUBLIC_BROWSER",
+            "observed_target": "git:f38d562",
+            "observed_result": "VALID_NEGATIVE",
+            "evidence_refs": ["https://github.com/kinoko34077/devflow/issues/14#issuecomment-1"],
+        }
+        result = devflow_mcp_core.DevflowService(
+            reader, observed_at_factory=lambda: "2026-10-31T20:00:00Z"
+        ).assess_outcome_observation("devflow", 14, packet)
+
+        self.assertEqual(reader.calls, [("kinoko34077/devflow", 14)])
+        self.assertEqual(result["status"], "DECLARED_ALIGNED")
+        self.assertEqual(result["observed_result"], "VALID_NEGATIVE")
+        self.assertEqual(result["owning_issue_url"], "https://github.com/kinoko34077/devflow/issues/14")
+        self.assertEqual(result["issue_body_sha256"], body_sha256)
+        self.assertEqual(result["observed_at"], "2026-10-31T20:00:00Z")
+        self.assertEqual(result["source_verification"], "NOT_PERFORMED")
+        self.assertFalse(result["acceptance_satisfied"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_outcome_observation_stale_issue_revision_returns_needs_evidence(self):
+        issue = {
+            "number": 14,
+            "title": "Outcome task",
+            "state": "open",
+            "body": "Current body",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/14",
+        }
+        packet = {
+            "task_ref": "kinoko34077/devflow#14",
+            "issue_body_sha256": "a" * 64,
+            "required_surface": "PUBLIC_BROWSER",
+            "required_target": "git:f38d562",
+            "observed_surface": "PUBLIC_BROWSER",
+            "observed_target": "git:f38d562",
+            "observed_result": "SUCCESS",
+            "evidence_refs": ["https://github.com/kinoko34077/devflow/issues/14#issuecomment-1"],
+        }
+        service = devflow_mcp_core.DevflowService(
+            FakeReader([issue]), observed_at_factory=lambda: "2026-10-31T20:00:00Z"
+        )
+        result = service.assess_outcome_observation("devflow", 14, packet)
+        self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(result["reason"], "STALE_OWNING_ISSUE_REVISION")
+        self.assertFalse(result["acceptance_satisfied"])
+
+    def test_invalid_outcome_observation_issue_number_fails_before_reader(self):
+        class Reader:
+            def get_issue(self, *_args):
+                raise AssertionError("invalid Issue number must fail before read")
+
+        service = devflow_mcp_core.DevflowService(Reader())
+        for invalid in (True, 0, -1):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError) as raised:
+                    service.assess_outcome_observation("devflow", invalid, None)
+                self.assertEqual(raised.exception.reason_code, "INVALID_ISSUE_NUMBER")
 
     def test_invalid_plan_is_returned_as_needs_evidence_before_live_reads(self):
         class Reader:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,7 @@ try:
     )
     from . import (
         github_issue_trust,
+        acceptance_evidence_preflight,
         human_portfolio,
         agent_inbox,
         issue_goal_context,
@@ -45,6 +47,7 @@ except ImportError:  # direct script execution
         parse_request_body,
     )
     import github_issue_trust
+    import acceptance_evidence_preflight
     import human_portfolio
     import agent_inbox
     import issue_goal_context
@@ -1246,6 +1249,35 @@ class DevflowService:
         normalized = normalize_repository(repository)
         context = self.get_issue_goal_context(normalized, issue_number)
         return goal_plan_assessment.assess_plan(context, plan)
+
+    def assess_outcome_observation(
+        self, repository: str, issue_number: int, evidence: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Compare a declared outcome packet to the exact current Issue revision.
+
+        The result checks packet consistency only. The linked evidence and the
+        requirement declaration are not independently authenticated here.
+        """
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        normalized = normalize_repository(repository)
+        issue = self.get_issue(normalized, issue_number)
+        body_sha256 = hashlib.sha256(issue["body"].encode("utf-8")).hexdigest()
+        result = acceptance_evidence_preflight.outcome_observation_preflight(
+            evidence,
+            task_ref=f"{normalized}#{issue_number}",
+            observed_issue_body_sha256=body_sha256,
+        )
+        return {
+            **result,
+            "task_ref": f"{normalized}#{issue_number}",
+            "owning_issue_url": issue["url"],
+            "issue_body_sha256": body_sha256,
+            "observed_at": self._observed_at_factory(),
+        }
 
     def get_sync_health(self) -> dict[str, Any]:
         issues = self.reader.list_issues(self.devflow_repository, state="all")

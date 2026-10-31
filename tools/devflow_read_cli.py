@@ -14,7 +14,10 @@ from tools import agent_inbox
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
-OPERATIONS = ("bootstrap", "work-view", "inbox", "issue-goal-context", "assess-issue-plan")
+OPERATIONS = (
+    "bootstrap", "work-view", "inbox", "issue-goal-context",
+    "assess-issue-plan", "assess-outcome-observation",
+)
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
 
 # Never echo exception text or caller-controlled fields into machine-readable
@@ -45,6 +48,7 @@ SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_ISSUE_NUMBER",
     "ISSUE_NUMBER_ON_NON_ISSUE_OPERATION",
     "PLAN_ON_NON_ASSESSMENT_OPERATION",
+    "OUTCOME_ON_NON_ASSESSMENT_OPERATION",
 })
 
 
@@ -62,11 +66,14 @@ def read_operation(
     recipient: str = "codex", limit: int = 20, offset: int = 0,
     work_status: str | None = None, issue_number: int | None = None,
     plan: dict[str, Any] | None = None,
+    outcome: dict[str, Any] | None = None,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
     if plan is not None and operation != "assess-issue-plan":
         raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
-    if operation in {"issue-goal-context", "assess-issue-plan"}:
+    if outcome is not None and operation != "assess-outcome-observation":
+        raise ValueError("OUTCOME_ON_NON_ASSESSMENT_OPERATION")
+    if operation in {"issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
         if type(issue_number) is not int or issue_number < 1:
             raise ValueError("INVALID_ISSUE_NUMBER")
         if operation == "assess-issue-plan" and plan is None:
@@ -87,6 +94,8 @@ def read_operation(
         return service.get_issue_goal_context(repository, issue_number)
     if operation == "assess-issue-plan":
         return service.assess_issue_plan(repository, issue_number, plan)
+    if operation == "assess-outcome-observation":
+        return service.assess_outcome_observation(repository, issue_number, outcome)
     raise ValueError("INVALID_OPERATION")
 
 
@@ -100,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work-status", default=None)
     parser.add_argument("--issue-number", type=int, default=None)
     parser.add_argument("--plan-file", default=None, help="JSON file containing a declared plan (assess-issue-plan only).")
+    parser.add_argument(
+        "--outcome-file", default=None,
+        help="JSON file containing a declared outcome observation (assess-outcome-observation only).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -118,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             agent_inbox.validate_inbox_options(
                 args.recipient, args.limit, args.offset, args.work_status
             )
-        if args.operation in {"issue-goal-context", "assess-issue-plan"}:
+        if args.operation in {"issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
             if args.issue_number is None or args.issue_number < 1:
                 raise ValueError("INVALID_ISSUE_NUMBER")
         elif args.issue_number is not None:
@@ -134,6 +147,19 @@ def main(argv: list[str] | None = None) -> int:
                     plan = None
         elif args.plan_file is not None:
             raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
+        outcome = None
+        if args.operation == "assess-outcome-observation":
+            if args.outcome_file is not None:
+                try:
+                    with open(args.outcome_file, encoding="utf-8") as evidence_file:
+                        raw = evidence_file.read(100_001)
+                    if len(raw) <= 100_000:
+                        packet = json.loads(raw, object_pairs_hook=_unique_object)
+                        outcome = packet if isinstance(packet, dict) else None
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                    outcome = None
+        elif args.outcome_file is not None:
+            raise ValueError("OUTCOME_ON_NON_ASSESSMENT_OPERATION")
         if args.operation == "assess-issue-plan" and plan is None:
             print(json.dumps(assess_plan({}, None), ensure_ascii=True, separators=(",", ":")))
             return 0
@@ -142,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             repository=args.repository, recipient=args.recipient,
             limit=args.limit, offset=args.offset,
             work_status=args.work_status, issue_number=args.issue_number,
-            plan=plan if args.operation == "assess-issue-plan" else None)
+            plan=plan if args.operation == "assess-issue-plan" else None,
+            outcome=outcome if args.operation == "assess-outcome-observation" else None)
         # Preserve the native MCP core's exact data, including partial/unknown
         # coverage diagnostics and null-valued unavailable sources.
         # JSON semantics are unchanged; ASCII escapes prevent cp932 stdout
@@ -153,6 +180,15 @@ def main(argv: list[str] | None = None) -> int:
         # Do not expose GitHub response bodies, headers, private Issues or tokens.
         print(json.dumps({"status": "BLOCKED", "reason_code": failure_reason_code(exc)}))
         return 2
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("DUPLICATE_JSON_KEY")
+        result[key] = value
+    return result
 
 
 if __name__ == "__main__":
