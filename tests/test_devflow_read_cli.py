@@ -34,6 +34,18 @@ class FakeService:
             "can_authorize_execution": False,
         }
 
+    def get_issue_goal_context(self, repository, issue_number):
+        self.calls.append(("issue-goal-context", repository, issue_number))
+        return {
+            "parent_chain_status": "COMPLETE",
+            "source_contexts": [{"issue_ref": f"{repository}#{issue_number}"}],
+            "effective_specifications": [{
+                "key": "runtime.mode", "scope": "default", "state": "adopted",
+                "value": "safe", "source_issue": f"{repository}#{issue_number}",
+            }],
+            "unknowns": [],
+        }
+
 
 class CloudReadCLITests(unittest.TestCase):
     REPOSITORY = "kinoko34077/devflow"
@@ -64,6 +76,47 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(result["issues"], [])
         self.assertTrue(result["has_unknown_work"])
         self.assertIsNone(result["next_offset"])
+
+    def test_issue_goal_context_cli_operation_preserves_shared_service_result(self):
+        service = FakeService()
+        direct = service.get_issue_goal_context(self.REPOSITORY, 14)
+        cli_result = cli.read_operation(
+            service, operation="issue-goal-context",
+            repository=self.REPOSITORY, issue_number=14,
+        )
+        self.assertEqual(cli_result, direct)
+        self.assertEqual(service.calls[-1], ("issue-goal-context", self.REPOSITORY, 14))
+        self.assertEqual(cli_result["source_contexts"], [{"issue_ref": "kinoko34077/devflow#14"}])
+        self.assertEqual(cli_result["effective_specifications"][0]["value"], "safe")
+
+    def test_issue_number_cli_arguments_are_validated_before_service_access(self):
+        for arguments, expected in (
+            (["issue-goal-context", "--repository", self.REPOSITORY], "INVALID_ISSUE_NUMBER"),
+            (["issue-goal-context", "--repository", self.REPOSITORY, "--issue-number", "0"], "INVALID_ISSUE_NUMBER"),
+            (["bootstrap", "--repository", self.REPOSITORY, "--issue-number", "14"], "ISSUE_NUMBER_ON_NON_ISSUE_OPERATION"),
+        ):
+            with self.subTest(arguments=arguments):
+                with patch("tools.devflow_read_cli.default_service") as get_service:
+                    with patch("builtins.print") as out:
+                        self.assertEqual(cli.main(arguments), 2)
+                    get_service.assert_not_called()
+                self.assertEqual(json.loads(out.call_args.args[0]), {
+                    "status": "BLOCKED", "reason_code": expected,
+                })
+
+    def test_main_issue_goal_context_json_uses_the_same_shared_service(self):
+        service = FakeService()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                status = cli.main([
+                    "issue-goal-context", "--repository", self.REPOSITORY,
+                    "--issue-number", "14",
+                ])
+        self.assertEqual(status, 0)
+        result = json.loads(out.call_args.args[0])
+        self.assertEqual(result["parent_chain_status"], "COMPLETE")
+        self.assertEqual(result["effective_specifications"][0]["source_issue"], f"{self.REPOSITORY}#14")
+        self.assertEqual(service.calls, [("issue-goal-context", self.REPOSITORY, 14)])
 
     def test_main_json_is_raw_core_result_and_not_a_synthetic_success(self):
         service = FakeService()
@@ -109,6 +162,9 @@ class CloudReadCLITests(unittest.TestCase):
             ["inbox", "--repository", self.REPOSITORY, "--limit", "0"],
             ["inbox", "--repository", self.REPOSITORY, "--offset", "-1"],
             ["work-view", "--repository", self.REPOSITORY, "--recipient", "claude-code"],
+            ["issue-goal-context", "--repository", self.REPOSITORY],
+            ["issue-goal-context", "--repository", self.REPOSITORY, "--issue-number", "0"],
+            ["bootstrap", "--repository", self.REPOSITORY, "--issue-number", "14"],
         ]
         for arguments in cases:
             with self.subTest(arguments=arguments):
@@ -117,6 +173,25 @@ class CloudReadCLITests(unittest.TestCase):
                         self.assertEqual(cli.main(arguments), 2)
                     get_service.assert_not_called()
                 self.assertEqual(json.loads(out.call_args.args[0])["status"], "BLOCKED")
+
+    def test_issue_goal_context_read_failure_uses_redacted_fixed_code(self):
+        service = FakeService()
+        def blocked(_repository, _issue_number):
+            raise DevflowMCPError(
+                "private Issue body and response token",
+                reason_code="GITHUB_HTTP_403",
+            )
+        service.get_issue_goal_context = blocked
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                status = cli.main([
+                    "issue-goal-context", "--repository", self.REPOSITORY,
+                    "--issue-number", "14",
+                ])
+        self.assertEqual(status, 2)
+        self.assertEqual(json.loads(out.call_args.args[0]), {
+            "status": "BLOCKED", "reason_code": "GITHUB_HTTP_403",
+        })
 
     def test_inbox_limit_matches_shared_core_boundary(self):
         self.assertEqual(cli.MAX_INBOX_LIMIT, 20)

@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
-from tools import devflow_mcp_core, repository_projection
+from tools import devflow_mcp_core, issue_goal_context, repository_projection
 from tests.test_repository_bootstrap import issue_body, request_payload
 
 
@@ -928,6 +928,7 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
 
         self.assertIn("get_repository_projection", tools)
         self.assertIn("get_portfolio_projection", tools)
+        self.assertIn("get_issue_goal_context", tools)
         self.assertFalse(
             any(
                 name.startswith(
@@ -945,6 +946,28 @@ class RepositoryProjectionMCPSurfaceContractTests(unittest.TestCase):
             ),
             tools,
         )
+
+    def test_goal_context_mcp_tool_delegates_to_shared_service_method(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tools"
+            / "devflow_mcp.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "get_issue_goal_context"
+        )
+        calls = [
+            node for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get_issue_goal_context"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0].func.value, ast.Call)
+        self.assertIsInstance(calls[0].func.value.func, ast.Name)
+        self.assertEqual(calls[0].func.value.func.id, "_service")
 
 
 
@@ -1251,6 +1274,150 @@ class GitHubReadOnlyClientTests(unittest.TestCase):
         reader = devflow_mcp_core.GitHubReader(token="", transport=transport)
         with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "GitHub read failed: TimeoutError"):
             reader.get_issue("kinoko34077/devflow", 1)
+
+
+class EffectiveGoalContextServiceTests(unittest.TestCase):
+    REPOSITORY = "org/repo"
+
+    @staticmethod
+    def _context(specifications, *, parent_goal_ref=None, request_ref="https://github.com/org/repo/issues/1"):
+        context = {
+            "schema_version": 2,
+            "request": "Preserve the user's requested behavior",
+            "request_ref": request_ref,
+            "specifications": specifications,
+        }
+        if parent_goal_ref:
+            context["parent_goal_ref"] = parent_goal_ref
+        else:
+            context["higher_goals"] = [{
+                "statement": "Keep the accepted project behavior",
+                "kind": "explicit",
+                "evidence_ref": request_ref,
+            }]
+            context["success_conditions"] = ["The selected source facts remain effective"]
+        return context
+
+    @staticmethod
+    def _claim(claim_id, key, value, *, supersedes=None, evidence_ref="https://sources.example/current"):
+        item = {
+            "id": claim_id,
+            "key": key,
+            "scope": "default",
+            "state": "adopted",
+            "authority": "accepted_spec",
+            "evidence_ref": evidence_ref,
+            "value": value,
+        }
+        if supersedes:
+            item["supersedes"] = supersedes
+        return item
+
+    def _issue(self, number, context):
+        body = issue_goal_context.upsert_goal_context("", context)
+        return {
+            "number": number,
+            "title": f"Goal context fixture {number}",
+            "state": "open",
+            "body": body,
+            "repository_url": "https://api.github.com/repos/org/repo",
+            "html_url": f"https://github.com/org/repo/issues/{number}",
+        }
+
+    def test_service_resolves_effective_context_through_identity_checked_reader(self):
+        parent = self._issue(11, self._context([
+            self._claim("mode-v1", "runtime.mode", "safe", evidence_ref="https://sources.example/base"),
+            self._claim("enabled", "feature.enabled", False),
+        ], request_ref="https://github.com/org/repo/issues/11"))
+        child = self._issue(14, self._context([
+            self._claim("mode-v2", "runtime.mode", "fast", supersedes="org/repo#11:mode-v1"),
+        ], parent_goal_ref="org/repo#11", request_ref="https://github.com/org/repo/issues/14"))
+
+        class Reader:
+            def __init__(self):
+                self.calls = []
+
+            def get_issue(inner_self, repository, issue_number):
+                inner_self.calls.append((repository, issue_number))
+                return {11: parent, 14: child}[issue_number]
+
+        reader = Reader()
+        service = devflow_mcp_core.DevflowService(reader)
+        result = service.get_issue_goal_context(self.REPOSITORY, 14)
+        from tools import devflow_read_cli
+        cli_result = devflow_read_cli.read_operation(
+            service, operation="issue-goal-context",
+            repository=self.REPOSITORY, issue_number=14,
+        )
+
+        effective = {(item["key"], item["scope"]): item for item in result["effective_specifications"]}
+        self.assertEqual(cli_result, result)
+        self.assertEqual(reader.calls, [
+            (self.REPOSITORY, 14), (self.REPOSITORY, 11),
+            (self.REPOSITORY, 14), (self.REPOSITORY, 11),
+        ])
+        self.assertEqual(result["parent_chain_status"], "COMPLETE")
+        self.assertEqual(effective[("runtime.mode", "default")]["value"], "fast")
+        self.assertEqual(effective[("feature.enabled", "default")]["value"], False)
+        self.assertEqual(effective[("runtime.mode", "default")]["source_issue"], "org/repo#14")
+        self.assertEqual(result["source_contexts"][0]["url"], "https://github.com/org/repo/issues/11")
+        self.assertEqual(result["semantic_citation_verification"], "NOT_PERFORMED")
+
+    def test_service_fails_closed_on_unavailable_parent_without_leaking_reader_details(self):
+        child = self._issue(14, self._context([
+            self._claim("visible", "feature.enabled", False),
+        ], parent_goal_ref="org/repo#11", request_ref="https://github.com/org/repo/issues/14"))
+
+        class Reader:
+            def get_issue(self, repository, issue_number):
+                if issue_number == 14:
+                    return child
+                raise devflow_mcp_core.DevflowMCPError(
+                    "private response and token must not escape",
+                    reason_code="GITHUB_HTTP_403",
+                )
+
+        result = devflow_mcp_core.DevflowService(Reader()).get_issue_goal_context(self.REPOSITORY, 14)
+        self.assertEqual(result["parent_chain_status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(result["unknowns"][0]["reason_code"], "PARENT_UNAVAILABLE")
+        self.assertEqual(result["effective_specifications"][0]["state"], "unknown")
+        self.assertEqual(result["effective_specifications"][0]["reason_code"], "PARENT_CHAIN_INCOMPLETE")
+        self.assertNotIn("private response", json.dumps(result))
+        self.assertNotIn("token", json.dumps(result))
+        self.assertNotIn("parent_goal_ref", json.dumps(result["source_contexts"]))
+
+    def test_invalid_issue_number_is_rejected_before_reader_io(self):
+        class Reader:
+            calls = []
+
+            def get_issue(self, repository, issue_number):
+                self.calls.append((repository, issue_number))
+                raise AssertionError("invalid issue number must fail before I/O")
+
+        reader = Reader()
+        service = devflow_mcp_core.DevflowService(reader)
+        for invalid in (True, 0, -1):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError) as raised:
+                    service.get_issue_goal_context(self.REPOSITORY, invalid)
+                self.assertEqual(raised.exception.reason_code, "INVALID_ISSUE_NUMBER")
+        self.assertEqual(reader.calls, [])
+
+    def test_invalid_repository_is_rejected_before_reader_io(self):
+        class Reader:
+            calls = []
+
+            def get_issue(self, repository, issue_number):
+                self.calls.append((repository, issue_number))
+                raise AssertionError("invalid repository must fail before I/O")
+
+        reader = Reader()
+        service = devflow_mcp_core.DevflowService(reader)
+        for repository in ("", "org/repo/extra"):
+            with self.subTest(repository=repository):
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+                    service.get_issue_goal_context(repository, 14)
+        self.assertEqual(reader.calls, [])
 
 
 class ObservedIssueIdentityTests(unittest.TestCase):

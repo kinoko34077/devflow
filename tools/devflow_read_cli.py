@@ -1,4 +1,4 @@
-"""Read-only Devflow bootstrap, work view and Agent Inbox without MCP tool registration.
+"""Read-only Devflow Goal Context, bootstrap, work view and Agent Inbox without MCP tool registration.
 
 Uses the same live Devflow service as the stdio MCP server. Does not schedule,
 claim, mutate GitHub state or treat incomplete data as an empty work inventory.
@@ -13,7 +13,7 @@ from typing import Any
 from tools import agent_inbox
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 
-OPERATIONS = ("bootstrap", "work-view", "inbox")
+OPERATIONS = ("bootstrap", "work-view", "inbox", "issue-goal-context")
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
 
 # Never echo exception text or caller-controlled fields into machine-readable
@@ -41,6 +41,8 @@ SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_LIMIT",
     "INVALID_OFFSET",
     "INVALID_WORK_STATUS",
+    "INVALID_ISSUE_NUMBER",
+    "ISSUE_NUMBER_ON_NON_ISSUE_OPERATION",
 })
 
 
@@ -56,9 +58,14 @@ def failure_reason_code(exc: DevflowMCPError | ValueError) -> str:
 def read_operation(
     service: Any, *, operation: str, repository: str,
     recipient: str = "codex", limit: int = 20, offset: int = 0,
-    work_status: str | None = None,
+    work_status: str | None = None, issue_number: int | None = None,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
+    if operation == "issue-goal-context":
+        if type(issue_number) is not int or issue_number < 1:
+            raise ValueError("INVALID_ISSUE_NUMBER")
+    elif issue_number is not None:
+        raise ValueError("ISSUE_NUMBER_ON_NON_ISSUE_OPERATION")
     if operation == "bootstrap":
         return service.bootstrap_repository(repository)
     if operation == "work-view":
@@ -67,6 +74,8 @@ def read_operation(
         return service.get_agent_inbox(
             repository, recipient, limit=limit, offset=offset,
             work_status=work_status)
+    if operation == "issue-goal-context":
+        return service.get_issue_goal_context(repository, issue_number)
     raise ValueError("INVALID_OPERATION")
 
 
@@ -78,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--work-status", default=None)
+    parser.add_argument("--issue-number", type=int, default=None)
     args = parser.parse_args(argv)
 
     try:
@@ -95,11 +105,16 @@ def main(argv: list[str] | None = None) -> int:
             agent_inbox.validate_inbox_options(
                 args.recipient, args.limit, args.offset, args.work_status
             )
+        if args.operation == "issue-goal-context":
+            if args.issue_number is None or args.issue_number < 1:
+                raise ValueError("INVALID_ISSUE_NUMBER")
+        elif args.issue_number is not None:
+            raise ValueError("ISSUE_NUMBER_ON_NON_ISSUE_OPERATION")
         result = read_operation(
             default_service(), operation=args.operation,
             repository=args.repository, recipient=args.recipient,
             limit=args.limit, offset=args.offset,
-            work_status=args.work_status)
+            work_status=args.work_status, issue_number=args.issue_number)
         # Preserve the native MCP core's exact data, including partial/unknown
         # coverage diagnostics and null-valued unavailable sources.
         # JSON semantics are unchanged; ASCII escapes prevent cp932 stdout

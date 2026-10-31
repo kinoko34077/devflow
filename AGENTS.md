@@ -47,6 +47,8 @@ If no Repository Control Issue exists, do not invent managed state. Treat onboar
 
 If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work. When resolving repository-local **open tasks**, call the read-only `get_repository_work_view` after bootstrap if available: it exposes all open machine TASK states and retains explicit manual Control fallback. Neither `MACHINE_COMPLETE_SHADOW` nor a visible READY entry grants runtime claim or authority removal; incomplete/unavailable/untrusted status means preserve the manual Control view and inspect owning Issues directly. A bot-authored Control without a verified bootstrap chain is not canonical merely because it has a `[REPO]` title or an older cached `VERIFIED` marker.
 
+When a task's source-linked Goal Context is present or referenced, use `get_issue_goal_context(repository, issue_number)` to read the shared effective projection. It preserves citations and explicit unknowns; it does not verify citation truth or authorize changes. Do not reimplement inheritance in an agent-specific planner.
+
 The MCP is a read-only access layer to the same live GitHub canon. It does not replace this file, the Control Issue, or repository-local technical truth. Setup and client trigger instructions are in `docs/operations/DEVFLOW_MCP.md`.
 
 ### Codex Cloud with no exposed Devflow MCP tools
@@ -59,7 +61,11 @@ From the devflow checkout, use `python -m tools.devflow_read_cli bootstrap
 work-view --repository kinoko34077/<repo>` for open-work analysis, and
 `python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow
 --recipient codex --work-status AWAITING_REVIEW` for Codex-addressed inbox
-messages. These delegate to the same live GET-only service as MCP. When only
+messages. For a known Issue whose source-linked goal context is needed, also use
+`python -m tools.devflow_read_cli issue-goal-context --repository kinoko34077/<repo> --issue-number <N>`.
+These delegate to the same live GET-only service as MCP. If neither shared entry
+is available, inspect the exact Issue and explicit parent Issues directly through
+GitHub; preserve inaccessible or malformed sources as unknown. When only
 the older accepted Inbox CLI is available, it remains a valid bounded Inbox
 fallback; direct Control and source Issue inspection remains mandatory if
 coverage is incomplete or unavailable. Preserve #503 pointer fallback.

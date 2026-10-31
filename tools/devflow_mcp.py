@@ -103,6 +103,12 @@ def get_issue(repository: str, issue_number: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_issue_goal_context(repository: str, issue_number: int) -> dict[str, Any]:
+    """Resolve source-linked effective Goal Context through bounded read-only Issue ancestry."""
+    return _service().get_issue_goal_context(repository, issue_number)
+
+
+@mcp.tool()
 def get_sync_health() -> dict[str, Any]:
     """Return the machine-maintained devflow Project Sync Health record."""
     return _service().get_sync_health()

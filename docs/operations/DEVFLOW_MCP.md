@@ -21,9 +21,10 @@ The server exposes only read operations:
 - `get_portfolio_projection()`
 - `get_human_portfolio(repository)`
 - `get_issue(repository, issue_number)`
+- `get_issue_goal_context(repository, issue_number)`
 - `get_sync_health()`
 
-This list reflects the **currently exported** ten functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
+This list reflects the **currently exported** eleven functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
@@ -43,6 +44,20 @@ python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
 python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
 ```
+
+For one Issue's source-linked effective Goal Context, both client paths call the
+same `DevflowService.get_issue_goal_context` method and return the same structured
+projection:
+
+```sh
+python -m tools.devflow_read_cli issue-goal-context --repository kinoko34077/<repo> --issue-number <N>
+```
+
+The MCP equivalent is `get_issue_goal_context(repository, issue_number)`. It
+preserves source contexts, citations, proposals, effective specifications and
+unknowns. It does not prove citation truth. If neither shared entry is available,
+read the exact Issue and explicit parents directly from GitHub; inaccessible or
+malformed sources remain unknown, not empty.
 
 A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
 or `has_unknown_work=true` is *not* the end of a recipient message check:
@@ -129,6 +144,8 @@ For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
 | `GITHUB_NETWORK_UNAVAILABLE` / `GITHUB_INVALID_JSON` / `GITHUB_REDIRECTED_READ` | Network, invalid API body or changed observed identity; keep reads fail-closed. |
 | `CONTROL_NOT_FOUND_OR_UNTRUSTED` / `CONTROL_AMBIGUOUS` | No single accepted open Control; inspect its author/provenance and exact title through canonical GitHub reads. |
 | `CONTROL_SCHEMA_INVALID` / `CONTROL_REPOSITORY_MISMATCH` | The Control failed required sections or repository identity checks; do not bypass validation. |
+| `INVALID_ISSUE_NUMBER` | The Goal Context operation needs one positive Issue number; check the command arguments. |
+| `ISSUE_NUMBER_ON_NON_ISSUE_OPERATION` | `--issue-number` is valid only for `issue-goal-context`; remove it for other operations. |
 | `DEVFLOW_READ_UNAVAILABLE` | Unclassified core failure; preserve manual Control and exact original Issue reads rather than infer no work. |
 
 Codes are not proof of the underlying cause (for example, 403 and 404 remain
@@ -156,6 +173,14 @@ The same policy applies to `get_sync_health`: only trusted-author `[SYSTEM] GitH
 ## Exact Issue identity
 
 `get_issue` validates the observed GitHub object, not the caller's request. The response `number` and `repository_url` must match the requested Issue (repository compared case-insensitively), pull requests are rejected, and any HTTP redirect (transfer, rename, misrouting) fails closed with a non-secret diagnostic. The caller-supplied identity is never used to fill in or relabel a response. A renamed repository must be requested by its current name.
+
+`get_issue_goal_context` keeps the raw `get_issue` response contract unchanged.
+It uses that same identity-checking reader for the requested Issue and every
+explicit parent reference, with the R1 bounded resolver. Incomplete ancestry
+returns explicit unknown values and bounded diagnostics; it does not expose a
+failed reader's response body or treat absence of data as an adopted value. The
+CLI uses the same service and emits only its fixed, redacted reason codes when
+the top-level Issue read is blocked.
 
 ## Runtime
 
