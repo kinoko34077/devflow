@@ -300,6 +300,9 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         self.assertIn("Assess declared source-bound plan effects", source)
         self.assertIn("Assess declared source-bound plan effects with trusted base code", source)
         self.assertIn("BASE_SHA: ${{ github.event.pull_request.base.sha }}", source)
+        self.assertIn('git cat-file -e "${BASE_SHA}:tools/goal_plan_assessment.py"', source)
+        self.assertIn("GOAL_PLAN_CHECK=SKIPPED_EVALUATOR_NOT_ON_BASE", source)
+        self.assertLess(source.index('git cat-file -e "${BASE_SHA}:tools/goal_plan_assessment.py"'), source.index("python -m tools.goal_plan_assessment"))
         self.assertNotIn("${{ github.sha }}", source)
         self.assertIn("pull_request:", source)
 

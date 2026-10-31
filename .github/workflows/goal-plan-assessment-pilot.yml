@@ -25,4 +25,11 @@ jobs:
           git fetch --depth=1 origin "${BASE_SHA}"
           git checkout --detach FETCH_HEAD
       - name: Assess declared source-bound plan effects with trusted base code
-        run: python -m tools.goal_plan_assessment
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git cat-file -e "${BASE_SHA}:tools/goal_plan_assessment.py" 2>/dev/null; then
+            echo "GOAL_PLAN_CHECK=SKIPPED_EVALUATOR_NOT_ON_BASE"
+            exit 0
+          fi
+          python -m tools.goal_plan_assessment
