@@ -68,7 +68,11 @@ def _json_value(value: object, name: str) -> Any:
     def validate(item: object, depth: int = 0) -> None:
         if depth > 12:
             raise GoalContextError(f"{name} is nested too deeply")
-        if item is None or type(item) in {str, bool, int}:
+        if type(item) is str:
+            if any(marker in item for marker in (START, END, START_V2, END_V2)):
+                raise GoalContextError(f"{name} contains a reserved marker")
+            return
+        if item is None or type(item) in {bool, int}:
             return
         if type(item) is float:
             if not math.isfinite(item):
@@ -83,7 +87,9 @@ def _json_value(value: object, name: str) -> Any:
         if isinstance(item, Mapping):
             if len(item) > 256 or any(not isinstance(key, str) for key in item):
                 raise GoalContextError(f"{name} objects require bounded string keys")
-            for child in item.values():
+            for key, child in item.items():
+                if any(marker in key for marker in (START, END, START_V2, END_V2)):
+                    raise GoalContextError(f"{name} contains a reserved marker")
                 validate(child, depth + 1)
             return
         raise GoalContextError(f"{name} must be a JSON value")
@@ -470,12 +476,23 @@ def resolve_goal_context(
     effective: dict[tuple[str, str], dict[str, Any]] = {}
     active_claim_refs: dict[tuple[str, str], str | None] = {}
 
-    def add_conflict(key: str, scope: str, source_issue: str, refs: list[str]) -> None:
+    def add_conflict(
+        key: str,
+        scope: str,
+        source_issue: str,
+        refs: list[str],
+        *,
+        invalid_supersedes_ref: str | None = None,
+    ) -> None:
         conflicting_refs = sorted(set(refs))
         for item in history:
-            if item["claim_ref"] in conflicting_refs:
+            if (
+                item["claim_ref"] in conflicting_refs
+                and item["key"] == key
+                and item["scope"] == scope
+            ):
                 item["resolution_status"] = "CONFLICTED"
-        effective[(key, scope)] = {
+        conflict = {
             "key": key,
             "scope": scope,
             "state": "unknown",
@@ -483,6 +500,9 @@ def resolve_goal_context(
             "source_issue": source_issue,
             "conflicting_claim_refs": conflicting_refs,
         }
+        if invalid_supersedes_ref is not None:
+            conflict["invalid_supersedes_ref"] = invalid_supersedes_ref
+        effective[(key, scope)] = conflict
         active_claim_refs[(key, scope)] = None
         unknowns.append(_unknown("CONFLICTING_OVERRIDES", source_issue))
 
@@ -511,10 +531,16 @@ def resolve_goal_context(
             if claim.get("supersedes") is not None:
                 if existing is None or existing_ref is None or not _same_claim_reference(existing_ref, claim["supersedes"]):
                     record["resolution_status"] = "CONFLICTED"
-                    prior_refs = [claim["supersedes"]]
+                    conflict_refs = [claim_ref]
                     if existing_ref:
-                        prior_refs.append(existing_ref)
-                    add_conflict(key, scope, issue_ref, prior_refs + [claim_ref])
+                        conflict_refs.append(existing_ref)
+                    add_conflict(
+                        key,
+                        scope,
+                        issue_ref,
+                        conflict_refs,
+                        invalid_supersedes_ref=claim["supersedes"],
+                    )
                     continue
                 prior = next((item for item in history if item["claim_ref"] == existing_ref), None)
                 if prior is not None:

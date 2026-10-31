@@ -104,6 +104,17 @@ class GoalContextTests(unittest.TestCase):
         with self.assertRaises(GoalContextError):
             normalize_goal_context(ctx)
 
+    def test_v2_rejects_reserved_markers_in_nested_specification_values_and_keys(self):
+        cases = (
+            {"text": f"quoted {V2_END} marker"},
+            {V2_START: "marker in object key"},
+        )
+        for value in cases:
+            with self.subTest(value=value):
+                context = self.v2_context([self.claim("marker", "runtime.option", value)])
+                with self.assertRaisesRegex(GoalContextError, "reserved marker"):
+                    normalize_goal_context(context)
+
     def test_repository_bootstrap_v1_initial_issue_preserves_goal_context(self):
         # The existing executor owns provisioning; goal text is the Issue-body
         # content authored before the strict v1 request is constructed.
@@ -351,6 +362,44 @@ class GoalContextTests(unittest.TestCase):
         self.assertEqual(current["state"], "unknown")
         self.assertEqual(current["reason_code"], "CONFLICTING_OVERRIDES")
         self.assertNotIn("value", current)
+
+    def test_wrong_key_or_scope_supersedes_does_not_conflict_unrelated_claim(self):
+        parent = self.make_issue("org/repo", 11, self.v2_context([
+            self.claim("target", "runtime.mode", "safe"),
+            self.claim("other-key", "feature.enabled", True),
+            self.claim("other-scope", "runtime.mode", "preview", scope="preview"),
+        ]))
+        cases = (
+            ("other-key", "runtime.mode", "default"),
+            ("other-scope", "runtime.mode", "default"),
+        )
+        for target_claim_id, key, scope in cases:
+            with self.subTest(target_claim_id=target_claim_id):
+                child = self.make_issue("org/repo", 14, self.v2_context([
+                    self.claim("child", key, "balanced", scope=scope,
+                               supersedes=f"org/repo#11:{target_claim_id}"),
+                ], parent_goal_ref="org/repo#11"))
+                result = issue_goal_context.resolve_goal_context(child, lambda _repo, _number: parent)
+                effective = {(item["key"], item["scope"]): item for item in result["effective_specifications"]}
+                history = {item["claim_ref"]: item["resolution_status"] for item in result["specifications"]}
+                conflict = effective[("runtime.mode", "default")]
+
+                self.assertEqual(conflict["state"], "unknown")
+                self.assertEqual(conflict["reason_code"], "CONFLICTING_OVERRIDES")
+                self.assertEqual(set(conflict["conflicting_claim_refs"]), {
+                    "org/repo#11:target", "org/repo#14:child",
+                })
+                self.assertEqual(conflict["invalid_supersedes_ref"], f"org/repo#11:{target_claim_id}")
+                self.assertEqual(history["org/repo#11:target"], "CONFLICTED")
+                self.assertEqual(history["org/repo#14:child"], "CONFLICTED")
+                unrelated = ("org/repo#11:" + target_claim_id)
+                self.assertNotEqual(history[unrelated], "CONFLICTED")
+                if target_claim_id == "other-key":
+                    self.assertEqual(effective[("feature.enabled", "default")]["value"], True)
+                    self.assertEqual(history["org/repo#11:other-key"], "EFFECTIVE")
+                else:
+                    self.assertEqual(effective[("runtime.mode", "preview")]["value"], "preview")
+                    self.assertEqual(history["org/repo#11:other-scope"], "EFFECTIVE")
 
     def test_source_backed_zero_unknown_and_build_runtime_fixtures_remain_distinct(self):
         frequency_ref = "https://github.com/kinoko34077/frequency-warp-vst/issues/3"
