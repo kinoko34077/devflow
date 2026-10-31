@@ -86,6 +86,12 @@ direct deterministic conflict in the declared packet, but is not a required
 branch-protection check. No packet is reported as skipped; neither this pilot
 nor an omitted packet proves that all PR plans were assessed.
 
+If the event-pinned base does not yet contain the comparator (as on its
+introduction PR), the pilot reports `SKIPPED_EVALUATOR_NOT_ON_BASE` and exits
+successfully without evaluating the packet. This is an explicit non-evaluation;
+the workflow never runs PR-supplied evaluator code. A later PR based on the
+merged comparator is required for hosted comparison evidence.
+
 The packet is deliberately limited to intended typed effects; it is not a
 second Issue/specification record. A set effect must include `value` (including
 `false`, `0`, or `null`); a removal omits it. For example:
