@@ -23,6 +23,7 @@ try:
         github_issue_trust,
         human_portfolio,
         agent_inbox,
+        issue_goal_context,
         maintenance_sync_check,
         reconciliation_publication,
         repository_projection,
@@ -45,6 +46,7 @@ except ImportError:  # direct script execution
     import github_issue_trust
     import human_portfolio
     import agent_inbox
+    import issue_goal_context
     import maintenance_sync_check
     import reconciliation_publication
     import repository_projection
@@ -1212,6 +1214,17 @@ class DevflowService:
             "body": body,
             "sections": parse_sections(body),
         }
+
+    def get_issue_goal_context(self, repository: str, issue_number: int) -> dict[str, Any]:
+        """Resolve source-linked effective Goal Context via the shared GET-only reader."""
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        normalized = normalize_repository(repository)
+        issue = self.get_issue(normalized, issue_number)
+        return issue_goal_context.resolve_goal_context(issue, self.get_issue)
 
     def get_sync_health(self) -> dict[str, Any]:
         issues = self.reader.list_issues(self.devflow_repository, state="all")
