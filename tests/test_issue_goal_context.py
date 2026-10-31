@@ -299,6 +299,15 @@ class GoalContextTests(unittest.TestCase):
         self.assertEqual(missing_context["unknowns"][0]["reason_code"], "GOAL_CONTEXT_MISSING")
         self.assertEqual(missing_context["effective_specifications"][0]["state"], "unknown")
 
+        malformed_parent = self.make_issue("org/repo", 11, self.v2_context([]))
+        malformed_parent["body"] = f"{V2_START}\n{{malformed json}}\n{V2_END}"
+        malformed = issue_goal_context.resolve_goal_context(child, lambda _repo, _number: malformed_parent)
+        self.assertEqual(malformed["unknowns"][0]["reason_code"], "GOAL_CONTEXT_INVALID")
+        self.assertEqual(malformed["parent_chain_status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(malformed["effective_specifications"][0]["state"], "unknown")
+        self.assertEqual(malformed["effective_specifications"][0]["reason_code"], "PARENT_CHAIN_INCOMPLETE")
+        self.assertNotIn("value", malformed["effective_specifications"][0])
+
         malformed = self.make_issue("org/repo", 14, self.v2_context([], parent_goal_ref="https://["))
         invalid_ref = issue_goal_context.resolve_goal_context(malformed, lambda _repo, _number: None)
         self.assertEqual(invalid_ref["unknowns"][0]["reason_code"], "PARENT_REF_INVALID")
