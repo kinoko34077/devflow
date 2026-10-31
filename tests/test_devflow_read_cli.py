@@ -56,6 +56,15 @@ class FakeService:
             "asserts_plan_completeness": False, "semantic_critique": "NOT_PERFORMED",
         }
 
+    def assess_outcome_observation(self, repository, issue_number, evidence):
+        self.calls.append(("assess-outcome-observation", repository, issue_number, evidence))
+        return {
+            "status": "NEEDS_EVIDENCE" if evidence is None else "DECLARED_ALIGNED",
+            "source_verification": "NOT_PERFORMED",
+            "acceptance_satisfied": False,
+            "can_authorize_execution": False,
+        }
+
 
 class CloudReadCLITests(unittest.TestCase):
     REPOSITORY = "kinoko34077/devflow"
@@ -110,6 +119,63 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(result["status"], "NEEDS_EVIDENCE")
         self.assertFalse(result["blocks_execution"])
         self.assertEqual(result["semantic_critique"], "NOT_PERFORMED")
+
+    def test_outcome_assessment_cli_delegates_to_shared_service(self):
+        service = FakeService()
+        packet = {"task_ref": f"{self.REPOSITORY}#14", "observed_result": "FAILURE"}
+        result = cli.read_operation(
+            service, operation="assess-outcome-observation",
+            repository=self.REPOSITORY, issue_number=14, outcome=packet,
+        )
+        self.assertEqual(service.calls, [(
+            "assess-outcome-observation", self.REPOSITORY, 14, packet,
+        )])
+        self.assertEqual(result["status"], "DECLARED_ALIGNED")
+        self.assertFalse(result["acceptance_satisfied"])
+
+    def test_outcome_packet_on_another_cli_operation_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "OUTCOME_ON_NON_ASSESSMENT_OPERATION"):
+            cli.read_operation(
+                FakeService(), operation="issue-goal-context",
+                repository=self.REPOSITORY, issue_number=14, outcome={},
+            )
+
+    def test_outcome_file_cli_preserves_declared_packet(self):
+        service = FakeService()
+        packet = {"task_ref": f"{self.REPOSITORY}#14", "observed_result": "VALID_NEGATIVE"}
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as evidence_file:
+            json.dump(packet, evidence_file)
+            evidence_file.flush()
+            with patch("tools.devflow_read_cli.default_service", return_value=service):
+                with patch("builtins.print") as out:
+                    status = cli.main([
+                        "assess-outcome-observation", "--repository", self.REPOSITORY,
+                        "--issue-number", "14", "--outcome-file", evidence_file.name,
+                    ])
+        self.assertEqual(status, 0)
+        self.assertEqual(service.calls, [(
+            "assess-outcome-observation", self.REPOSITORY, 14, packet,
+        )])
+        self.assertEqual(json.loads(out.call_args.args[0])["status"], "DECLARED_ALIGNED")
+
+    def test_malformed_or_duplicate_outcome_json_is_delegated_as_missing_evidence(self):
+        for content in ('{"task_ref":"one","task_ref":"two"}', '{bad json'):
+            with self.subTest(content=content):
+                service = FakeService()
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8") as evidence_file:
+                    evidence_file.write(content)
+                    evidence_file.flush()
+                    with patch("tools.devflow_read_cli.default_service", return_value=service):
+                        with patch("builtins.print") as out:
+                            status = cli.main([
+                                "assess-outcome-observation", "--repository", self.REPOSITORY,
+                                "--issue-number", "14", "--outcome-file", evidence_file.name,
+                            ])
+                self.assertEqual(status, 0)
+                self.assertEqual(service.calls, [(
+                    "assess-outcome-observation", self.REPOSITORY, 14, None,
+                )])
+                self.assertEqual(json.loads(out.call_args.args[0])["status"], "NEEDS_EVIDENCE")
 
     def test_plan_is_rejected_on_non_assessment_cli_operation(self):
         with self.assertRaisesRegex(ValueError, "PLAN_ON_NON_ASSESSMENT_OPERATION"):

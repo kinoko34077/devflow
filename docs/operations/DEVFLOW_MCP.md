@@ -113,6 +113,58 @@ second Issue/specification record. A set effect must include `value` (including
 }
 ```
 
+To compare a claimed user-facing outcome with the required surface and target
+artifact, use the read-only outcome observation adapter. It binds the packet's
+Issue body hash to a fresh read of that exact Issue, then compares declared
+surface and target strings. It does **not** parse the Issue to establish that
+the declarations are requirements, fetch or authenticate evidence links,
+verify authorship, or prove the runtime result. Its `DECLARED_ALIGNED` status
+means only that the packet's declarations agree; source verification remains
+`NOT_PERFORMED`, and task acceptance stays false.
+
+```sh
+python -m tools.devflow_read_cli assess-outcome-observation \
+  --repository kinoko34077/<repo> --issue-number <N> --outcome-file outcome.json
+```
+
+The packet schema is deliberately explicit. `issue_body_sha256` must be the
+current owning Issue body hash; `required_surface` and `required_target` are
+declarations supplied by the caller, not values inferred by this comparator.
+
+```json
+{
+  "task_ref": "kinoko34077/<repo>#<issue>",
+  "issue_body_sha256": "<64 lowercase hex characters>",
+  "required_surface": "PUBLIC_BROWSER",
+  "required_target": "git:<full-commit-sha>",
+  "observed_surface": "PUBLIC_BROWSER",
+  "observed_target": "git:<full-commit-sha>",
+  "observed_result": "SUCCESS",
+  "evidence_refs": [
+    "https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<id>"
+  ]
+}
+```
+
+The MCP equivalent is
+`assess_outcome_observation(repository, issue_number, evidence)`. Outcome values
+preserve `SUCCESS`, `FAILURE`, `VALID_NEGATIVE`, `UNKNOWN`, and `NOT_RUN`.
+Surface or target mismatches are reported separately; absent target identity
+remains `UNKNOWN`; missing or malformed references remain `NEEDS_EVIDENCE`.
+The result never authorizes work, merge, release, deployment, permission
+changes, or task-wide acceptance.
+
+The existing unprivileged trusted-base pilot also reads one optional JSON
+packet from a PR body between `DEVFLOW_OUTCOME_OBSERVATION_V1_BEGIN` /
+`DEVFLOW_OUTCOME_OBSERVATION_V1_END`. A detected surface/target mismatch,
+missing evidence, or declared runtime failure fails this optional check. A
+valid negative, `UNKNOWN`, or `NOT_RUN` remains distinct. No packet or an
+evaluator absent from the event-pinned base produces an explicit skip. The
+workflow has `permissions: {}`: it validates declarations within the packet,
+does not read the cited source, and does not verify whether the claimed Issue
+hash is current. This GitHub result is contract-consistency evidence only, not
+proof of public-browser, physical-runtime, or end-user success.
+
 A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
 or `has_unknown_work=true` is *not* the end of a recipient message check:
 non-TASK original Issues can contain authentic KAEP roots. For an
@@ -198,9 +250,10 @@ For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
 | `GITHUB_NETWORK_UNAVAILABLE` / `GITHUB_INVALID_JSON` / `GITHUB_REDIRECTED_READ` | Network, invalid API body or changed observed identity; keep reads fail-closed. |
 | `CONTROL_NOT_FOUND_OR_UNTRUSTED` / `CONTROL_AMBIGUOUS` | No single accepted open Control; inspect its author/provenance and exact title through canonical GitHub reads. |
 | `CONTROL_SCHEMA_INVALID` / `CONTROL_REPOSITORY_MISMATCH` | The Control failed required sections or repository identity checks; do not bypass validation. |
-| `INVALID_ISSUE_NUMBER` | The Goal Context operation needs one positive Issue number; check the command arguments. |
-| `ISSUE_NUMBER_ON_NON_ISSUE_OPERATION` | `--issue-number` is valid only for `issue-goal-context`; remove it for other operations. |
+| `INVALID_ISSUE_NUMBER` | An Issue-scoped operation needs one positive Issue number; check the command arguments. |
+| `ISSUE_NUMBER_ON_NON_ISSUE_OPERATION` | `--issue-number` is valid only for Issue-scoped operations (`issue-goal-context`, `assess-issue-plan`, `assess-outcome-observation`); remove it for other operations. |
 | `PLAN_ON_NON_ASSESSMENT_OPERATION` | `--plan-file` is valid only for `assess-issue-plan`. |
+| `OUTCOME_ON_NON_ASSESSMENT_OPERATION` | `--outcome-file` is valid only for `assess-outcome-observation`. |
 | `DEVFLOW_READ_UNAVAILABLE` | Unclassified core failure; preserve manual Control and exact original Issue reads rather than infer no work. |
 
 Codes are not proof of the underlying cause (for example, 403 and 404 remain
