@@ -379,6 +379,69 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
         self.assertTrue(result["has_unknown_work"])
 
+    def test_workspace_recent_get_failure_keeps_verified_indexed_old_root(self):
+        old = message(issue=22)
+        self.index_mock.return_value = demo_index((22, 31, old))
+        reader = fixture_reader(
+            [unclassified_issue(22)],
+            comments={(REPO, 22): [issue_comment(31, old)]},
+        )
+
+        def recent_unavailable(_repo):
+            raise devflow_mcp_core.DevflowMCPError(
+                "GitHub recent comments HTTP 403", reason_code="GITHUB_HTTP_403",
+            )
+
+        reader.list_recent_repository_comments = recent_unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True,
+        )
+        messages = result["sections"]["messages"]
+        self.assertEqual(messages["status"], "RECENT_DISCOVERY_PARTIAL")
+        self.assertEqual(len(messages["entries"]), 1)
+        self.assertEqual(
+            messages["entries"][0]["subject_ref"],
+            f"https://github.com/{REPO}/issues/22",
+        )
+        self.assertEqual(messages["entries"][0]["discovery_basis"], "INDEXED_SOURCE")
+        self.assertEqual(messages["entries"][0]["source_validation"],
+                         "STRICT_COMPLETE_FOR_CANDIDATE")
+        self.assertEqual(messages["recent_discovery"]["indexed_source_issues"], 1)
+        self.assertEqual(messages["recent_discovery"]["index_status"], "AVAILABLE")
+        self.assertEqual(messages["recent_discovery"]["status"], "PARTIAL_UNKNOWN")
+        self.assertIn(
+            "RECENT_WINDOW_SOURCE_UNAVAILABLE",
+            [w["reason_code"] for w in messages["recent_discovery"]["warnings"]],
+        )
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_both_index_and_recent_fail_keeps_task_roots(self):
+        self.index_mock.side_effect = InvalidMessage("PUBLIC_INDEX_READ_UNAVAILABLE")
+        reader = fixture_reader(
+            [task()], {(REPO, 21): [issue_comment(11, message())]},
+        )
+
+        def recent_unavailable(_repo):
+            raise devflow_mcp_core.DevflowMCPError(
+                "GitHub recent comments HTTP 403", reason_code="GITHUB_HTTP_403",
+            )
+
+        reader.list_recent_repository_comments = recent_unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True,
+        )
+        messages = result["sections"]["messages"]
+        self.assertEqual(len(messages["entries"]), 1)
+        self.assertEqual(messages["status"], "RECENT_DISCOVERY_PARTIAL")
+        self.assertEqual(messages["recent_discovery"]["index_status"], "UNAVAILABLE")
+        self.assertEqual(messages["recent_discovery"]["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(
+            [w["reason_code"] for w in messages["recent_discovery"]["warnings"]][-2:],
+            ["PUBLIC_INDEX_UNAVAILABLE", "RECENT_WINDOW_SOURCE_UNAVAILABLE"],
+        )
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_b6_failure_keeps_task_roots_and_unknown(self):
         reader = fixture_reader(
             [task()], {(REPO, 21): [issue_comment(11, message())]})
@@ -389,8 +452,11 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
             "demo", recipient="claude-code", include_recent_kaep=True)
         self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
-        self.assertEqual(result["sections"]["messages"]["recent_discovery"]["reason_code"],
-                         "RECENT_DISCOVERY_UNAVAILABLE")
+        discovery = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(discovery["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(discovery["index_status"], "AVAILABLE")
+        self.assertIn("RECENT_WINDOW_SOURCE_UNAVAILABLE",
+                      [w["reason_code"] for w in discovery["warnings"]])
         self.assertTrue(result["sections"]["messages"]["has_unknown_work"])
 
     def test_workspace_b6_full_window_marks_partial_not_no_work(self):
