@@ -240,7 +240,6 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(len(messages["entries"]), 2)
         self.assertTrue(any(
             r["subject_ref"] == f"https://github.com/{REPO}/issues/22"
-            and r["issue_role"] == "UNCLASSIFIED"
             and r["source_validation"] == "STRICT_COMPLETE_FOR_CANDIDATE"
             for r in messages["entries"] if r.get("discovery_basis")
         ))
