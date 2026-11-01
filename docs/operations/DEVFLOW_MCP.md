@@ -284,7 +284,8 @@ For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
 | Code | Meaning / next check |
 | --- | --- |
 | `GITHUB_HTTP_401` | GitHub rejected authentication; inspect that runtime's read-capable credentials without printing them. |
-| `GITHUB_HTTP_403` | Access policy, authentication scope **or** rate limits; inspect the runtime's safe response metadata. Do not assume a missing token. |
+| `GITHUB_HTTP_403` | Access policy, authentication scope **or** rate limits remain ambiguous when no explicit exhaustion header is present; inspect safe response metadata. Do not assume a missing token. |
+| `GITHUB_HTTP_403_RATE_LIMIT` | HTTP 403 explicitly reported `X-RateLimit-Remaining: 0`; the reported GitHub API bucket was exhausted. Use an already-authorized authenticated read path or wait for reset; do not silently change tokens or permissions. This code does not imply a particular token identity. |
 | `GITHUB_HTTP_404` | Resource absent **or** inaccessible (including hidden Private repositories); confirm exact repo identity and access independently. |
 | `GITHUB_HTTP_429` / `GITHUB_HTTP_OTHER` | API throttling or another HTTP failure; check GitHub availability and retry only after the cause is understood. |
 | `GITHUB_NETWORK_UNAVAILABLE` / `GITHUB_INVALID_JSON` / `GITHUB_REDIRECTED_READ` | Network, invalid API body or changed observed identity; keep reads fail-closed. |
