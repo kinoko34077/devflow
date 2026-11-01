@@ -165,6 +165,46 @@ does not read the cited source, and does not verify whether the claimed Issue
 hash is current. This GitHub result is contract-consistency evidence only, not
 proof of public-browser, physical-runtime, or end-user success.
 
+### Historical example: japanese-orthography #310 S310-A
+
+Use this only as a narrowly accepted, historical public-browser case. The owner
+receipt records the deployed source target and a bounded set of browser checks:
+[#310 comment #6106750343](https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106750343).
+The packet below binds the comparison to the #839 Issue-body revision observed
+on 2026-10-31. Any later edit to that body requires a new hash.
+
+```json
+{
+  "task_ref": "kinoko34077/devflow#839",
+  "issue_body_sha256": "d08d84941f2db9de48b0cac19d2a709ff12d85034bd9bbd20f19c13166479f74",
+  "required_surface": "PUBLIC_BROWSER",
+  "required_target": "git:f38d562edfda0bbaefaa3e1b6d71ccb078c26364",
+  "observed_surface": "PUBLIC_BROWSER",
+  "observed_target": "git:f38d562edfda0bbaefaa3e1b6d71ccb078c26364",
+  "observed_result": "SUCCESS",
+  "evidence_refs": [
+    "https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106750343"
+  ]
+}
+```
+
+That receipt is a past limited observation, not a fresh check of today's Pages
+content or proof that every #310 scenario works. The separate tokenWindow
+fixture witness in [#310 comment #6106079188](https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106079188)
+is `FIXTURE_PARITY`, so treating it as `PUBLIC_BROWSER` must produce a surface
+mismatch; it is a false-positive control, not a second browser success.
+Gesture IME [#203 comment #6116020441](https://github.com/kinoko34077/gesture-ime/issues/203#issuecomment-6116020441)
+preserves the reported physical failure while installed IPA identity remains
+unknown. These examples test declaration handling; the comparator does not
+fetch or authenticate the linked comments.
+
+A follow-up PR based on a commit that already contains this evaluator can carry
+the #310 packet between the pilot markers. Its hosted Actions output should be
+recorded as declaration-consistency evidence only. The introduction [PR #840](https://github.com/kinoko34077/devflow/pull/840)
+explicitly reported `OUTCOME_PILOT=SKIPPED_EVALUATOR_NOT_ON_BASE` in its
+[hosted run #41236135413](https://github.com/kinoko34077/devflow/actions/runs/41236135413),
+because the event-pinned base did not yet include this evaluator.
+
 A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
 or `has_unknown_work=true` is *not* the end of a recipient message check:
 non-TASK original Issues can contain authentic KAEP roots. For an
