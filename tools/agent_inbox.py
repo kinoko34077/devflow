@@ -109,7 +109,6 @@ def _issue_messages(
     if len(comments) > MAX_ISSUE_COMMENTS:
         raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
     task_ref = f"{repository}#{issue_number}"
-    actors: dict[int, str] = {}
     trusted_actor_ids: set[int] = set()
     trusted_comments: list[Mapping[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -120,7 +119,6 @@ def _issue_messages(
         login = user.get("login")
         if type(login) is not str or not login:
             raise InvalidMessage("INVALID_GITHUB_ACTOR")
-        actors[cid] = login
         body = comment.get("body")
         if type(body) is not str:
             raise InvalidMessage("INVALID_GITHUB_COMMENT")
@@ -138,7 +136,16 @@ def _issue_messages(
         trusted_comments.append(comment)
     parsed = read_mailbox(trusted_comments, task_ref=task_ref)
     roots: dict[str, tuple[int, dict[str, Any]]] = {}
+    # Build the correlation lookup during the same validated mailbox pass.
+    # A reply names a single parent, so repeated full-mailbox scans for each
+    # root are unnecessary. Trusted actor, kind and recipient gates remain.
+    replies_by_parent: dict[str, list[dict[str, Any]]] = {}
     for cid, msg in parsed:
+        parent_id = msg["in_reply_to"]
+        if (parent_id is not None and msg["kind"] in KNOWN_REPLY_KINDS
+                and msg["recipient"] == "chatgpt"
+                and cid in trusted_actor_ids):
+            replies_by_parent.setdefault(parent_id, []).append(msg)
         if msg["kind"] != "REQUEST" or msg["in_reply_to"] is not None:
             continue
         if msg["recipient"] != recipient or msg["scope"]["effect"] != "READ_ONLY":
@@ -150,15 +157,11 @@ def _issue_messages(
     out: list[dict[str, Any]] = []
     for message_id, (cid, root) in roots.items():
         reply_kinds = sorted({
-            msg["kind"] for reply_id, msg in parsed
-            if msg["in_reply_to"] == message_id
-            and msg["exchange_id"] == root["exchange_id"]
+            msg["kind"] for msg in replies_by_parent.get(message_id, ())
+            if msg["exchange_id"] == root["exchange_id"]
             and msg["task_ref"] == root["task_ref"]
             and msg["scope"] == root["scope"]
             and msg["intent"] == root["intent"]
-            and msg["kind"] in KNOWN_REPLY_KINDS
-            and msg["recipient"] == "chatgpt"
-            and reply_id in trusted_actor_ids
         })
         out.append({
             "source_comment_id": cid,

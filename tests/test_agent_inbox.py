@@ -1,6 +1,7 @@
 """KAEP Agent Inbox read-only projection regressions (no GitHub network)."""
 import json
 import unittest
+from unittest.mock import patch
 
 from tools import agent_inbox, devflow_mcp_core, repository_projection
 from tools.kaep_mailbox_codec import encode_comment
@@ -99,6 +100,74 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertNotIn("review this real work", json.dumps(res))
         self.assertNotIn("audit complete", json.dumps(res))
         self.assertIn((REPO, "comments", 21), reader.calls)
+
+    def test_reply_correlation_scans_decoded_mailbox_once_for_many_roots(self):
+        # Multiple legitimate roots share one Issue mailbox. Unrelated
+        # replies must never appear on a different parent, and recipient /
+        # actor filtering must remain exact after indexing.
+        roots = []
+        comments = []
+        for i in range(60):
+            root, _ = make_request(
+                "[[]]", repository=REPO, issue=21,
+                recipient="claude-code", intent="ANALYZE",
+                request_key=f"kaep.agentinbox.many.{i:03d}",
+                request_text="read-only fixture",
+                expect_existing_actor=OWNER,
+            )
+            roots.append(root)
+            comments.append(issue_comment(100 + i, root))
+        for i, root in enumerate(roots):
+            answer = dict(root)
+            answer.update({
+                "message_id": f"msg_agentinbox_many_answer_{i:03d}",
+                "in_reply_to": root["message_id"],
+                "kind": "ANSWER" if i % 3 == 0 else "ACK",
+                "recipient": "chatgpt",
+                "idempotency_key": f"kaep.agentinbox.many.reply.{i:03d}",
+                "payload": {"text": "review response"},
+            })
+            comments.append(issue_comment(200 + i, answer))
+        # Untrusted replies cannot produce owner-authenticated status.
+        outsider = dict(roots[1])
+        outsider.update({
+            "message_id": "msg_agentinbox_many_outsider",
+            "in_reply_to": roots[1]["message_id"], "kind": "ANSWER",
+            "recipient": "chatgpt",
+            "idempotency_key": "kaep.agentinbox.many.outsider",
+            "payload": {"text": "not trusted"},
+        })
+        comments.append(issue_comment(300, outsider, "untrusted-user"))
+
+        real_reader = agent_inbox.read_mailbox
+        iterations = []
+        class CountedMessages(list):
+            def __iter__(self):
+                iterations.append(1)
+                return super().__iter__()
+        def counted_read(*args, **kwargs):
+            return CountedMessages(real_reader(*args, **kwargs))
+
+        with patch.object(agent_inbox, "read_mailbox", side_effect=counted_read):
+            results, warnings = agent_inbox._issue_messages(
+                comments, repository=REPO, issue_number=21,
+                recipient="claude-code", expected_actor=OWNER,
+            )
+        self.assertEqual(len(results), 60)
+        self.assertEqual([r["status"] for r in results], [
+            "ANSWER_OBSERVED" if i % 3 == 0 else "ACK_OBSERVED"
+            for i in range(60)
+        ])
+        self.assertEqual(
+            [r["reply_kinds_observed"] for r in results],
+            [["ANSWER"] if i % 3 == 0 else ["ACK"] for i in range(60)],
+        )
+        self.assertEqual(warnings, [{
+            "comment_id": 300, "reason_code": "UNTRUSTED_MARKER_COMMENT",
+        }])
+        # The previous O(roots * mailbox) implementation iterated the
+        # decoded list 61 times for this fixture; one shared index needs one.
+        self.assertEqual(len(iterations), 1)
 
     def test_explicit_recipient_not_inferred_from_task_status(self):
         reader = fixture_reader([task()], {(REPO, 21): [issue_comment(11, message())]})
