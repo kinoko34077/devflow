@@ -154,6 +154,23 @@ class PublicIncrementalTests(TestCase):
             self.assertEqual(rc, 2)
             self.assertEqual(json.loads(out.getvalue())["status"], "BLOCKED")
 
+    def test_full_and_incremental_reuse_identical_public_comment_contract(self):
+        from tools import kaep_public_locator_cli as scanner
+        repo_name = f"{OWNER}/devflow"
+        current = [ptr("devflow", 20, 103), ptr("devflow", 21, 102, marker=False),
+                   ptr("devflow", 19, 101)]
+        fetch, _ = stream(["devflow"], {"devflow": {1: current}})
+        with mock.patch.object(scanner, "_validated_locator_candidate",
+                               wraps=scanner._validated_locator_candidate) as validator:
+            full = scanner.discover(fetch=fetch)
+            delta = inc.discover_incremental(
+                prior=inc._checkpoint({repo_name: 100}), fetch=fetch)
+        self.assertEqual(validator.call_count, 2 * len(current))
+        self.assertEqual(full["locators"], delta["locators"])
+        self.assertEqual(full["locator_count"], delta["locator_count"])
+        self.assertFalse(full["can_authorize_execution"])
+        self.assertFalse(delta["can_authorize_execution"])
+
     def test_not_a_raw_issue_body_or_trusted_root(self):
         get, _ = stream(["devflow"], {"devflow": {
             1: [ptr("devflow", 500, 5000)]}})

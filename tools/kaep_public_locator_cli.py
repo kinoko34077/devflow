@@ -55,6 +55,40 @@ def _gh_get(path: str) -> Any:
         raise InvalidMessage("INVALID_GITHUB_JSON") from exc
 
 
+
+def _validated_locator_candidate(
+    repository: str, comment: dict[str, Any],
+) -> tuple[int, dict[str, Any] | None]:
+    """Validate one untrusted public comment; return only a location hint.
+
+    Both the full public scan and incremental cursor scan use this exact
+    structure check and allowlisted locator formatting. A marker is neither
+    a decoded KAEP message nor authority to act.
+    """
+    if type(comment) is not dict:
+        _fail("INVALID_PUBLIC_COMMENT")
+    body, cid, source = (
+        comment.get("body"), comment.get("id"), comment.get("issue_url"),
+    )
+    match = API_ISSUE.fullmatch(source) if type(source) is str else None
+    if (type(body) is not str or type(cid) is not int or cid < 1
+            or match is None or match.group(1) != repository):
+        _fail("INVALID_PUBLIC_COMMENT")
+    if not body.startswith(MARKER):
+        return cid, None
+    issue = int(match.group(2))
+    url = f"https://github.com/{repository}/issues/{issue}"
+    return cid, {
+        "locator": f"{repository.split('/', 1)[1]}#{issue}@{cid}",
+        "repository": repository,
+        "issue_number": issue,
+        "comment_id": cid,
+        "source_url": f"{url}#issuecomment-{cid}",
+        "strict_source_validated": False,
+        "is_authoritative_assignment": False,
+    }
+
+
 def discover(
     *, fetch: Callable[[str], Any] = _gh_get,
     max_repo_pages: int = 3,
@@ -133,31 +167,16 @@ def discover(
                 if type(comments) is not list or len(comments) > PAGE_SIZE:
                     _fail("INVALID_PUBLIC_COMMENT_PAGE")
                 for comment in comments:
-                    if type(comment) is not dict:
-                        _fail("INVALID_PUBLIC_COMMENT")
-                    body, cid, source = (comment.get("body"), comment.get("id"),
-                                         comment.get("issue_url"))
-                    match = API_ISSUE.fullmatch(source) if type(source) is str else None
-                    if (type(body) is not str or type(cid) is not int or cid < 1
-                            or match is None or match.group(1) != repo):
-                        _fail("INVALID_PUBLIC_COMMENT")
-                    if not body.startswith(MARKER):
+                    cid, candidate = _validated_locator_candidate(repo, comment)
+                    if candidate is None:
                         continue
-                    issue = int(match.group(2))
-                    key = (repo, issue, cid)
+                    key = (repo, candidate["issue_number"], cid)
                     if key in found:
                         continue
                     found.add(key)
                     if len(found) > MAX_LOCATORS:
                         _fail("PUBLIC_LOCATOR_LIMIT")
-                    url = f"https://github.com/{repo}/issues/{issue}"
-                    locators.append({
-                        "locator": f"{repo.split('/', 1)[1]}#{issue}@{cid}",
-                        "repository": repo, "issue_number": issue,
-                        "comment_id": cid, "source_url": f"{url}#issuecomment-{cid}",
-                        "strict_source_validated": False,
-                        "is_authoritative_assignment": False,
-                    })
+                    locators.append(candidate)
             except (InvalidMessage, ValueError, TypeError, OSError):
                 incomplete.append({"scope": repo, "next_page": page,
                                    "reason_code": "COMMENT_PAGE_UNKNOWN"})
