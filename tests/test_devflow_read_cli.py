@@ -35,8 +35,11 @@ class FakeService:
             "can_authorize_execution": False,
         }
 
-    def get_agent_workspace(self, repository, recipient, *, limit, offset, work_status):
-        self.calls.append(("workspace", repository, recipient, limit, offset, work_status))
+    def get_agent_workspace(self, repository, recipient, *, limit, offset, work_status,
+                            include_recent_kaep=False):
+        self.calls.append(("workspace", repository, recipient, limit, offset, work_status)
+                          if not include_recent_kaep else
+                          ("workspace-recent", repository, recipient, limit, offset, work_status))
         return {"schema_version": "devflow.agent-workspace.read.v0.1",
                 "sections": {"offers": {"status": "NOT_INTEGRATED", "entries": None}},
                 "has_unknown_work": True, "can_authorize_execution": False}
@@ -111,6 +114,18 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertIsNone(result["sections"]["offers"]["entries"])
         self.assertEqual(service.calls, [
             ("workspace", self.REPOSITORY, "codex", 2, 3, "BLOCKED")])
+
+    def test_workspace_b6_flag_is_opt_in_and_workspace_only(self):
+        service = FakeService()
+        result = cli.read_operation(
+            service, operation="workspace", repository=self.REPOSITORY,
+            recipient="codex", include_recent_kaep=True)
+        self.assertTrue(result["has_unknown_work"])
+        self.assertEqual(service.calls[-1][0], "workspace-recent")
+        with self.assertRaisesRegex(ValueError, "INVALID_RECENT_DISCOVERY_OPTION"):
+            cli.read_operation(
+                service, operation="inbox", repository=self.REPOSITORY,
+                include_recent_kaep=True)
 
     def test_issue_goal_context_cli_operation_preserves_shared_service_result(self):
         service = FakeService()
