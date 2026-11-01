@@ -56,6 +56,39 @@ def _discovery_read_preflight(offline_pages: str | None, discovery_issue: int = 
     _mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=discovery_issue)
 
 
+def _validate_two_phase_options(
+    *, repository: str, issue: int, intent: str,
+    discovery_issue: int, expected_notice_actor: str,
+    do_send: bool, offline_source_pages: str | None,
+    offline_discovery_pages: str | None,
+) -> None:
+    """Validate source/route options without performing any I/O.
+
+    Visibility and strict index reads are distinct preflight stages; both
+    still precede the original POST in the two-phase orchestrator.
+    """
+    if type(do_send) is not bool:
+        raise InvalidMessage("INVALID_SEND_MODE")
+    if (type(discovery_issue) is not int or discovery_issue not in
+            (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
+        raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
+    if (type(repository) is not str or REPOSITORY.fullmatch(repository) is None
+            or type(issue) is not int or issue < 1):
+        raise InvalidMessage("INVALID_TARGET")
+    if repository == DISCOVERY_REPOSITORY and issue in (
+            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+        raise InvalidMessage("DISCOVERY_LOOP")
+    if (type(expected_notice_actor) is not str
+            or ACTOR.fullmatch(expected_notice_actor) is None):
+        raise InvalidMessage("INVALID_ACTOR")
+    if intent not in _SUPPORTED_INTENTS:
+        raise InvalidMessage("ROUTE_UNSUPPORTED_INTENT")
+    if (offline_source_pages is None) != (offline_discovery_pages is None):
+        raise InvalidMessage("INCOMPLETE_OFFLINE_FIXTURE")
+    if do_send and offline_source_pages is not None:
+        raise InvalidMessage("OFFLINE_POST_FORBIDDEN")
+
+
 def publish_source_and_route(
     *,
     repository: str,
@@ -78,29 +111,14 @@ def publish_source_and_route(
     stored but route verification failed. A caller may safely retry the same
     stable request_key, using existing source/route idempotency.
     """
-    if type(do_send) is not bool:
-        raise InvalidMessage("INVALID_SEND_MODE")
-    # Never allow a free-form public destination, including for dry-run.
-    if (type(discovery_issue) is not int or discovery_issue not in
-            (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
-        raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
-    # Route eligibility must be checked before the original Issue POST.
-    # Once the source is written an invalid target cannot be rolled back.
-    if (type(repository) is not str or REPOSITORY.fullmatch(repository) is None
-            or type(issue) is not int or issue < 1):
-        raise InvalidMessage("INVALID_TARGET")
-    if repository == DISCOVERY_REPOSITORY and issue in (
-            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
-        raise InvalidMessage("DISCOVERY_LOOP")
-    if (type(expected_notice_actor) is not str
-            or ACTOR.fullmatch(expected_notice_actor) is None):
-        raise InvalidMessage("INVALID_ACTOR")
-    if intent not in _SUPPORTED_INTENTS:
-        raise InvalidMessage("ROUTE_UNSUPPORTED_INTENT")
-    if (offline_source_pages is None) != (offline_discovery_pages is None):
-        raise InvalidMessage("INCOMPLETE_OFFLINE_FIXTURE")
-    if do_send and offline_source_pages is not None:
-        raise InvalidMessage("OFFLINE_POST_FORBIDDEN")
+    _validate_two_phase_options(
+        repository=repository, issue=issue, intent=intent,
+        discovery_issue=discovery_issue,
+        expected_notice_actor=expected_notice_actor,
+        do_send=do_send,
+        offline_source_pages=offline_source_pages,
+        offline_discovery_pages=offline_discovery_pages,
+    )
     if do_send:
         # Existing policy: never put a private source Issue locator in the
         # world-readable #503 mailbox. Check BEFORE the first public POST.
