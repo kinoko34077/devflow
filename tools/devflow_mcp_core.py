@@ -1049,6 +1049,7 @@ class DevflowService:
             "observed_at": view["observed_at"],
             "source_status": view["source_status"],
             "source_freshness": view["source_freshness"],
+            "source_error": view["source_error"],
             "coverage_status": view["coverage_status"],
             "has_unknown_work": True,  # B5/non-TASK source universe unproven
             "sections": {
