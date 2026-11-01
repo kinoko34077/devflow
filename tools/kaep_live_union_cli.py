@@ -321,7 +321,6 @@ def _project_verified_union_rows(
             "issue_state": row["issue_state"],
             "reply_observation": row["reply_observation"],
             "source_validation": row["source_validation"],
-            "issue_role": row["issue_role"],
             "head_freshness": "NOT_REVALIDATED",
             "incremental_marker_observed": (repo, number) in marker_in_scope,
             "source_origin": _source_origin(
