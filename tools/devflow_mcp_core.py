@@ -26,6 +26,8 @@ try:
         human_portfolio,
         agent_inbox,
         kaep_live_delta_view,
+        kaep_live_candidate_cli,
+        kaep_live_union_cli,
         issue_goal_context,
         goal_plan_assessment,
         maintenance_sync_check,
@@ -53,6 +55,8 @@ except ImportError:  # direct script execution
     import human_portfolio
     import agent_inbox
     import kaep_live_delta_view
+    import kaep_live_candidate_cli
+    import kaep_live_union_cli
     import issue_goal_context
     import goal_plan_assessment
     import maintenance_sync_check
@@ -1019,31 +1023,71 @@ class DevflowService:
     def _workspace_recent_kaep(
         self, repository: str, recipient: str,
     ) -> dict[str, Any]:
-        """Adapt the existing B6 original-source validator to our GET reader.
+        """One selected-repository B6 union of untrusted index + fresh hints.
 
-        This is only an updated-comment candidate window. Source scope and
-        message validity stay owned by B6 and the canonical KAEP codec.
+        The existing pinned public index GET never receives a GitHub token.
+        Existing B6 strict original-source validation remains authoritative.
+        If that index is absent, preserve the existing live-only route but
+        report partial/unknown coverage instead of silently dropping requests.
         """
         def original_comments(repo: str, number: int) -> str:
             rows = self.reader.list_issue_comments(
                 repo, number, max_comments=agent_inbox.MAX_ISSUE_COMMENTS,
             )
-            # B6 parse_pages expects the complete paginated gh response.
-            # Reusing the same page structure with this authenticated GET
-            # preserves its identity, actor, sequence and size checks.
             pages = [
                 rows[i:i + 100] for i in range(0, len(rows), 100)
             ] or [[]]
             return json.dumps(pages, ensure_ascii=True, separators=(",", ":"))
 
-        return kaep_live_delta_view.read_live_candidates(
-            [repository], recipient=recipient, expected_actor=DEFAULT_OWNER,
-            recent_read=lambda repo, since=None: (
-                self.reader.list_recent_repository_comments(repo)
-            ),
-            issue_read=self.reader.get_issue,
-            comments_read=original_comments,
+        recent_reader = lambda repo, since=None: (
+            self.reader.list_recent_repository_comments(repo)
         )
+        try:
+            public_index = kaep_live_candidate_cli.fetch_public_json()
+            union = kaep_live_union_cli.read_union(
+                public_index, recipient=recipient,
+                scoped_repository=repository,
+                recent_read=recent_reader, issue_read=self.reader.get_issue,
+                comments_read=original_comments,
+            )
+        except kaep_live_delta_view.InvalidMessage:
+            # The public index is an optional untrusted locator, not a source
+            # of truth. Preserve actual recent original-source observation.
+            recent = kaep_live_delta_view.read_live_candidates(
+                [repository], recipient=recipient, expected_actor=DEFAULT_OWNER,
+                recent_read=recent_reader, issue_read=self.reader.get_issue,
+                comments_read=original_comments,
+            )
+            recent["status"] = "PARTIAL_UNKNOWN"
+            recent["index_status"] = "UNAVAILABLE"
+            recent["indexed_source_issues"] = None
+            recent["warnings"] = list(recent["warnings"]) + [
+                {"repository": repository, "reason_code": "PUBLIC_INDEX_UNAVAILABLE"}
+            ]
+            for row in recent["rows"]:
+                row["source_origin"] = "LATEST_COMMENT_SOURCE"
+            return recent
+        rows = [
+            {
+                **row,
+                "issue_role": None,  # Union's verifier does not project M3 role
+            }
+            for row in union["live_rows"]
+        ]
+        return {
+            "status": union["status"],
+            "rows": rows,
+            "source_coverage": union["source_coverage"],
+            "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
+            "searched_candidates": union["source_issue_count"],
+            "validated_source_issues": len({
+                (row["repository"], row["issue_number"]) for row in rows
+            }),
+            "errors": union["source_errors"],
+            "warnings": union["warnings"],
+            "index_status": "AVAILABLE",
+            "indexed_source_issues": union["indexed_issue_count"],
+        }
 
     def _workspace_published_supply(
         self, view: dict[str, Any],
@@ -1155,6 +1199,8 @@ class DevflowService:
                     "source_coverage": recent["source_coverage"],
                     "observation_basis": recent["observation_basis"],
                     "source_candidates": recent["searched_candidates"],
+                    "index_status": recent.get("index_status", "NOT_USED"),
+                    "indexed_source_issues": recent.get("indexed_source_issues"),
                     "validated_source_issues": recent["validated_source_issues"],
                     "errors": recent["errors"],
                     "warnings": recent["warnings"],
@@ -1170,7 +1216,9 @@ class DevflowService:
                         "observed_state": row["reply_observation"],
                         "source_validation": row["source_validation"],
                         "issue_role": row["issue_role"],
-                        "discovery_basis": "B6_RECENT_COMMENT_ORIGINAL",
+                        "discovery_basis": (
+                            row.get("source_origin") or "B6_RECENT_COMMENT_ORIGINAL"
+                        ),
                     }
                     for row in recent["rows"]
                 ]
@@ -1250,7 +1298,9 @@ class DevflowService:
             result["sections"]["messages"]["entries"] = messages
             result["sections"]["messages"]["status"] = (
                 "TASK_AND_RECENT_ORIGINALS"
-                if recent_discovery["status"] == "LIVE_WINDOW_READ"
+                if recent_discovery["status"] in (
+                    "LIVE_WINDOW_READ", "BOUNDED_UNION_READ"
+                )
                 else "RECENT_DISCOVERY_PARTIAL"
                 if recent_discovery["status"] == "PARTIAL_UNKNOWN"
                 else "RECENT_DISCOVERY_UNAVAILABLE"
