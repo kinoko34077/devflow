@@ -517,3 +517,5 @@ client instructions
   -> Guidelines MCP    (static shared policy)
   -> owning repository (technical canon + implementation)
 ```
+
+<!-- R4 validation-only mismatch control: intentionally never merge this line. -->
