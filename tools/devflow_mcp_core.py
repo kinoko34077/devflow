@@ -1067,13 +1067,7 @@ class DevflowService:
             for row in recent["rows"]:
                 row["source_origin"] = "LATEST_COMMENT_SOURCE"
             return recent
-        rows = [
-            {
-                **row,
-                "issue_role": None,  # Union's verifier does not project M3 role
-            }
-            for row in union["live_rows"]
-        ]
+        rows = union["live_rows"]
         return {
             "status": union["status"],
             "rows": rows,
