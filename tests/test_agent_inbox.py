@@ -116,6 +116,28 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(result["sections"]["messages"]["status"], "TASK_SOURCE_COHORT_ONLY")
         self.assertFalse(result["is_live_agent_delivery"])
 
+    def test_workspace_preserves_source_error_without_misreporting_empty(self):
+        reader = fixture_reader([task()])
+        original_list = reader.list_issues
+
+        def unavailable(repository, state="open"):
+            if repository == REPO:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "GitHub read failed with HTTP 403; API rate-limit remaining is zero.",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
+            return original_list(repository, state=state)
+
+        reader.list_issues = unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex")
+        self.assertEqual(result["source_status"], "UNAVAILABLE")
+        self.assertIn("HTTP 403", result["source_error"])
+        self.assertIsNone(result["sections"]["known_tasks"]["entries"])
+        self.assertIsNone(result["sections"]["messages"]["entries"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_options_fail_before_live_read(self):
         reader = fixture_reader([task()])
         service = devflow_mcp_core.DevflowService(reader)
