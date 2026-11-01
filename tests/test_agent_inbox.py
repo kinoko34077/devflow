@@ -65,11 +65,26 @@ def issue_comment(cid, msg, login=OWNER):
             "user": {"id": 79015263 if login == OWNER else 123456789, "login": login}}
 
 
-def fixture_reader(issues, comments=None):
+def fixture_reader(issues, comments=None, recent_comments=None):
     return FakeReader([], issues_by_repository={
         "kinoko34077/devflow": [control()],
         REPO: issues,
-    }, comments=comments)
+    }, comments=comments, recent_comments=recent_comments)
+
+def unclassified_issue(number=22):
+    return {
+        "number": number, "title": "Original nonTASK source",
+        "state": "open", "author_association": "OWNER",
+        "user": {"id": 79015263, "login": OWNER},
+        "html_url": f"https://github.com/{REPO}/issues/{number}",
+        "created_at": "2026-10-14T00:00:00Z",
+        "updated_at": "2026-10-14T00:00:00Z",
+        "body": "Normal discussion without TASK metadata",
+    }
+
+def recent_marker(issue=22, cid=31, msg=None, login=OWNER):
+    row = issue_comment(cid, msg or message(issue=issue), login=login)
+    return {**row, "issue_url": f"https://api.github.com/repos/{REPO}/issues/{issue}"}
 
 
 class AgentWorkspaceProjectionTests(unittest.TestCase):
@@ -135,6 +150,84 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertIn("HTTP 403", result["source_error"])
         self.assertIsNone(result["sections"]["known_tasks"]["entries"])
         self.assertIsNone(result["sections"]["messages"]["entries"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_b6_finds_strict_non_task_recipient_root_without_promotion(self):
+        reader = fixture_reader(
+            [task(), unclassified_issue()],
+            comments={
+                (REPO, 21): [issue_comment(11, message())],
+                (REPO, 22): [issue_comment(31, message(issue=22))],
+            },
+            recent_comments={REPO: [recent_marker()]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        messages = result["sections"]["messages"]
+        self.assertEqual(messages["recent_discovery"]["status"], "LIVE_WINDOW_READ")
+        self.assertEqual(messages["recent_discovery"]["validated_source_issues"], 1)
+        self.assertEqual(len(messages["entries"]), 2)
+        self.assertTrue(any(
+            r["subject_ref"] == f"https://github.com/{REPO}/issues/22"
+            and r["issue_role"] == "UNCLASSIFIED"
+            and r["source_validation"] == "STRICT_COMPLETE_FOR_CANDIDATE"
+            for r in messages["entries"] if r.get("discovery_basis")
+        ))
+        self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
+        self.assertEqual(reader.calls.count((REPO, "open")), 1)
+        self.assertEqual(reader.calls.count((REPO, "recent_comments")), 1)
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertTrue(result["has_unknown_work"])
+
+    def test_workspace_b6_does_not_deliver_other_recipient_or_outsider_root(self):
+        reader = fixture_reader(
+            [task(), unclassified_issue()],
+            comments={(REPO, 22): [issue_comment(31, message(issue=22))]},
+            recent_comments={REPO: [recent_marker()]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex", include_recent_kaep=True)
+        self.assertEqual(result["sections"]["messages"]["entries"], [])
+        self.assertEqual(result["sections"]["messages"]["recent_discovery"]["validated_source_issues"], 1)
+        outsider = fixture_reader(
+            [unclassified_issue()],
+            comments={(REPO, 22): [issue_comment(31, message(issue=22), login="outsider")]},
+            recent_comments={REPO: [recent_marker(login="outsider")]},
+        )
+        blocked = devflow_mcp_core.DevflowService(outsider).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(blocked["sections"]["messages"]["entries"], [])
+
+    def test_workspace_b6_failure_keeps_task_roots_and_unknown(self):
+        reader = fixture_reader(
+            [task()], {(REPO, 21): [issue_comment(11, message())]})
+        def blocked(_repo):
+            raise devflow_mcp_core.DevflowMCPError(
+                "Rate limit or private API details", reason_code="GITHUB_HTTP_403")
+        reader.list_recent_repository_comments = blocked
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
+        self.assertEqual(result["sections"]["messages"]["recent_discovery"]["reason_code"],
+                         "RECENT_DISCOVERY_UNAVAILABLE")
+        self.assertTrue(result["sections"]["messages"]["has_unknown_work"])
+
+    def test_workspace_b6_full_window_marks_partial_not_no_work(self):
+        window = [recent_marker(cid=31)] + [
+            {**recent_marker(cid=n, msg=message(issue=22)), "body": "discussion"}
+            for n in range(32, 131)
+        ]
+        reader = fixture_reader(
+            [unclassified_issue()],
+            comments={(REPO, 22): [issue_comment(31, message(issue=22))]},
+            recent_comments={REPO: window},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(d["warnings"][0]["reason_code"], "RECENT_WINDOW_TRUNCATED")
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
