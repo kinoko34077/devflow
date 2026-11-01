@@ -56,6 +56,30 @@ def _gh_get(path: str) -> Any:
 
 
 
+def _validated_public_repository_page(data: Any) -> list[str]:
+    """Admit only the configured owner's public repository identities.
+
+    Full and incremental scanners share this trust contract. The caller owns
+    pagination, deduplication, request budgets and incomplete-scope reporting.
+    """
+    if type(data) is not list or len(data) > PAGE_SIZE:
+        _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+    names: list[str] = []
+    for item in data:
+        if type(item) is not dict:
+            _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+        full = item.get("full_name")
+        account = item.get("owner")
+        if (type(full) is not str or not REPO_NAME.fullmatch(full)
+                or type(account) is not dict
+                or account.get("id") != 79015263
+                or account.get("login") != OWNER
+                or item.get("private") is not False):
+            _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+        names.append(full)
+    return names
+
+
 def _validated_locator_candidate(
     repository: str, comment: dict[str, Any],
 ) -> tuple[int, dict[str, Any] | None]:
@@ -120,19 +144,7 @@ def discover(
         path = f"/users/{OWNER}/repos?type=owner&per_page={PAGE_SIZE}&page={page}"
         try:
             data = fetch(path)
-            if type(data) is not list or len(data) > PAGE_SIZE:
-                _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
-            for item in data:
-                if type(item) is not dict:
-                    _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
-                full = item.get("full_name")
-                account = item.get("owner")
-                if (type(full) is not str or not REPO_NAME.fullmatch(full)
-                        or type(account) is not dict
-                        or account.get("id") != 79015263
-                        or account.get("login") != OWNER
-                        or item.get("private") is not False):
-                    _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+            for full in _validated_public_repository_page(data):
                 if full not in repo_set:
                     repos.append(full)
                     repo_set.add(full)
