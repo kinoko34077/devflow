@@ -35,6 +35,12 @@ class FakeService:
             "can_authorize_execution": False,
         }
 
+    def get_agent_workspace(self, repository, recipient, *, limit, offset, work_status):
+        self.calls.append(("workspace", repository, recipient, limit, offset, work_status))
+        return {"schema_version": "devflow.agent-workspace.read.v0.1",
+                "sections": {"offers": {"status": "NOT_INTEGRATED", "entries": None}},
+                "has_unknown_work": True, "can_authorize_execution": False}
+
     def get_issue_goal_context(self, repository, issue_number):
         self.calls.append(("issue-goal-context", repository, issue_number))
         return {
@@ -95,6 +101,16 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(result["issues"], [])
         self.assertTrue(result["has_unknown_work"])
         self.assertIsNone(result["next_offset"])
+
+    def test_workspace_cli_forwards_options_and_unknowns(self):
+        service = FakeService()
+        result = cli.read_operation(
+            service, operation="workspace", repository=self.REPOSITORY,
+            recipient="codex", limit=2, offset=3, work_status="BLOCKED")
+        self.assertEqual(result["schema_version"], "devflow.agent-workspace.read.v0.1")
+        self.assertIsNone(result["sections"]["offers"]["entries"])
+        self.assertEqual(service.calls, [
+            ("workspace", self.REPOSITORY, "codex", 2, 3, "BLOCKED")])
 
     def test_issue_goal_context_cli_operation_preserves_shared_service_result(self):
         service = FakeService()
