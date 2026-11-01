@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools import agent_inbox, devflow_mcp_core, repository_projection
+from tools import agent_inbox, devflow_mcp_core, maintenance_supply, repository_projection
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
 from tests.test_devflow_mcp_core import FakeReader
@@ -85,6 +85,30 @@ def unclassified_issue(number=22):
 def recent_marker(issue=22, cid=31, msg=None, login=OWNER):
     row = issue_comment(cid, msg or message(issue=issue), login=login)
     return {**row, "issue_url": f"https://api.github.com/repos/{REPO}/issues/{issue}"}
+
+
+def supply_candidate():
+    return {
+        "task": f"{REPO}#21",
+        "task_body_sha256": "sha256:" + "a" * 64,
+        "task_work_status": "READY_FOR_IMPLEMENTATION",
+        "entry_ref": f"https://github.com/{REPO}/issues/21",
+        "scope_ready": True, "blocked": False,
+        "requires_user_confirmation": False,
+        "conflict_keys": [],
+        "roles": [{"role": "implementer", "next_action_tag": "IMPLEMENT"}],
+    }
+
+
+def supply_control_block(candidates):
+    doc = {
+        "schema_version": 1, "source_ref": "kinoko34077/devflow#90",
+        "repository": REPO, "candidates": candidates,
+    }
+    return (
+        "\n" + maintenance_supply.CANDIDATE_BEGIN + "\n"
+        + json.dumps(doc) + "\n" + maintenance_supply.CANDIDATE_END + "\n"
+    )
 
 
 class AgentWorkspaceProjectionTests(unittest.TestCase):
@@ -230,6 +254,57 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(d["warnings"][0]["reason_code"], "RECENT_WINDOW_TRUNCATED")
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_published_supply_empty_does_not_mean_no_tasks(self):
+        reader = fixture_reader([task()])
+        c = reader.issues_by_repository["kinoko34077/devflow"][0]
+        c["body"] += supply_control_block([])
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex", include_published_supply=True)
+        observed = result["sections"]["published_supply"]
+        self.assertEqual(observed["status"], "NO_PUBLISHED_CANDIDATES")
+        self.assertEqual(observed["entries"], [])
+        self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertEqual(reader.calls.count(("kinoko34077/devflow", 90)), 1)
+        self.assertEqual(reader.calls.count((REPO, "open")), 1)
+
+    def test_workspace_published_supply_validated_candidate_is_not_claimable(self):
+        reader = fixture_reader([task()])
+        c = reader.issues_by_repository["kinoko34077/devflow"][0]
+        c["body"] += supply_control_block([supply_candidate()])
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex", include_published_supply=True)
+        observed = result["sections"]["published_supply"]
+        self.assertEqual(observed["status"], "PUBLISHED_SNAPSHOT_ONLY")
+        self.assertEqual(observed["entries"][0]["task_ref"], f"{REPO}#21")
+        self.assertEqual(observed["entries"][0]["roles"], ["implementer"])
+        self.assertEqual(observed["entries"][0]["claimability"], "NOT_EVALUATED")
+        self.assertFalse(observed["can_authorize_execution"])
+
+    def test_workspace_published_supply_absent_vs_malformed_not_false_empty(self):
+        reader = fixture_reader([task()])
+        service = devflow_mcp_core.DevflowService(reader)
+        missing = service.get_agent_workspace(
+            "demo", include_published_supply=True)
+        self.assertEqual(missing["sections"]["published_supply"]["status"], "NOT_PUBLISHED")
+        self.assertIsNone(missing["sections"]["published_supply"]["entries"])
+        c = reader.issues_by_repository["kinoko34077/devflow"][0]
+        c["body"] += supply_control_block([{
+            **supply_candidate(), "entry_ref": f"https://github.com/{REPO}/issues/999",
+        }])
+        malformed = service.get_agent_workspace(
+            "demo", include_published_supply=True)
+        self.assertEqual(malformed["sections"]["published_supply"]["status"], "SOURCE_UNKNOWN")
+        self.assertIsNone(malformed["sections"]["published_supply"]["entries"])
+        self.assertFalse(malformed["can_authorize_execution"])
+
+    def test_workspace_published_supply_not_requested_adds_no_control_get(self):
+        reader = fixture_reader([task()])
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex")
+        self.assertNotIn("published_supply", result["sections"])
+        self.assertEqual(reader.calls.count(("kinoko34077/devflow", 90)), 0)
 
     def test_workspace_options_fail_before_live_read(self):
         reader = fixture_reader([task()])
