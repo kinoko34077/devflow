@@ -317,9 +317,14 @@ class DiscoveryReaderTests(unittest.TestCase):
             for n in range(42)
         ])
         read = lambda repo, issue: pages([comment(77, root)])
-        out = discover_index_shadow(
-            index, expected_notice_actor=ACTOR,
-            expected_source_actor=ACTOR, fetch_source=read)
+        with patch("tools.kaep_discovery_reader._mailbox",
+                   wraps=_mailbox) as strict_read:
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=read)
+        # Both pointers refer to the same verified Issue across three
+        # batches. The source is decoded once, never re-decoded per pointer.
+        self.assertEqual(strict_read.call_count, 1)
         self.assertEqual(len(out["hints"]), 1)
         self.assertEqual(out["duplicate_verified_pointers"], 1)
         self.assertEqual(out["distinct_source_issue_count"], 1)
