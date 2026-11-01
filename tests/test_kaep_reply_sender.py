@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import InvalidMessage, encode_comment, fingerprint
+from tools.kaep_mailbox_codec import InvalidMessage, encode_comment, fingerprint, read_mailbox
 from tools.kaep_reply_sender import (
     FIXED_ACK, make_reply, post_comment, send_reply, main,
 )
@@ -53,6 +53,17 @@ def build(source=None, **kwargs):
 
 
 class ReplyContractTests(unittest.TestCase):
+    def test_sender_preflight_decodes_each_issue_mailbox_once(self):
+        source = pages([comment(11, parent())])
+        with patch("tools.kaep_reply_sender.read_mailbox",
+                   wraps=read_mailbox) as read:
+            reply, existing = build(source)
+        self.assertIsNone(existing)
+        self.assertEqual(reply["in_reply_to"], PARENT)
+        # Prior implementation decoded the entire Issue twice to reserve
+        # quarantined IDs/keys after finding an eligible parent.
+        self.assertEqual(read.call_count, 1)
+
     def test_unrelated_cross_exchange_is_not_a_global_reply_blocker(self):
         good = parent()
         bad = parent(message_id="msg_bad_root003")
