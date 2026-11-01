@@ -21,7 +21,7 @@ from tools.kaep_mailbox_codec import (
 from tools.kaep_reply_sender import ACTOR, _mailbox, _matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    verify_source_request,
+    verify_source_request, _verify_source_request_from_snapshot,
 )
 
 SOURCE_URL = re.compile(
@@ -68,11 +68,11 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
 
 
 def _source_context(
-    pages: str, *, repository: str, issue: int, message_id: str,
-    expected_actor: str,
+    snapshot: tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]],
+    *, message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
-    """Observe original immutable scope and correlated replies (not model ID)."""
-    comments, items = _mailbox(pages, repository=repository, issue=issue)
+    """Observe original scope/replies from the same validated source snapshot."""
+    comments, items = snapshot
     matches_found = [(cid, msg) for cid, msg in items if msg["message_id"] == message_id]
     if len(matches_found) != 1:
         _fail("SOURCE_MESSAGE_NOT_UNIQUE")
@@ -127,7 +127,7 @@ def discover_batch(
         "read_only": True,
         "peer_identity_verified": False,
     }
-    source_cache: dict[tuple[str, int], str] = {}
+    source_cache: dict[tuple[str, int], tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]] = {}
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for position, comment in enumerate(subset):
@@ -172,17 +172,20 @@ def discover_batch(
             key = (repo, issue)
             source_validation = True
             if key not in source_cache:
-                # A failed provider/source fetch is not a malformed index item:
-                # fail the entire scan so a cursor is NEVER advanced past it.
-                source_cache[key] = fetch_source(repo, issue)
-            verified = verify_source_request(
-                source_cache[key], repository=repo, issue=issue,
-                message_id=pointer["message_id"], expected_actor=expected_source_actor)
+                # A source failure pins the safe cursor; never infer delivery.
+                # Strictly decode its complete owning Issue once per source.
+                source_cache[key] = _mailbox(
+                    fetch_source(repo, issue), repository=repo, issue=issue,
+                )
+            snapshot = source_cache[key]
+            verified = _verify_source_request_from_snapshot(
+                snapshot, repository=repo, issue=issue,
+                message_id=pointer["message_id"],
+                expected_actor=expected_source_actor)
             if verified != pointer:
                 _fail("DISCOVERY_SOURCE_MISMATCH")
             context = _source_context(
-                source_cache[key], repository=repo, issue=issue,
-                message_id=pointer["message_id"],
+                snapshot, message_id=pointer["message_id"],
                 expected_actor=expected_source_actor)
             result["hints"].append({
                 "index_comment_id": cid,
