@@ -92,11 +92,12 @@ def _source_context(
             "observed_reply_kinds": replies}
 
 
-def discover_batch(
+def _discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
     after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
     additional_forbidden_issue: int | None = None,
+    source_mailboxes: dict[tuple[str, int], SourceMailbox] | None = None,
 ) -> dict[str, Any]:
     if (type(index_issue) is not int or index_issue <= 0
             or additional_forbidden_issue is not None
@@ -127,7 +128,9 @@ def discover_batch(
         "read_only": True,
         "peer_identity_verified": False,
     }
-    source_cache: dict[tuple[str, int], SourceMailbox] = {}
+    source_cache: dict[tuple[str, int], SourceMailbox] = (
+        {} if source_mailboxes is None else source_mailboxes
+    )
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for position, comment in enumerate(subset):
@@ -220,6 +223,21 @@ def discover_batch(
     return result
 
 
+def discover_batch(
+    index_pages: str, *, expected_notice_actor: str,
+    expected_source_actor: str, fetch_source: Callable[[str, int], str],
+    after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
+    additional_forbidden_issue: int | None = None,
+) -> dict[str, Any]:
+    """Public entry never accepts a prevalidated cache from its caller."""
+    return _discover_batch(
+        index_pages, expected_notice_actor=expected_notice_actor,
+        expected_source_actor=expected_source_actor, fetch_source=fetch_source,
+        after_id=after_id, index_issue=index_issue,
+        additional_forbidden_issue=additional_forbidden_issue,
+    )
+
+
 MAX_SHADOW_BATCHES = 10
 
 
@@ -239,7 +257,7 @@ def discover_index_shadow(
         _fail("INVALID_SHADOW_LIMIT")
     # Preserve fail-closed provider transport/page validation in discover_batch.
     cursor = after_id
-    source_cache: dict[tuple[str, int], str] = {}
+    source_cache: dict[tuple[str, int], SourceMailbox] = {}
     hints: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
@@ -247,19 +265,14 @@ def discover_index_shadow(
     duplicate_verified_pointers = 0
     batches = 0
 
-    def cached_source(repository: str, issue: int) -> str:
-        key = (repository, issue)
-        if key not in source_cache:
-            source_cache[key] = fetch_source(repository, issue)
-        return source_cache[key]
-
     for _ in range(max_batches):
-        batch = discover_batch(
+        batch = _discover_batch(
             index_pages, expected_notice_actor=expected_notice_actor,
             expected_source_actor=expected_source_actor,
-            fetch_source=cached_source, after_id=cursor,
+            fetch_source=fetch_source, after_id=cursor,
             index_issue=index_issue,
             additional_forbidden_issue=additional_forbidden_issue,
+            source_mailboxes=source_cache,
         )
         batches += 1
         for hint in batch["hints"]:
