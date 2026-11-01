@@ -280,6 +280,59 @@ def _build_source_candidate_ledger(
     return candidates
 
 
+def _project_verified_union_rows(
+    current_by_key: dict[tuple[str, int, int, str], dict[str, Any]], *,
+    indexed_by_key: dict[tuple[str, int, int, str], dict[str, Any]],
+    prior_rows: dict[tuple[str, int, int, str], dict[str, str]],
+    recipient: str,
+    indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Project strict verified roots and compare two different baselines.
+
+    A search-index snapshot may omit earlier state/observation fields, while
+    a validated previous report supplies both. Do not unify their semantics.
+    No Issue read, mailbox decode, authority decision or report status here.
+    """
+    out_rows: list[dict[str, Any]] = []
+    state_changes = 0
+    previous_changes = 0
+    for key, row in sorted(current_by_key.items()):
+        repo, number = key[:2]
+        old = indexed_by_key.get(key)
+        changed = bool(old and (
+            (old.get("issue_state") is not None and old["issue_state"] != row["issue_state"])
+            or (old.get("reply_observation") is not None
+                and old["reply_observation"] != row["reply_observation"])))
+        state_changes += changed
+        previous = prior_rows.get(key)
+        changed_previous = bool(previous and (
+            previous["issue_state"] != row["issue_state"]
+            or previous["reply_observation"] != row["reply_observation"]))
+        previous_changes += changed_previous
+        out_rows.append({
+            "changed_from_previous_report": changed_previous,
+            "repository": repo, "issue_number": number,
+            "issue_url": row["issue_url"], "source_url": row["source_url"],
+            "source_comment_id": row["source_comment_id"],
+            "message_id": row["message_id"],
+            "recipient": recipient,
+            "issue_state": row["issue_state"],
+            "reply_observation": row["reply_observation"],
+            "source_validation": row["source_validation"],
+            "head_freshness": "NOT_REVALIDATED",
+            "incremental_marker_observed": (repo, number) in marker_in_scope,
+            "source_origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
+            ),
+            "changed_from_snapshot": changed,
+            "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
+        })
+    return out_rows, state_changes, previous_changes
+
+
 def read_union(
     snapshot: dict[str, Any], *, recipient: str,
     recent_read: Callable[..., list[dict[str, Any]]] = delta.read_repository_recent,
@@ -361,41 +414,12 @@ def read_union(
         (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
         for r in verified["rows"]
     }
-    out_rows: list[dict[str, Any]] = []
-    state_changes = 0
-    previous_changes = 0
-    for key, row in sorted(current_by_key.items()):
-        repo, number = key[:2]
-        old = indexed_by_key.get(key)
-        changed = bool(old and (
-            (old.get("issue_state") is not None and old["issue_state"] != row["issue_state"])
-            or (old.get("reply_observation") is not None
-                and old["reply_observation"] != row["reply_observation"])))
-        state_changes += changed
-        previous = prior_rows.get(key)
-        changed_previous = bool(previous and (
-            previous["issue_state"] != row["issue_state"]
-            or previous["reply_observation"] != row["reply_observation"]))
-        previous_changes += changed_previous
-        out_rows.append({
-            "changed_from_previous_report": changed_previous,
-            "repository": repo, "issue_number": number,
-            "issue_url": row["issue_url"], "source_url": row["source_url"],
-            "source_comment_id": row["source_comment_id"],
-            "message_id": row["message_id"],
-            "recipient": recipient,
-            "issue_state": row["issue_state"],
-            "reply_observation": row["reply_observation"],
-            "source_validation": row["source_validation"],
-            "head_freshness": "NOT_REVALIDATED",
-            "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "source_origin": _source_origin(
-                repo, number, indexed_sources=indexed_sources,
-                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
-            ),
-            "changed_from_snapshot": changed,
-            "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
-        })
+    out_rows, state_changes, previous_changes = _project_verified_union_rows(
+        current_by_key,
+        indexed_by_key=indexed_by_key, prior_rows=prior_rows,
+        recipient=recipient, indexed_sources=indexed_sources,
+        recent_sources=recent_sources, marker_in_scope=marker_in_scope,
+    )
     candidates = _build_source_candidate_ledger(
         all_sources, verified_rows=out_rows,
         source_errors=verified["errors"],
