@@ -136,18 +136,7 @@ def discover_incremental(
                 f"&per_page={locator.PAGE_SIZE}&page={page}")
         try:
             result = fetch(path)
-            if type(result) is not list or len(result) > locator.PAGE_SIZE:
-                _deny("INVALID_PUBLIC_REPOSITORY_PAGE")
-            for item in result:
-                if (type(item) is not dict
-                        or type(item.get("full_name")) is not str
-                        or not locator.REPO_NAME.fullmatch(item["full_name"])
-                        or type(item.get("owner")) is not dict
-                        or item["owner"].get("id") != 79015263
-                        or item["owner"].get("login") != locator.OWNER
-                        or item.get("private") is not False):
-                    _deny("INVALID_PUBLIC_REPOSITORY_PAGE")
-                name = item["full_name"]
+            for name in locator._validated_public_repository_page(result):
                 if name not in seen:
                     seen.add(name)
                     repositories.append(name)
