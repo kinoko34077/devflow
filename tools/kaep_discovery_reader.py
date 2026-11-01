@@ -93,6 +93,43 @@ def _source_context(
             "observed_reply_kinds": replies}
 
 
+def _verify_pointer_source(
+    pointer: dict[str, Any], *, repository: str, issue: int,
+    fetch_source: Callable[[str, int], str], expected_actor: str,
+    source_mailboxes: dict[tuple[str, int], SourceMailbox],
+    source_proofs: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Revalidate original-source evidence, caching only verified scan-local proof.
+
+    The full source mailbox is strictly decoded once within this scan. A cache
+    hit never permits altered pointer content, including a forged comment ID.
+    """
+    key = (repository, issue)
+    if key not in source_mailboxes:
+        source_mailboxes[key] = _mailbox(
+            fetch_source(repository, issue), repository=repository, issue=issue,
+        )
+    snapshot = source_mailboxes[key]
+    proof_key = (repository, issue, pointer["message_id"])
+    if proof_key not in source_proofs:
+        verified = _verify_source_request_from_snapshot(
+            snapshot, repository=repository, issue=issue,
+            message_id=pointer["message_id"], expected_actor=expected_actor)
+        # Preserve original failure ordering: source mismatch precedes context.
+        if verified != pointer:
+            _fail("DISCOVERY_SOURCE_MISMATCH")
+        context = _source_context(
+            snapshot, message_id=pointer["message_id"],
+            expected_actor=expected_actor)
+        source_proofs[proof_key] = (verified, context)
+    verified, context = source_proofs[proof_key]
+    if verified != pointer:
+        _fail("DISCOVERY_SOURCE_MISMATCH")
+    return verified, context
+
+
 def _discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
@@ -203,36 +240,12 @@ def _discover_batch(
             if (repo == DISCOVERY_REPOSITORY
                     and (issue == index_issue or issue == additional_forbidden_issue)):
                 _fail("DISCOVERY_LOOP")
-            key = (repo, issue)
             source_validation = True
-            if key not in source_cache:
-                # A source failure pins the safe cursor; never infer delivery.
-                # Strictly decode its complete owning Issue once per source.
-                source_cache[key] = _mailbox(
-                    fetch_source(repo, issue), repository=repo, issue=issue,
-                )
-            snapshot = source_cache[key]
-            proof_key = (repo, issue, pointer["message_id"])
-            if proof_key not in proof_cache:
-                verified = _verify_source_request_from_snapshot(
-                    snapshot, repository=repo, issue=issue,
-                    message_id=pointer["message_id"],
-                    expected_actor=expected_source_actor)
-                # Preserve original failure ordering: a forged pointer
-                # fails before any reply-context aggregation or memoization.
-                if verified != pointer:
-                    _fail("DISCOVERY_SOURCE_MISMATCH")
-                context = _source_context(
-                    snapshot, message_id=pointer["message_id"],
-                    expected_actor=expected_source_actor)
-                # Only source-proven, exact-matching pointers produce a cache
-                # entry. Invalid actor, message or locator is never memoized.
-                proof_cache[proof_key] = (verified, context)
-            verified, context = proof_cache[proof_key]
-            # Validate *each* pointer, including a cache hit: its comment ID
-            # can be individually forged even when the source ID is genuine.
-            if verified != pointer:
-                _fail("DISCOVERY_SOURCE_MISMATCH")
+            verified, context = _verify_pointer_source(
+                pointer, repository=repo, issue=issue,
+                fetch_source=fetch_source, expected_actor=expected_source_actor,
+                source_mailboxes=source_cache, source_proofs=proof_cache,
+            )
             result["hints"].append({
                 "index_comment_id": cid,
                 "owning_issue": pointer["owning_issue"],

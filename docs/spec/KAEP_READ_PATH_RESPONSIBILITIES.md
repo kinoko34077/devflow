@@ -17,6 +17,9 @@ Change rationale: [#847](https://github.com/kinoko34077/devflow/issues/847).
 | B6 updated-window pagination/marker hints | `kaep_live_union_cli._collect_recent_source_hints` | Bounded comments only; overlap/truncation signal uncertainty, not source completeness |
 | B6 source provenance precedence | `kaep_live_union_cli._source_origin` | One label selector for both verified rows and untrusted candidates; never grants work authority |
 | B6 union of indexed/recent/previous sources | `kaep_live_union_cli.read_union` | Strict original-source verification, cap and cross-snapshot change reporting remain the orchestration owner |
+| Discovery notice/identity scan and durable cursor | `kaep_discovery_reader._discover_batch` | Only strict notice actor and index replay may produce source candidates; original source failure pins commit cursor |
+| Discovery original proof + reply context | `kaep_discovery_reader._verify_pointer_source` | Strict original mailbox, source actor and pointer equality before proof caching, with every cache hit rechecked; caches are scan-local |
+| Discovery index shadow / dual-index reconciliation | `kaep_discovery_reader.discover_index_shadow`, `discover_dual_index_shadow` | Preserve source conflicts, blocked cursors and non-authoritative results |
 | Agent Inbox / reply observation for recipients | `agent_inbox._issue_messages_for_recipients` | Canonical mailbox validation stays upstream; no independent recipient/claim authority |
 
 **Flow:** Search or bounded B6 hints → candidate validation → original Issue
