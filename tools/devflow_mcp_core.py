@@ -1054,9 +1054,24 @@ class DevflowService:
                     "SOURCE_READ_UNAVAILABLE"
                 ) from exc
 
-        recent_reader = lambda repo, since=None: (
-            self.reader.list_recent_repository_comments(repo)
-        )
+        recent_window_unavailable = False
+
+        def recent_reader(repo: str, since: str | None = None) -> list[dict[str, Any]]:
+            nonlocal recent_window_unavailable
+            try:
+                return self.reader.list_recent_repository_comments(repo)
+            except DevflowMCPError:
+                # The recent source is independent of the public index.
+                # Missing hints are NOT proof of an empty recent window.
+                recent_window_unavailable = True
+                return []
+
+        def recent_warning() -> list[dict[str, str]]:
+            return (
+                [{"repository": repository, "reason_code": "RECENT_WINDOW_SOURCE_UNAVAILABLE"}]
+                if recent_window_unavailable else []
+            )
+
         try:
             public_index = kaep_live_candidate_cli.fetch_public_json()
             union = kaep_live_union_cli.read_union(
@@ -1078,14 +1093,18 @@ class DevflowService:
             recent["indexed_source_issues"] = None
             recent["warnings"] = list(recent["warnings"]) + [
                 {"repository": repository, "reason_code": "PUBLIC_INDEX_UNAVAILABLE"}
-            ]
+            ] + recent_warning()
             for row in recent["rows"]:
                 row["source_origin"] = "LATEST_COMMENT_SOURCE"
             return recent
         rows = union["live_rows"]
         index_stale = union["snapshot_stale"]
         return {
-            "status": "PARTIAL_UNKNOWN" if index_stale else union["status"],
+            "status": (
+                "PARTIAL_UNKNOWN"
+                if index_stale or recent_window_unavailable
+                else union["status"]
+            ),
             "rows": rows,
             "source_coverage": union["source_coverage"],
             "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
@@ -1098,7 +1117,7 @@ class DevflowService:
             "warnings": list(union["warnings"]) + (
                 [{"repository": repository, "reason_code": "PUBLIC_INDEX_STALE"}]
                 if index_stale else []
-            ),
+            ) + recent_warning(),
             "index_status": "AVAILABLE",
             "index_snapshot_stale": index_stale,
             "index_snapshot_age_seconds": union["snapshot_age_seconds"],
