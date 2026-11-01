@@ -33,6 +33,7 @@ def task(number=21, status="AWAITING_REVIEW", author="OWNER"):
 def control():
     return {
         "number": 90, "state": "open", "author_association": "OWNER",
+        "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
         "user": {"id": 79015263, "login": OWNER},
         "title": "[REPO] demo", "html_url":
         "https://github.com/kinoko34077/devflow/issues/90",
