@@ -8,6 +8,7 @@ closed; this does not loosen the shared KAEP codec or Claim protections.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
 import re
 import sys
@@ -98,6 +99,7 @@ def _discover_batch(
     after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
     additional_forbidden_issue: int | None = None,
     source_mailboxes: dict[tuple[str, int], SourceMailbox] | None = None,
+    index_comments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if (type(index_issue) is not int or index_issue <= 0
             or additional_forbidden_issue is not None
@@ -111,16 +113,22 @@ def _discover_batch(
         _fail("INVALID_ACTOR")
     # Provider pagination/order/user metadata remains globally verified. Only
     # individual untrusted Issue comment content gets per-item isolation.
-    comments = parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
-                           issue=index_issue)
-    remaining = [item for item in comments if item["id"] > after_id]
-    subset = remaining[:MAX_INDEX_BATCH]
+    # The public entry validates complete GitHub pages here. Shadow scans
+    # pass the same already-validated immutable-by-convention snapshot through
+    # successive batches instead of decoding the whole JSON input repeatedly.
+    comments = (parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
+                            issue=index_issue)
+                if index_comments is None else index_comments)
+    # parse_pages guarantees ascending IDs. Binary cursor lookup avoids
+    # copying/rechecking every prior index comment on each bounded batch.
+    start = bisect_right(comments, after_id, key=lambda item: item["id"])
+    subset = comments[start:start + MAX_INDEX_BATCH]
     result: dict[str, Any] = {
         "status": "READ_ONLY",
         "hints": [],
         "rejected": [],
         "blocked": [],
-        "truncated": len(remaining) > len(subset),
+        "truncated": start + len(subset) < len(comments),
         # Commit cursor stops at the first failed source; scan cursor is only
         # for traversing subsequent batches in this active check-in.
         "next_after_id": subset[-1]["id"] if subset else after_id,
@@ -256,6 +264,12 @@ def discover_index_shadow(
     if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
         _fail("INVALID_SHADOW_LIMIT")
     # Preserve fail-closed provider transport/page validation in discover_batch.
+    # Strictly validate the complete provider history once per shadow scan.
+    # Repeated _discover_batch calls only traverse its validated comment data.
+    # No raw or caller-provided prevalidated snapshot enters this public API.
+    index_comments = parse_pages(
+        index_pages, repository=DISCOVERY_REPOSITORY, issue=index_issue,
+    )
     cursor = after_id
     source_cache: dict[tuple[str, int], SourceMailbox] = {}
     hints: list[dict[str, Any]] = []
@@ -273,6 +287,7 @@ def discover_index_shadow(
             index_issue=index_issue,
             additional_forbidden_issue=additional_forbidden_issue,
             source_mailboxes=source_cache,
+            index_comments=index_comments,
         )
         batches += 1
         for hint in batch["hints"]:

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from tools import agent_inbox
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
-from tools.kaep_inbox_reader import inspect_pages
+from tools.kaep_inbox_reader import inspect_pages, parse_pages
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import (
     discover, discover_batch, discover_index_shadow, parse_pointer,
@@ -290,9 +290,14 @@ class DiscoveryReaderTests(unittest.TestCase):
         def get_source(repo, issue):
             reads.append((repo, issue))
             return sources[(repo, issue)]
-        out = discover_index_shadow(
-            index, expected_notice_actor=ACTOR,
-            expected_source_actor=ACTOR, fetch_source=get_source)
+        with patch("tools.kaep_discovery_reader.parse_pages",
+                   wraps=parse_pages) as strict_pages:
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=get_source)
+        # Four 20-comment batches must share ONE complete, strictly
+        # validated index parse rather than rescanning the JSON four times.
+        self.assertEqual(strict_pages.call_count, 1)
         self.assertEqual(out["status"], "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY")
         self.assertEqual(len(out["hints"]), 21)
         self.assertEqual(out["scanned_batches"], 4)
@@ -307,6 +312,23 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertFalse(out["complete_work_inventory"])
         self.assertFalse(out["fallback_retirement_authorized"])
         self.assertNotIn("hidden source payload", json.dumps(out))
+
+    def test_shadow_and_public_batch_parse_once_per_independent_entry(self):
+        root, hint, _ = fixtures()
+        index = pages([comment(88, hint)])
+        source = lambda _repo, _issue: pages([comment(77, root)])
+        with patch("tools.kaep_discovery_reader.parse_pages",
+                   wraps=parse_pages) as strict_pages:
+            first = discover_batch(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=source)
+            self.assertEqual(strict_pages.call_count, 1)
+            shadow = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=source)
+            self.assertEqual(strict_pages.call_count, 2)
+        self.assertEqual(first["hints"], shadow["hints"])
+        self.assertFalse(shadow["truncated"])
 
     def test_shadow_cross_batch_replay_and_explicit_limit_are_not_new_work(self):
         root, hint, _ = fixtures()
