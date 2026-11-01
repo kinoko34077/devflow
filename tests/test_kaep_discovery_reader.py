@@ -146,6 +146,34 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertEqual(out["hints"][0]["source_comment_id"], 77)
         self.assertFalse(out["complete_work_inventory"])
 
+    def test_forged_first_pointer_is_not_cached_before_valid_notice(self):
+        root, valid_notice, pointer = fixtures()
+        forged = dict(pointer)
+        forged["comment_id"] = 78
+        forged_notice = other_notice(
+            json.dumps(forged), "kaep.discovery.proof.first.forged",
+        )
+        original = pages([comment(77, root)])
+        from tools import kaep_discovery_reader as reader
+        with (patch.object(reader, "_verify_source_request_from_snapshot",
+                           wraps=reader._verify_source_request_from_snapshot) as verified,
+              patch.object(reader, "_source_context",
+                           wraps=reader._source_context) as context):
+            out = discover_batch(
+                pages([comment(88, forged_notice), comment(89, valid_notice)]),
+                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                fetch_source=lambda _r, _i: original,
+            )
+        self.assertEqual(verified.call_count, 2)
+        self.assertEqual(context.call_count, 1)
+        self.assertEqual(len(out["hints"]), 1)
+        self.assertEqual(out["hints"][0]["index_comment_id"], 89)
+        self.assertEqual(out["rejected"], [{
+            "index_comment_id": 88,
+            "reason_code": "DISCOVERY_SOURCE_MISMATCH",
+        }])
+        self.assertEqual(out["blocked"], [])
+
     def test_valid_pointer_has_actual_root_and_no_payload(self):
         root, hint, pointer = fixtures()
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]))
