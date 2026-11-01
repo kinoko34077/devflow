@@ -377,6 +377,23 @@ class CloudReadCLITests(unittest.TestCase):
                 self.assertEqual(cli.failure_reason_code(mapped), expected)
                 self.assertNotIn("secret", cli.failure_reason_code(mapped))
 
+    def test_http_403_zero_remaining_has_distinct_redacted_diagnostic(self):
+        cases = (
+            ({"X-RateLimit-Remaining": "0"}, "GITHUB_HTTP_403_RATE_LIMIT"),
+            ({"X-RateLimit-Remaining": " 0 "}, "GITHUB_HTTP_403_RATE_LIMIT"),
+            ({"X-RateLimit-Remaining": "1"}, "GITHUB_HTTP_403"),
+            ({"X-RateLimit-Remaining": "not-a-number"}, "GITHUB_HTTP_403"),
+            ({}, "GITHUB_HTTP_403"),
+        )
+        for headers, expected in cases:
+            with self.subTest(headers=headers):
+                error = HTTPError("https://invalid.test/secret-url", 403, "secret", headers, None)
+                mapped = _translate_read_error(error)
+                self.assertEqual(mapped.reason_code, expected)
+                self.assertEqual(cli.failure_reason_code(mapped), expected)
+                self.assertNotIn("secret", str(mapped))
+                self.assertNotIn("secret", cli.failure_reason_code(mapped))
+
     def test_network_json_and_unexpected_errors_are_safely_classified(self):
         self.assertEqual(
             cli.failure_reason_code(_translate_read_error(URLError("secret host"))),
