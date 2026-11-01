@@ -19,7 +19,8 @@ Change rationale: [#847](https://github.com/kinoko34077/devflow/issues/847).
 | B6 union of indexed/recent/previous sources | `kaep_live_union_cli.read_union` | Strict original-source verification, cap and cross-snapshot change reporting remain the orchestration owner |
 | Discovery verified source proof and scan-local memoization | `kaep_discovery_reader._verified_source_pointer`, canonical `kaep_route_notice._verify_source_request_from_snapshot` | Full owning-Issue validation precedes caching; each pointer including cache hits must match the exact source comment ID; failure cannot advance durable cursor |
 | Discovery read-only hint projection | `kaep_discovery_reader._verified_pointer_hint` | Emits only source-verified pointer metadata; never source message text, recipient pickup or execution authority |
-| Discovery batching, notice replay, blocking and cursor | `kaep_discovery_reader._discover_batch`, `discover_index_shadow` | Index actor/identity checks, untrusted notice rejection and global source failure distinction stay in the ordered scanner |
+| Discovery index-notice idempotence and replay identity | `kaep_discovery_reader._record_index_notice_identity` | Reject conflicting same/cross-batch message IDs and idempotency keys; same-batch identical notice skipped; cross-batch identical pointer rechecked for duplicate source accounting |
+| Discovery batching, notice actor and safe cursor | `kaep_discovery_reader._discover_batch`, `discover_index_shadow` | Index actor checks, bounded scan, untrusted notice rejection and source fail-closed cursor remain in the ordered scanner |
 | Agent Inbox / reply observation for recipients | `agent_inbox._issue_messages_for_recipients` | Canonical mailbox validation stays upstream; no independent recipient/claim authority |
 
 **Flow:** Search or bounded B6 hints → candidate validation → original Issue
