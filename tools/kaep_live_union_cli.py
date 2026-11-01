@@ -162,6 +162,75 @@ def _recent_issue_keys(
     return sources
 
 
+def _collect_recent_source_hints(
+    repositories: list[str], *,
+    recent_read: Callable[..., list[dict[str, Any]]], since: str | None,
+) -> tuple[
+    set[tuple[str, int]], dict[str, int], dict[str, int], list[dict[str, str]]
+]:
+    """Interpret bounded updated-comment windows as untrusted source *hints*.
+
+    Keep pagination uncertainty and warning ordering at this boundary.
+    This function never validates original sources or grants a work assignment.
+    """
+    recent_sources: set[tuple[str, int]] = set()
+    counts: dict[str, int] = {}
+    updated_pages_read: dict[str, int] = {}
+    warnings: list[dict[str, str]] = []
+    for repo in repositories:
+        raw = recent_read(repo, since=since)
+        if type(raw) is dict:
+            comments = raw.get("comments")
+            truncated = raw.get("truncated")
+            page_count = raw.get("read_pages")
+            overlap = raw.get("page_boundary_overlap_count")
+            page_limit = raw.get("page_limit")
+            if (type(comments) is not list
+                    or type(truncated) is not bool
+                    or type(page_count) is not int or not 1 <= page_count <= delta.MAX_UPDATED_PAGES
+                    or type(page_limit) is not int or page_count > page_limit
+                    or page_limit > delta.MAX_UPDATED_PAGES
+                    or type(overlap) is not int or overlap < 0
+                    or len(comments) > page_count * delta.MAX_WINDOW):
+                _deny("INVALID_UPDATED_PAGE_RESULT")
+            if overlap:
+                warnings.append({"repository": repo, "reason_code": "UPDATED_PAGE_BOUNDARY_OVERLAP"})
+        else:
+            comments = raw
+            if type(comments) is not list or len(comments) > delta.MAX_WINDOW:
+                _deny("INVALID_LIVE_WINDOW")
+            truncated = len(comments) == delta.MAX_WINDOW
+            page_count = 1
+        counts[repo] = len(comments)
+        updated_pages_read[repo] = page_count
+        recent_sources.update(_recent_issue_keys(repo, comments))
+        if truncated:
+            warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
+    return recent_sources, counts, updated_pages_read, warnings
+
+
+def _source_origin(
+    repo: str, number: int, *,
+    indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> str:
+    """Choose the same precedence for verified roots and locator candidates.
+
+    A provenance label is descriptive only: no trust, coverage or authority.
+    """
+    key = (repo, number)
+    if key in indexed_sources and key in recent_sources:
+        return "BOTH"
+    if key in indexed_sources:
+        return "INDEXED_SOURCE"
+    if key in recent_sources:
+        return "LATEST_COMMENT_SOURCE"
+    if key in marker_in_scope:
+        return "INCREMENTAL_MARKER_SOURCE"
+    return "PREVIOUS_REPORT_SOURCE"
+
+
 def read_union(
     snapshot: dict[str, Any], *, recipient: str,
     recent_read: Callable[..., list[dict[str, Any]]] = delta.read_repository_recent,
@@ -213,39 +282,11 @@ def read_union(
         (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
         for r in indexed_rows
     }
-    recent_sources: set[tuple[str, int]] = set()
-    counts: dict[str, int] = {}
-    updated_pages_read: dict[str, int] = {}
-    warnings: list[dict[str, str]] = []
-    for repo in repos:
-        raw = recent_read(repo, since=since)
-        if type(raw) is dict:
-            comments = raw.get("comments")
-            truncated = raw.get("truncated")
-            page_count = raw.get("read_pages")
-            overlap = raw.get("page_boundary_overlap_count")
-            page_limit = raw.get("page_limit")
-            if (type(comments) is not list
-                    or type(truncated) is not bool
-                    or type(page_count) is not int or not 1 <= page_count <= delta.MAX_UPDATED_PAGES
-                    or type(page_limit) is not int or page_count > page_limit
-                    or page_limit > delta.MAX_UPDATED_PAGES
-                    or type(overlap) is not int or overlap < 0
-                    or len(comments) > page_count * delta.MAX_WINDOW):
-                _deny("INVALID_UPDATED_PAGE_RESULT")
-            if overlap:
-                warnings.append({"repository": repo, "reason_code": "UPDATED_PAGE_BOUNDARY_OVERLAP"})
-        else:
-            comments = raw
-            if type(comments) is not list or len(comments) > delta.MAX_WINDOW:
-                _deny("INVALID_LIVE_WINDOW")
-            truncated = len(comments) == delta.MAX_WINDOW
-            page_count = 1
-        counts[repo] = len(comments)
-        updated_pages_read[repo] = page_count
-        recent_sources.update(_recent_issue_keys(repo, comments))
-        if truncated:
-            warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
+    recent_sources, counts, updated_pages_read, warnings = (
+        _collect_recent_source_hints(
+            repos, recent_read=recent_read, since=since,
+        )
+    )
 
     all_sources = sorted(indexed_sources | recent_sources | marker_in_scope | prior_source_keys)
     # A cap cannot silently drop a known source. Fail closed and retain fallback.
@@ -299,13 +340,9 @@ def read_union(
             "source_validation": row["source_validation"],
             "head_freshness": "NOT_REVALIDATED",
             "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "source_origin": (
-                "BOTH" if (repo, number) in indexed_sources and
-                          (repo, number) in recent_sources else
-                "INDEXED_SOURCE" if (repo, number) in indexed_sources else
-                "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources else
-                "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope else
-                "PREVIOUS_REPORT_SOURCE"
+            "source_origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
             ),
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
@@ -334,13 +371,9 @@ def read_union(
             "issue_number": number,
             "issue_url": source_url,
             "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "origin": (
-                "BOTH" if (repo, number) in indexed_sources
-                          and (repo, number) in recent_sources else
-                "INDEXED_SOURCE" if (repo, number) in indexed_sources
-                else "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources
-                else "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope
-                else "PREVIOUS_REPORT_SOURCE"
+            "origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
             ),
             "matching_recipient_roots": count,
             "source_observation": (
