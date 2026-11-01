@@ -231,6 +231,55 @@ def _source_origin(
     return "PREVIOUS_REPORT_SOURCE"
 
 
+def _build_source_candidate_ledger(
+    sources: list[tuple[str, int]], *, verified_rows: list[dict[str, Any]],
+    source_errors: list[Any], indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> list[dict[str, Any]]:
+    """Show every bounded locator, without claiming a delivered assignment.
+
+    Candidate visibility and uncertainty are a display contract separate from
+    recipient root verification: a source with no matching roots still appears.
+    Global source uncertainty dominates issue-specific observations.
+    """
+    roots_by_issue: dict[tuple[str, int], int] = {}
+    for row in verified_rows:
+        key = (row["repository"], row["issue_number"])
+        roots_by_issue[key] = roots_by_issue.get(key, 0) + 1
+    failed_issues = {
+        err.get("owning_issue") for err in source_errors
+        if type(err) is dict and type(err.get("owning_issue")) is str
+    }
+    global_unknown = any(
+        type(err) is not dict or not err.get("owning_issue")
+        for err in source_errors
+    )
+    candidates = []
+    for repo, number in sources:
+        source_url = f"https://github.com/{repo}/issues/{number}"
+        count = roots_by_issue.get((repo, number), 0)
+        suspect = global_unknown or source_url in failed_issues
+        candidates.append({
+            "repository": repo,
+            "issue_number": number,
+            "issue_url": source_url,
+            "incremental_marker_observed": (repo, number) in marker_in_scope,
+            "origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
+            ),
+            "matching_recipient_roots": count,
+            "source_observation": (
+                "SOURCE_VALIDATION_UNKNOWN" if suspect else
+                "ACCEPTED_RECIPIENT_ROOTS" if count else
+                "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED"
+            ),
+            "grants_work_authority": False,
+        })
+    return candidates
+
+
 def read_union(
     snapshot: dict[str, Any], *, recipient: str,
     recent_read: Callable[..., list[dict[str, Any]]] = delta.read_repository_recent,
@@ -347,42 +396,12 @@ def read_union(
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
         })
-    # Candidate locators must be visible even when this recipient has zero
-    # accepted roots. A locator is a read hint, never a delivered assignment.
-    roots_by_issue: dict[tuple[str, int], int] = {}
-    for row in out_rows:
-        key = (row["repository"], row["issue_number"])
-        roots_by_issue[key] = roots_by_issue.get(key, 0) + 1
-    failed_issues = {
-        err.get("owning_issue") for err in verified["errors"]
-        if type(err) is dict and type(err.get("owning_issue")) is str
-    }
-    global_unknown = any(
-        type(err) is not dict or not err.get("owning_issue")
-        for err in verified["errors"]
+    candidates = _build_source_candidate_ledger(
+        all_sources, verified_rows=out_rows,
+        source_errors=verified["errors"],
+        indexed_sources=indexed_sources, recent_sources=recent_sources,
+        marker_in_scope=marker_in_scope,
     )
-    candidates = []
-    for repo, number in all_sources:
-        source_url = f"https://github.com/{repo}/issues/{number}"
-        count = roots_by_issue.get((repo, number), 0)
-        suspect = global_unknown or source_url in failed_issues
-        candidates.append({
-            "repository": repo,
-            "issue_number": number,
-            "issue_url": source_url,
-            "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "origin": _source_origin(
-                repo, number, indexed_sources=indexed_sources,
-                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
-            ),
-            "matching_recipient_roots": count,
-            "source_observation": (
-                "SOURCE_VALIDATION_UNKNOWN" if suspect else
-                "ACCEPTED_RECIPIENT_ROOTS" if count else
-                "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED"
-            ),
-            "grants_work_authority": False,
-        })
 
     removed = set(indexed_by_key) - set(current_by_key)
     missing_previous = set(prior_rows) - set(current_by_key)
