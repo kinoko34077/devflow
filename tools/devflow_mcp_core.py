@@ -140,6 +140,17 @@ def _redact_url(value: str) -> str:
 
 def _translate_read_error(exc: Exception) -> DevflowMCPError:
     if isinstance(exc, urllib.error.HTTPError):
+        # The response header is safe to classify, but do not echo headers,
+        # caller URLs, response bodies or credential details into diagnostics.
+        # Without explicit remaining=0 evidence, 403 stays ambiguous
+        # (scope/permission, policy, secondary limits, or another cause).
+        if exc.code == 403 and exc.headers is not None:
+            remaining = exc.headers.get("X-RateLimit-Remaining")
+            if isinstance(remaining, str) and remaining.strip() == "0":
+                return DevflowMCPError(
+                    "GitHub read failed with HTTP 403; API rate-limit remaining is zero.",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
         if exc.code in {401, 403, 404}:
             return DevflowMCPError(
                 f"GitHub read failed with HTTP {exc.code}. "
