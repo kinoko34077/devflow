@@ -214,13 +214,13 @@ def build_search_list(
             parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
             verify_reply_chain([m for _, m in parsed])
             recipients = RECIPIENTS if recipient == "all" else (recipient,)
+            by_recipient, _warnings = agent_inbox._issue_messages_for_recipients(
+                trusted, repository=repo, issue_number=number,
+                recipients=recipients, expected_actor=expected_actor,
+            )
             verified_roots: list[dict[str, Any]] = []
             for target in recipients:
-                roots, _warnings = agent_inbox._issue_messages(
-                    trusted, repository=repo, issue_number=number,
-                    recipient=target, expected_actor=expected_actor,
-                )
-                for root in roots:
+                for root in by_recipient[target]:
                     verified_roots.append({
                         "repository": repo, "issue_number": number,
                         "issue_url": url,
