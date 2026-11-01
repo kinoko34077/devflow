@@ -35,7 +35,11 @@ def prepare(text=None, **kw):
 
 class RequestSenderTests(unittest.TestCase):
     def test_unrelated_cross_exchange_does_not_block_new_root(self):
-        original, _ = prepare()
+        original, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.other0001",
+            request_text="safe analysis only", expect_existing_actor="kinoko34077",
+        )
         broken = dict(original)
         broken["exchange_id"] = "ex_broken003"
         broken["message_id"] = "msg_broken003"
