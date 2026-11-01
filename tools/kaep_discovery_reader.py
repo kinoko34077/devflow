@@ -93,6 +93,70 @@ def _source_context(
             "observed_reply_kinds": replies}
 
 
+def _verified_source_pointer(
+    pointer: dict[str, Any], *, repo: str, issue: int,
+    expected_source_actor: str,
+    fetch_source: Callable[[str, int], str],
+    source_cache: dict[tuple[str, int], SourceMailbox],
+    proof_cache: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate one pointer against its complete original Issue mailbox.
+
+    Both caches are scoped to the same discovery scan. A source snapshot is
+    decoded strictly once, but every pointer (including a proof-cache hit)
+    must match the original comment ID before it can become a visible hint.
+    """
+    source_key = (repo, issue)
+    if source_key not in source_cache:
+        # Failure here pins the caller's durable cursor: not an empty source.
+        source_cache[source_key] = _mailbox(
+            fetch_source(repo, issue), repository=repo, issue=issue,
+        )
+    snapshot = source_cache[source_key]
+    proof_key = (repo, issue, pointer["message_id"])
+    if proof_key not in proof_cache:
+        verified = _verify_source_request_from_snapshot(
+            snapshot, repository=repo, issue=issue,
+            message_id=pointer["message_id"],
+            expected_actor=expected_source_actor,
+        )
+        # Check the exact source pointer BEFORE reply-context work or caching.
+        if verified != pointer:
+            _fail("DISCOVERY_SOURCE_MISMATCH")
+        context = _source_context(
+            snapshot, message_id=pointer["message_id"],
+            expected_actor=expected_source_actor,
+        )
+        proof_cache[proof_key] = (verified, context)
+    verified, context = proof_cache[proof_key]
+    # Cache hits cannot admit a forged comment ID referencing a real root.
+    if verified != pointer:
+        _fail("DISCOVERY_SOURCE_MISMATCH")
+    return verified, context
+
+
+def _verified_pointer_hint(
+    index_comment_id: int, pointer: dict[str, Any],
+    verified: dict[str, Any], context: dict[str, Any],
+) -> dict[str, Any]:
+    """Project source-proven context into a non-authoritative index hint.
+
+    Source verification, transport and cursor decisions belong elsewhere.
+    No message body, identity certification or execution permission is output.
+    """
+    return {
+        "index_comment_id": index_comment_id,
+        "owning_issue": pointer["owning_issue"],
+        "source_comment_id": verified["comment_id"],
+        "source_message_id": verified["message_id"],
+        "expected_head": context["expected_head"],
+        "observed_reply_kinds": list(context["observed_reply_kinds"]),
+        "status": "POINTER_SOURCE_VERIFIED_ONLY",
+    }
+
+
 def _discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
@@ -203,45 +267,16 @@ def _discover_batch(
             if (repo == DISCOVERY_REPOSITORY
                     and (issue == index_issue or issue == additional_forbidden_issue)):
                 _fail("DISCOVERY_LOOP")
-            key = (repo, issue)
             source_validation = True
-            if key not in source_cache:
-                # A source failure pins the safe cursor; never infer delivery.
-                # Strictly decode its complete owning Issue once per source.
-                source_cache[key] = _mailbox(
-                    fetch_source(repo, issue), repository=repo, issue=issue,
-                )
-            snapshot = source_cache[key]
-            proof_key = (repo, issue, pointer["message_id"])
-            if proof_key not in proof_cache:
-                verified = _verify_source_request_from_snapshot(
-                    snapshot, repository=repo, issue=issue,
-                    message_id=pointer["message_id"],
-                    expected_actor=expected_source_actor)
-                # Preserve original failure ordering: a forged pointer
-                # fails before any reply-context aggregation or memoization.
-                if verified != pointer:
-                    _fail("DISCOVERY_SOURCE_MISMATCH")
-                context = _source_context(
-                    snapshot, message_id=pointer["message_id"],
-                    expected_actor=expected_source_actor)
-                # Only source-proven, exact-matching pointers produce a cache
-                # entry. Invalid actor, message or locator is never memoized.
-                proof_cache[proof_key] = (verified, context)
-            verified, context = proof_cache[proof_key]
-            # Validate *each* pointer, including a cache hit: its comment ID
-            # can be individually forged even when the source ID is genuine.
-            if verified != pointer:
-                _fail("DISCOVERY_SOURCE_MISMATCH")
-            result["hints"].append({
-                "index_comment_id": cid,
-                "owning_issue": pointer["owning_issue"],
-                "source_comment_id": verified["comment_id"],
-                "source_message_id": verified["message_id"],
-                "expected_head": context["expected_head"],
-                "observed_reply_kinds": list(context["observed_reply_kinds"]),
-                "status": "POINTER_SOURCE_VERIFIED_ONLY",
-            })
+            verified, context = _verified_source_pointer(
+                pointer, repo=repo, issue=issue,
+                expected_source_actor=expected_source_actor,
+                fetch_source=fetch_source, source_cache=source_cache,
+                proof_cache=proof_cache,
+            )
+            result["hints"].append(
+                _verified_pointer_hint(cid, pointer, verified, context)
+            )
         except InvalidMessage as exc:
             # Invalid index content/actor cannot starve later entries. Never
             # claim the invalid item is a verified task. Owning-Issue transport
