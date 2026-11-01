@@ -1074,9 +1074,10 @@ class DevflowService:
             "source_coverage": union["source_coverage"],
             "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
             "searched_candidates": union["source_issue_count"],
-            "validated_source_issues": len({
-                (row["repository"], row["issue_number"]) for row in rows
-            }),
+            "validated_source_issues": sum(
+                item["source_observation"] != "SOURCE_VALIDATION_UNKNOWN"
+                for item in union["source_candidates"]
+            ),
             "errors": union["source_errors"],
             "warnings": union["warnings"],
             "index_status": "AVAILABLE",
