@@ -85,6 +85,18 @@ def get_agent_inbox(
 
 
 @mcp.tool()
+def get_agent_workspace(
+    repository: str, recipient: str = "codex",
+    limit: int = 20, offset: int = 0, work_status: str | None = None,
+) -> dict[str, Any]:
+    """Opt-in read-only unified Work/KAEP observation; unknown runtime sections remain unknown."""
+    return _service().get_agent_workspace(
+        repository, recipient, limit=limit, offset=offset,
+        work_status=work_status,
+    )
+
+
+@mcp.tool()
 def get_portfolio_projection() -> dict[str, Any]:
     """Return a read-only summary projection across all currently managed repositories."""
     return _service().get_portfolio_projection()
