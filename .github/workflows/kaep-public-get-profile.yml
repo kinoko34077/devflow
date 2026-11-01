@@ -1,0 +1,27 @@
+name: KAEP public GET latency diagnostic (read-only)
+
+# One narrow PR change or explicit manual run. No schedule, token or write scope.
+on:
+  pull_request:
+    paths:
+      - 'tools/kaep_public_get_profile.py'
+      - 'tests/test_kaep_public_get_profile.py'
+      - '.github/workflows/kaep-public-get-profile.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  observe:
+    if: github.repository == 'kinoko34077/devflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Observe exactly three public GitHub GETs; never log source bodies
+        run: python -m tools.kaep_public_get_profile --live
