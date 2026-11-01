@@ -25,6 +25,7 @@ try:
         acceptance_evidence_preflight,
         human_portfolio,
         agent_inbox,
+        kaep_live_delta_view,
         issue_goal_context,
         goal_plan_assessment,
         maintenance_sync_check,
@@ -50,6 +51,7 @@ except ImportError:  # direct script execution
     import acceptance_evidence_preflight
     import human_portfolio
     import agent_inbox
+    import kaep_live_delta_view
     import issue_goal_context
     import goal_plan_assessment
     import maintenance_sync_check
@@ -281,6 +283,21 @@ class GitHubReader:
             if len(batch) < per_page:
                 return comments
             page += 1
+
+    def list_recent_repository_comments(self, repository: str) -> list[dict[str, Any]]:
+        """One B6-compatible updated-desc repository comment page, GET only.
+
+        A full page is a potentially truncated window; the B6 reader marks
+        it as partial. No GitHub Search or extra gh authentication path.
+        """
+        query = urllib.parse.urlencode({
+            "sort": "updated", "direction": "desc",
+            "per_page": kaep_live_delta_view.MAX_WINDOW, "page": 1,
+        })
+        result = self._read(self._repository_url(repository, f"issues/comments?{query}"))
+        if not isinstance(result, list) or len(result) > kaep_live_delta_view.MAX_WINDOW:
+            raise DevflowMCPError("GitHub recent Issue comments response is invalid.")
+        return result
 
     def get_file(self, repository: str, path: str) -> dict[str, Any] | None:
         if not isinstance(path, str) or not path.strip():
@@ -997,10 +1014,40 @@ class DevflowService:
             errors_by_issue=errors_by_issue, limit=limit, offset=offset,
             work_status=work_status)
 
+    def _workspace_recent_kaep(
+        self, repository: str, recipient: str,
+    ) -> dict[str, Any]:
+        """Adapt the existing B6 original-source validator to our GET reader.
+
+        This is only an updated-comment candidate window. Source scope and
+        message validity stay owned by B6 and the canonical KAEP codec.
+        """
+        def original_comments(repo: str, number: int) -> str:
+            rows = self.reader.list_issue_comments(
+                repo, number, max_comments=agent_inbox.MAX_ISSUE_COMMENTS,
+            )
+            # B6 parse_pages expects the complete paginated gh response.
+            # Reusing the same page structure with this authenticated GET
+            # preserves its identity, actor, sequence and size checks.
+            pages = [
+                rows[i:i + 100] for i in range(0, len(rows), 100)
+            ] or [[]]
+            return json.dumps(pages, ensure_ascii=True, separators=(",", ":"))
+
+        return kaep_live_delta_view.read_live_candidates(
+            [repository], recipient=recipient, expected_actor=DEFAULT_OWNER,
+            recent_read=lambda repo, since=None: (
+                self.reader.list_recent_repository_comments(repo)
+            ),
+            issue_read=self.reader.get_issue,
+            comments_read=original_comments,
+        )
+
     def get_agent_workspace(
         self, repository: str, recipient: str = "codex",
         *, limit: int = 20, offset: int = 0,
         work_status: str | None = None,
+        include_recent_kaep: bool = False,
     ) -> dict[str, Any]:
         """Opt-in observation over existing Work View and bounded KAEP Inbox.
 
@@ -1009,6 +1056,8 @@ class DevflowService:
         Coordinator claims/offers/recovery are not integrated yet (U4).
         """
         agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
+        if type(include_recent_kaep) is not bool:
+            raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
         view = self.get_repository_work_view(repository)
         inbox = self._agent_inbox_from_work_view(
             view, recipient=recipient, limit=limit, offset=offset,
@@ -1031,6 +1080,55 @@ class DevflowService:
             for issue in inbox["issues"]
             for request in (issue["requests"] or [])
         ] if current else None
+        recent_discovery: dict[str, Any] | None = None
+        if include_recent_kaep:
+            try:
+                recent = self._workspace_recent_kaep(view["repository"], recipient)
+                recent_discovery = {
+                    "status": recent["status"],
+                    "source_coverage": recent["source_coverage"],
+                    "observation_basis": recent["observation_basis"],
+                    "source_candidates": recent["searched_candidates"],
+                    "validated_source_issues": recent["validated_source_issues"],
+                    "errors": recent["errors"],
+                    "warnings": recent["warnings"],
+                    "complete_source_universe": False,
+                }
+                extra_rows = [
+                    {
+                        "source_kind": "KAEP_REQUEST",
+                        "source_ref": row["source_url"],
+                        "subject_ref": row["issue_url"],
+                        "recipient": row["recipient"],
+                        "source_message_id": row["message_id"],
+                        "observed_state": row["reply_observation"],
+                        "source_validation": row["source_validation"],
+                        "issue_role": row["issue_role"],
+                        "discovery_basis": "B6_RECENT_COMMENT_ORIGINAL",
+                    }
+                    for row in recent["rows"]
+                ]
+                known = {
+                    (item["source_ref"], item["source_message_id"])
+                    for item in (messages or [])
+                }
+                if messages is None:
+                    messages = []
+                for row in extra_rows:
+                    key = (row["source_ref"], row["source_message_id"])
+                    if key not in known:
+                        messages.append(row)
+                        known.add(key)
+            except (DevflowMCPError, kaep_live_delta_view.InvalidMessage,
+                    TypeError, ValueError, KeyError):
+                # Source errors are local to B6. Never erase valid TASK roots,
+                # echo arbitrary error text or claim missing work is empty.
+                recent_discovery = {
+                    "status": "SOURCE_UNAVAILABLE",
+                    "reason_code": "RECENT_DISCOVERY_UNAVAILABLE",
+                    "source_coverage": "UNKNOWN",
+                    "complete_source_universe": False,
+                }
         known_tasks = [
             {
                 "source_kind": "MACHINE_TASK",
@@ -1042,7 +1140,7 @@ class DevflowService:
             for task in view["task_records"]
         ] if current else None
         not_integrated = {"status": "NOT_INTEGRATED", "entries": None}
-        return {
+        result = {
             "schema_version": "devflow.agent-workspace.read.v0.1",
             "repository": view["repository"],
             "recipient": recipient,
@@ -1080,6 +1178,18 @@ class DevflowService:
             "is_authoritative_assignment": False,
             "is_live_agent_delivery": False,
         }
+        if recent_discovery is not None:
+            result["sections"]["messages"]["entries"] = messages
+            result["sections"]["messages"]["status"] = (
+                "TASK_AND_RECENT_ORIGINALS"
+                if recent_discovery["status"] == "LIVE_WINDOW_READ"
+                else "RECENT_DISCOVERY_PARTIAL"
+                if recent_discovery["status"] == "PARTIAL_UNKNOWN"
+                else "RECENT_DISCOVERY_UNAVAILABLE"
+            )
+            result["sections"]["messages"]["recent_discovery"] = recent_discovery
+            result["sections"]["messages"]["has_unknown_work"] = True
+        return result
 
     @staticmethod
     def _human_portfolio_entry_dict(
