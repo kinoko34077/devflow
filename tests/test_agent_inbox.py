@@ -1,9 +1,11 @@
 """KAEP Agent Inbox read-only projection regressions (no GitHub network)."""
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from tools import agent_inbox, devflow_mcp_core, maintenance_supply, repository_projection
+from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
 from tests.test_devflow_mcp_core import FakeReader
@@ -112,7 +114,50 @@ def supply_control_block(candidates):
     )
 
 
+def demo_index(*entries, other_repo=None):
+    repositories = [REPO]
+    rows = [
+        {
+            "repository": REPO, "issue_number": number,
+            "issue_url": f"https://github.com/{REPO}/issues/{number}",
+            "source_comment_id": cid,
+            "source_url": f"https://github.com/{REPO}/issues/{number}#issuecomment-{cid}",
+            "recipient": msg["recipient"], "message_id": msg["message_id"],
+        }
+        for number, cid, msg in entries
+    ]
+    if other_repo is not None:
+        repositories.append(other_repo)
+        # Another repository's index row must never trigger a Workspace GET.
+        rows.append({
+            **rows[0], "repository": other_repo,
+            "issue_url": f"https://github.com/{other_repo}/issues/{rows[0]['issue_number']}",
+            "source_url": f"https://github.com/{other_repo}/issues/{rows[0]['issue_number']}#issuecomment-{rows[0]['source_comment_id']}",
+        })
+    return {
+        "schema_version": "kaep.public-source-index.v1",
+        "kind": "NON_AUTHORITATIVE_CANDIDATE_SNAPSHOT",
+        "status": "BOUNDED_SEARCH_READ",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "repositories": repositories,
+        "rows": rows,
+        "has_unknown_work": True,
+        "complete_source_universe": False,
+        "can_authorize_execution": False,
+        "fallback_retirement_authorized": False,
+        "requires_live_original_issue_revalidation": True,
+    }
+
+
 class AgentWorkspaceProjectionTests(unittest.TestCase):
+    def setUp(self):
+        self.index_patcher = patch.object(
+            devflow_mcp_core.kaep_live_candidate_cli,
+            "fetch_public_json", return_value=demo_index(),
+        )
+        self.index_mock = self.index_patcher.start()
+        self.addCleanup(self.index_patcher.stop)
+
     def test_workspace_reads_one_projection_and_preserves_recipient_identity(self):
         reader = fixture_reader(
             [task()], {(REPO, 21): [issue_comment(11, message())]})
@@ -190,12 +235,11 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
             "demo", recipient="claude-code", include_recent_kaep=True)
         messages = result["sections"]["messages"]
-        self.assertEqual(messages["recent_discovery"]["status"], "LIVE_WINDOW_READ")
+        self.assertEqual(messages["recent_discovery"]["status"], "BOUNDED_UNION_READ")
         self.assertEqual(messages["recent_discovery"]["validated_source_issues"], 1)
         self.assertEqual(len(messages["entries"]), 2)
         self.assertTrue(any(
             r["subject_ref"] == f"https://github.com/{REPO}/issues/22"
-            and r["issue_role"] == "UNCLASSIFIED"
             and r["source_validation"] == "STRICT_COMPLETE_FOR_CANDIDATE"
             for r in messages["entries"] if r.get("discovery_basis")
         ))
@@ -223,6 +267,117 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         blocked = devflow_mcp_core.DevflowService(outsider).get_agent_workspace(
             "demo", recipient="claude-code", include_recent_kaep=True)
         self.assertEqual(blocked["sections"]["messages"]["entries"], [])
+
+    def test_workspace_b6_indexed_old_non_task_root_and_recent_new_root_share_verifier(self):
+        old = message(issue=22)
+        newer = message(issue=23)
+        self.index_mock.return_value = demo_index((22, 31, old))
+        reader = fixture_reader(
+            [task(), unclassified_issue(22), unclassified_issue(23)],
+            comments={
+                (REPO, 22): [issue_comment(31, old)],
+                (REPO, 23): [issue_comment(41, newer)],
+            },
+            recent_comments={REPO: [recent_marker(issue=23, cid=41, msg=newer)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        rows = result["sections"]["messages"]["entries"]
+        self.assertEqual(result["sections"]["messages"]["recent_discovery"]["indexed_source_issues"], 1)
+        self.assertEqual(result["sections"]["messages"]["recent_discovery"]["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            {r["subject_ref"] for r in rows},
+            {f"https://github.com/{REPO}/issues/22",
+             f"https://github.com/{REPO}/issues/23"},
+        )
+        self.assertEqual(reader.calls.count((REPO, "comments", 22)), 1)
+        self.assertEqual(reader.calls.count((REPO, "comments", 23)), 1)
+        self.assertTrue(all(r["issue_role"] is None for r in rows))
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_b6_index_scope_does_not_fetch_other_repository(self):
+        old = message(issue=22)
+        self.index_mock.return_value = demo_index(
+            (22, 31, old), other_repo="kinoko34077/elsewhere",
+        )
+        reader = fixture_reader(
+            [unclassified_issue(22)],
+            comments={(REPO, 22): [issue_comment(31, old)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
+        self.assertFalse(any(
+            "elsewhere" in str(call) for call in reader.calls
+        ))
+
+    def test_workspace_public_index_failure_preserves_live_original_and_unknown(self):
+        self.index_mock.side_effect = InvalidMessage("PUBLIC_INDEX_READ_UNAVAILABLE")
+        reader = fixture_reader(
+            [unclassified_issue()],
+            comments={(REPO, 22): [issue_comment(31, message(issue=22))]},
+            recent_comments={REPO: [recent_marker()]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(d["index_status"], "UNAVAILABLE")
+        self.assertEqual(d["warnings"][-1]["reason_code"], "PUBLIC_INDEX_UNAVAILABLE")
+        self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
+        self.assertTrue(result["has_unknown_work"])
+
+    def test_workspace_indexed_original_failure_preserves_independent_recent_request(self):
+        old = message(issue=22)
+        newer = message(issue=23)
+        self.index_mock.return_value = demo_index((22, 31, old))
+        reader = fixture_reader(
+            [unclassified_issue(22), unclassified_issue(23)],
+            comments={(REPO, 23): [issue_comment(41, newer)]},
+            recent_comments={REPO: [recent_marker(issue=23, cid=41, msg=newer)]},
+        )
+        original_get = reader.get_issue
+        def fail_indexed_original(repository, number):
+            if repository == REPO and number == 22:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "GitHub source unavailable", reason_code="GITHUB_HTTP_404",
+                )
+            return original_get(repository, number)
+        reader.get_issue = fail_indexed_original
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        found = result["sections"]["messages"]["entries"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["subject_ref"], f"https://github.com/{REPO}/issues/23")
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertTrue(d["errors"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_stale_index_is_explicitly_partial_after_original_verification(self):
+        from datetime import timedelta
+        old = message(issue=22)
+        snap = demo_index((22, 31, old))
+        snap["observed_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=1)
+        ).isoformat()
+        self.index_mock.return_value = snap
+        reader = fixture_reader(
+            [unclassified_issue(22)],
+            comments={(REPO, 22): [issue_comment(31, old)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(d["index_status"], "AVAILABLE")
+        self.assertTrue(d["index_snapshot_stale"])
+        self.assertGreater(d["index_snapshot_age_seconds"], 300)
+        self.assertEqual(d["warnings"][-1]["reason_code"], "PUBLIC_INDEX_STALE")
+        self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
+        self.assertTrue(result["has_unknown_work"])
 
     def test_workspace_b6_failure_keeps_task_roots_and_unknown(self):
         reader = fixture_reader(

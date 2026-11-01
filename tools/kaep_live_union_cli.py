@@ -342,6 +342,7 @@ def read_union(
     additional_repositories: tuple[str, ...] = (),
     public_marker_discovery: dict[str, Any] | None = None,
     previous_report: dict[str, Any] | None = None,
+    scoped_repository: str | None = None,
 ) -> dict[str, Any]:
     """Recheck one deduplicated cohort in canonical original sources.
 
@@ -351,6 +352,17 @@ def read_union(
     if recipient not in RECIPIENTS:
         _deny("INVALID_RECIPIENT")
     info = cached.validate_index(snapshot)
+    # Optional Workspace consumer scope is a strict subset of a fully validated
+    # public snapshot (or one explicitly requested extra repo). No other
+    # repository's original Issue is read or returned.
+    if scoped_repository is not None and (
+        type(scoped_repository) is not str
+        or not REPOSITORY.fullmatch(scoped_repository)
+        or additional_repositories
+        or public_marker_discovery is not None
+        or previous_report is not None
+    ):
+        _deny("INVALID_SCOPED_REPOSITORY")
     # Extra repositories are an explicit caller-selected scope, never
     # discovered or authorized by untrusted public index rows.
     if (type(additional_repositories) is not tuple
@@ -361,7 +373,15 @@ def read_union(
             or len(snapshot["repositories"]) + len(additional_repositories)
                > delta.MAX_REPOSITORIES):
         _deny("INVALID_ADDITIONAL_REPOSITORY_SET")
-    repos = list(snapshot["repositories"]) + list(additional_repositories)
+    if scoped_repository is None:
+        repos = list(snapshot["repositories"]) + list(additional_repositories)
+        effective_additional = list(additional_repositories)
+    else:
+        repos = [scoped_repository]
+        effective_additional = (
+            [scoped_repository] if scoped_repository not in snapshot["repositories"]
+            else []
+        )
     if public_marker_discovery is None:
         public_marker_keys: set[tuple[str, int]] = set()
         marker_partial = False
@@ -378,7 +398,10 @@ def read_union(
     else:
         prior_source_keys, prior_rows, previous_partial = _validated_previous_report(
             previous_report, recipient=recipient, repositories=repos)
-    indexed_rows = [r for r in snapshot["rows"] if r["recipient"] == recipient]
+    indexed_rows = [
+        r for r in snapshot["rows"]
+        if r["recipient"] == recipient and r["repository"] in repos
+    ]
     indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
     indexed_by_key = {
         (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
@@ -443,7 +466,7 @@ def read_union(
         "recipient": recipient, "observed_at": verified["observed_at"],
         "snapshot_observed_at": snapshot["observed_at"],
         "repositories_checked": list(repos),
-        "explicit_additional_repositories": list(additional_repositories),
+        "explicit_additional_repositories": effective_additional,
         "repository_scope_proven_complete": False,
         **info,
         "recent_comments_observed": counts,
