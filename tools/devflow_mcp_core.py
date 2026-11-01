@@ -29,6 +29,7 @@ try:
         issue_goal_context,
         goal_plan_assessment,
         maintenance_sync_check,
+        maintenance_supply,
         reconciliation_publication,
         repository_projection,
         workflow_contract,
@@ -55,6 +56,7 @@ except ImportError:  # direct script execution
     import issue_goal_context
     import goal_plan_assessment
     import maintenance_sync_check
+    import maintenance_supply
     import reconciliation_publication
     import repository_projection
     import workflow_contract
@@ -1043,11 +1045,73 @@ class DevflowService:
             comments_read=original_comments,
         )
 
+    def _workspace_published_supply(
+        self, view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Observe accepted Control candidate publication without granting pickup."""
+        try:
+            repository = view["repository"]
+            control_ref = view["control_ref"]
+            number = int(control_ref.rsplit("/", 1)[1])
+            control_issue = self.reader.get_issue(self.devflow_repository, number)
+            verify_observed_issue_identity(
+                control_issue, self.devflow_repository, number,
+            )
+            if (control_issue.get("html_url") != control_ref
+                    or str(control_issue.get("title") or "").strip()
+                       != f"[REPO] {repository.split('/', 1)[1]}"
+                    or not self._is_accepted_control(control_issue, repository)):
+                raise DevflowMCPError("Current Control identity is not trusted.")
+            observed = maintenance_supply.observe_published_admissions(
+                str(control_issue.get("body") or ""),
+                repository=repository,
+                control_ref=f"{self.devflow_repository}#{number}",
+            )
+        except (DevflowMCPError, maintenance_supply.MaintenanceSupplyError,
+                TypeError, KeyError, ValueError):
+            return {
+                "status": "SOURCE_UNKNOWN", "entries": None,
+                "reason_code": "PUBLISHED_CANDIDATE_SOURCE_UNAVAILABLE",
+                "claimability": "NOT_EVALUATED",
+                "can_authorize_execution": False,
+            }
+        if observed is None:
+            return {
+                "status": "NOT_PUBLISHED", "entries": None,
+                "claimability": "NOT_EVALUATED",
+                "can_authorize_execution": False,
+            }
+        entries = [
+            {
+                "source_kind": "CONTROL_PUBLISHED_CANDIDATE",
+                "source_ref": control_ref,
+                "task_ref": row["task"],
+                "entry_ref": row["entry_ref"],
+                "roles": [
+                    role["role"] for role in row["roles"]
+                ],
+                "publication_state": "PUBLISHED_SNAPSHOT_ONLY",
+                "claimability": "NOT_EVALUATED",
+            }
+            for row in observed
+        ]
+        return {
+            "status": (
+                "PUBLISHED_SNAPSHOT_ONLY" if entries
+                else "NO_PUBLISHED_CANDIDATES"
+            ),
+            "entries": entries,
+            "source_ref": control_ref,
+            "claimability": "NOT_EVALUATED",
+            "can_authorize_execution": False,
+        }
+
     def get_agent_workspace(
         self, repository: str, recipient: str = "codex",
         *, limit: int = 20, offset: int = 0,
         work_status: str | None = None,
         include_recent_kaep: bool = False,
+        include_published_supply: bool = False,
     ) -> dict[str, Any]:
         """Opt-in observation over existing Work View and bounded KAEP Inbox.
 
@@ -1058,6 +1122,8 @@ class DevflowService:
         agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         if type(include_recent_kaep) is not bool:
             raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
+        if type(include_published_supply) is not bool:
+            raise ValueError("INVALID_SUPPLY_OBSERVATION_OPTION")
         view = self.get_repository_work_view(repository)
         inbox = self._agent_inbox_from_work_view(
             view, recipient=recipient, limit=limit, offset=offset,
@@ -1178,6 +1244,8 @@ class DevflowService:
             "is_authoritative_assignment": False,
             "is_live_agent_delivery": False,
         }
+        if include_published_supply:
+            result["sections"]["published_supply"] = self._workspace_published_supply(view)
         if recent_discovery is not None:
             result["sections"]["messages"]["entries"] = messages
             result["sections"]["messages"]["status"] = (

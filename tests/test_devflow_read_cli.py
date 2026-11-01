@@ -36,10 +36,12 @@ class FakeService:
         }
 
     def get_agent_workspace(self, repository, recipient, *, limit, offset, work_status,
-                            include_recent_kaep=False):
-        self.calls.append(("workspace", repository, recipient, limit, offset, work_status)
-                          if not include_recent_kaep else
-                          ("workspace-recent", repository, recipient, limit, offset, work_status))
+                            include_recent_kaep=False, include_published_supply=False):
+        route = (
+            "workspace-supply" if include_published_supply else
+            "workspace-recent" if include_recent_kaep else "workspace"
+        )
+        self.calls.append((route, repository, recipient, limit, offset, work_status))
         return {"schema_version": "devflow.agent-workspace.read.v0.1",
                 "sections": {"offers": {"status": "NOT_INTEGRATED", "entries": None}},
                 "has_unknown_work": True, "can_authorize_execution": False}
@@ -126,6 +128,18 @@ class CloudReadCLITests(unittest.TestCase):
             cli.read_operation(
                 service, operation="inbox", repository=self.REPOSITORY,
                 include_recent_kaep=True)
+
+    def test_workspace_published_supply_flag_is_opt_in_and_workspace_only(self):
+        service = FakeService()
+        got = cli.read_operation(
+            service, operation="workspace", repository=self.REPOSITORY,
+            recipient="codex", include_published_supply=True)
+        self.assertFalse(got["can_authorize_execution"])
+        self.assertEqual(service.calls[-1][0], "workspace-supply")
+        with self.assertRaisesRegex(ValueError, "INVALID_SUPPLY_OBSERVATION_OPTION"):
+            cli.read_operation(
+                service, operation="inbox", repository=self.REPOSITORY,
+                include_published_supply=True)
 
     def test_issue_goal_context_cli_operation_preserves_shared_service_result(self):
         service = FakeService()
