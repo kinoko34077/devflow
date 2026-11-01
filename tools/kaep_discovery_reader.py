@@ -101,6 +101,9 @@ def _discover_batch(
     source_mailboxes: dict[tuple[str, int], SourceMailbox] | None = None,
     index_comments: list[dict[str, Any]] | None = None,
     replay_history: tuple[dict[str, str], dict[str, str]] | None = None,
+    source_proofs: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] | None = None,
 ) -> dict[str, Any]:
     if (type(index_issue) is not int or index_issue <= 0
             or additional_forbidden_issue is not None
@@ -140,6 +143,11 @@ def _discover_batch(
     source_cache: dict[tuple[str, int], SourceMailbox] = (
         {} if source_mailboxes is None else source_mailboxes
     )
+    # Proofs are valid only for the exact immutable source snapshot and fixed
+    # expected actor of this call. Never carry them into a later live read.
+    proof_cache: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] = {} if source_proofs is None else source_proofs
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for position, comment in enumerate(subset):
@@ -204,22 +212,30 @@ def _discover_batch(
                     fetch_source(repo, issue), repository=repo, issue=issue,
                 )
             snapshot = source_cache[key]
-            verified = _verify_source_request_from_snapshot(
-                snapshot, repository=repo, issue=issue,
-                message_id=pointer["message_id"],
-                expected_actor=expected_source_actor)
+            proof_key = (repo, issue, pointer["message_id"])
+            if proof_key not in proof_cache:
+                verified = _verify_source_request_from_snapshot(
+                    snapshot, repository=repo, issue=issue,
+                    message_id=pointer["message_id"],
+                    expected_actor=expected_source_actor)
+                context = _source_context(
+                    snapshot, message_id=pointer["message_id"],
+                    expected_actor=expected_source_actor)
+                # Only verified source proofs are cached. An invalid source
+                # or actor never produces reusable acceptance evidence.
+                proof_cache[proof_key] = (verified, context)
+            verified, context = proof_cache[proof_key]
+            # Validate *each* pointer, including a cache hit: its comment ID
+            # can be individually forged even when the source ID is genuine.
             if verified != pointer:
                 _fail("DISCOVERY_SOURCE_MISMATCH")
-            context = _source_context(
-                snapshot, message_id=pointer["message_id"],
-                expected_actor=expected_source_actor)
             result["hints"].append({
                 "index_comment_id": cid,
                 "owning_issue": pointer["owning_issue"],
                 "source_comment_id": verified["comment_id"],
                 "source_message_id": verified["message_id"],
                 "expected_head": context["expected_head"],
-                "observed_reply_kinds": context["observed_reply_kinds"],
+                "observed_reply_kinds": list(context["observed_reply_kinds"]),
                 "status": "POINTER_SOURCE_VERIFIED_ONLY",
             })
         except InvalidMessage as exc:
@@ -287,6 +303,9 @@ def discover_index_shadow(
     )
     cursor = after_id
     source_cache: dict[tuple[str, int], SourceMailbox] = {}
+    source_proofs: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] = {}
     replay_history: tuple[dict[str, str], dict[str, str]] = ({}, {})
     hints: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -305,6 +324,7 @@ def discover_index_shadow(
             source_mailboxes=source_cache,
             index_comments=index_comments,
             replay_history=replay_history,
+            source_proofs=source_proofs,
         )
         batches += 1
         for hint in batch["hints"]:
