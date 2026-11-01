@@ -157,6 +157,43 @@ def _verified_pointer_hint(
     }
 
 
+def _record_index_notice_identity(
+    msg: dict[str, Any], *,
+    seen_messages: dict[str, str], seen_keys: dict[str, str],
+    replay_history: tuple[dict[str, str], dict[str, str]] | None,
+) -> bool:
+    """Enforce same-batch replay suppression and cross-batch identity checks.
+
+    Return False only for an identical repeat within the SAME batch. The
+    shadow's identical cross-batch replay is intentionally revalidated so
+    it can be counted as a duplicate verified source pointer. Conflicting
+    message IDs or idempotency keys are always rejected before recording.
+    """
+    identity = fingerprint(msg)
+    message_id = msg["message_id"]
+    idempotency_key = msg["idempotency_key"]
+    old_msg = seen_messages.get(message_id)
+    old_key = seen_keys.get(idempotency_key)
+    if replay_history is not None:
+        earlier_messages, earlier_keys = replay_history
+        previous_message = earlier_messages.get(message_id)
+        previous_key = earlier_keys.get(idempotency_key)
+        if (previous_message is not None and previous_message != identity
+                or previous_key is not None and previous_key != identity):
+            _fail("CONFLICTING_INDEX_REPLAY")
+    if (old_msg is not None and old_msg != identity
+            or old_key is not None and old_key != identity):
+        _fail("CONFLICTING_INDEX_REPLAY")
+    if old_msg == identity or old_key == identity:
+        return False
+    seen_messages[message_id] = identity
+    seen_keys[idempotency_key] = identity
+    if replay_history is not None:
+        earlier_messages[message_id] = identity
+        earlier_keys[idempotency_key] = identity
+    return True
+
+
 def _discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
@@ -226,32 +263,11 @@ def _discover_batch(
             continue
         try:
             msg = decode_comment(body, task_ref=f"{DISCOVERY_REPOSITORY}#{index_issue}")
-            identity = fingerprint(msg)
-            old_msg = seen_msg.get(msg["message_id"])
-            old_key = seen_keys.get(msg["idempotency_key"])
-            if replay_history is not None:
-                # The shadow's multi-batch scan must detect conflicting index
-                # identities from *earlier* batches as well as this batch.
-                # Identical cross-batch replays still reach source-root
-                # accounting, preserving duplicate_verified_pointers.
-                earlier_messages, earlier_keys = replay_history
-                previous_message = earlier_messages.get(msg["message_id"])
-                previous_key = earlier_keys.get(msg["idempotency_key"])
-                if (previous_message is not None and previous_message != identity
-                        or previous_key is not None and previous_key != identity):
-                    _fail("CONFLICTING_INDEX_REPLAY")
-            if (old_msg is not None and old_msg != identity
-                    or old_key is not None and old_key != identity):
-                _fail("CONFLICTING_INDEX_REPLAY")
-            if old_msg == identity or old_key == identity:
-                # Identical repeated stored comments are transport replays,
-                # not two separately actionable task hints.
+            if not _record_index_notice_identity(
+                msg, seen_messages=seen_msg, seen_keys=seen_keys,
+                replay_history=replay_history,
+            ):
                 continue
-            seen_msg[msg["message_id"]] = identity
-            seen_keys[msg["idempotency_key"]] = identity
-            if replay_history is not None:
-                earlier_messages[msg["message_id"]] = identity
-                earlier_keys[msg["idempotency_key"]] = identity
             if (msg["recipient"] != "claude-code" or msg["kind"] != "REQUEST"
                     or msg["intent"] != "REPORT" or msg["in_reply_to"] is not None
                     or msg["scope"]["effect"] != "READ_ONLY"):
