@@ -23,7 +23,7 @@ from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, parse_pages, REPOSITORY, MAX_RESPONSE_BYTES,
 )
 from tools.kaep_mailbox_codec import (
-    encode_comment, fingerprint, read_mailbox, verify_reply_chain,
+    encode_comment, fingerprint, read_mailbox, isolate_cross_exchange_replies,
 )
 
 KINDS = {"ACK", "ANSWER", "BLOCKED"}
@@ -54,8 +54,14 @@ def _mailbox(text: str, *, repository: str, issue: int) -> tuple[list[dict[str, 
     comments = parse_pages(text, repository=repository, issue=issue)
     task_ref = f"{repository}#{issue}"
     items = read_mailbox(comments, task_ref=task_ref)
-    verify_reply_chain([item for _, item in items])
-    return comments, items
+    accepted, _quarantined = isolate_cross_exchange_replies(
+        [item for _, item in items]
+    )
+    accepted_ids = {item["message_id"] for item in accepted}
+    return comments, [
+        (cid, item) for cid, item in items
+        if item["message_id"] in accepted_ids
+    ]
 
 
 def make_reply(

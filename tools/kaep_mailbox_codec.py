@@ -137,3 +137,38 @@ def verify_reply_chain(messages: Sequence[Mapping[str, Any]]) -> None:
             if d["exchange_id"] != parent["exchange_id"] or d["task_ref"] != parent["task_ref"]:
                 fail("CROSS_EXCHANGE_REPLY")
         known[mid] = d
+
+
+def isolate_cross_exchange_replies(
+    messages: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Isolate only demonstrable cross-exchange linkage, not malformed history.
+
+    A complete caller-verified mailbox is required. Unknown parents, duplicate
+    identities, invalid envelopes and all other integrity errors remain fatal.
+    Any crossing quarantines the *entire originating exchange*, including its
+    otherwise well-formed descendants. The returned accepted messages retain
+    original order; no untrusted payload is returned as a diagnostic.
+    """
+    known: dict[str, dict[str, Any]] = {}
+    compromised: set[str] = set()
+    for msg in messages:
+        d = validate(msg)
+        mid, parent_id = d["message_id"], d["in_reply_to"]
+        if mid in known:
+            fail("DUPLICATE_MESSAGE_ID")
+        if parent_id is not None:
+            parent = known.get(parent_id)
+            if parent is None:
+                fail("UNKNOWN_PARENT")
+            if (d["exchange_id"] != parent["exchange_id"] or
+                    d["task_ref"] != parent["task_ref"]):
+                compromised.add(d["exchange_id"])
+        known[mid] = d
+    accepted = [
+        d for d in known.values() if d["exchange_id"] not in compromised
+    ]
+    # Recheck the result with the existing strict validator. Do not allow a
+    # partial chain or a dependency on a quarantined exchange to pass.
+    verify_reply_chain(accepted)
+    return accepted, sorted(compromised)

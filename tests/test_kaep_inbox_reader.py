@@ -92,14 +92,34 @@ class ReadOnlyInboxTests(unittest.TestCase):
                                      in_reply_to="msg_missing"))
         self.assert_blocked(pages([comment(11, ack)]), "UNKNOWN_PARENT")
 
-    def test_cross_exchange_fails_closed(self):
+    def test_cross_exchange_quarantined_and_reported(self):
         ping = encode_comment(envelope())
         ack = encode_comment(envelope(kind="ACK", recipient="chatgpt",
                                      message_id="msg_ack002",
                                      in_reply_to="msg_msg001",
                                      exchange_id="ex_another"))
-        self.assert_blocked(pages([comment(11, ping), comment(12, ack)]),
-                            "CROSS_EXCHANGE_REPLY")
+        independent = encode_comment(envelope(
+            message_id="msg_independent003", exchange_id="ex_independent",
+            recipient="chatgpt"))
+        result = inspect_pages(
+            pages([comment(11, ping), comment(12, ack),
+                   comment(13, independent)]),
+            repository=REPO, issue=503, recipient="chatgpt", after_id=11,
+        )
+        self.assertEqual(
+            [m["message_id"] for m in result["messages"]],
+            ["msg_independent003"],
+        )
+        self.assertEqual(result["quarantined_exchanges"], [
+            {"exchange_id": "ex_another", "reason": "CROSS_EXCHANGE_REPLY"}
+        ])
+        # The formerly valid root remains available to its intended recipient.
+        roots = inspect_pages(
+            pages([comment(11, ping), comment(12, ack),
+                   comment(13, independent)]),
+            repository=REPO, issue=503, recipient="claude-code")
+        self.assertEqual([m["message_id"] for m in roots["messages"]],
+                         ["msg_msg001"])
 
     def test_cursor_does_not_hide_conflicting_history(self):
         first = encode_comment(envelope())

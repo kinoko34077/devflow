@@ -21,7 +21,7 @@ from tools.kaep_mailbox_codec import (
     InvalidMessage,
     MARKER,
     read_mailbox,
-    verify_reply_chain,
+    isolate_cross_exchange_replies,
 )
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -106,8 +106,15 @@ def inspect_pages(
     # Validate whole mailbox before filtering so conflicts before the cursor
     # cannot be hidden by a partial read.
     full = read_mailbox(comments, task_ref=task_ref)
-    verify_reply_chain([msg for _, msg in full])
-    accepted = read_mailbox(comments, task_ref=task_ref, after_id=after_id, recipient=recipient)
+    valid, quarantined = isolate_cross_exchange_replies(
+        [msg for _, msg in full]
+    )
+    accepted_ids = {msg["message_id"] for msg in valid}
+    accepted = [
+        (cid, msg) for cid, msg in full
+        if cid > after_id and msg["recipient"] == recipient
+        and msg["message_id"] in accepted_ids
+    ]
     actors = {c["id"]: c["actor_login"] for c in comments}
     messages: list[dict[str, Any]] = []
     for cid, msg in accepted:
@@ -131,6 +138,10 @@ def inspect_pages(
         "after_id": after_id,
         "observed_latest_comment_id": comments[-1]["id"] if comments else 0,
         "messages": messages,
+        "quarantined_exchanges": [
+            {"exchange_id": exchange_id, "reason": "CROSS_EXCHANGE_REPLY"}
+            for exchange_id in quarantined
+        ],
         "read_only": True,
         "claim_or_agent_execution_proven": False,
         "complete_paginated_read_required": True,

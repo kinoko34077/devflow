@@ -53,6 +53,22 @@ def build(source=None, **kwargs):
 
 
 class ReplyContractTests(unittest.TestCase):
+    def test_unrelated_cross_exchange_is_not_a_global_reply_blocker(self):
+        good = parent()
+        bad = parent(message_id="msg_bad_root003")
+        bad["exchange_id"] = "ex_bad003"
+        bad["in_reply_to"] = PARENT
+        source = pages([comment(11, good), comment(12, bad)])
+        response, existing = build(source)
+        self.assertIsNone(existing)
+        self.assertEqual(response["in_reply_to"], PARENT)
+        with self.assertRaisesRegex(InvalidMessage, "PARENT_NOT_FOUND"):
+            make_reply(
+                source, repository=REPO, issue=503,
+                parent_message_id="msg_bad_root003", kind="ACK",
+                response_text=FIXED_ACK, expect_actor="kinoko34077",
+            )
+
     def test_ack_shape(self):
         reply, existing = build()
         self.assertIsNone(existing)

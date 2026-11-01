@@ -34,6 +34,20 @@ def prepare(text=None, **kw):
 
 
 class RequestSenderTests(unittest.TestCase):
+    def test_unrelated_cross_exchange_does_not_block_new_root(self):
+        original, _ = prepare()
+        broken = dict(original)
+        broken["exchange_id"] = "ex_broken003"
+        broken["message_id"] = "msg_broken003"
+        broken["idempotency_key"] = "kaep.broken.003"
+        broken["in_reply_to"] = original["message_id"]
+        new, existing = prepare(
+            pages([comment(11, original), comment(12, broken)]),
+            expected_head=HEAD,
+        )
+        self.assertIsNone(existing)
+        self.assertIsNone(new["in_reply_to"])
+
     def test_valid_request_shape(self):
         message, existing = prepare()
         self.assertIsNone(existing)
