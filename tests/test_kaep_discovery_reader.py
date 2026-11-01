@@ -14,6 +14,7 @@ from tools.kaep_discovery_reader import (
     POINTER_VERSION, MAX_INDEX_BATCH, MAX_SHADOW_BATCHES,
 )
 from tools.kaep_route_notice import DISCOVERY_REPOSITORY, DISCOVERY_ISSUE
+from tools.kaep_reply_sender import _mailbox
 
 SOURCE_REPO = "kinoko34077/UniverseGenome"
 SOURCE_ISSUE = 336
@@ -69,6 +70,37 @@ def read(index, source, *, after_id=0, notice_actor=ACTOR, source_actor=ACTOR):
 
 
 class DiscoveryReaderTests(unittest.TestCase):
+    def test_multiple_pointers_to_one_source_decode_one_complete_mailbox(self):
+        root, first_notice, pointer = fixtures()
+        second_notice = other_notice(
+            json.dumps(pointer), "kaep.discovery.second.notice0002",
+        )
+        original = pages([comment(77, root)])
+        index = pages([comment(88, first_notice), comment(89, second_notice)])
+        fetched = []
+
+        def fetch_source(repository, issue):
+            fetched.append((repository, issue))
+            return original
+
+        # Prior code: verify_source_request + _source_context per pointer,
+        # resulting in four full mailbox decodes for these two notices.
+        with patch("tools.kaep_discovery_reader._mailbox",
+                   wraps=_mailbox) as strict_read:
+            result = discover_batch(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=fetch_source,
+            )
+        self.assertEqual(fetched, [(SOURCE_REPO, SOURCE_ISSUE)])
+        self.assertEqual(strict_read.call_count, 1)
+        self.assertEqual(len(result["hints"]), 2)
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual(result["rejected"], [])
+        self.assertEqual(
+            {item["source_message_id"] for item in result["hints"]},
+            {root["message_id"]},
+        )
+
     def test_valid_pointer_has_actual_root_and_no_payload(self):
         root, hint, pointer = fixtures()
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]))
@@ -285,9 +317,14 @@ class DiscoveryReaderTests(unittest.TestCase):
             for n in range(42)
         ])
         read = lambda repo, issue: pages([comment(77, root)])
-        out = discover_index_shadow(
-            index, expected_notice_actor=ACTOR,
-            expected_source_actor=ACTOR, fetch_source=read)
+        with patch("tools.kaep_discovery_reader._mailbox",
+                   wraps=_mailbox) as strict_read:
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=read)
+        # Both pointers refer to the same verified Issue across three
+        # batches. The source is decoded once, never re-decoded per pointer.
+        self.assertEqual(strict_read.call_count, 1)
         self.assertEqual(len(out["hints"]), 1)
         self.assertEqual(out["duplicate_verified_pointers"], 1)
         self.assertEqual(out["distinct_source_issue_count"], 1)
