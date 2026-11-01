@@ -34,6 +34,44 @@ def prepare(text=None, **kw):
 
 
 class RequestSenderTests(unittest.TestCase):
+    def test_unrelated_cross_exchange_does_not_block_new_root(self):
+        original, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.other0001",
+            request_text="safe analysis only", expect_existing_actor="kinoko34077",
+        )
+        broken = dict(original)
+        broken["exchange_id"] = "ex_broken003"
+        broken["message_id"] = "msg_broken003"
+        broken["idempotency_key"] = "kaep.broken.003"
+        broken["in_reply_to"] = original["message_id"]
+        new, existing = prepare(
+            pages([comment(11, original), comment(12, broken)]),
+            expected_head=HEAD,
+        )
+        self.assertIsNone(existing)
+        self.assertIsNone(new["in_reply_to"])
+
+    def test_quarantined_request_identity_cannot_be_reused(self):
+        other, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.other0001",
+            request_text="safe analysis only", expect_existing_actor="kinoko34077",
+        )
+        outgoing, _ = prepare()
+        for mode in ("message_id", "idempotency_key"):
+            with self.subTest(mode=mode):
+                invalid = dict(outgoing)
+                invalid["exchange_id"] = "ex_wrong003"
+                invalid["in_reply_to"] = other["message_id"]
+                if mode == "message_id":
+                    invalid["idempotency_key"] = "kaep.wrong.003"
+                else:
+                    invalid["message_id"] = "msg_wrong003"
+                source = pages([comment(11, other), comment(12, invalid)])
+                with self.assertRaisesRegex(InvalidMessage, "REQUEST_KEY_COLLISION"):
+                    prepare(source)
+
     def test_valid_request_shape(self):
         message, existing = prepare()
         self.assertIsNone(existing)

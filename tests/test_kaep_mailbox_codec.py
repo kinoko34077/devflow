@@ -4,7 +4,7 @@ import copy
 import unittest
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
-    read_mailbox, validate, verify_reply_chain,
+    read_mailbox, validate, verify_reply_chain, isolate_cross_exchange_replies,
 )
 
 TASK = "kinoko34077/devflow#503"
@@ -81,6 +81,46 @@ class KAEPMailboxContract(unittest.TestCase):
         a = envelope()
         b = envelope(exchange_id="ex_wrong001", message_id="msg_ack002", idempotency_key="kaep.test.002", kind="ACK", in_reply_to="msg_test001")
         with self.assertRaisesRegex(InvalidMessage, "CROSS_EXCHANGE_REPLY"): verify_reply_chain([a,b])
+
+    def test_cross_exchange_isolated_without_weakening_strict_validator(self):
+        root = envelope()
+        corrupt = envelope(
+            exchange_id="ex_bad003", message_id="msg_bad003",
+            in_reply_to="msg_test001", idempotency_key="kaep.bad.003",
+        )
+        descendant = envelope(
+            exchange_id="ex_bad003", message_id="msg_bad_ack004",
+            kind="ACK", in_reply_to="msg_bad003",
+            idempotency_key="kaep.bad.004",
+        )
+        good = envelope(
+            exchange_id="ex_good005", message_id="msg_good005",
+            idempotency_key="kaep.good.005",
+        )
+        good_ack = envelope(
+            exchange_id="ex_good005", message_id="msg_good_ack006",
+            in_reply_to="msg_good005", kind="ACK",
+            idempotency_key="kaep.good.006",
+        )
+        history = [root, corrupt, descendant, good, good_ack]
+        with self.assertRaisesRegex(InvalidMessage, "CROSS_EXCHANGE_REPLY"):
+            verify_reply_chain(history)
+        valid, quarantined = isolate_cross_exchange_replies(history)
+        self.assertEqual(quarantined, ["ex_bad003"])
+        self.assertEqual(
+            [m["message_id"] for m in valid],
+            ["msg_test001", "msg_good005", "msg_good_ack006"],
+        )
+        verify_reply_chain(valid)
+
+    def test_isolation_still_rejects_unknown_parent(self):
+        root = envelope()
+        orphan = envelope(
+            exchange_id="ex_bad003", message_id="msg_orphan003",
+            in_reply_to="msg_missing", idempotency_key="kaep.bad.003",
+        )
+        with self.assertRaisesRegex(InvalidMessage, "UNKNOWN_PARENT"):
+            isolate_cross_exchange_replies([root, orphan])
 
     def test_no_comment_prefix_or_suffix(self):
         body = encode_comment(envelope())

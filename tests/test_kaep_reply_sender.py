@@ -53,6 +53,39 @@ def build(source=None, **kwargs):
 
 
 class ReplyContractTests(unittest.TestCase):
+    def test_unrelated_cross_exchange_is_not_a_global_reply_blocker(self):
+        good = parent()
+        bad = parent(message_id="msg_bad_root003")
+        bad["exchange_id"] = "ex_bad003"
+        bad["in_reply_to"] = PARENT
+        source = pages([comment(11, good), comment(12, bad)])
+        response, existing = build(source)
+        self.assertIsNone(existing)
+        self.assertEqual(response["in_reply_to"], PARENT)
+        with self.assertRaisesRegex(InvalidMessage, "PARENT_NOT_FOUND"):
+            make_reply(
+                source, repository=REPO, issue=503,
+                parent_message_id="msg_bad_root003", kind="ACK",
+                response_text=FIXED_ACK, expect_actor="kinoko34077",
+            )
+
+    def test_quarantined_reply_id_or_key_still_reserves_identity(self):
+        good = parent()
+        expected_reply, _ = build()
+        for mode in ("message_id", "idempotency_key"):
+            with self.subTest(mode=mode):
+                invalid = dict(expected_reply)
+                invalid["exchange_id"] = "ex_wrong003"
+                if mode == "message_id":
+                    invalid["idempotency_key"] = "kaep.wrong.003"
+                else:
+                    invalid["message_id"] = "msg_wrong003"
+                # The foreign parent remains known: this is a quarantinable
+                # cross-exchange link, not a truncated/unknown-parent mailbox.
+                source = pages([comment(11, good), comment(12, invalid)])
+                with self.assertRaisesRegex(InvalidMessage, "REPLY_COLLISION"):
+                    build(source)
+
     def test_ack_shape(self):
         reply, existing = build()
         self.assertIsNone(existing)
