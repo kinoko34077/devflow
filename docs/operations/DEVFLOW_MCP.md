@@ -18,14 +18,16 @@ The server exposes only read operations:
 - `get_repository_projection(repository)`
 - `get_repository_work_view(repository)`
 - `get_agent_inbox(repository, recipient="claude-code", limit=20, offset=0, work_status=None)`
+- `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None, include_recent_kaep=False, include_published_supply=False)`
 - `get_portfolio_projection()`
 - `get_human_portfolio(repository)`
 - `get_issue(repository, issue_number)`
 - `get_issue_goal_context(repository, issue_number)`
 - `assess_issue_plan(repository, issue_number, plan)`
+- `assess_outcome_observation(repository, issue_number, evidence)`
 - `get_sync_health()`
 
-This list reflects the **currently exported** twelve functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
+This list follows the **currently exported** functions in `tools/devflow_mcp.py`. All remain read-only. `get_agent_workspace` is the existing combined Agent-facing observation: it reuses `get_repository_work_view` and the bounded `get_agent_inbox` reader without a second repository Issue-list scan. Opt in to `include_recent_kaep=True` for B6 latest-comment original-source candidates and `include_published_supply=True` for the validated Control publication snapshot. Both default to `False` and the extra reads are conditional. `known_tasks`, recipient messages, and published candidates are distinct observations; none grants assignment, Claim/Lease, permission to execute, historical source completeness or successful agent delivery. Coordinator Offer/ongoing/recovery sections are still `NOT_INTEGRATED`. Existing focused readers and manual Control/#503 fallback remain supported. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
 The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
 
@@ -42,9 +44,10 @@ exactly the same `tools.devflow_mcp_core.default_service()` as the stdio MCP:
 
 ```sh
 python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
-python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
-python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
+python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
+
+The Workspace command combines repository TASK observations, bounded recipient KAEP discovery and published Control candidate evidence. It does not prove there are no historical requests when `has_unknown_work=true`; a published candidate is not a currently claimable Task. The additional flags are optional; for smaller checks or old clients, `work-view` and `inbox` remain valid, and the manual Control/#503 fallback remains in force. Existing operating Codex processes are not silently migrated by updating this document; the new tool must be visible to that client's own MCP registry after its normal refresh. Portfolio-wide discovery starts with existing `get_portfolio_projection()`, which does not authorize widening repository-scoped work or selecting a runnable Task.
 
 For one Issue's source-linked effective Goal Context, both client paths call the
 same `DevflowService.get_issue_goal_context` method and return the same structured

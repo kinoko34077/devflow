@@ -45,7 +45,7 @@ If no Repository Control Issue exists, do not invent managed state. Treat onboar
 
 ### MCP-capable clients
 
-If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work. When resolving repository-local **open tasks**, call the read-only `get_repository_work_view` after bootstrap if available: it exposes all open machine TASK states and retains explicit manual Control fallback. Neither `MACHINE_COMPLETE_SHADOW` nor a visible READY entry grants runtime claim or authority removal; incomplete/unavailable/untrusted status means preserve the manual Control view and inspect owning Issues directly. A bot-authored Control without a verified bootstrap chain is not canonical merely because it has a `[REPO]` title or an older cached `VERIFIED` marker.
+If the KiNoTch Devflow MCP is connected, call `bootstrap_repository` for the target repository before answering or acting on managed-repository Current State, resume, audit, implementation, review, Issue/PR/Work Order, or cross-repository work. For an already-running agent needing both repository work and recipient messages, use the **existing read-only** `get_agent_workspace(repository, recipient, include_recent_kaep=True, include_published_supply=True)` rather than manually combining separate Work View + Inbox results. The two optional flags add bounded original-comment discovery and Control-published candidate observation; omit them when those sources are not needed. For a focused task-only or request-only read, the existing `get_repository_work_view` / `get_agent_inbox` remain valid and cheaper. For a **user-authorized portfolio-wide** scope with no target repository, use existing `get_portfolio_projection` to discover managed repositories before choosing a repository-specific Workspace; the portfolio projection does not select an eligible Task. Neither `MACHINE_COMPLETE_SHADOW` nor a visible READY entry grants execution authority or permission to remove the manual Control fallback. Workspace `known_tasks`, KAEP messages and published supply are observations, **not** a verified Worker match, assigned Task or Claim. Incomplete/unavailable/untrusted status means preserve the manual Control view and inspect owning Issues directly; a bot-authored Control without a verified bootstrap chain is not canonical merely because it has a `[REPO]` title or older `VERIFIED` marker.
 
 When a task's source-linked Goal Context is present or referenced, use `get_issue_goal_context(repository, issue_number)` to read the shared effective projection. It preserves citations and explicit unknowns; it does not verify citation truth or authorize changes. Do not reimplement inheritance in an agent-specific planner.
 
@@ -57,11 +57,14 @@ When the Codex Cloud client does not expose the existing read-only Devflow
 MCP tools but a current devflow checkout and GitHub GET path are available,
 do not classify missing tool registration as failure of the Devflow core.
 From the devflow checkout, use `python -m tools.devflow_read_cli bootstrap
---repository kinoko34077/<repo>`, then `python -m tools.devflow_read_cli
-work-view --repository kinoko34077/<repo>` for open-work analysis, and
-`python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow
---recipient codex --work-status AWAITING_REVIEW` for Codex-addressed inbox
-messages. For a known Issue whose source-linked goal context is needed, also use
+--repository kinoko34077/<repo>`, then use a **single combined read** when
+both work and Codex-addressed messages matter:
+`python -m tools.devflow_read_cli workspace --repository kinoko34077/<repo>
+--recipient codex --include-recent-kaep --include-published-supply`.
+The optional flags request bounded additional reads; omit them for a lighter
+task-cohort read. The existing `work-view` and `inbox` CLI commands remain
+available for focused or older-client checks (including `--work-status AWAITING_REVIEW`).
+For a known Issue whose source-linked goal context is needed, also use
 `python -m tools.devflow_read_cli issue-goal-context --repository kinoko34077/<repo> --issue-number <N>`.
 These delegate to the same live GET-only service as MCP. If neither shared entry
 is available, inspect the exact Issue and explicit parent Issues directly through
