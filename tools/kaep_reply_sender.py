@@ -50,18 +50,39 @@ def _matching_actor(comment: dict[str, Any], expected_login: str) -> bool:
     return True
 
 
-def _mailbox(text: str, *, repository: str, issue: int) -> tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]:
+def _mailbox_snapshot(
+    text: str, *, repository: str, issue: int,
+) -> tuple[
+    list[dict[str, Any]],
+    list[tuple[int, dict[str, Any]]],
+    list[tuple[int, dict[str, Any]]],
+]:
+    """Decode once; retain both eligible messages and all reserved identities.
+
+    The complete mailbox is required for collision and replay checks.
+    Quarantined exchanges are excluded only from actionable parent selection.
+    """
     comments = parse_pages(text, repository=repository, issue=issue)
-    task_ref = f"{repository}#{issue}"
-    items = read_mailbox(comments, task_ref=task_ref)
+    all_items = read_mailbox(comments, task_ref=f"{repository}#{issue}")
     accepted, _quarantined = isolate_cross_exchange_replies(
-        [item for _, item in items]
+        [item for _, item in all_items]
     )
     accepted_ids = {item["message_id"] for item in accepted}
-    return comments, [
-        (cid, item) for cid, item in items
+    eligible = [
+        (cid, item) for cid, item in all_items
         if item["message_id"] in accepted_ids
     ]
+    return comments, eligible, all_items
+
+
+def _mailbox(
+    text: str, *, repository: str, issue: int,
+) -> tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]:
+    """Existing two-result contract for source and discovery callers."""
+    comments, eligible, _all_items = _mailbox_snapshot(
+        text, repository=repository, issue=issue,
+    )
+    return comments, eligible
 
 
 def make_reply(
@@ -87,7 +108,9 @@ def make_reply(
     effective_reply_actor = expect_actor if reply_actor is None else reply_actor
     if type(effective_reply_actor) is not str or not ACTOR.fullmatch(effective_reply_actor):
         _fail("INVALID_REPLY_ACTOR")
-    comments, items = _mailbox(text, repository=repository, issue=issue)
+    comments, items, all_items = _mailbox_snapshot(
+        text, repository=repository, issue=issue,
+    )
     actor_map = {item["id"]: item for item in comments}
     matching = [(cid, msg) for cid, msg in items if msg["message_id"] == parent_message_id]
     if len(matching) != 1:
@@ -127,7 +150,6 @@ def make_reply(
     # Quarantine controls parent selection, not reservation of message IDs or
     # idempotency keys. A quarantined envelope must not allow re-issuing its
     # identity, which would turn a local fault into a global mailbox collision.
-    all_items = read_mailbox(comments, task_ref=parent["task_ref"])
     accepted_ids = {m["message_id"] for _, m in items}
     existing = [
         (c, m) for c, m in all_items
