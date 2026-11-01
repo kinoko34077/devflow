@@ -265,6 +265,7 @@ def read_union(
         repos, locators, fetch_original_issue=issue_read,
         fetch_comments=comments_read, expected_actor="kinoko34077",
         recipient=recipient, max_candidates=MAX_SOURCES,
+        source_workers=2,
     )
     current_by_key = {
         (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
