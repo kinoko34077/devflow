@@ -328,6 +328,57 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
         self.assertTrue(result["has_unknown_work"])
 
+    def test_workspace_indexed_original_failure_preserves_independent_recent_request(self):
+        old = message(issue=22)
+        newer = message(issue=23)
+        self.index_mock.return_value = demo_index((22, 31, old))
+        reader = fixture_reader(
+            [unclassified_issue(22), unclassified_issue(23)],
+            comments={(REPO, 23): [issue_comment(41, newer)]},
+            recent_comments={REPO: [recent_marker(issue=23, cid=41, msg=newer)]},
+        )
+        original_get = reader.get_issue
+        def fail_indexed_original(repository, number):
+            if repository == REPO and number == 22:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "GitHub source unavailable", reason_code="GITHUB_HTTP_404",
+                )
+            return original_get(repository, number)
+        reader.get_issue = fail_indexed_original
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        found = result["sections"]["messages"]["entries"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["subject_ref"], f"https://github.com/{REPO}/issues/23")
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertTrue(d["errors"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_stale_index_is_explicitly_partial_after_original_verification(self):
+        from datetime import timedelta
+        old = message(issue=22)
+        snap = demo_index((22, 31, old))
+        snap["observed_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=1)
+        ).isoformat()
+        self.index_mock.return_value = snap
+        reader = fixture_reader(
+            [unclassified_issue(22)],
+            comments={(REPO, 22): [issue_comment(31, old)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        d = result["sections"]["messages"]["recent_discovery"]
+        self.assertEqual(d["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(d["index_status"], "AVAILABLE")
+        self.assertTrue(d["index_snapshot_stale"])
+        self.assertGreater(d["index_snapshot_age_seconds"], 300)
+        self.assertEqual(d["warnings"][-1]["reason_code"], "PUBLIC_INDEX_STALE")
+        self.assertEqual(len(result["sections"]["messages"]["entries"]), 1)
+        self.assertTrue(result["has_unknown_work"])
+
     def test_workspace_b6_failure_keeps_task_roots_and_unknown(self):
         reader = fixture_reader(
             [task()], {(REPO, 21): [issue_comment(11, message())]})
