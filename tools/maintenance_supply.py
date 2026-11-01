@@ -466,6 +466,41 @@ def _parse_projection_block(
     return value, start, end
 
 
+def observe_published_admissions(
+    body: str, *, repository: str, control_ref: str,
+) -> list[dict[str, Any]] | None:
+    """Read only the existing Control candidate publication, with one validator.
+
+    None means no accepted source projection; [] means an explicit, validated
+    empty publication. This is NOT current worker eligibility or runtime Claim.
+    """
+    if not isinstance(body, str):
+        raise MaintenanceSupplyError("Control body must be a string")
+    # Missing marker is a missing supply observation, not a proof of zero work.
+    if CANDIDATE_BEGIN not in body and CANDIDATE_END not in body:
+        return None
+    projection, _start, _end = _parse_projection_block(
+        body, start_marker=CANDIDATE_BEGIN,
+        end_marker=CANDIDATE_END, repository=repository,
+        control_ref=control_ref, schema_version=ADMISSION_SCHEMA_VERSION,
+        array_key="candidates",
+    )
+    result: list[dict[str, Any]] = []
+    for item in projection["candidates"]:
+        if not isinstance(item, dict):
+            raise MaintenanceSupplyError("candidate projection entries must be objects")
+        task = item.get("task")
+        if not isinstance(task, str) or not task.startswith(repository + "#"):
+            raise MaintenanceSupplyError("candidate task does not belong to repository")
+        checked = extract_existing_admission(
+            body, repository=repository, control_ref=control_ref, task_ref=task,
+        )
+        if checked is None:
+            raise MaintenanceSupplyError("candidate projection lost an original task")
+        result.append(checked)
+    return result
+
+
 def extract_existing_admission(
     body: str,
     *,
