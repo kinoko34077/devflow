@@ -200,7 +200,9 @@ fetch or authenticate the linked comments.
 
 A follow-up PR based on a commit that already contains this evaluator can carry
 the #310 packet between the pilot markers. Its hosted Actions output should be
-recorded as declaration-consistency evidence only. The introduction PR skipped
+recorded as declaration-consistency evidence only. The introduction [PR #840](https://github.com/kinoko34077/devflow/pull/840)
+explicitly reported `OUTCOME_PILOT=SKIPPED_EVALUATOR_NOT_ON_BASE` in its
+[hosted run #41236135413](https://github.com/kinoko34077/devflow/actions/runs/41236135413),
 because the event-pinned base did not yet include this evaluator.
 
 A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
