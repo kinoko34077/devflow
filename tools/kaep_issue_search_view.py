@@ -6,6 +6,8 @@ The Project API, runtime, writer, KAEP routing and M3 role source are unchanged.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -102,6 +104,27 @@ def _display_only_trusted_comments(
     return usable, quarantined
 
 
+def _read_candidate_original(
+    repo: str, number: int, *,
+    fetch_original_issue: Callable[[str, int], dict[str, Any]],
+    fetch_comments: Callable[[str, int], str],
+) -> tuple[dict[str, Any], Any, str]:
+    """Read a candidate's source only after its original Issue shape passes.
+
+    This runs per-source; the canonical full-mailbox codec, actor and reply
+    checks remain in the ordered projection caller, never in worker threads.
+    """
+    url = f"https://github.com/{repo}/issues/{number}"
+    issue = fetch_original_issue(repo, number)
+    if (type(issue) is not dict or issue.get("html_url") != url
+            or issue.get("number") != number
+            or issue.get("state") not in ("open", "closed")
+            or "pull_request" in issue):
+        _fail("SOURCE_ISSUE_MISMATCH")
+    classified = repository_projection.classify_issue(issue)
+    return issue, classified, fetch_comments(repo, number)
+
+
 def build_search_list(
     repositories: list[str], search_results: dict[str, dict[str, Any]], *,
     fetch_original_issue: Callable[[str, int], dict[str, Any]],
@@ -109,6 +132,7 @@ def build_search_list(
     expected_actor: str,
     recipient: str = "all",
     max_candidates: int = MAX_CANDIDATES,
+    source_workers: int = 1,
 ) -> dict[str, Any]:
     """Use real search *locators*, then revalidate each original source.
 
@@ -126,6 +150,8 @@ def build_search_list(
         _fail("INVALID_FILTER")
     if type(expected_actor) is not str or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", expected_actor):
         _fail("INVALID_EXPECTED_ACTOR")
+    if type(source_workers) is not int or source_workers not in (1, 2):
+        _fail("INVALID_SOURCE_WORKERS")
     output: dict[str, Any] = {
         "schema_version": "kaep.search-list.v0.1",
         "status": "BOUNDED_SEARCH_READ",
@@ -178,92 +204,108 @@ def build_search_list(
     if len(candidates) > max_candidates:
         output["errors"].append({"reason_code": "CANDIDATE_LIMIT"})
         candidates = candidates[:max_candidates]
-    for repo, number in candidates:
-        url = f"https://github.com/{repo}/issues/{number}"
-        try:
-            issue = fetch_original_issue(repo, number)
-            if (type(issue) is not dict or issue.get("html_url") != url
-                    or issue.get("number") != number
-                    or issue.get("state") not in ("open", "closed")
-                    or "pull_request" in issue):
-                _fail("SOURCE_ISSUE_MISMATCH")
-            classified = repository_projection.classify_issue(issue)
-            pages = parse_pages(fetch_comments(repo, number),
-                                repository=repo, issue=number)
-            # Enforce the canonical limit on the COMPLETE original mailbox,
-            # before excluding bot markers or quarantining malformed markers.
-            # Otherwise a large source could evade _issue_messages' limit.
-            if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
-                _fail("ISSUE_COMMENTS_LIMIT")
-            # Only the configured GitHub transport actor is an admitted root
-            # origin. A bot/outsider marker is evidence of uncertainty, not a
-            # source of task authority.
-            trusted = [
-                {"id": c["id"], "body": c["body"],
-                 "user": {"id": c.get("actor_id"),
-                          "login": c["actor_login"]}}
-                for c in pages
-                if not c["body"].startswith(MARKER)
-                or c["actor_login"].casefold() == expected_actor.casefold()
-            ]
-            trusted, quarantined = _display_only_trusted_comments(
-                trusted, task_ref=f"{repo}#{number}",
-            )
-            # The unchanged strict codec still verifies every remaining
-            # message; parent/collision/actor failure blocks this entire Issue.
-            parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
-            verify_reply_chain([m for _, m in parsed])
-            recipients = RECIPIENTS if recipient == "all" else (recipient,)
-            by_recipient, _warnings = agent_inbox._issue_messages_for_recipients(
-                trusted, repository=repo, issue_number=number,
-                recipients=recipients, expected_actor=expected_actor,
-            )
-            verified_roots: list[dict[str, Any]] = []
-            for target in recipients:
-                for root in by_recipient[target]:
-                    verified_roots.append({
-                        "repository": repo, "issue_number": number,
-                        "issue_url": url,
-                        "source_url": root["source_url"],
-                        "title_hint": agent_inbox._safe_untrusted_title(issue.get("title")),
-                        "issue_state": issue["state"],
-                        "issue_role": classified.record_role or "UNCLASSIFIED",
-                        "issue_type": classified.type,
-                        "role_source": classified.source_kind,
-                        "recipient": target,
-                        "intent": root["intent"],
-                        "reply_observation": (
-                            "UNVERIFIED_DUE_TO_SOURCE_QUARANTINE"
-                            if quarantined else root["status"]
-                        ),
-                        "source_validation": (
-                            "PARTIAL_UNKNOWN" if quarantined
-                            else "STRICT_COMPLETE_FOR_CANDIDATE"
-                        ),
-                        "message_id": root["source_message_id"],
-                        "source_comment_id": root["source_comment_id"],
-                        "head_freshness": "NOT_REVALIDATED",
-                        "is_authoritative_assignment": False,
-                    })
-            if quarantined:
-                output["partial_source_issues"] += 1
-                for entry in quarantined:
-                    output["errors"].append({"owning_issue": url, **entry})
-            else:
-                output["validated_source_issues"] += 1
-                if not verified_roots:
-                    output["unmatched_candidates"] += 1
-            output["rows"].extend(verified_roots)
-        except (InvalidMessage, ValueError, KeyError, TypeError) as exc:
-            output["errors"].append({
-                "owning_issue": url,
-                "reason_code": str(exc) if isinstance(exc, InvalidMessage)
-                               else "SOURCE_VALIDATION_FAILED",
-            })
-        except (OSError, UnicodeError):
-            output["errors"].append({
-                "owning_issue": url, "reason_code": "SOURCE_READ_UNAVAILABLE",
-            })
+    # The default search reader remains serial. The B6 bounded union may
+    # overlap at most two immutable, allowlisted original-source GET pairs.
+    # Futures resolve in candidate order; all strict codec/actor/parent checks
+    # and output mutations remain on this caller thread.
+    context = (
+        ThreadPoolExecutor(max_workers=source_workers)
+        if source_workers > 1 and len(candidates) > 1 else nullcontext()
+    )
+    with context as pool:
+        futures = (
+            [pool.submit(
+                _read_candidate_original, repo, number,
+                fetch_original_issue=fetch_original_issue,
+                fetch_comments=fetch_comments,
+            ) for repo, number in candidates]
+            if pool is not None else None
+        )
+        for index, (repo, number) in enumerate(candidates):
+            url = f"https://github.com/{repo}/issues/{number}"
+            try:
+                if futures is None:
+                    issue, classified, raw = _read_candidate_original(
+                        repo, number, fetch_original_issue=fetch_original_issue,
+                        fetch_comments=fetch_comments,
+                    )
+                else:
+                    issue, classified, raw = futures[index].result()
+                pages = parse_pages(raw, repository=repo, issue=number)
+                # Enforce the canonical limit on the COMPLETE original mailbox,
+                # before excluding bot markers or quarantining malformed markers.
+                # Otherwise a large source could evade _issue_messages' limit.
+                if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
+                    _fail("ISSUE_COMMENTS_LIMIT")
+                # Only the configured GitHub transport actor is an admitted root
+                # origin. A bot/outsider marker is evidence of uncertainty, not a
+                # source of task authority.
+                trusted = [
+                    {"id": c["id"], "body": c["body"],
+                     "user": {"id": c.get("actor_id"),
+                              "login": c["actor_login"]}}
+                    for c in pages
+                    if not c["body"].startswith(MARKER)
+                    or c["actor_login"].casefold() == expected_actor.casefold()
+                ]
+                trusted, quarantined = _display_only_trusted_comments(
+                    trusted, task_ref=f"{repo}#{number}",
+                )
+                # The unchanged strict codec still verifies every remaining
+                # message; parent/collision/actor failure blocks this entire Issue.
+                parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
+                verify_reply_chain([m for _, m in parsed])
+                recipients = RECIPIENTS if recipient == "all" else (recipient,)
+                by_recipient, _warnings = agent_inbox._issue_messages_for_recipients(
+                    trusted, repository=repo, issue_number=number,
+                    recipients=recipients, expected_actor=expected_actor,
+                )
+                verified_roots: list[dict[str, Any]] = []
+                for target in recipients:
+                    for root in by_recipient[target]:
+                        verified_roots.append({
+                            "repository": repo, "issue_number": number,
+                            "issue_url": url,
+                            "source_url": root["source_url"],
+                            "title_hint": agent_inbox._safe_untrusted_title(issue.get("title")),
+                            "issue_state": issue["state"],
+                            "issue_role": classified.record_role or "UNCLASSIFIED",
+                            "issue_type": classified.type,
+                            "role_source": classified.source_kind,
+                            "recipient": target,
+                            "intent": root["intent"],
+                            "reply_observation": (
+                                "UNVERIFIED_DUE_TO_SOURCE_QUARANTINE"
+                                if quarantined else root["status"]
+                            ),
+                            "source_validation": (
+                                "PARTIAL_UNKNOWN" if quarantined
+                                else "STRICT_COMPLETE_FOR_CANDIDATE"
+                            ),
+                            "message_id": root["source_message_id"],
+                            "source_comment_id": root["source_comment_id"],
+                            "head_freshness": "NOT_REVALIDATED",
+                            "is_authoritative_assignment": False,
+                        })
+                if quarantined:
+                    output["partial_source_issues"] += 1
+                    for entry in quarantined:
+                        output["errors"].append({"owning_issue": url, **entry})
+                else:
+                    output["validated_source_issues"] += 1
+                    if not verified_roots:
+                        output["unmatched_candidates"] += 1
+                output["rows"].extend(verified_roots)
+            except (InvalidMessage, ValueError, KeyError, TypeError) as exc:
+                output["errors"].append({
+                    "owning_issue": url,
+                    "reason_code": str(exc) if isinstance(exc, InvalidMessage)
+                                   else "SOURCE_VALIDATION_FAILED",
+                })
+            except (OSError, UnicodeError):
+                output["errors"].append({
+                    "owning_issue": url, "reason_code": "SOURCE_READ_UNAVAILABLE",
+                })
     output["rows"].sort(
         key=lambda r: (r["repository"], r["issue_number"], r["source_comment_id"])
     )
