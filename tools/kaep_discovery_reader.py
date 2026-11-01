@@ -8,6 +8,7 @@ closed; this does not loosen the shared KAEP codec or Claim protections.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
 import re
 import sys
@@ -118,14 +119,16 @@ def _discover_batch(
     comments = (parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
                             issue=index_issue)
                 if index_comments is None else index_comments)
-    remaining = [item for item in comments if item["id"] > after_id]
-    subset = remaining[:MAX_INDEX_BATCH]
+    # parse_pages guarantees ascending IDs. Binary cursor lookup avoids
+    # copying/rechecking every prior index comment on each bounded batch.
+    start = bisect_right(comments, after_id, key=lambda item: item["id"])
+    subset = comments[start:start + MAX_INDEX_BATCH]
     result: dict[str, Any] = {
         "status": "READ_ONLY",
         "hints": [],
         "rejected": [],
         "blocked": [],
-        "truncated": len(remaining) > len(subset),
+        "truncated": start + len(subset) < len(comments),
         # Commit cursor stops at the first failed source; scan cursor is only
         # for traversing subsequent batches in this active check-in.
         "next_after_id": subset[-1]["id"] if subset else after_id,
