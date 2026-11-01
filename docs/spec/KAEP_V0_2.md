@@ -54,6 +54,9 @@ This is NOT a permissive parser: unknown/missing parents, incomplete paginated
 history, invalid wrappers/JSON/scope, duplicate/colliding message identities
 or idempotency keys, task mismatches and actor/authority checks still fail
 closed. The accepted remainder is checked again by the strict chain validator.
+**Outgoing message ID and idempotency collision checks still reserve identities
+from the complete validated history, including quarantined exchanges**; a
+conflicting quarantined identity blocks that send before POST.
 No quarantined data becomes a source of work/permission/approval. An ordinary
 native GitHub PR Review or Issue discussion is unaffected by KAEP correlation
 errors and must still satisfy its independent GitHub and project review gates.

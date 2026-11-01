@@ -69,6 +69,23 @@ class ReplyContractTests(unittest.TestCase):
                 response_text=FIXED_ACK, expect_actor="kinoko34077",
             )
 
+    def test_quarantined_reply_id_or_key_still_reserves_identity(self):
+        good = parent()
+        expected_reply, _ = build()
+        for mode in ("message_id", "idempotency_key"):
+            with self.subTest(mode=mode):
+                invalid = dict(expected_reply)
+                invalid["exchange_id"] = "ex_wrong003"
+                if mode == "message_id":
+                    invalid["idempotency_key"] = "kaep.wrong.003"
+                else:
+                    invalid["message_id"] = "msg_wrong003"
+                # The foreign parent remains known: this is a quarantinable
+                # cross-exchange link, not a truncated/unknown-parent mailbox.
+                source = pages([comment(11, good), comment(12, invalid)])
+                with self.assertRaisesRegex(InvalidMessage, "REPLY_COLLISION"):
+                    build(source)
+
     def test_ack_shape(self):
         reply, existing = build()
         self.assertIsNone(existing)

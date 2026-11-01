@@ -14,7 +14,7 @@ from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
 from tools.kaep_reply_sender import _mailbox, post_comment, post_and_verify, ACTOR, _matching_actor
-from tools.kaep_mailbox_codec import encode_comment, fingerprint, matches
+from tools.kaep_mailbox_codec import encode_comment, fingerprint, matches, read_mailbox
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
 RECIPIENTS = {"claude-code", "chatgpt", "codex"}
@@ -61,12 +61,20 @@ def make_request(
     encode_comment(req)
     comments, items = _mailbox(text, repository=repository, issue=issue)
     actors = {c["id"]: c for c in comments}
+    # Reserve identities from the *full* structurally valid history, even
+    # when an exchange is quarantined for a wrong-parent relationship.
+    # Otherwise a new POST could recreate a quarantined ID and globally poison
+    # future reads with MESSAGE_ID_COLLISION or IDEMPOTENCY_CONFLICT.
+    all_items = read_mailbox(comments, task_ref=task_ref)
+    accepted_ids = {msg["message_id"] for _, msg in items}
     matching = [
-        (cid, msg) for cid, msg in items
+        (cid, msg) for cid, msg in all_items
         if msg["idempotency_key"] == request_key or msg["message_id"] == req["message_id"]
     ]
     if matching:
         cid, existing = matching[0]
+        if existing["message_id"] not in accepted_ids:
+            _fail("REQUEST_KEY_COLLISION")
         if fingerprint(existing) != fingerprint(req):
             _fail("REQUEST_KEY_COLLISION")
         if not _matching_actor(actors[cid], expect_existing_actor):

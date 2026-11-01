@@ -124,9 +124,20 @@ def make_reply(
     }
     # Use the canonical codec for strict size, allowed-fields and wire validation.
     encode_comment(reply)
-    existing = [(c, m) for c, m in items if m["message_id"] == reply["message_id"]]
+    # Quarantine controls parent selection, not reservation of message IDs or
+    # idempotency keys. A quarantined envelope must not allow re-issuing its
+    # identity, which would turn a local fault into a global mailbox collision.
+    all_items = read_mailbox(comments, task_ref=parent["task_ref"])
+    accepted_ids = {m["message_id"] for _, m in items}
+    existing = [
+        (c, m) for c, m in all_items
+        if (m["message_id"] == reply["message_id"] or
+            m["idempotency_key"] == reply["idempotency_key"])
+    ]
     if existing:
         existing_id, existing_msg = existing[0]
+        if existing_msg["message_id"] not in accepted_ids:
+            _fail("REPLY_COLLISION")
         if fingerprint(existing_msg) != fingerprint(reply):
             _fail("REPLY_COLLISION")
         if not _matching_actor(actor_map[existing_id], effective_reply_actor):
