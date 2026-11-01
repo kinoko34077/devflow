@@ -41,19 +41,19 @@ def _read_jobs(
     issue_read: Callable[[str, int], dict[str, Any]],
     comments_read: Callable[[str, int], str],
     recent_read: Callable[[str], list[dict[str, Any]]],
-) -> list[tuple[str, Callable[[], tuple[Any, int, int]]]]:
+) -> list[tuple[str, Callable[[], tuple[Any, int, int, str]]]]:
     jobs: list[tuple[str, Callable[[], tuple[Any, int, int]]]] = []
     for number in SOURCE_ISSUES:
-        def read_issue(number: int = number) -> tuple[Any, int, int]:
+        def read_issue(number: int = number) -> tuple[Any, int, int, str]:
             issue = issue_read(REPOSITORY, number)
             if (type(issue) is not dict or issue.get("number") != number
                     or issue.get("html_url")
                     != f"https://github.com/{REPOSITORY}/issues/{number}"):
                 raise InvalidMessage("SOURCE_ISSUE_MISMATCH")
             payload = _canonical_bytes(issue)
-            return issue, len(payload), 1
+            return issue, len(payload), 1, "canonical_json_estimate"
 
-        def read_comments(number: int = number) -> tuple[Any, int, int]:
+        def read_comments(number: int = number) -> tuple[Any, int, int, str]:
             raw = comments_read(REPOSITORY, number)
             comments = parse_pages(raw, repository=REPOSITORY, issue=number)
             canonical = [
@@ -65,26 +65,26 @@ def _read_jobs(
                 }
                 for item in comments
             ]
-            return canonical, len(raw.encode("utf-8")), len(comments)
+            return canonical, len(raw.encode("utf-8")), len(comments), "raw_gh_slurp_utf8"
 
         jobs.append((f"issue_{number}", read_issue))
         jobs.append((f"comments_{number}", read_comments))
 
-    def read_recent() -> tuple[Any, int, int]:
+    def read_recent() -> tuple[Any, int, int, str]:
         comments = recent_read(REPOSITORY)
         if type(comments) is not list or len(comments) > RECENT_WINDOW_LIMIT:
             raise InvalidMessage("INVALID_RECENT_COMMENTS")
         payload = _canonical_bytes(comments)
-        return comments, len(payload), len(comments)
+        return comments, len(payload), len(comments), "canonical_json_estimate"
 
     jobs.append(("updated_comment_window", read_recent))
     return jobs
 
 
-def _read_one(label: str, call: Callable[[], tuple[Any, int, int]]) -> dict[str, Any]:
+def _read_one(label: str, call: Callable[[], tuple[Any, int, int, str]]) -> dict[str, Any]:
     started = perf_counter_ns()
     try:
-        payload, payload_bytes, items = call()
+        payload, payload_bytes, items, payload_bytes_scope = call()
         fingerprint = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
         status = "READ_OK"
     except Exception:
@@ -92,12 +92,14 @@ def _read_one(label: str, call: Callable[[], tuple[Any, int, int]]) -> dict[str,
         status = "READ_UNAVAILABLE"
         fingerprint = None
         payload_bytes = None
+        payload_bytes_scope = None
         items = None
     return {
         "source": label,
         "status": status,
         "elapsed_ms": round((perf_counter_ns() - started) / 1_000_000, 3),
         "payload_bytes": payload_bytes,
+        "payload_bytes_scope": payload_bytes_scope,
         "items": items,
         "fingerprint_sha256": fingerprint,
     }
