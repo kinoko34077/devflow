@@ -101,11 +101,15 @@ def select_task_records(
     }
 
 
-def _issue_messages(
+def _issue_messages_for_recipients(
     comments: Sequence[Mapping[str, Any]], *, repository: str,
-    issue_number: int, recipient: str, expected_actor: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Read correlation from complete stored comments; never return raw prompts."""
+    issue_number: int, recipients: Sequence[str], expected_actor: str,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Validate one full Issue mailbox and project exact recipient views.
+
+    The trust filter, strict decoder and reply correlation run once regardless
+    of the number of requested recipients. This does not grant task authority.
+    """
     if len(comments) > MAX_ISSUE_COMMENTS:
         raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
     task_ref = f"{repository}#{issue_number}"
@@ -135,7 +139,9 @@ def _issue_messages(
             trusted_actor_ids.add(cid)
         trusted_comments.append(comment)
     parsed = read_mailbox(trusted_comments, task_ref=task_ref)
-    roots: dict[str, tuple[int, dict[str, Any]]] = {}
+    roots_by_recipient: dict[str, dict[str, tuple[int, dict[str, Any]]]] = {
+        target: {} for target in recipients
+    }
     # Build the correlation lookup during the same validated mailbox pass.
     # A reply names a single parent, so repeated full-mailbox scans for each
     # root are unnecessary. Trusted actor, kind and recipient gates remain.
@@ -148,36 +154,52 @@ def _issue_messages(
             replies_by_parent.setdefault(parent_id, []).append(msg)
         if msg["kind"] != "REQUEST" or msg["in_reply_to"] is not None:
             continue
-        if msg["recipient"] != recipient or msg["scope"]["effect"] != "READ_ONLY":
+        recipient_roots = roots_by_recipient.get(msg["recipient"])
+        if recipient_roots is None or msg["scope"]["effect"] != "READ_ONLY":
             continue
         if cid not in trusted_actor_ids:
             warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_ROOT_ACTOR"})
             continue
-        roots[msg["message_id"]] = (cid, msg)
-    out: list[dict[str, Any]] = []
-    for message_id, (cid, root) in roots.items():
-        reply_kinds = sorted({
-            msg["kind"] for msg in replies_by_parent.get(message_id, ())
-            if msg["exchange_id"] == root["exchange_id"]
-            and msg["task_ref"] == root["task_ref"]
-            and msg["scope"] == root["scope"]
-            and msg["intent"] == root["intent"]
-        })
-        out.append({
-            "source_comment_id": cid,
-            "source_message_id": message_id,
-            "exchange_id": root["exchange_id"],
-            "intent": root["intent"],
-            "expected_head": root["scope"]["expected_head"],
-            "reply_kinds_observed": reply_kinds,
-            "status": "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
-                      "BLOCKED_OBSERVED" if "BLOCKED" in reply_kinds else
-                      "ACK_OBSERVED" if "ACK" in reply_kinds else "PENDING_REPLY",
-            "source_url": f"https://github.com/{repository}/issues/{issue_number}#issuecomment-{cid}",
-            "actor_login_verified_only": True,
-        })
-    out.sort(key=lambda row: row["source_comment_id"])
-    return out, warnings
+        recipient_roots[msg["message_id"]] = (cid, msg)
+    out_by_recipient: dict[str, list[dict[str, Any]]] = {}
+    for target, roots in roots_by_recipient.items():
+        out: list[dict[str, Any]] = []
+        for message_id, (cid, root) in roots.items():
+            reply_kinds = sorted({
+                msg["kind"] for msg in replies_by_parent.get(message_id, ())
+                if msg["exchange_id"] == root["exchange_id"]
+                and msg["task_ref"] == root["task_ref"]
+                and msg["scope"] == root["scope"]
+                and msg["intent"] == root["intent"]
+            })
+            out.append({
+                "source_comment_id": cid,
+                "source_message_id": message_id,
+                "exchange_id": root["exchange_id"],
+                "intent": root["intent"],
+                "expected_head": root["scope"]["expected_head"],
+                "reply_kinds_observed": reply_kinds,
+                "status": "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
+                          "BLOCKED_OBSERVED" if "BLOCKED" in reply_kinds else
+                          "ACK_OBSERVED" if "ACK" in reply_kinds else "PENDING_REPLY",
+                "source_url": f"https://github.com/{repository}/issues/{issue_number}#issuecomment-{cid}",
+                "actor_login_verified_only": True,
+            })
+        out.sort(key=lambda row: row["source_comment_id"])
+        out_by_recipient[target] = out
+    return out_by_recipient, warnings
+
+
+def _issue_messages(
+    comments: Sequence[Mapping[str, Any]], *, repository: str,
+    issue_number: int, recipient: str, expected_actor: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compatibility single-recipient entrypoint for the Agent Inbox."""
+    grouped, warnings = _issue_messages_for_recipients(
+        comments, repository=repository, issue_number=issue_number,
+        recipients=(recipient,), expected_actor=expected_actor,
+    )
+    return grouped[recipient], warnings
 
 
 def build_agent_inbox(
