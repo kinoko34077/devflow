@@ -218,11 +218,15 @@ def _discover_batch(
                     snapshot, repository=repo, issue=issue,
                     message_id=pointer["message_id"],
                     expected_actor=expected_source_actor)
+                # Preserve original failure ordering: a forged pointer
+                # fails before any reply-context aggregation or memoization.
+                if verified != pointer:
+                    _fail("DISCOVERY_SOURCE_MISMATCH")
                 context = _source_context(
                     snapshot, message_id=pointer["message_id"],
                     expected_actor=expected_source_actor)
-                # Only verified source proofs are cached. An invalid source
-                # or actor never produces reusable acceptance evidence.
+                # Only source-proven, exact-matching pointers produce a cache
+                # entry. Invalid actor, message or locator is never memoized.
                 proof_cache[proof_key] = (verified, context)
             verified, context = proof_cache[proof_key]
             # Validate *each* pointer, including a cache hit: its comment ID
