@@ -967,6 +967,16 @@ class DevflowService:
         # any live GitHub Control or Issue GET (including private repositories).
         agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         view = self.get_repository_work_view(repository)
+        return self._agent_inbox_from_work_view(
+            view, recipient=recipient, limit=limit, offset=offset,
+            work_status=work_status,
+        )
+
+    def _agent_inbox_from_work_view(
+        self, view: dict[str, Any], *, recipient: str,
+        limit: int, offset: int, work_status: str | None,
+    ) -> dict[str, Any]:
+        """Use a caller's already-observed live work view; no second Issue scan."""
         selected = agent_inbox.select_task_records(
             view, recipient=recipient, limit=limit,
             offset=offset, work_status=work_status)
@@ -986,6 +996,90 @@ class DevflowService:
             view, recipient=recipient, comments_by_issue=comments_by_issue,
             errors_by_issue=errors_by_issue, limit=limit, offset=offset,
             work_status=work_status)
+
+    def get_agent_workspace(
+        self, repository: str, recipient: str = "codex",
+        *, limit: int = 20, offset: int = 0,
+        work_status: str | None = None,
+    ) -> dict[str, Any]:
+        """Opt-in observation over existing Work View and bounded KAEP Inbox.
+
+        It deliberately does not claim that machine TASKs are claimable,
+        or that TASK-only KAEP discovery covers non-TASK original messages.
+        Coordinator claims/offers/recovery are not integrated yet (U4).
+        """
+        agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
+        view = self.get_repository_work_view(repository)
+        inbox = self._agent_inbox_from_work_view(
+            view, recipient=recipient, limit=limit, offset=offset,
+            work_status=work_status,
+        )
+        current = (
+            view["source_status"] == "AVAILABLE"
+            and view["source_freshness"] == "CURRENT"
+        )
+        messages = [
+            {
+                "source_kind": "KAEP_REQUEST",
+                "source_ref": request["source_url"],
+                "subject_ref": issue["url"],
+                "recipient": recipient,
+                "source_message_id": request["source_message_id"],
+                "observed_state": request["status"],
+                "expected_head": request["expected_head"],
+            }
+            for issue in inbox["issues"]
+            for request in (issue["requests"] or [])
+        ] if current else None
+        known_tasks = [
+            {
+                "source_kind": "MACHINE_TASK",
+                "source_ref": task["url"],
+                "observed_state": task["work_status"],
+                "record_role": task["record_role"],
+                "claimability": "NOT_EVALUATED",
+            }
+            for task in view["task_records"]
+        ] if current else None
+        not_integrated = {"status": "NOT_INTEGRATED", "entries": None}
+        return {
+            "schema_version": "devflow.agent-workspace.read.v0.1",
+            "repository": view["repository"],
+            "recipient": recipient,
+            "observed_at": view["observed_at"],
+            "source_status": view["source_status"],
+            "source_freshness": view["source_freshness"],
+            "source_error": view["source_error"],
+            "coverage_status": view["coverage_status"],
+            "has_unknown_work": True,  # B5/non-TASK source universe unproven
+            "sections": {
+                "ongoing": dict(not_integrated),
+                "messages": {
+                    "status": "TASK_SOURCE_COHORT_ONLY" if current else "SOURCE_UNAVAILABLE",
+                    "entries": messages,
+                    "errors": inbox["errors"],
+                    "offset": offset,
+                    "next_offset": inbox["next_offset"],
+                    "has_unknown_work": True,
+                    "task_inbox_has_unknown_work": inbox["has_unknown_work"],
+                },
+                "known_tasks": {
+                    "status": view["observed_task_view"]["status"],
+                    "entries": known_tasks,
+                    "unresolved_open_issue_count": (
+                        view["observed_task_view"]["unresolved_open_issue_count"]
+                    ),
+                    "claimability": "NOT_EVALUATED",
+                },
+                "offers": dict(not_integrated),
+                "waiting_recovery": dict(not_integrated),
+            },
+            "manual_control": view["manual_control"],
+            "can_authorize_execution": False,
+            "can_replace_manual_active_work": False,
+            "is_authoritative_assignment": False,
+            "is_live_agent_delivery": False,
+        }
 
     @staticmethod
     def _human_portfolio_entry_dict(

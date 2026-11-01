@@ -72,6 +72,80 @@ def fixture_reader(issues, comments=None):
     }, comments=comments)
 
 
+class AgentWorkspaceProjectionTests(unittest.TestCase):
+    def test_workspace_reads_one_projection_and_preserves_recipient_identity(self):
+        reader = fixture_reader(
+            [task()], {(REPO, 21): [issue_comment(11, message())]})
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code")
+        self.assertEqual(result["schema_version"], "devflow.agent-workspace.read.v0.1")
+        self.assertEqual(reader.calls.count((REPO, "open")), 1)
+        self.assertEqual(reader.calls.count((REPO, "comments", 21)), 1)
+        self.assertEqual(result["sections"]["messages"]["entries"][0]["recipient"], "claude-code")
+        self.assertEqual(result["sections"]["messages"]["entries"][0]["source_kind"], "KAEP_REQUEST")
+        self.assertEqual(result["sections"]["known_tasks"]["entries"][0]["claimability"], "NOT_EVALUATED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertIsNone(result["sections"]["offers"]["entries"])
+        self.assertIsNone(result["sections"]["ongoing"]["entries"])
+        self.assertIsNone(result["sections"]["waiting_recovery"]["entries"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["can_replace_manual_active_work"])
+
+    def test_workspace_does_not_imply_assignment_from_a_different_recipient(self):
+        reader = fixture_reader([task()], {(REPO, 21): [issue_comment(11, message())]})
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex")
+        self.assertEqual(result["sections"]["messages"]["entries"], [])
+        self.assertTrue(result["sections"]["messages"]["has_unknown_work"])
+        self.assertEqual(result["sections"]["known_tasks"]["entries"][0]["source_kind"], "MACHINE_TASK")
+
+    def test_workspace_unclassified_source_is_not_promoted_to_task_or_delivery(self):
+        reader = fixture_reader([task(), {
+            "number": 22, "title": "Untyped discussion", "state": "open",
+            "body": "no machine task role", "author_association": "OWNER",
+            "user": {"id": 79015263, "login": OWNER},
+            "html_url": f"https://github.com/{REPO}/issues/22",
+            "created_at": "2026-10-14T00:00:00Z",
+            "updated_at": "2026-10-14T00:00:00Z",
+        }])
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex")
+        self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
+        self.assertEqual(result["coverage_status"], "INCOMPLETE")
+        self.assertEqual(result["sections"]["known_tasks"]["unresolved_open_issue_count"], 1)
+        self.assertEqual(result["sections"]["messages"]["status"], "TASK_SOURCE_COHORT_ONLY")
+        self.assertFalse(result["is_live_agent_delivery"])
+
+    def test_workspace_preserves_source_error_without_misreporting_empty(self):
+        reader = fixture_reader([task()])
+        original_list = reader.list_issues
+
+        def unavailable(repository, state="open"):
+            if repository == REPO:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "GitHub read failed with HTTP 403; API rate-limit remaining is zero.",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
+            return original_list(repository, state=state)
+
+        reader.list_issues = unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="codex")
+        self.assertEqual(result["source_status"], "UNAVAILABLE")
+        self.assertIn("HTTP 403", result["source_error"])
+        self.assertIsNone(result["sections"]["known_tasks"]["entries"])
+        self.assertIsNone(result["sections"]["messages"]["entries"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_options_fail_before_live_read(self):
+        reader = fixture_reader([task()])
+        service = devflow_mcp_core.DevflowService(reader)
+        with self.assertRaisesRegex(ValueError, "INVALID_RECIPIENT"):
+            service.get_agent_workspace("demo", recipient="invalid")
+        self.assertEqual(reader.calls, [])
+
+
 class AgentInboxProjectionTests(unittest.TestCase):
     def test_real_source_task_and_correlated_answer(self):
         root = message()

@@ -15,7 +15,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
 OPERATIONS = (
-    "bootstrap", "work-view", "inbox", "issue-goal-context",
+    "bootstrap", "work-view", "inbox", "workspace", "issue-goal-context",
     "assess-issue-plan", "assess-outcome-observation",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
@@ -91,6 +91,10 @@ def read_operation(
         return service.get_agent_inbox(
             repository, recipient, limit=limit, offset=offset,
             work_status=work_status)
+    if operation == "workspace":
+        return service.get_agent_workspace(
+            repository, recipient, limit=limit, offset=offset,
+            work_status=work_status)
     if operation == "issue-goal-context":
         return service.get_issue_goal_context(repository, issue_number)
     if operation == "assess-issue-plan":
@@ -122,12 +126,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("INVALID_REPOSITORY")
         if not 1 <= args.limit <= MAX_INBOX_LIMIT or args.offset < 0:
             raise ValueError("INVALID_PAGINATION")
-        if args.operation != "inbox" and (
+        if args.operation not in {"inbox", "workspace"} and (
             args.recipient != "codex" or args.limit != 20
             or args.offset != 0 or args.work_status is not None
         ):
             raise ValueError("INBOX_OPTIONS_ON_NON_INBOX_OPERATION")
-        if args.operation == "inbox":
+        if args.operation in {"inbox", "workspace"}:
             # Shared with the MCP core: fail before any live GitHub read.
             agent_inbox.validate_inbox_options(
                 args.recipient, args.limit, args.offset, args.work_status

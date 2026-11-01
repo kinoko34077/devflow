@@ -358,6 +358,14 @@ Token lookup order:
 
 Use a read-capable token only. Do not commit tokens to this repository, `.mcp.json`, `AGENTS.md`, `CLAUDE.md`, or other shared files.
 
+## Agent Workspace U1 opt-in unified read (devflow #869 / #870)
+
+The additive `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None)` MCP tool and `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex` reuse **one current repository work-view read** plus the existing bounded original-comment TASK Inbox read. Existing `get_repository_work_view`, `get_agent_inbox` and CLI operations are unchanged.
+
+This is a **read-only observation / U1 opt-in consumer**, not an authoritative task queue or all-work index. `known_tasks` means classified TASK records **without Claim eligibility assessment**. `messages` covers only existing TASK-scoped Inbox roots; true non-TASK / unindexed discovery is future U2 (#531/#680/#771). `ongoing`, `offers` and `waiting_recovery` return `NOT_INTEGRATED` and `entries=null` until directly backed by execution-coordinator sources, **never** empty arrays suggesting no work. Workspace `has_unknown_work=true` while the global KAEP source universe remains unproven; it retains the source `source_error` / `coverage_status`, Inbox page `next_offset`, error codes and `manual_control` fallback. `can_authorize_execution=false` and `can_replace_manual_active_work=false`.
+
+Deployment/rollback: Clients must explicitly opt in; old MCP/CLI consumers are not migrated. If this view is unsuitable, call existing `get_repository_work_view` + `get_agent_inbox`. No new local MCP settings, permissions, credentials, automatic triggers, coordinator mutations or new stored state are involved. Do not switch the controller or retire #503/manual fallback on U1 evidence alone.
+
 ## KAEP Agent Inbox operational status
 
 As of 2026-10-15, the read-only MCP function `get_agent_inbox` and native CLI `python -m tools.kaep_agent_inbox_cli` are merged on main. A Claude Code session reported its existing idle check-in executed the CLI and discovered a new, non-pointer KAEP root before direct Issue lookup, then stored actual source-correlated [ACK/ANSWER on #553](https://github.com/kinoko34077/devflow/issues/553). This is **functional E2E evidence with a self-reported trigger path**, not an independently authenticated wake or automatic MCP registration. The recurring user-managed prompt had been modified earlier to add generic CLI invocation; connecting this MCP alone does not schedule or cause an agent to read it.
