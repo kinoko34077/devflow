@@ -1210,7 +1210,7 @@ class DevflowService:
                         "source_message_id": row["message_id"],
                         "observed_state": row["reply_observation"],
                         "source_validation": row["source_validation"],
-                        "issue_role": row["issue_role"],
+                        "issue_role": row.get("issue_role"),
                         "discovery_basis": (
                             row.get("source_origin") or "B6_RECENT_COMMENT_ORIGINAL"
                         ),
