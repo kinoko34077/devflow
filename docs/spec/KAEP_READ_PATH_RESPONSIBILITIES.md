@@ -14,7 +14,9 @@ Change rationale: [#847](https://github.com/kinoko34077/devflow/issues/847).
 | Complete mailbox/actor/reply-chain/limited quarantine | `kaep_issue_search_view._verify_candidate_mailbox`, canonical `kaep_inbox_reader.parse_pages`, `kaep_mailbox_codec` and `agent_inbox` | Only two presentation defects may be quarantined; identity/collision/parent failures remain source-blocking; do not reinterpret actor login as model identity |
 | Non-authoritative recipient rows | `kaep_issue_search_view._project_candidate_roots` | Presentation only; no fetching, message decoding, authorization, or output status ownership |
 | Candidate report aggregation, error status and unknown-work flags | `kaep_issue_search_view.build_search_list` | Candidate errors remain ordered; no complete-source-universe or execution-authority claim |
-| B6 union across existing and recent source hints | `kaep_live_union_cli.read_union` | Uses strict original-source reader; source caps and origin labels preserved |
+| B6 updated-window pagination/marker hints | `kaep_live_union_cli._collect_recent_source_hints` | Bounded comments only; overlap/truncation signal uncertainty, not source completeness |
+| B6 source provenance precedence | `kaep_live_union_cli._source_origin` | One label selector for both verified rows and untrusted candidates; never grants work authority |
+| B6 union of indexed/recent/previous sources | `kaep_live_union_cli.read_union` | Strict original-source verification, cap and cross-snapshot change reporting remain the orchestration owner |
 | Agent Inbox / reply observation for recipients | `agent_inbox._issue_messages_for_recipients` | Canonical mailbox validation stays upstream; no independent recipient/claim authority |
 
 **Flow:** Search or bounded B6 hints → candidate validation → original Issue
