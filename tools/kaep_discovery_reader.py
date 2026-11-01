@@ -21,7 +21,7 @@ from tools.kaep_mailbox_codec import (
 from tools.kaep_reply_sender import ACTOR, _mailbox, _matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    verify_source_request, _verify_source_request_from_snapshot,
+    verify_source_request, _verify_source_request_from_snapshot, SourceMailbox,
 )
 
 SOURCE_URL = re.compile(
@@ -68,7 +68,7 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
 
 
 def _source_context(
-    snapshot: tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]],
+    snapshot: SourceMailbox,
     *, message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
     """Observe original scope/replies from the same validated source snapshot."""
@@ -127,7 +127,7 @@ def discover_batch(
         "read_only": True,
         "peer_identity_verified": False,
     }
-    source_cache: dict[tuple[str, int], tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]] = {}
+    source_cache: dict[tuple[str, int], SourceMailbox] = {}
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for position, comment in enumerate(subset):
