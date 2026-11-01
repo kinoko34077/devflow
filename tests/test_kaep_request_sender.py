@@ -7,7 +7,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import encode_comment, fingerprint, InvalidMessage
+from tools.kaep_mailbox_codec import encode_comment, fingerprint, InvalidMessage, read_mailbox
 from tools.kaep_request_sender import make_request, send_request, main
 
 REPO = "kinoko34077/devflow"
@@ -34,6 +34,14 @@ def prepare(text=None, **kw):
 
 
 class RequestSenderTests(unittest.TestCase):
+    def test_sender_preflight_decodes_each_issue_mailbox_once(self):
+        with patch("tools.kaep_reply_sender.read_mailbox",
+                   wraps=read_mailbox) as read:
+            request, existing = prepare()
+        self.assertIsNone(existing)
+        self.assertIsNone(request["in_reply_to"])
+        self.assertEqual(read.call_count, 1)
+
     def test_unrelated_cross_exchange_does_not_block_new_root(self):
         original, _ = make_request(
             pages([]), repository=REPO, issue=503, recipient="claude-code",
