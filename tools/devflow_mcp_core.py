@@ -1031,13 +1031,28 @@ class DevflowService:
         report partial/unknown coverage instead of silently dropping requests.
         """
         def original_comments(repo: str, number: int) -> str:
-            rows = self.reader.list_issue_comments(
-                repo, number, max_comments=agent_inbox.MAX_ISSUE_COMMENTS,
-            )
+            try:
+                rows = self.reader.list_issue_comments(
+                    repo, number, max_comments=agent_inbox.MAX_ISSUE_COMMENTS,
+                )
+            except DevflowMCPError as exc:
+                # B6 isolates original-source failure through InvalidMessage;
+                # do not discard unrelated verified recipient requests.
+                raise kaep_live_delta_view.InvalidMessage(
+                    "SOURCE_READ_UNAVAILABLE"
+                ) from exc
             pages = [
                 rows[i:i + 100] for i in range(0, len(rows), 100)
             ] or [[]]
             return json.dumps(pages, ensure_ascii=True, separators=(",", ":"))
+
+        def original_issue(repo: str, number: int) -> dict[str, Any]:
+            try:
+                return self.reader.get_issue(repo, number)
+            except DevflowMCPError as exc:
+                raise kaep_live_delta_view.InvalidMessage(
+                    "SOURCE_READ_UNAVAILABLE"
+                ) from exc
 
         recent_reader = lambda repo, since=None: (
             self.reader.list_recent_repository_comments(repo)
@@ -1047,7 +1062,7 @@ class DevflowService:
             union = kaep_live_union_cli.read_union(
                 public_index, recipient=recipient,
                 scoped_repository=repository,
-                recent_read=recent_reader, issue_read=self.reader.get_issue,
+                recent_read=recent_reader, issue_read=original_issue,
                 comments_read=original_comments,
             )
         except kaep_live_delta_view.InvalidMessage:
@@ -1055,7 +1070,7 @@ class DevflowService:
             # of truth. Preserve actual recent original-source observation.
             recent = kaep_live_delta_view.read_live_candidates(
                 [repository], recipient=recipient, expected_actor=DEFAULT_OWNER,
-                recent_read=recent_reader, issue_read=self.reader.get_issue,
+                recent_read=recent_reader, issue_read=original_issue,
                 comments_read=original_comments,
             )
             recent["status"] = "PARTIAL_UNKNOWN"
@@ -1068,8 +1083,9 @@ class DevflowService:
                 row["source_origin"] = "LATEST_COMMENT_SOURCE"
             return recent
         rows = union["live_rows"]
+        index_stale = union["snapshot_stale"]
         return {
-            "status": union["status"],
+            "status": "PARTIAL_UNKNOWN" if index_stale else union["status"],
             "rows": rows,
             "source_coverage": union["source_coverage"],
             "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
@@ -1079,8 +1095,13 @@ class DevflowService:
                 for item in union["source_candidates"]
             ),
             "errors": union["source_errors"],
-            "warnings": union["warnings"],
+            "warnings": list(union["warnings"]) + (
+                [{"repository": repository, "reason_code": "PUBLIC_INDEX_STALE"}]
+                if index_stale else []
+            ),
             "index_status": "AVAILABLE",
+            "index_snapshot_stale": index_stale,
+            "index_snapshot_age_seconds": union["snapshot_age_seconds"],
             "indexed_source_issues": union["indexed_issue_count"],
         }
 
@@ -1195,6 +1216,8 @@ class DevflowService:
                     "observation_basis": recent["observation_basis"],
                     "source_candidates": recent["searched_candidates"],
                     "index_status": recent.get("index_status", "NOT_USED"),
+                    "index_snapshot_stale": recent.get("index_snapshot_stale"),
+                    "index_snapshot_age_seconds": recent.get("index_snapshot_age_seconds"),
                     "indexed_source_issues": recent.get("indexed_source_issues"),
                     "validated_source_issues": recent["validated_source_issues"],
                     "errors": recent["errors"],
