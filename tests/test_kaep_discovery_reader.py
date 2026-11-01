@@ -363,6 +363,38 @@ class DiscoveryReaderTests(unittest.TestCase):
                 expected_source_actor=ACTOR, fetch_source=read,
                 max_batches=MAX_SHADOW_BATCHES + 1)
 
+    def test_shadow_rejects_conflicting_index_identity_across_batches(self):
+        root, hint, pointer = fixtures()
+        for identity_field in ("message_id", "idempotency_key"):
+            with self.subTest(identity_field=identity_field):
+                altered = other_notice(
+                    json.dumps(pointer), "kaep.shadow.othernotice0002",
+                )
+                altered[identity_field] = hint[identity_field]
+                index = pages([
+                    comment(1000 + n, hint if n == 0 else altered)
+                    if n in (0, 35) else {
+                        "id": 1000 + n, "body": "operator note",
+                        "user": actor_user(),
+                    }
+                    for n in range(42)
+                ])
+                out = discover_index_shadow(
+                    index, expected_notice_actor=ACTOR,
+                    expected_source_actor=ACTOR,
+                    fetch_source=lambda _r, _i: pages([comment(77, root)]),
+                )
+                self.assertEqual(out["status"], "INDEX_EXHAUSTED_WITH_REJECTIONS")
+                self.assertEqual(len(out["hints"]), 1)
+                self.assertEqual(len(out["rejected"]), 1)
+                self.assertEqual(out["rejected"][0]["index_comment_id"], 1035)
+                self.assertEqual(
+                    out["rejected"][0]["reason_code"], "CONFLICTING_INDEX_REPLAY"
+                )
+                self.assertEqual(out["distinct_source_issue_count"], 1)
+                self.assertEqual(out["scanned_batches"], 3)
+                self.assertFalse(out["complete_work_inventory"])
+
     def test_shadow_blocked_original_pins_safe_cursor_not_full_index(self):
         root, hint, _ = fixtures()
         index = pages([

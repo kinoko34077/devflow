@@ -100,6 +100,7 @@ def _discover_batch(
     additional_forbidden_issue: int | None = None,
     source_mailboxes: dict[tuple[str, int], SourceMailbox] | None = None,
     index_comments: list[dict[str, Any]] | None = None,
+    replay_history: tuple[dict[str, str], dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if (type(index_issue) is not int or index_issue <= 0
             or additional_forbidden_issue is not None
@@ -156,6 +157,17 @@ def _discover_batch(
             identity = fingerprint(msg)
             old_msg = seen_msg.get(msg["message_id"])
             old_key = seen_keys.get(msg["idempotency_key"])
+            if replay_history is not None:
+                # The shadow's multi-batch scan must detect conflicting index
+                # identities from *earlier* batches as well as this batch.
+                # Identical cross-batch replays still reach source-root
+                # accounting, preserving duplicate_verified_pointers.
+                earlier_messages, earlier_keys = replay_history
+                previous_message = earlier_messages.get(msg["message_id"])
+                previous_key = earlier_keys.get(msg["idempotency_key"])
+                if (previous_message is not None and previous_message != identity
+                        or previous_key is not None and previous_key != identity):
+                    _fail("CONFLICTING_INDEX_REPLAY")
             if (old_msg is not None and old_msg != identity
                     or old_key is not None and old_key != identity):
                 _fail("CONFLICTING_INDEX_REPLAY")
@@ -165,6 +177,9 @@ def _discover_batch(
                 continue
             seen_msg[msg["message_id"]] = identity
             seen_keys[msg["idempotency_key"]] = identity
+            if replay_history is not None:
+                earlier_messages[msg["message_id"]] = identity
+                earlier_keys[msg["idempotency_key"]] = identity
             if (msg["recipient"] != "claude-code" or msg["kind"] != "REQUEST"
                     or msg["intent"] != "REPORT" or msg["in_reply_to"] is not None
                     or msg["scope"]["effect"] != "READ_ONLY"):
@@ -272,6 +287,7 @@ def discover_index_shadow(
     )
     cursor = after_id
     source_cache: dict[tuple[str, int], SourceMailbox] = {}
+    replay_history: tuple[dict[str, str], dict[str, str]] = ({}, {})
     hints: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
@@ -288,6 +304,7 @@ def discover_index_shadow(
             additional_forbidden_issue=additional_forbidden_issue,
             source_mailboxes=source_cache,
             index_comments=index_comments,
+            replay_history=replay_history,
         )
         batches += 1
         for hint in batch["hints"]:
