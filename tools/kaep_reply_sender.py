@@ -85,6 +85,62 @@ def _mailbox(
     return comments, eligible
 
 
+def _eligible_reply_parent(
+    items: list[tuple[int, dict[str, Any]]],
+    actors: dict[int, dict[str, Any]], *, parent_message_id: str,
+    expect_actor: str, parent_recipient: str, kind: str,
+) -> dict[str, Any]:
+    """Select one trusted READ_ONLY parent before composing a reply.
+
+    Only canonical, non-quarantined mailbox items may be a reply parent;
+    this boundary never reserves reply identities or posts a comment.
+    """
+    matching = [(cid, msg) for cid, msg in items
+                if msg["message_id"] == parent_message_id]
+    if len(matching) != 1:
+        _fail("PARENT_NOT_FOUND")
+    cid, parent = matching[0]
+    if not _matching_actor(actors[cid], expect_actor):
+        _fail("PARENT_ACTOR_MISMATCH")
+    if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
+        _fail("INVALID_PARENT_INTENT")
+    if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
+        _fail("UNSUPPORTED_EFFECT")
+    if kind == "ACK" and parent["kind"] != "REQUEST":
+        _fail("INVALID_REPLY_KIND")
+    return parent
+
+
+def _reserved_reply_comment(
+    reply: dict[str, Any], *,
+    eligible_items: list[tuple[int, dict[str, Any]]],
+    all_items: list[tuple[int, dict[str, Any]]],
+    actors: dict[int, dict[str, Any]], expected_reply_actor: str,
+) -> int | None:
+    """Reserve identities from the complete mailbox, even quarantined replies.
+
+    An eligible parent is not proof that a matching reply ID is available.
+    Compare the first pre-existing matching ID/key and require its original
+    actor; a matching transport login is not a verified model identity.
+    """
+    accepted_ids = {m["message_id"] for _, m in eligible_items}
+    existing = [
+        (c, m) for c, m in all_items
+        if (m["message_id"] == reply["message_id"] or
+            m["idempotency_key"] == reply["idempotency_key"])
+    ]
+    if existing:
+        existing_id, existing_msg = existing[0]
+        if existing_msg["message_id"] not in accepted_ids:
+            _fail("REPLY_COLLISION")
+        if fingerprint(existing_msg) != fingerprint(reply):
+            _fail("REPLY_COLLISION")
+        if not _matching_actor(actors[existing_id], expected_reply_actor):
+            _fail("EXISTING_REPLY_ACTOR_MISMATCH")
+        return existing_id
+    return None
+
+
 def make_reply(
     text: str, *, repository: str, issue: int, parent_message_id: str,
     kind: str, response_text: str, expect_actor: str,
@@ -112,18 +168,11 @@ def make_reply(
         text, repository=repository, issue=issue,
     )
     actor_map = {item["id"]: item for item in comments}
-    matching = [(cid, msg) for cid, msg in items if msg["message_id"] == parent_message_id]
-    if len(matching) != 1:
-        _fail("PARENT_NOT_FOUND")
-    cid, parent = matching[0]
-    if not _matching_actor(actor_map[cid], expect_actor):
-        _fail("PARENT_ACTOR_MISMATCH")
-    if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
-        _fail("INVALID_PARENT_INTENT")
-    if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
-        _fail("UNSUPPORTED_EFFECT")
-    if kind == "ACK" and parent["kind"] != "REQUEST":
-        _fail("INVALID_REPLY_KIND")
+    parent = _eligible_reply_parent(
+        items, actor_map, parent_message_id=parent_message_id,
+        expect_actor=expect_actor, parent_recipient=parent_recipient,
+        kind=kind,
+    )
     digest = hashlib.sha256(
         (parent["task_ref"] + "\n" + parent_message_id + "\n" + kind).encode("utf-8")
     ).hexdigest()[:32]
@@ -147,27 +196,11 @@ def make_reply(
     }
     # Use the canonical codec for strict size, allowed-fields and wire validation.
     encode_comment(reply)
-    # Quarantine controls parent selection, not reservation of message IDs or
-    # idempotency keys. A quarantined envelope must not allow re-issuing its
-    # identity, which would turn a local fault into a global mailbox collision.
-    accepted_ids = {m["message_id"] for _, m in items}
-    existing = [
-        (c, m) for c, m in all_items
-        if (m["message_id"] == reply["message_id"] or
-            m["idempotency_key"] == reply["idempotency_key"])
-    ]
-    if existing:
-        existing_id, existing_msg = existing[0]
-        if existing_msg["message_id"] not in accepted_ids:
-            _fail("REPLY_COLLISION")
-        if fingerprint(existing_msg) != fingerprint(reply):
-            _fail("REPLY_COLLISION")
-        if not _matching_actor(actor_map[existing_id], effective_reply_actor):
-            _fail("EXISTING_REPLY_ACTOR_MISMATCH")
-        # Identical reply is already durable from the expected transport actor.
-        # Shared GitHub login is still not model/session identity.
-        return reply, existing_id
-    return reply, None
+    existing_id = _reserved_reply_comment(
+        reply, eligible_items=items, all_items=all_items,
+        actors=actor_map, expected_reply_actor=effective_reply_actor,
+    )
+    return reply, existing_id
 
 
 def post_comment(*, repository: str, issue: int, body: str) -> int:
