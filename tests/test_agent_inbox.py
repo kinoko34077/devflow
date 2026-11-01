@@ -293,7 +293,7 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         )
         self.assertEqual(reader.calls.count((REPO, "comments", 22)), 1)
         self.assertEqual(reader.calls.count((REPO, "comments", 23)), 1)
-        self.assertTrue(all(r["issue_role"] == "UNCLASSIFIED" for r in rows))
+        self.assertTrue(all(r["issue_role"] is None for r in rows))
         self.assertFalse(result["can_authorize_execution"])
 
     def test_workspace_b6_index_scope_does_not_fetch_other_repository(self):
