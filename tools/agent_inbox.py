@@ -109,7 +109,6 @@ def _issue_messages(
     if len(comments) > MAX_ISSUE_COMMENTS:
         raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
     task_ref = f"{repository}#{issue_number}"
-    actors: dict[int, str] = {}
     trusted_actor_ids: set[int] = set()
     trusted_comments: list[Mapping[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -120,7 +119,6 @@ def _issue_messages(
         login = user.get("login")
         if type(login) is not str or not login:
             raise InvalidMessage("INVALID_GITHUB_ACTOR")
-        actors[cid] = login
         body = comment.get("body")
         if type(body) is not str:
             raise InvalidMessage("INVALID_GITHUB_COMMENT")
