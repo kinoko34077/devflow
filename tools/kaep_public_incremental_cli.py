@@ -17,8 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import kaep_public_locator_cli as locator
-from tools.kaep_inbox_reader import InvalidMessage, MARKER
-from tools.kaep_live_delta_view import API_ISSUE
+from tools.kaep_inbox_reader import InvalidMessage
 
 CURSOR_SCHEMA = "kaep.public-marker-head-cursor.v0.1"
 RESULT_SCHEMA = "kaep.public-marker-incremental.v0.1"
@@ -194,33 +193,19 @@ def discover_incremental(
                     _deny("INVALID_PUBLIC_COMMENT")
                 anchor_seen = False
                 for item in comments:
-                    if type(item) is not dict:
-                        _deny("INVALID_PUBLIC_COMMENT")
-                    body, cid, src = item.get("body"), item.get("id"), item.get("issue_url")
-                    matched = API_ISSUE.fullmatch(src) if type(src) is str else None
-                    if (type(body) is not str or type(cid) is not int or cid < 1
-                            or matched is None or matched.group(1) != repo):
-                        _deny("INVALID_PUBLIC_COMMENT")
+                    cid, candidate = locator._validated_locator_candidate(repo, item)
                     if old is not _NOT_FOUND and old > 0 and cid == old:
                         anchor_seen = True
                         break
-                    if not body.startswith(MARKER):
+                    if candidate is None:
                         continue
-                    issue = int(matched.group(2))
-                    key = (repo, issue, cid)
+                    key = (repo, candidate["issue_number"], cid)
                     if key in found:
                         continue
                     found.add(key)
                     if len(found) > locator.MAX_LOCATORS:
                         _deny("PUBLIC_LOCATOR_LIMIT")
-                    url = f"https://github.com/{repo}/issues/{issue}"
-                    links.append({
-                        "locator": f"{repo.split('/', 1)[1]}#{issue}@{cid}",
-                        "repository": repo, "issue_number": issue, "comment_id": cid,
-                        "source_url": f"{url}#issuecomment-{cid}",
-                        "strict_source_validated": False,
-                        "is_authoritative_assignment": False,
-                    })
+                    links.append(candidate)
                 if anchor_seen or (
                     len(comments) < locator.PAGE_SIZE
                     and (old is _NOT_FOUND or old == 0)):
