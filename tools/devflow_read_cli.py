@@ -46,6 +46,7 @@ SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_LIMIT",
     "INVALID_OFFSET",
     "INVALID_WORK_STATUS",
+    "INVALID_RECENT_DISCOVERY_OPTION",
     "INVALID_ISSUE_NUMBER",
     "ISSUE_NUMBER_ON_NON_ISSUE_OPERATION",
     "PLAN_ON_NON_ASSESSMENT_OPERATION",
@@ -68,12 +69,15 @@ def read_operation(
     work_status: str | None = None, issue_number: int | None = None,
     plan: dict[str, Any] | None = None,
     outcome: dict[str, Any] | None = None,
+    include_recent_kaep: bool = False,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
     if plan is not None and operation != "assess-issue-plan":
         raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
     if outcome is not None and operation != "assess-outcome-observation":
         raise ValueError("OUTCOME_ON_NON_ASSESSMENT_OPERATION")
+    if type(include_recent_kaep) is not bool or (include_recent_kaep and operation != "workspace"):
+        raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
     if operation in {"issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
         if type(issue_number) is not int or issue_number < 1:
             raise ValueError("INVALID_ISSUE_NUMBER")
@@ -92,6 +96,10 @@ def read_operation(
             repository, recipient, limit=limit, offset=offset,
             work_status=work_status)
     if operation == "workspace":
+        if include_recent_kaep:
+            return service.get_agent_workspace(
+                repository, recipient, limit=limit, offset=offset,
+                work_status=work_status, include_recent_kaep=True)
         return service.get_agent_workspace(
             repository, recipient, limit=limit, offset=offset,
             work_status=work_status)
@@ -112,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--work-status", default=None)
+    parser.add_argument(
+        "--include-recent-kaep", action="store_true",
+        help="Workspace only: opt-in bounded B6 updated-comment original-source GET",
+    )
     parser.add_argument("--issue-number", type=int, default=None)
     parser.add_argument("--plan-file", default=None, help="JSON file containing a declared plan (assess-issue-plan only).")
     parser.add_argument(
@@ -126,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("INVALID_REPOSITORY")
         if not 1 <= args.limit <= MAX_INBOX_LIMIT or args.offset < 0:
             raise ValueError("INVALID_PAGINATION")
+        if args.include_recent_kaep and args.operation != "workspace":
+            raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
         if args.operation not in {"inbox", "workspace"} and (
             args.recipient != "codex" or args.limit != 20
             or args.offset != 0 or args.work_status is not None
@@ -174,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit, offset=args.offset,
             work_status=args.work_status, issue_number=args.issue_number,
             plan=plan if args.operation == "assess-issue-plan" else None,
-            outcome=outcome if args.operation == "assess-outcome-observation" else None)
+            outcome=outcome if args.operation == "assess-outcome-observation" else None,
+            include_recent_kaep=args.include_recent_kaep)
         # Preserve the native MCP core's exact data, including partial/unknown
         # coverage diagnostics and null-valued unavailable sources.
         # JSON semantics are unchanged; ASCII escapes prevent cp932 stdout

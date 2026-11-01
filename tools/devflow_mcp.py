@@ -88,11 +88,12 @@ def get_agent_inbox(
 def get_agent_workspace(
     repository: str, recipient: str = "codex",
     limit: int = 20, offset: int = 0, work_status: str | None = None,
+    include_recent_kaep: bool = False,
 ) -> dict[str, Any]:
     """Opt-in read-only unified Work/KAEP observation; unknown runtime sections remain unknown."""
     return _service().get_agent_workspace(
         repository, recipient, limit=limit, offset=offset,
-        work_status=work_status,
+        work_status=work_status, include_recent_kaep=include_recent_kaep,
     )
 
 

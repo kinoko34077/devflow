@@ -81,11 +81,13 @@ class DevflowMCPCommentPageBoundTests(unittest.TestCase):
 
 
 class FakeReader:
-    def __init__(self, issues, *, issues_by_repository=None, files=None, comments=None):
+    def __init__(self, issues, *, issues_by_repository=None, files=None, comments=None,
+                 recent_comments=None):
         self.issues = issues
         self.issues_by_repository = issues_by_repository or {}
         self.files = files or {}
         self.comments = comments or {}
+        self.recent_comments = recent_comments or {}
         self.calls = []
 
     def list_issues(self, repository, state="open"):
@@ -109,6 +111,10 @@ class FakeReader:
         self.calls.append((repository, "comments", issue_number))
         rows = list(self.comments.get((repository, issue_number), []))
         return rows[:max_comments + 1] if max_comments is not None else rows
+
+    def list_recent_repository_comments(self, repository):
+        self.calls.append((repository, "recent_comments"))
+        return self.recent_comments.get(repository, [])
 
     def get_file(self, repository, path):
         self.calls.append((repository, "file", path))

@@ -366,6 +366,12 @@ This is a **read-only observation / U1 opt-in consumer**, not an authoritative t
 
 Deployment/rollback: Clients must explicitly opt in; old MCP/CLI consumers are not migrated. If this view is unsuitable, call existing `get_repository_work_view` + `get_agent_inbox`. No new local MCP settings, permissions, credentials, automatic triggers, coordinator mutations or new stored state are involved. Do not switch the controller or retire #503/manual fallback on U1 evidence alone.
 
+### U2 opt-in bounded recent KAEP discovery (devflow #869 / #872)
+
+Add `include_recent_kaep=true` to `get_agent_workspace`, or use `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep`. It reuses the accepted B6 live updated-desc comment candidate reader and strict original-Issue codec using the existing authenticated Devflow GitHub GET transport (no extra local `gh` subprocess). Original Issue classification is **not** required for KAEP discovery; a genuine non-TASK Issue can supply a validated recipient REQUEST. Already-observed TASK roots are deduplicated by source URL/message ID.
+
+The recent window is bounded to 100 latest updated comments in one repository. A full window produces `PARTIAL_UNKNOWN`, not completeness. Old unindexed roots outside that window are not guaranteed discoverable; the verified original comments may be blocked/quarantined per existing B6 strict rules. Unavailable B6 GET is local to `recent_discovery` and leaves TASK-cohort observations intact, with `has_unknown_work=true`. No Claim, actual Agent wake, historical complete mailbox, publisher rollout or #503/manual fallback retirement is implied. Default `include_recent_kaep=false` preserves existing U1 behavior.
+
 ## KAEP Agent Inbox operational status
 
 As of 2026-10-15, the read-only MCP function `get_agent_inbox` and native CLI `python -m tools.kaep_agent_inbox_cli` are merged on main. A Claude Code session reported its existing idle check-in executed the CLI and discovered a new, non-pointer KAEP root before direct Issue lookup, then stored actual source-correlated [ACK/ANSWER on #553](https://github.com/kinoko34077/devflow/issues/553). This is **functional E2E evidence with a self-reported trigger path**, not an independently authenticated wake or automatic MCP registration. The recurring user-managed prompt had been modified earlier to add generic CLI invocation; connecting this MCP alone does not schedule or cause an agent to read it.
