@@ -23,6 +23,9 @@ DISCOVERY_REPOSITORY = "kinoko34077/devflow"
 DISCOVERY_ISSUE = 503
 APPROVED_SUCCESSOR_ISSUE = 789  # Explicitly user-approved public index; NOT an arbitrary target
 POINTER_VERSION = "kaep.discovery-pointer.v1"
+SourceMailbox = tuple[
+    list[dict[str, Any]], list[tuple[int, dict[str, Any]]],
+]
 
 
 def _fail(code: str) -> None:
@@ -50,7 +53,7 @@ def verify_public_source(repository: str) -> None:
 
 
 def _verify_source_request_from_snapshot(
-    snapshot: tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]],
+    snapshot: SourceMailbox,
     *, repository: str, issue: int, message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
     """Verify original source, using a previously strict-decoded snapshot.
