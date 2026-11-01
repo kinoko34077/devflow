@@ -21,7 +21,7 @@ from tools.kaep_mailbox_codec import (
 from tools.kaep_reply_sender import ACTOR, _mailbox, _matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    verify_source_request, _verify_source_request_from_snapshot, SourceMailbox,
+    _verify_source_request_from_snapshot, SourceMailbox,
 )
 
 SOURCE_URL = re.compile(
