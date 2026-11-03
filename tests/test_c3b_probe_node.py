@@ -24,12 +24,12 @@ class C3BProbeOfflineNodeTests(unittest.TestCase):
             with self.subTest(command=args[1]):
                 run = subprocess.run(
                     args, cwd=ROOT, capture_output=True, text=True,
-                    timeout=20, check=False
+                    encoding="utf-8", errors="replace", timeout=20, check=False
                 )
                 self.assertEqual(
                     run.returncode, 0,
                     f"Offline C3-B check failed (never run OAuth here):\n"
-                    f"{run.stdout[-3500:]}\n{run.stderr[-3500:]}",
+                    f"{(run.stdout or '')[-3500:]}\n{(run.stderr or '')[-3500:]}",
                 )
                 if args[1] == "--test":
                     self.assertIn("pass 24", run.stdout)
