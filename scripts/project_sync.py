@@ -140,7 +140,6 @@ class TransientAPIError(APIError):
     pass
 
 
-
 def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> dict[str, str]:
     body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = body.split("\n")
