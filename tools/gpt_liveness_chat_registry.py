@@ -14,7 +14,12 @@ from typing import Any
 
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
 from tools.gpt_liveness_pilot import answer, challenge, enrollment, utc
-from tools.kaep_mailbox_codec import InvalidMessage, validate as validate_message, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    InvalidMessage,
+    fail,
+    validate as validate_message,
+    verify_reply_chain,
+)
 
 BINDING_SCHEMA = "gpt.liveness.chat-binding.v0.1"
 MARKER = "<!-- gpt-liveness:chat-binding:v0.1 "
@@ -22,10 +27,6 @@ END = " -->"
 CHAT_ID = re.compile(r"chat_[0-9a-f]{32}\Z")
 MAILBOX = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
 MAX_BODY_BYTES = 200_000
-
-
-def fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def new_chat_id() -> str:
