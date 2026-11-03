@@ -1,0 +1,88 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "kaep",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "entry": "features/kaep/README.md",
+  "routes": {
+    "inbox": {
+      "when": "an existing agent needs a recipient-scoped Inbox read",
+      "documents": [
+        "docs/spec/KAEP_AGENT_INBOX_V01.md",
+        "docs/spec/KAEP_V0_2.md",
+        "docs/operations/DEVFLOW_MCP.md"
+      ],
+      "code": [
+        "tools/kaep_inbox_reader.py",
+        "tools/kaep_agent_inbox_cli.py"
+      ],
+      "tests": [
+        "tests/test_kaep_inbox_reader.py",
+        "tests/test_kaep_agent_inbox_cli.py"
+      ]
+    },
+    "discovery": {
+      "when": "an existing agent needs bounded source-candidate discovery",
+      "documents": [
+        "docs/spec/KAEP_AGENT_FIRST_API_V1.md",
+        "docs/spec/KAEP_READ_PATH_RESPONSIBILITIES.md"
+      ],
+      "code": [
+        "tools/kaep_live_union_cli.py",
+        "tools/kaep_discovery_reader.py",
+        "tools/kaep_public_incremental_cli.py"
+      ],
+      "tests": [
+        "tests/test_kaep_live_union_cli.py",
+        "tests/test_kaep_discovery_reader.py",
+        "tests/test_kaep_public_incremental_cli.py"
+      ]
+    },
+    "send": {
+      "when": "reviewing or changing authorized send or reply code",
+      "documents": [
+        "docs/spec/KAEP_V0_2.md",
+        "docs/spec/KAEP_SEND_PATH_RESPONSIBILITIES.md",
+        "docs/spec/kaep_message_v02.schema.json"
+      ],
+      "code": [
+        "tools/kaep_reply_sender.py",
+        "tools/kaep_request_sender.py"
+      ],
+      "tests": [
+        "tests/test_kaep_reply_sender.py",
+        "tests/test_kaep_request_sender.py"
+      ]
+    },
+    "audit": {
+      "when": "auditing source-to-route preservation or source verification boundaries",
+      "documents": [
+        "docs/spec/KAEP_READ_PATH_RESPONSIBILITIES.md",
+        "docs/spec/KAEP_SEND_PATH_RESPONSIBILITIES.md"
+      ],
+      "code": [
+        "tools/kaep_source_route_audit.py"
+      ],
+      "tests": [
+        "tests/test_kaep_source_route_audit.py"
+      ]
+    },
+    "history": {
+      "when": "investigating prior incidents, acceptance, or migration evidence",
+      "documents": [],
+      "code": [],
+      "tests": []
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#503",
+    "kinoko34077/devflow#531",
+    "kinoko34077/devflow#680"
+  ],
+  "notes": [
+    "Resolve every path relative to the source repository at the current revision.",
+    "Read-only discovery metadata is not a work assignment or execution authority.",
+    "Current state, review, CI, and authorization are always read live."
+  ]
+}
+
