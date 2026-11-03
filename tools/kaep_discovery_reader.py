@@ -20,11 +20,17 @@ from tools.kaep_mailbox_codec import (
     MARKER, decode_comment, fingerprint, reject_constant, unique_pairs,
     matches,
 )
-from tools.kaep_reply_sender import ACTOR, _mailbox, _matching_actor
+from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    _verify_source_request_from_snapshot, SourceMailbox,
+    verify_source_request_from_snapshot, SourceMailbox,
 )
+
+# Local compatibility aliases preserve established patch points while the
+# ownership boundary is now the shared mailbox/source helpers.
+_mailbox = mailbox
+_matching_actor = matching_actor
+_verify_source_request_from_snapshot = verify_source_request_from_snapshot
 
 SOURCE_URL = re.compile(
     r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
@@ -603,3 +609,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
