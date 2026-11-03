@@ -18,7 +18,7 @@ from tools.kaep_mailbox_codec import (
 from tools.kaep_route_notice import (
     DISCOVERY_ISSUE, DISCOVERY_REPOSITORY, verify_source_request,
 )
-from tools.kaep_reply_sender import ACTOR
+from tools.kaep_mailbox_support import ACTOR
 from tools.github_issue_trust import is_trusted_principal
 
 MAX_INDEX_COMMENTS = 500
@@ -172,3 +172,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
