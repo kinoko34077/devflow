@@ -19,7 +19,7 @@ from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE,
     route_request, verify_public_source,
 )
-from tools.kaep_reply_sender import ACTOR, _mailbox
+from tools.kaep_mailbox_support import ACTOR, mailbox
 
 _SUPPORTED_INTENTS = frozenset(("ANALYZE", "REPORT"))
 _SOURCE_STORED = frozenset(("SENT_AND_READ_BACK", "ALREADY_SENT"))
@@ -53,7 +53,7 @@ def _discovery_read_preflight(offline_pages: str | None, discovery_issue: int = 
     """
     pages = (offline_pages if offline_pages is not None else
              fetch_gh_pages(DISCOVERY_REPOSITORY, discovery_issue))
-    _mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=discovery_issue)
+    mailbox(pages, repository=DISCOVERY_REPOSITORY, issue=discovery_issue)
 
 
 def _validate_two_phase_options(
@@ -237,3 +237,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
