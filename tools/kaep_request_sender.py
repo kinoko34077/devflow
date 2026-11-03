@@ -13,10 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
-from tools.kaep_reply_sender import (
-    _mailbox_snapshot, post_comment, post_and_verify, ACTOR, _matching_actor,
-)
+from tools.kaep_reply_sender import post_comment, post_and_verify
 from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint, matches
+from tools.kaep_mailbox_support import ACTOR, mailbox_snapshot, matching_actor
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
 RECIPIENTS = {"claude-code", "chatgpt", "codex"}
@@ -58,7 +57,7 @@ def make_request(
         "evidence_refs": [],
     }
     encode_comment(req)
-    comments, items, all_items = _mailbox_snapshot(
+    comments, items, all_items = mailbox_snapshot(
         text, repository=repository, issue=issue,
     )
     actors = {c["id"]: c for c in comments}
@@ -77,7 +76,7 @@ def make_request(
             fail("REQUEST_KEY_COLLISION")
         if fingerprint(existing) != fingerprint(req):
             fail("REQUEST_KEY_COLLISION")
-        if not _matching_actor(actors[cid], expect_existing_actor):
+        if not matching_actor(actors[cid], expect_existing_actor):
             fail("EXISTING_ACTOR_MISMATCH")
         return req, cid
     return req, None
@@ -166,3 +165,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
