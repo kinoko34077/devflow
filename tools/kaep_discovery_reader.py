@@ -16,6 +16,7 @@ from typing import Callable, Any
 
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
+    fail,
     MARKER, decode_comment, fingerprint, reject_constant, unique_pairs,
     matches,
 )
@@ -31,9 +32,6 @@ POINTER_FIELDS = {"type", "owning_issue", "message_id", "comment_id"}
 MAX_INDEX_BATCH = 20
 REPLY_KINDS = {"ACK", "ANSWER", "BLOCKED"}
 
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def parse_pointer(text: str) -> dict[str, Any] | None:
@@ -57,14 +55,14 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
     if type(obj) is not dict or obj.get("type") != POINTER_VERSION:
         return None
     if set(obj) != POINTER_FIELDS or type(obj["owning_issue"]) is not str:
-        _fail("INVALID_DISCOVERY_POINTER")
+        fail("INVALID_DISCOVERY_POINTER")
     target = SOURCE_URL.fullmatch(obj["owning_issue"])
     if target is None or not matches(r"msg_[A-Za-z0-9_-]{1,72}", obj["message_id"]):
-        _fail("INVALID_DISCOVERY_POINTER")
+        fail("INVALID_DISCOVERY_POINTER")
     if type(obj["comment_id"]) is not int or obj["comment_id"] < 1:
-        _fail("INVALID_DISCOVERY_POINTER")
+        fail("INVALID_DISCOVERY_POINTER")
     if target.group(1) == DISCOVERY_REPOSITORY and int(target.group(2)) == DISCOVERY_ISSUE:
-        _fail("DISCOVERY_LOOP")
+        fail("DISCOVERY_LOOP")
     return obj
 
 
@@ -76,7 +74,7 @@ def _source_context(
     comments, items = snapshot
     matches_found = [(cid, msg) for cid, msg in items if msg["message_id"] == message_id]
     if len(matches_found) != 1:
-        _fail("SOURCE_MESSAGE_NOT_UNIQUE")
+        fail("SOURCE_MESSAGE_NOT_UNIQUE")
     _, root = matches_found[0]
     actors = {comment["id"]: comment for comment in comments}
     replies = sorted({
@@ -124,7 +122,7 @@ def _verified_source_pointer(
         )
         # Check the exact source pointer BEFORE reply-context work or caching.
         if verified != pointer:
-            _fail("DISCOVERY_SOURCE_MISMATCH")
+            fail("DISCOVERY_SOURCE_MISMATCH")
         context = _source_context(
             snapshot, message_id=pointer["message_id"],
             expected_actor=expected_source_actor,
@@ -133,7 +131,7 @@ def _verified_source_pointer(
     verified, context = proof_cache[proof_key]
     # Cache hits cannot admit a forged comment ID referencing a real root.
     if verified != pointer:
-        _fail("DISCOVERY_SOURCE_MISMATCH")
+        fail("DISCOVERY_SOURCE_MISMATCH")
     return verified, context
 
 
@@ -180,10 +178,10 @@ def _record_index_notice_identity(
         previous_key = earlier_keys.get(idempotency_key)
         if (previous_message is not None and previous_message != identity
                 or previous_key is not None and previous_key != identity):
-            _fail("CONFLICTING_INDEX_REPLAY")
+            fail("CONFLICTING_INDEX_REPLAY")
     if (old_msg is not None and old_msg != identity
             or old_key is not None and old_key != identity):
-        _fail("CONFLICTING_INDEX_REPLAY")
+        fail("CONFLICTING_INDEX_REPLAY")
     if old_msg == identity or old_key == identity:
         return False
     seen_messages[message_id] = identity
@@ -210,12 +208,12 @@ def _discover_batch(
             or additional_forbidden_issue is not None
             and (type(additional_forbidden_issue) is not int
                  or additional_forbidden_issue <= 0)):
-        _fail("INVALID_DISCOVERY_INDEX")
+        fail("INVALID_DISCOVERY_INDEX")
     if type(after_id) is not int or after_id < 0:
-        _fail("INVALID_CURSOR")
+        fail("INVALID_CURSOR")
     if (type(expected_notice_actor) is not str or not ACTOR.fullmatch(expected_notice_actor)
             or type(expected_source_actor) is not str or not ACTOR.fullmatch(expected_source_actor)):
-        _fail("INVALID_ACTOR")
+        fail("INVALID_ACTOR")
     # Provider pagination/order/user metadata remains globally verified. Only
     # individual untrusted Issue comment content gets per-item isolation.
     # The public entry validates complete GitHub pages here. Shadow scans
@@ -282,7 +280,7 @@ def _discover_batch(
             # or a second recognized index as an original task source.
             if (repo == DISCOVERY_REPOSITORY
                     and (issue == index_issue or issue == additional_forbidden_issue)):
-                _fail("DISCOVERY_LOOP")
+                fail("DISCOVERY_LOOP")
             source_validation = True
             verified, context = _verified_source_pointer(
                 pointer, repo=repo, issue=issue,
@@ -348,7 +346,7 @@ def discover_index_shadow(
     active requests, peer identity, current HEAD, or M3/Agent Inbox authority.
     """
     if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
-        _fail("INVALID_SHADOW_LIMIT")
+        fail("INVALID_SHADOW_LIMIT")
     # Preserve fail-closed provider transport/page validation in discover_batch.
     # Strictly validate the complete provider history once per shadow scan.
     # Repeated _discover_batch calls only traverse its validated comment data.
@@ -434,7 +432,7 @@ def discover_dual_index_shadow(
     """
     if (type(successor_issue) is not int or successor_issue <= 0
             or successor_issue == DISCOVERY_ISSUE):
-        _fail("INVALID_SUCCESSOR_INDEX")
+        fail("INVALID_SUCCESSOR_INDEX")
     source_cache: dict[tuple[str, int], str] = {}
 
     def cached_source(repository: str, issue: int) -> str:
@@ -544,7 +542,7 @@ def discover(
     # Legacy consumers cannot receive blocked/cursor metadata. Preserve their
     # previous strict failure semantics instead of silently accepting partial.
     if batch["blocked"]:
-        _fail("DISCOVERY_SOURCE_BLOCKED")
+        fail("DISCOVERY_SOURCE_BLOCKED")
     return batch["hints"]
 
 
@@ -565,10 +563,10 @@ def main(argv: list[str] | None = None) -> int:
         # authority to write any new KAEP requests, mark work complete, or
         # retire legacy #503. Other caller-provided Issue IDs are rejected.
         if args.index_issue not in (DISCOVERY_ISSUE, 789) or type(args.index_issue) is not int:
-            _fail("DISCOVERY_INDEX_NOT_APPROVED")
+            fail("DISCOVERY_INDEX_NOT_APPROVED")
         if args.dual_shadow:
             if args.index_issue != DISCOVERY_ISSUE or args.after_id != 0 or args.shadow_all:
-                _fail("INVALID_DUAL_INDEX_ARGUMENTS")
+                fail("INVALID_DUAL_INDEX_ARGUMENTS")
             legacy_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
             successor_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, 789)
             result = discover_dual_index_shadow(
