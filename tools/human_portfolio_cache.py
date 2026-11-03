@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from tools import marker_json
+from tools.repository_identity import is_repository_name
 
 
 CACHE_MARKER_BEGIN = "<!-- DEVFLOW_HUMAN_PORTFOLIO_V1_BEGIN -->"
@@ -19,7 +20,6 @@ CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_ENTRIES = 200
 MAX_TASK_ERRORS = 100
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TASK_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
 _ENTRY_REF = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$"
@@ -137,7 +137,7 @@ def _require_mapping(value: object, field: str) -> dict[str, Any]:
 
 
 def _require_repository(value: object, field: str = "repository") -> str:
-    if not isinstance(value, str) or _REPOSITORY.fullmatch(value.strip()) is None:
+    if not is_repository_name(value):
         raise HumanPortfolioCacheError(f"{field} must be owner/repository")
     return value.strip()
 
