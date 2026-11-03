@@ -18,6 +18,7 @@ import sys
 from typing import Any
 
 from tools.kaep_mailbox_codec import (
+    fail,
     InvalidMessage,
     MARKER,
     read_mailbox,
@@ -31,15 +32,12 @@ RECIPIENTS = {"claude-code", "chatgpt", "codex", "coordinator"}
 REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 
 
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
-
 
 def _no_duplicate_json_keys(items: list[tuple[str, Any]]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for key, value in items:
         if key in output:
-            _fail("DUPLICATE_GITHUB_FIELD")
+            fail("DUPLICATE_GITHUB_FIELD")
         output[key] = value
     return output
 
@@ -51,37 +49,37 @@ def parse_pages(text: str, *, repository: str, issue: int) -> list[dict[str, Any
     must still require gh exit code zero to establish transport completion.
     """
     if type(text) is not str or len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        _fail("MAILBOX_TOO_LARGE")
+        fail("MAILBOX_TOO_LARGE")
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     try:
         pages = json.loads(text, object_pairs_hook=_no_duplicate_json_keys)
     except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise InvalidMessage("INVALID_GITHUB_JSON") from exc
     if type(pages) is not list or len(pages) > MAX_COMMENT_PAGES:
-        _fail("INVALID_PAGES")
+        fail("INVALID_PAGES")
     if not pages:
-        _fail("MISSING_PAGES")
+        fail("MISSING_PAGES")
     output: list[dict[str, Any]] = []
     prev = 0
     for n, page in enumerate(pages):
         if type(page) is not list or len(page) > PAGE_SIZE:
-            _fail("INVALID_PAGE")
+            fail("INVALID_PAGE")
         # All nonterminal pages of GitHub's per_page=100 paginated response are full.
         if n < len(pages) - 1 and len(page) != PAGE_SIZE:
-            _fail("INCOMPLETE_PAGE")
+            fail("INCOMPLETE_PAGE")
         if not page and n < len(pages) - 1:
-            _fail("INCOMPLETE_PAGE")
+            fail("INCOMPLETE_PAGE")
         for comment in page:
             if type(comment) is not dict:
-                _fail("INVALID_COMMENT")
+                fail("INVALID_COMMENT")
             cid = comment.get("id")
             body = comment.get("body")
             user = comment.get("user")
             if type(cid) is not int or cid <= prev or type(body) is not str:
-                _fail("INVALID_COMMENT_SEQUENCE")
+                fail("INVALID_COMMENT_SEQUENCE")
             if type(user) is not dict or not isinstance(user.get("login"), str) or not user["login"]:
-                _fail("MISSING_GITHUB_ACTOR")
+                fail("MISSING_GITHUB_ACTOR")
             if not body.startswith(MARKER):
                 # Ordinary discussion is not agent instruction and is not emitted.
                 pass
@@ -100,7 +98,7 @@ def inspect_pages(
     after_id: int = 0, include_text: bool = False,
 ) -> dict[str, Any]:
     if recipient not in RECIPIENTS or type(after_id) is not int or after_id < 0:
-        _fail("INVALID_FILTER")
+        fail("INVALID_FILTER")
     comments = parse_pages(text, repository=repository, issue=issue)
     task_ref = f"{repository}#{issue}"
     # Validate whole mailbox before filtering so conflicts before the cursor
@@ -150,7 +148,7 @@ def inspect_pages(
 
 def fetch_gh_pages(repository: str, issue: int) -> str:
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     api_path = f"/repos/{repository}/issues/{issue}/comments?per_page={PAGE_SIZE}"
     try:
         response = subprocess.run(
@@ -163,9 +161,9 @@ def fetch_gh_pages(repository: str, issue: int) -> str:
         raise InvalidMessage("GITHUB_READ_UNAVAILABLE") from exc
     # Never include gh stderr: it may contain sensitive provider context.
     if response.returncode != 0:
-        _fail("GITHUB_READ_FAILED")
+        fail("GITHUB_READ_FAILED")
     if len(response.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        _fail("MAILBOX_TOO_LARGE")
+        fail("MAILBOX_TOO_LARGE")
     return response.stdout
 
 

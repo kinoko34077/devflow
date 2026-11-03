@@ -23,6 +23,7 @@ from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, parse_pages, REPOSITORY, MAX_RESPONSE_BYTES,
 )
 from tools.kaep_mailbox_codec import (
+    fail,
     encode_comment, fingerprint, read_mailbox, isolate_cross_exchange_replies,
 )
 
@@ -31,9 +32,6 @@ ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
 ACTOR = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}|github-actions\[bot\])\Z")
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def _matching_actor(comment: dict[str, Any], expected_login: str) -> bool:
@@ -98,16 +96,16 @@ def _eligible_reply_parent(
     matching = [(cid, msg) for cid, msg in items
                 if msg["message_id"] == parent_message_id]
     if len(matching) != 1:
-        _fail("PARENT_NOT_FOUND")
+        fail("PARENT_NOT_FOUND")
     cid, parent = matching[0]
     if not _matching_actor(actors[cid], expect_actor):
-        _fail("PARENT_ACTOR_MISMATCH")
+        fail("PARENT_ACTOR_MISMATCH")
     if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
-        _fail("INVALID_PARENT_INTENT")
+        fail("INVALID_PARENT_INTENT")
     if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
-        _fail("UNSUPPORTED_EFFECT")
+        fail("UNSUPPORTED_EFFECT")
     if kind == "ACK" and parent["kind"] != "REQUEST":
-        _fail("INVALID_REPLY_KIND")
+        fail("INVALID_REPLY_KIND")
     return parent
 
 
@@ -132,11 +130,11 @@ def _reserved_reply_comment(
     if existing:
         existing_id, existing_msg = existing[0]
         if existing_msg["message_id"] not in accepted_ids:
-            _fail("REPLY_COLLISION")
+            fail("REPLY_COLLISION")
         if fingerprint(existing_msg) != fingerprint(reply):
-            _fail("REPLY_COLLISION")
+            fail("REPLY_COLLISION")
         if not _matching_actor(actors[existing_id], expected_reply_actor):
-            _fail("EXISTING_REPLY_ACTOR_MISMATCH")
+            fail("EXISTING_REPLY_ACTOR_MISMATCH")
         return existing_id
     return None
 
@@ -153,17 +151,17 @@ def make_reply(
     metadata. Caller must separately confirm task authority and provenance.
     """
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     if kind not in KINDS or type(expect_actor) is not str or not ACTOR.fullmatch(expect_actor):
-        _fail("INVALID_REPLY_OPTIONS")
+        fail("INVALID_REPLY_OPTIONS")
     if type(response_text) is not str or not response_text.strip():
-        _fail("INVALID_REPLY_TEXT")
+        fail("INVALID_REPLY_TEXT")
     if (parent_recipient not in ROLES or reply_recipient not in ROLES
             or parent_recipient == reply_recipient):
-        _fail("INVALID_REPLY_ROUTE")
+        fail("INVALID_REPLY_ROUTE")
     effective_reply_actor = expect_actor if reply_actor is None else reply_actor
     if type(effective_reply_actor) is not str or not ACTOR.fullmatch(effective_reply_actor):
-        _fail("INVALID_REPLY_ACTOR")
+        fail("INVALID_REPLY_ACTOR")
     comments, items, all_items = _mailbox_snapshot(
         text, repository=repository, issue=issue,
     )
@@ -206,7 +204,7 @@ def make_reply(
 def post_comment(*, repository: str, issue: int, body: str) -> int:
     """Single ordinary Issue-comment POST, never an Action/Claim operation."""
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     data = json.dumps({"body": body}, ensure_ascii=False)
     try:
         resp = subprocess.run(
@@ -220,15 +218,15 @@ def post_comment(*, repository: str, issue: int, body: str) -> int:
         raise InvalidMessage("POST_AMBIGUOUS_READ_BEFORE_RETRY") from exc
     # Do not leak stderr or transport response body into failure messages.
     if resp.returncode != 0:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
+        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
     if len(resp.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
+        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
     try:
         info = json.loads(resp.stdout)
     except (ValueError, TypeError) as exc:
         raise InvalidMessage("POST_UNKNOWN_READ_BEFORE_RETRY") from exc
     if type(info) is not dict or type(info.get("id")) is not int or info["id"] < 1:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
+        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
     return info["id"]
 
 
@@ -242,7 +240,7 @@ def post_and_verify(
     task authorization, runtime Claim or formal GitHub Review.
     """
     if type(expected_post_actor) is not str or not ACTOR.fullmatch(expected_post_actor):
-        _fail("INVALID_POST_ACTOR")
+        fail("INVALID_POST_ACTOR")
     posted_id = post_func(repository=repository, issue=issue,
                           body=encode_comment(message))
     after = fetch_func(repository, issue)
@@ -251,10 +249,10 @@ def post_and_verify(
              msg["message_id"] == message["message_id"] and
              fingerprint(msg) == fingerprint(message)]
     if len(exact) != 1:
-        _fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
+        fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
     actors = {c["id"]: c for c in comments}
     if not _matching_actor(actors[posted_id], expected_post_actor):
-        _fail("READBACK_ACTOR_MISMATCH")
+        fail("READBACK_ACTOR_MISMATCH")
     return posted_id
 
 
@@ -266,7 +264,7 @@ def send_reply(
     reply_actor: str | None = None,
 ) -> dict[str, Any]:
     if do_send and offline_pages is not None:
-        _fail("OFFLINE_POST_FORBIDDEN")
+        fail("OFFLINE_POST_FORBIDDEN")
     source = offline_pages if offline_pages is not None else fetch_gh_pages(repository, issue)
     reply, existing_id = make_reply(
         source, repository=repository, issue=issue,
@@ -327,9 +325,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.text_file is not None:
             answer = args.text_file.read_text(encoding="utf-8")
         else:
-            _fail("REPLY_TEXT_REQUIRED")
+            fail("REPLY_TEXT_REQUIRED")
         if args.send and args.offline_pages is not None:
-            _fail("OFFLINE_POST_FORBIDDEN")
+            fail("OFFLINE_POST_FORBIDDEN")
         offline = (args.offline_pages.read_text(encoding="utf-8")
                    if args.offline_pages else None)
         result = send_reply(

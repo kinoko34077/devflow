@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import kaep_public_locator_cli as locator
+from tools.kaep_mailbox_codec import fail
 from tools.kaep_inbox_reader import InvalidMessage
 
 CURSOR_SCHEMA = "kaep.public-marker-head-cursor.v0.1"
@@ -25,9 +26,6 @@ MAX_OWNER_REPOS = 300
 MAX_CURSOR_BYTES = 131_072
 _NOT_FOUND = object()
 
-
-def _deny(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def validate_cursor(cursor: dict[str, Any]) -> dict[str, int]:
@@ -39,11 +37,11 @@ def validate_cursor(cursor: dict[str, Any]) -> dict[str, int]:
             or cursor.get("public_only") is not True
             or type(cursor.get("heads")) is not dict
             or len(cursor["heads"]) > MAX_OWNER_REPOS):
-        _deny("INVALID_PUBLIC_CURSOR")
+        fail("INVALID_PUBLIC_CURSOR")
     for name, head in cursor["heads"].items():
         if (type(name) is not str or not locator.REPO_NAME.fullmatch(name)
                 or type(head) is not int or head < 0):
-            _deny("INVALID_PUBLIC_CURSOR")
+            fail("INVALID_PUBLIC_CURSOR")
     return dict(cursor["heads"])
 
 
@@ -94,7 +92,7 @@ def discover_incremental(
             or not 1 <= max_comment_pages <= locator.MAX_COMMENT_PAGES
             or type(max_api_calls) is not int
             or not max_repo_pages <= max_api_calls <= locator.MAX_API_CALLS):
-        _deny("INVALID_SCAN_BOUNDS")
+        fail("INVALID_SCAN_BOUNDS")
     previous = None if prior is None else validate_cursor(prior)
     if previous is None:
         heads: dict[str, int] = {}
@@ -175,11 +173,11 @@ def discover_incremental(
             try:
                 comments = fetch(path)
                 if type(comments) is not list or len(comments) > locator.PAGE_SIZE:
-                    _deny("INVALID_PUBLIC_COMMENT_PAGE")
+                    fail("INVALID_PUBLIC_COMMENT_PAGE")
                 if current_head is _NOT_FOUND:
                     current_head = comments[0].get("id") if comments else 0
                 if type(current_head) is not int or current_head < 0:
-                    _deny("INVALID_PUBLIC_COMMENT")
+                    fail("INVALID_PUBLIC_COMMENT")
                 anchor_seen = False
                 for item in comments:
                     cid, candidate = locator._validated_locator_candidate(repo, item)
@@ -193,7 +191,7 @@ def discover_incremental(
                         continue
                     found.add(key)
                     if len(found) > locator.MAX_LOCATORS:
-                        _deny("PUBLIC_LOCATOR_LIMIT")
+                        fail("PUBLIC_LOCATOR_LIMIT")
                     links.append(candidate)
                 if anchor_seen or (
                     len(comments) < locator.PAGE_SIZE
@@ -227,15 +225,15 @@ def discover_incremental(
 def _read_cursor_file(path: Path) -> tuple[dict[str, Any], bytes]:
     """Read only a regular local cursor, never follow the final symlink."""
     if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode):
-        _deny("INVALID_PUBLIC_CURSOR_FILE")
+        fail("INVALID_PUBLIC_CURSOR_FILE")
     raw = path.read_bytes()
     if not 0 < len(raw) <= MAX_CURSOR_BYTES:
-        _deny("INVALID_PUBLIC_CURSOR_FILE")
+        fail("INVALID_PUBLIC_CURSOR_FILE")
     def pairs_unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, val in pairs:
             if key in out:
-                _deny("DUPLICATE_PUBLIC_CURSOR_FIELD")
+                fail("DUPLICATE_PUBLIC_CURSOR_FIELD")
             out[key] = val
         return out
     obj = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs_unique)
@@ -250,7 +248,7 @@ def _persist_cursor_file(path: Path, cursor: dict[str, Any],
     payload = (json.dumps(cursor, ensure_ascii=True, sort_keys=True,
                           separators=(",", ":")) + "\n").encode("ascii")
     if len(payload) > MAX_CURSOR_BYTES:
-        _deny("INVALID_PUBLIC_CURSOR")
+        fail("INVALID_PUBLIC_CURSOR")
     temp_name: str | None = None
     try:
         fd, temp_name = tempfile.mkstemp(
@@ -270,12 +268,12 @@ def _persist_cursor_file(path: Path, cursor: dict[str, Any],
             raise
         # Detect another writer or substitution before replacing a read cursor.
         if path.is_symlink():
-            _deny("CURSOR_CHANGED_ON_DISK")
+            fail("CURSOR_CHANGED_ON_DISK")
         if path.exists():
             if old is None or path.read_bytes() != old:
-                _deny("CURSOR_CHANGED_ON_DISK")
+                fail("CURSOR_CHANGED_ON_DISK")
         elif old is not None:
-            _deny("CURSOR_CHANGED_ON_DISK")
+            fail("CURSOR_CHANGED_ON_DISK")
         os.replace(temp_name, path)
         temp_name = None
     finally:
@@ -306,12 +304,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.cursor_in is not None:
             data = args.cursor_in.read_bytes()
             if len(data) > MAX_CURSOR_BYTES:
-                _deny("INVALID_PUBLIC_CURSOR")
+                fail("INVALID_PUBLIC_CURSOR")
             def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
                 out: dict[str, Any] = {}
                 for key, val in pairs:
                     if key in out:
-                        _deny("DUPLICATE_PUBLIC_CURSOR_FIELD")
+                        fail("DUPLICATE_PUBLIC_CURSOR_FIELD")
                     out[key] = val
                 return out
             previous = json.loads(data.decode("utf-8"), object_pairs_hook=unique_pairs)

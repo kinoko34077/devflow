@@ -22,7 +22,7 @@ from tools.kaep_public_index import to_public_index
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
-from tools.kaep_mailbox_codec import MARKER, decode_comment, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import fail, MARKER, decode_comment, read_mailbox, verify_reply_chain
 
 MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
@@ -30,9 +30,6 @@ SEARCH_PAGE_SIZE = 100
 RECIPIENTS = ("claude-code", "chatgpt", "codex", "coordinator")
 URL = re.compile(r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
 
-
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
 
 
 def _gh_json(path: str, *, query: str | None = None) -> dict[str, Any]:
@@ -49,19 +46,19 @@ def _gh_json(path: str, *, query: str | None = None) -> dict[str, Any]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise InvalidMessage("GITHUB_SEARCH_OR_ISSUE_UNAVAILABLE") from exc
     if p.returncode != 0 or len(p.stdout.encode("utf-8")) > 2_000_000:
-        _fail("GITHUB_SEARCH_OR_ISSUE_FAILED")
+        fail("GITHUB_SEARCH_OR_ISSUE_FAILED")
     try:
         obj = json.loads(p.stdout)
     except (ValueError, UnicodeError) as exc:
         raise InvalidMessage("INVALID_GITHUB_JSON") from exc
     if type(obj) is not dict:
-        _fail("INVALID_GITHUB_RESPONSE")
+        fail("INVALID_GITHUB_RESPONSE")
     return obj
 
 
 def search_repository(repository: str) -> dict[str, Any]:
     if not REPOSITORY.fullmatch(repository):
-        _fail("INVALID_REPOSITORY")
+        fail("INVALID_REPOSITORY")
     return _gh_json("/search/issues", query=(
         f'repo:{repository} is:issue "kaep:message:v0.2" in:comments'
     ))
@@ -69,7 +66,7 @@ def search_repository(repository: str) -> dict[str, Any]:
 
 def fetch_issue(repository: str, number: int) -> dict[str, Any]:
     if not REPOSITORY.fullmatch(repository) or type(number) is not int or number < 1:
-        _fail("INVALID_ISSUE")
+        fail("INVALID_ISSUE")
     return _gh_json(f"/repos/{repository}/issues/{number}")
 
 
@@ -120,7 +117,7 @@ def _read_candidate_original(
             or issue.get("number") != number
             or issue.get("state") not in ("open", "closed")
             or "pull_request" in issue):
-        _fail("SOURCE_ISSUE_MISMATCH")
+        fail("SOURCE_ISSUE_MISMATCH")
     classified = repository_projection.classify_issue(issue)
     return issue, classified, fetch_comments(repo, number)
 
@@ -181,7 +178,7 @@ def _verify_candidate_mailbox(
     """
     pages = parse_pages(raw, repository=repo, issue=number)
     if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
-        _fail("ISSUE_COMMENTS_LIMIT")
+        fail("ISSUE_COMMENTS_LIMIT")
     trusted = [
         {"id": c["id"], "body": c["body"],
          "user": {"id": c.get("actor_id"),
@@ -263,15 +260,15 @@ def build_search_list(
             or len(repositories) != len(set(repositories))
             or any(type(r) is not str or not REPOSITORY.fullmatch(r)
                    for r in repositories)):
-        _fail("INVALID_REPOSITORY_SET")
+        fail("INVALID_REPOSITORY_SET")
     if (recipient != "all" and recipient not in RECIPIENTS) or (
         type(max_candidates) is not int or not 1 <= max_candidates <= MAX_CANDIDATES
     ):
-        _fail("INVALID_FILTER")
+        fail("INVALID_FILTER")
     if type(expected_actor) is not str or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", expected_actor):
-        _fail("INVALID_EXPECTED_ACTOR")
+        fail("INVALID_EXPECTED_ACTOR")
     if type(source_workers) is not int or source_workers not in (1, 2):
-        _fail("INVALID_SOURCE_WORKERS")
+        fail("INVALID_SOURCE_WORKERS")
     output: dict[str, Any] = {
         "schema_version": "kaep.search-list.v0.1",
         "status": "BOUNDED_SEARCH_READ",
@@ -444,11 +441,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.public_live and (args.format != "html" or args.public_json_out is None):
-            _fail("PUBLIC_LIVE_REQUIRES_PAIRED_HTML_INDEX")
+            fail("PUBLIC_LIVE_REQUIRES_PAIRED_HTML_INDEX")
         if (len(args.repository) > MAX_REPOSITORIES
                 or len(set(args.repository)) != len(args.repository)
                 or any(not REPOSITORY.fullmatch(r) for r in args.repository)):
-            _fail("INVALID_REPOSITORY_SET")
+            fail("INVALID_REPOSITORY_SET")
         search_results = {r: search_repository(r) for r in args.repository}
         result = build_search_list(
             args.repository, search_results, fetch_original_issue=fetch_issue,
