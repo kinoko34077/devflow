@@ -15,7 +15,7 @@ from typing import Any
 
 from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_mailbox_codec import fail, matches
-from tools.kaep_reply_sender import ACTOR, _mailbox
+from tools.kaep_mailbox_support import ACTOR, mailbox
 from tools.kaep_request_sender import send_request
 from tools.github_issue_trust import is_trusted_principal
 
@@ -49,7 +49,7 @@ def verify_public_source(repository: str) -> None:
         fail("SOURCE_NOT_PUBLIC")
 
 
-def _verify_source_request_from_snapshot(
+def verify_source_request_from_snapshot(
     snapshot: SourceMailbox,
     *, repository: str, issue: int, message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
@@ -97,6 +97,10 @@ def _verify_source_request_from_snapshot(
 
 
 
+# Compatibility alias retained for discovery-reader patch points.
+_verify_source_request_from_snapshot = verify_source_request_from_snapshot
+
+
 def verify_source_request(
     pages: str, *, repository: str, issue: int,
     message_id: str, expected_actor: str,
@@ -110,8 +114,8 @@ def verify_source_request(
         fail("INVALID_MESSAGE_ID")
     if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
         fail("INVALID_ACTOR")
-    snapshot = _mailbox(pages, repository=repository, issue=issue)
-    return _verify_source_request_from_snapshot(
+    snapshot = mailbox(pages, repository=repository, issue=issue)
+    return verify_source_request_from_snapshot(
         snapshot, repository=repository, issue=issue,
         message_id=message_id, expected_actor=expected_actor,
     )
@@ -205,3 +209,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
