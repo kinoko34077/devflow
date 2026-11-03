@@ -269,11 +269,11 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         event = {"pull_request": {"body": (
             f"{PLAN_MARKER_START}\n{json.dumps(packet)}\n{PLAN_MARKER_END}"
         )}}
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as event_file:
-            json.dump(event, event_file)
-            event_file.flush()
+        with tempfile.TemporaryDirectory() as directory:
+            event_file = Path(directory) / "event.json"
+            event_file.write_text(json.dumps(event), encoding="utf-8")
             output = []
-            with patch.dict(os.environ, {"GITHUB_EVENT_PATH": event_file.name}):
+            with patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(event_file)}):
                 with patch("tools.goal_plan_assessment.assess_issue_plan", return_value={
                     "status": "CONFLICTS_DETECTED", "checked_effect_count": 1,
                     "mechanical_conflicts": [{}], "unchecked_effects": [],
@@ -284,22 +284,22 @@ class GoalPlanAssessmentTests(unittest.TestCase):
         self.assertTrue(any("CONFLICTS_DETECTED" in line for line in output))
         self.assertFalse(any("offline" in line for line in output))
 
-        with tempfile.NamedTemporaryFile("r+", encoding="utf-8") as summary:
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary.md"
             write_action_summary({
                 "status": "CONFLICTS_DETECTED",
                 "observed_at": "2026-10-31T19:00:00Z",
                 "source_revisions": [{"issue_ref": TASK, "body_sha256": "a" * 64}],
-            }, summary.name)
-            summary.seek(0)
-            text = summary.read()
+            }, str(summary))
+            text = summary.read_text(encoding="utf-8")
         self.assertIn("org/repo#14", text)
         self.assertIn("a" * 64, text)
         self.assertIn("does not authorize work", text)
 
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as event_file:
-            json.dump({"pull_request": {"body": "No declaration"}}, event_file)
-            event_file.flush()
-            with patch.dict(os.environ, {"GITHUB_EVENT_PATH": event_file.name}):
+        with tempfile.TemporaryDirectory() as directory:
+            event_file = Path(directory) / "event.json"
+            event_file.write_text(json.dumps({"pull_request": {"body": "No declaration"}}), encoding="utf-8")
+            with patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(event_file)}):
                 with patch("builtins.print") as output:
                     self.assertEqual(main(), 0)
                     self.assertIn("SKIPPED_NO_DECLARED_PLAN", output.call_args.args[0])

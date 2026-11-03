@@ -1,5 +1,6 @@
 """Regression tests for the read-only Codex Cloud MCP-unavailable CLI."""
 import json
+from pathlib import Path
 import tempfile
 import unittest
 from urllib.error import HTTPError, URLError
@@ -188,14 +189,14 @@ class CloudReadCLITests(unittest.TestCase):
     def test_outcome_file_cli_preserves_declared_packet(self):
         service = FakeService()
         packet = {"task_ref": f"{self.REPOSITORY}#14", "observed_result": "VALID_NEGATIVE"}
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as evidence_file:
-            json.dump(packet, evidence_file)
-            evidence_file.flush()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_file = Path(directory) / "outcome.json"
+            evidence_file.write_text(json.dumps(packet), encoding="utf-8")
             with patch("tools.devflow_read_cli.default_service", return_value=service):
                 with patch("builtins.print") as out:
                     status = cli.main([
                         "assess-outcome-observation", "--repository", self.REPOSITORY,
-                        "--issue-number", "14", "--outcome-file", evidence_file.name,
+                        "--issue-number", "14", "--outcome-file", str(evidence_file),
                     ])
         self.assertEqual(status, 0)
         self.assertEqual(service.calls, [(
@@ -207,14 +208,14 @@ class CloudReadCLITests(unittest.TestCase):
         for content in ('{"task_ref":"one","task_ref":"two"}', '{bad json'):
             with self.subTest(content=content):
                 service = FakeService()
-                with tempfile.NamedTemporaryFile("w", encoding="utf-8") as evidence_file:
-                    evidence_file.write(content)
-                    evidence_file.flush()
+                with tempfile.TemporaryDirectory() as directory:
+                    evidence_file = Path(directory) / "outcome.json"
+                    evidence_file.write_text(content, encoding="utf-8")
                     with patch("tools.devflow_read_cli.default_service", return_value=service):
                         with patch("builtins.print") as out:
                             status = cli.main([
                                 "assess-outcome-observation", "--repository", self.REPOSITORY,
-                                "--issue-number", "14", "--outcome-file", evidence_file.name,
+                                "--issue-number", "14", "--outcome-file", str(evidence_file),
                             ])
                 self.assertEqual(status, 0)
                 self.assertEqual(service.calls, [(
@@ -232,13 +233,13 @@ class CloudReadCLITests(unittest.TestCase):
         service = FakeService()
         candidate = {"schema_version": 1, "task_ref": f"{self.REPOSITORY}#14",
                      "steps": [{"id": "step-1", "intent": "Keep the declared runtime behavior"}]}
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as plan_file:
-            json.dump(candidate, plan_file)
-            plan_file.flush()
+        with tempfile.TemporaryDirectory() as directory:
+            plan_file = Path(directory) / "plan.json"
+            plan_file.write_text(json.dumps(candidate), encoding="utf-8")
             with patch("tools.devflow_read_cli.default_service", return_value=service):
                 with patch("builtins.print") as out:
                     status = cli.main(["assess-issue-plan", "--repository", self.REPOSITORY,
-                                       "--issue-number", "14", "--plan-file", plan_file.name])
+                                       "--issue-number", "14", "--plan-file", str(plan_file)])
         self.assertEqual(status, 0)
         self.assertEqual(service.calls[0], (
             "assess-issue-plan", self.REPOSITORY, 14,
@@ -246,13 +247,13 @@ class CloudReadCLITests(unittest.TestCase):
         ))
         self.assertEqual(json.loads(out.call_args.args[0])["status"], "NEEDS_EVIDENCE")
 
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as plan_file:
-            plan_file.write('{"schema_version":1,"schema_version":1}')
-            plan_file.flush()
+        with tempfile.TemporaryDirectory() as directory:
+            plan_file = Path(directory) / "plan.json"
+            plan_file.write_text('{"schema_version":1,"schema_version":1}', encoding="utf-8")
             with patch("tools.devflow_read_cli.default_service") as get_service:
                 with patch("builtins.print") as out:
                     status = cli.main(["assess-issue-plan", "--repository", self.REPOSITORY,
-                                       "--issue-number", "14", "--plan-file", plan_file.name])
+                                       "--issue-number", "14", "--plan-file", str(plan_file)])
         get_service.assert_not_called()
         self.assertEqual(status, 0)
         self.assertEqual(json.loads(out.call_args.args[0])["reason_code"], "PLAN_INVALID")
