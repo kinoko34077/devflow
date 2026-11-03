@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable
 
 try:
     from .markdown_scalar import strip_scalar as _strip_scalar
+    from .markdown_sections import iter_h2_sections
     from .repository_bootstrap import (
         BootstrapError,
         normalize_request,
@@ -52,6 +53,7 @@ except ImportError:  # direct script execution
         parse_request_body,
     )
     from markdown_scalar import strip_scalar as _strip_scalar
+    from markdown_sections import iter_h2_sections
     import github_issue_trust
     import acceptance_evidence_preflight
     import human_portfolio
@@ -86,20 +88,12 @@ class DevflowMCPError(RuntimeError):
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
-    body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in body.split("\n"):
-        match = re.match(r"^## ([^#].*?)\s*$", line)
-        if match:
-            current = match.group(1).strip()
-            if reject_duplicates and current in sections:
-                raise DevflowMCPError(f"Duplicate section in canonical Issue body: {current!r}.")
-            sections[current] = []
-            continue
-        if current is not None:
-            sections[current].append(line)
-    return {name: _strip_scalar("\n".join(lines)) for name, lines in sections.items()}
+    sections: dict[str, str] = {}
+    for name, value in iter_h2_sections(body):
+        if reject_duplicates and name in sections:
+            raise DevflowMCPError(f"Duplicate section in canonical Issue body: {name!r}.")
+        sections[name] = _strip_scalar(value)
+    return sections
 
 
 def normalize_repository(repository: str) -> str:

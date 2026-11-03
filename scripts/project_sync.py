@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterable
 try:
     from tools import devflow_mcp_core, github_issue_trust, workflow_contract
     from tools.markdown_scalar import strip_scalar as _strip_scalar
+    from tools.markdown_sections import iter_h2_sections
 except ImportError:  # direct script execution
     _TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
     if str(_TOOLS_DIR) not in sys.path:
@@ -26,6 +27,7 @@ except ImportError:  # direct script execution
     import github_issue_trust
     import workflow_contract
     from markdown_scalar import strip_scalar as _strip_scalar
+    from markdown_sections import iter_h2_sections
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
@@ -141,27 +143,12 @@ class TransientAPIError(APIError):
 
 
 def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> dict[str, str]:
-    body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = body.split("\n")
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in lines:
-        # Machine-owned DEVFLOW blocks are transport/state surfaces, never
-        # continuation text for the preceding canonical Markdown section.
-        # Reset section capture at BEGIN; a later ## heading resumes normally.
-        if re.match(r"^<!--\s*DEVFLOW_[A-Z0-9_]+_BEGIN\s*-->\s*$", line):
-            current = None
-            continue
-        m = re.match(r"^## ([^#].*?)\s*$", line)
-        if m:
-            current = m.group(1).strip()
-            if reject_duplicates and current in reject_duplicates and current in sections:
-                raise ConfigError(f"duplicate canonical section in Project sync input: {current}")
-            sections[current] = []
-            continue
-        if current is not None:
-            sections[current].append(line)
-    return {name: _strip_scalar("\n".join(value)) for name, value in sections.items()}
+    sections: dict[str, str] = {}
+    for name, value in iter_h2_sections(body, reset_on_devflow_blocks=True):
+        if reject_duplicates and name in reject_duplicates and name in sections:
+            raise ConfigError(f"duplicate canonical section in Project sync input: {name}")
+        sections[name] = _strip_scalar(value)
+    return sections
 
 
 def _project_date(value: str, section: str) -> str:
