@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable
 
 try:
     from tools import devflow_mcp_core, github_issue_trust, workflow_contract
+    from tools.markdown_scalar import strip_scalar as _strip_scalar
 except ImportError:  # direct script execution
     _TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
     if str(_TOOLS_DIR) not in sys.path:
@@ -24,6 +25,7 @@ except ImportError:  # direct script execution
     import devflow_mcp_core
     import github_issue_trust
     import workflow_contract
+    from markdown_scalar import strip_scalar as _strip_scalar
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
@@ -136,17 +138,6 @@ class APIError(SyncError):
 class TransientAPIError(APIError):
     """Transport-only 502/503/504 or timeout; never GraphQL validation errors."""
     pass
-
-
-def _strip_scalar(value: str) -> str:
-    value = value.strip()
-    if value.startswith("```") and value.endswith("```"):
-        lines = value.splitlines()
-        if len(lines) >= 3:
-            value = "\n".join(lines[1:-1]).strip()
-    if len(value) >= 2 and value[0] == value[-1] == "`":
-        value = value[1:-1].strip()
-    return value
 
 
 def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> dict[str, str]:
@@ -1673,3 +1664,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
