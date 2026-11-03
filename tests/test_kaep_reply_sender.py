@@ -55,7 +55,7 @@ def build(source=None, **kwargs):
 class ReplyContractTests(unittest.TestCase):
     def test_sender_preflight_decodes_each_issue_mailbox_once(self):
         source = pages([comment(11, parent())])
-        with patch("tools.kaep_reply_sender.read_mailbox",
+        with patch("tools.kaep_mailbox_support.read_mailbox",
                    wraps=read_mailbox) as read:
             reply, existing = build(source)
         self.assertIsNone(existing)
@@ -452,3 +452,4 @@ class NumericOwnerTrustRegression(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
