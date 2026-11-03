@@ -6,7 +6,7 @@ from tools.markdown_sections import iter_h2_sections
 class MarkdownSectionScannerTests(unittest.TestCase):
     def test_normalizes_line_endings_and_yields_h2_bodies(self):
         self.assertEqual(
-            list(iter_h2_sections("## One\\r\\nvalue\\r\\n## Two\\r\\nnext")),
+            list(iter_h2_sections("## One\r\\nvalue\\r\\n## Two\\r\\nnext")),
             [("One", "value"), ("Two", "next")],
         )
 
