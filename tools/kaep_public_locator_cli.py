@@ -14,6 +14,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
+from tools.kaep_mailbox_codec import fail
 from tools.kaep_inbox_reader import InvalidMessage, MARKER
 from tools.kaep_live_delta_view import API_ISSUE
 
@@ -27,9 +28,6 @@ MAX_RESPONSE_BYTES = 4_000_000
 REPO_NAME = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 
 
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
-
 
 def _gh_get(path: str) -> Any:
     """Use existing gh authentication only, with a generated GET-only path."""
@@ -37,7 +35,7 @@ def _gh_get(path: str) -> Any:
         path.startswith("/repos/kinoko34077/")
         and "/issues/comments?" in path
     ):
-        _fail("INVALID_PUBLIC_GITHUB_PATH")
+        fail("INVALID_PUBLIC_GITHUB_PATH")
     try:
         run = subprocess.run(
             ["gh", "api", "--method", "GET", "-H",
@@ -48,7 +46,7 @@ def _gh_get(path: str) -> Any:
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise InvalidMessage("PUBLIC_GITHUB_GET_UNAVAILABLE") from exc
     if run.returncode or len(run.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        _fail("PUBLIC_GITHUB_GET_FAILED")
+        fail("PUBLIC_GITHUB_GET_FAILED")
     try:
         return json.loads(run.stdout)
     except ValueError as exc:
@@ -63,11 +61,11 @@ def _validated_public_repository_page(data: Any) -> list[str]:
     pagination, deduplication, request budgets and incomplete-scope reporting.
     """
     if type(data) is not list or len(data) > PAGE_SIZE:
-        _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+        fail("INVALID_PUBLIC_REPOSITORY_PAGE")
     names: list[str] = []
     for item in data:
         if type(item) is not dict:
-            _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+            fail("INVALID_PUBLIC_REPOSITORY_PAGE")
         full = item.get("full_name")
         account = item.get("owner")
         if (type(full) is not str or not REPO_NAME.fullmatch(full)
@@ -75,7 +73,7 @@ def _validated_public_repository_page(data: Any) -> list[str]:
                 or account.get("id") != 79015263
                 or account.get("login") != OWNER
                 or item.get("private") is not False):
-            _fail("INVALID_PUBLIC_REPOSITORY_PAGE")
+            fail("INVALID_PUBLIC_REPOSITORY_PAGE")
         names.append(full)
     return names
 
@@ -90,14 +88,14 @@ def _validated_locator_candidate(
     a decoded KAEP message nor authority to act.
     """
     if type(comment) is not dict:
-        _fail("INVALID_PUBLIC_COMMENT")
+        fail("INVALID_PUBLIC_COMMENT")
     body, cid, source = (
         comment.get("body"), comment.get("id"), comment.get("issue_url"),
     )
     match = API_ISSUE.fullmatch(source) if type(source) is str else None
     if (type(body) is not str or type(cid) is not int or cid < 1
             or match is None or match.group(1) != repository):
-        _fail("INVALID_PUBLIC_COMMENT")
+        fail("INVALID_PUBLIC_COMMENT")
     if not body.startswith(MARKER):
         return cid, None
     issue = int(match.group(2))
@@ -129,7 +127,7 @@ def discover(
             or not 1 <= max_comment_pages <= MAX_COMMENT_PAGES
             or type(max_api_calls) is not int
             or not max_repo_pages <= max_api_calls <= MAX_API_CALLS):
-        _fail("INVALID_SCAN_BOUNDS")
+        fail("INVALID_SCAN_BOUNDS")
     calls = 0
     repos: list[str] = []
     repo_set: set[str] = set()
@@ -177,7 +175,7 @@ def discover(
             try:
                 comments = fetch(path)
                 if type(comments) is not list or len(comments) > PAGE_SIZE:
-                    _fail("INVALID_PUBLIC_COMMENT_PAGE")
+                    fail("INVALID_PUBLIC_COMMENT_PAGE")
                 for comment in comments:
                     cid, candidate = _validated_locator_candidate(repo, comment)
                     if candidate is None:
@@ -187,7 +185,7 @@ def discover(
                         continue
                     found.add(key)
                     if len(found) > MAX_LOCATORS:
-                        _fail("PUBLIC_LOCATOR_LIMIT")
+                        fail("PUBLIC_LOCATOR_LIMIT")
                     locators.append(candidate)
             except (InvalidMessage, ValueError, TypeError, OSError):
                 incomplete.append({"scope": repo, "next_page": page,
