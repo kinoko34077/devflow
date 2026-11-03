@@ -12,75 +12,29 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from tools.github_issue_trust import is_trusted_principal
 from tools.kaep_inbox_reader import (
-    InvalidMessage, fetch_gh_pages, parse_pages, REPOSITORY, MAX_RESPONSE_BYTES,
+    InvalidMessage, fetch_gh_pages, REPOSITORY, MAX_RESPONSE_BYTES,
 )
-from tools.kaep_mailbox_codec import (
-    fail,
-    encode_comment, fingerprint, read_mailbox, isolate_cross_exchange_replies,
+from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint
+from tools.kaep_mailbox_support import (
+    ACTOR, mailbox, mailbox_snapshot, matching_actor,
 )
 
 KINDS = {"ACK", "ANSWER", "BLOCKED"}
 ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
-ACTOR = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}|github-actions\[bot\])\Z")
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
 
 
-def _matching_actor(comment: dict[str, Any], expected_login: str) -> bool:
-    """Require stable numeric identity for the trusted human actor.
-
-    Other expected logins are read-only transport observations, never authority.
-    """
-    if comment["actor_login"].casefold() != expected_login.casefold():
-        return False
-    if expected_login.casefold() == "kinoko34077":
-        return is_trusted_principal({"user": {
-            "id": comment.get("actor_id"), "login": comment["actor_login"]
-        }})
-    return True
-
-
-def _mailbox_snapshot(
-    text: str, *, repository: str, issue: int,
-) -> tuple[
-    list[dict[str, Any]],
-    list[tuple[int, dict[str, Any]]],
-    list[tuple[int, dict[str, Any]]],
-]:
-    """Decode once; retain both eligible messages and all reserved identities.
-
-    The complete mailbox is required for collision and replay checks.
-    Quarantined exchanges are excluded only from actionable parent selection.
-    """
-    comments = parse_pages(text, repository=repository, issue=issue)
-    all_items = read_mailbox(comments, task_ref=f"{repository}#{issue}")
-    accepted, _quarantined = isolate_cross_exchange_replies(
-        [item for _, item in all_items]
-    )
-    accepted_ids = {item["message_id"] for item in accepted}
-    eligible = [
-        (cid, item) for cid, item in all_items
-        if item["message_id"] in accepted_ids
-    ]
-    return comments, eligible, all_items
-
-
-def _mailbox(
-    text: str, *, repository: str, issue: int,
-) -> tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]:
-    """Existing two-result contract for source and discovery callers."""
-    comments, eligible, _all_items = _mailbox_snapshot(
-        text, repository=repository, issue=issue,
-    )
-    return comments, eligible
+# Compatibility aliases retained for existing callers and test patch points.
+_matching_actor = matching_actor
+_mailbox_snapshot = mailbox_snapshot
+_mailbox = mailbox
 
 
 def _eligible_reply_parent(
@@ -348,3 +302,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

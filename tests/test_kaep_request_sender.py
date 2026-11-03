@@ -35,7 +35,7 @@ def prepare(text=None, **kw):
 
 class RequestSenderTests(unittest.TestCase):
     def test_sender_preflight_decodes_each_issue_mailbox_once(self):
-        with patch("tools.kaep_reply_sender.read_mailbox",
+        with patch("tools.kaep_mailbox_support.read_mailbox",
                    wraps=read_mailbox) as read:
             request, existing = prepare()
         self.assertIsNone(existing)
@@ -365,3 +365,4 @@ class NumericOwnerTrustRegression(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
