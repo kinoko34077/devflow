@@ -44,6 +44,8 @@ except ImportError:  # direct script execution
     if _repository_root not in sys.path:
         sys.path.insert(0, _repository_root)
 
+    from markdown_scalar import strip_scalar as _strip_scalar
+
     from repository_bootstrap import (
         BootstrapError,
         normalize_request,
