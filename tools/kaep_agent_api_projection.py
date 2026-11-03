@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+from tools.kaep_mailbox_codec import fail
 from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_live_union_cli import RECIPIENTS
 
@@ -25,9 +26,6 @@ MAX_ERRORS = 100
 MAX_WARNINGS = 100
 
 
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
-
 
 def _issue_url(repo: str, number: int) -> str:
     return f"https://github.com/{repo}/issues/{number}"
@@ -39,17 +37,17 @@ def _source_url(repo: str, number: int, cid: int) -> str:
 
 def _timestamp(text: Any, now: datetime) -> tuple[str, int]:
     if type(text) is not str or len(text) > 64:
-        _fail("INVALID_AGENT_API_TIMESTAMP")
+        fail("INVALID_AGENT_API_TIMESTAMP")
     try:
         observed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         if observed.tzinfo is None:
-            _fail("INVALID_AGENT_API_TIMESTAMP")
+            fail("INVALID_AGENT_API_TIMESTAMP")
         observed = observed.astimezone(timezone.utc)
     except (TypeError, ValueError) as exc:
         raise InvalidMessage("INVALID_AGENT_API_TIMESTAMP") from exc
     age = int((now - observed).total_seconds())
     if age < -300:
-        _fail("AGENT_API_TIMESTAMP_FROM_FUTURE")
+        fail("AGENT_API_TIMESTAMP_FROM_FUTURE")
     return observed.isoformat(), max(age, 0)
 
 
@@ -73,7 +71,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
             or union.get("current_head_verified") is not False
             or union.get("recipient_pickup_proven") is not False
             or union.get("fallback_retirement_authorized") is not False):
-        _fail("AGENT_API_INVALID_SOURCE")
+        fail("AGENT_API_INVALID_SOURCE")
     recipient = union.get("recipient")
     repos = union.get("repositories_checked")
     rows = union.get("live_rows")
@@ -88,10 +86,10 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
             or type(candidates) is not list or len(candidates) > MAX_SOURCES
             or type(errors) is not list or len(errors) > MAX_ERRORS
             or type(warnings) is not list or len(warnings) > MAX_WARNINGS):
-        _fail("AGENT_API_INVALID_SCOPE")
+        fail("AGENT_API_INVALID_SCOPE")
     clock = now or datetime.now(timezone.utc)
     if clock.tzinfo is None:
-        _fail("AGENT_API_INVALID_CLOCK")
+        fail("AGENT_API_INVALID_CLOCK")
     observed, age = _timestamp(union.get("observed_at"),
                                clock.astimezone(timezone.utc))
     filtered_rows = []
@@ -99,7 +97,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
     seen: set[tuple[str, int, int, str]] = set()
     for row in rows:
         if type(row) is not dict:
-            _fail("AGENT_API_INVALID_ROW")
+            fail("AGENT_API_INVALID_ROW")
         repo, number, cid, message = (
             row.get("repository"), row.get("issue_number"),
             row.get("source_comment_id"), row.get("message_id"))
@@ -116,7 +114,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
                 or type(row.get("reply_observation")) is not str
                 or not _CODE.fullmatch(row["reply_observation"])
                 or (repo, number, cid, message) in seen):
-            _fail("AGENT_API_INVALID_ROW")
+            fail("AGENT_API_INVALID_ROW")
         seen.add((repo, number, cid, message))
         per_issue[(repo, number)] = per_issue.get((repo, number), 0) + 1
         filtered_rows.append({
@@ -134,7 +132,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
     seen_issues: set[tuple[str, int]] = set()
     for c in candidates:
         if type(c) is not dict:
-            _fail("AGENT_API_INVALID_CANDIDATE")
+            fail("AGENT_API_INVALID_CANDIDATE")
         repo, number, count, observation = (
             c.get("repository"), c.get("issue_number"),
             c.get("matching_recipient_roots"), c.get("source_observation"))
@@ -150,7 +148,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
                 or type(c.get("origin")) is not str
                 or not _ORIGIN.fullmatch(c["origin"])
                 or (repo, number) in seen_issues):
-            _fail("AGENT_API_INVALID_CANDIDATE")
+            fail("AGENT_API_INVALID_CANDIDATE")
         seen_issues.add((repo, number))
         filtered_candidates.append({
             "repository": repo, "issue_number": number,
@@ -161,22 +159,22 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
             "grants_work_authority": False,
         })
     if set(per_issue) - seen_issues:
-        _fail("AGENT_API_UNMATCHED_ROOT")
+        fail("AGENT_API_UNMATCHED_ROOT")
 
     filtered_errors = []
     for e in errors:
         if type(e) is not dict or type(e.get("reason_code")) is not str or not _CODE.fullmatch(e["reason_code"]):
-            _fail("AGENT_API_INVALID_ERROR")
+            fail("AGENT_API_INVALID_ERROR")
         url = e.get("issue_url")
         if url is not None and url not in {_issue_url(r, n) for r, n in seen_issues}:
-            _fail("AGENT_API_INVALID_ERROR")
+            fail("AGENT_API_INVALID_ERROR")
         filtered_errors.append({"reason_code": e["reason_code"], "issue_url": url})
     filtered_warnings = []
     for w in warnings:
         if (type(w) is not dict or w.get("repository") not in repos
                 or type(w.get("reason_code")) is not str
                 or not _CODE.fullmatch(w["reason_code"])):
-            _fail("AGENT_API_INVALID_WARNING")
+            fail("AGENT_API_INVALID_WARNING")
         filtered_warnings.append({
             "repository": w["repository"], "reason_code": w["reason_code"]})
 
