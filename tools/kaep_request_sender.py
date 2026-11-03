@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
-from tools.kaep_reply_sender import post_comment, post_and_verify
 from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint, matches
-from tools.kaep_mailbox_support import ACTOR, mailbox_snapshot, matching_actor
+from tools.kaep_mailbox_support import (
+    ACTOR, mailbox_snapshot, matching_actor, post_and_verify, post_comment,
+)
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
 RECIPIENTS = {"claude-code", "chatgpt", "codex"}
@@ -165,4 +166,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 

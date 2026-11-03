@@ -18,11 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import (
-    InvalidMessage, fetch_gh_pages, REPOSITORY, MAX_RESPONSE_BYTES,
+    InvalidMessage, fetch_gh_pages, REPOSITORY,
 )
 from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint
 from tools.kaep_mailbox_support import (
-    ACTOR, mailbox, mailbox_snapshot, matching_actor,
+    ACTOR, mailbox, mailbox_snapshot, matching_actor, post_and_verify,
+    post_comment as _shared_post_comment,
 )
 
 KINDS = {"ACK", "ANSWER", "BLOCKED"}
@@ -35,6 +36,13 @@ FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt onl
 _matching_actor = matching_actor
 _mailbox_snapshot = mailbox_snapshot
 _mailbox = mailbox
+
+
+def post_comment(*, repository: str, issue: int, body: str) -> int:
+    """Compatibility adapter preserving the established patch point."""
+    return _shared_post_comment(
+        repository=repository, issue=issue, body=body, run_func=subprocess.run,
+    )
 
 
 def _eligible_reply_parent(
@@ -155,61 +163,6 @@ def make_reply(
     return reply, existing_id
 
 
-def post_comment(*, repository: str, issue: int, body: str) -> int:
-    """Single ordinary Issue-comment POST, never an Action/Claim operation."""
-    if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        fail("INVALID_TARGET")
-    data = json.dumps({"body": body}, ensure_ascii=False)
-    try:
-        resp = subprocess.run(
-            ["gh", "api", "-X", "POST", "-H",
-             "Accept: application/vnd.github+json",
-             f"/repos/{repository}/issues/{issue}/comments", "--input", "-"],
-            input=data, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise InvalidMessage("POST_AMBIGUOUS_READ_BEFORE_RETRY") from exc
-    # Do not leak stderr or transport response body into failure messages.
-    if resp.returncode != 0:
-        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    if len(resp.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    try:
-        info = json.loads(resp.stdout)
-    except (ValueError, TypeError) as exc:
-        raise InvalidMessage("POST_UNKNOWN_READ_BEFORE_RETRY") from exc
-    if type(info) is not dict or type(info.get("id")) is not int or info["id"] < 1:
-        fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    return info["id"]
-
-
-def post_and_verify(
-    *, repository: str, issue: int, message: dict[str, Any],
-    post_func, fetch_func, expected_post_actor: str,
-) -> int:
-    """Single shared post/readback boundary; callable injection is for offline tests.
-
-    An Issue comment is only transport evidence, never provider identity,
-    task authorization, runtime Claim or formal GitHub Review.
-    """
-    if type(expected_post_actor) is not str or not ACTOR.fullmatch(expected_post_actor):
-        fail("INVALID_POST_ACTOR")
-    posted_id = post_func(repository=repository, issue=issue,
-                          body=encode_comment(message))
-    after = fetch_func(repository, issue)
-    comments, observed = _mailbox(after, repository=repository, issue=issue)
-    exact = [(cid, msg) for cid, msg in observed if cid == posted_id and
-             msg["message_id"] == message["message_id"] and
-             fingerprint(msg) == fingerprint(message)]
-    if len(exact) != 1:
-        fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
-    actors = {c["id"]: c for c in comments}
-    if not _matching_actor(actors[posted_id], expected_post_actor):
-        fail("READBACK_ACTOR_MISMATCH")
-    return posted_id
-
-
 def send_reply(
     *, repository: str, issue: int, parent_message_id: str, kind: str,
     response_text: str, expect_actor: str, do_send: bool = False,
@@ -302,4 +255,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
