@@ -16,14 +16,11 @@ from tools.kaep_inbox_reader import fetch_gh_pages, InvalidMessage, REPOSITORY
 from tools.kaep_reply_sender import (
     _mailbox_snapshot, post_comment, post_and_verify, ACTOR, _matching_actor,
 )
-from tools.kaep_mailbox_codec import encode_comment, fingerprint, matches
+from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint, matches
 
 INTENTS = {"PING", "ANALYZE", "TEST", "REPORT"}
 RECIPIENTS = {"claude-code", "chatgpt", "codex"}
 
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def make_request(
@@ -32,15 +29,15 @@ def make_request(
     expect_existing_actor: str, expected_head: str | None = None,
 ) -> tuple[dict[str, Any], int | None]:
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     if recipient not in RECIPIENTS or intent not in INTENTS:
-        _fail("UNSUPPORTED_REQUEST")
+        fail("UNSUPPORTED_REQUEST")
     if type(request_text) is not str or not request_text.strip():
-        _fail("INVALID_REQUEST_TEXT")
+        fail("INVALID_REQUEST_TEXT")
     if type(expect_existing_actor) is not str or not ACTOR.fullmatch(expect_existing_actor):
-        _fail("INVALID_ACTOR")
+        fail("INVALID_ACTOR")
     if expected_head is not None and not matches(r"[0-9a-f]{40}", expected_head):
-        _fail("INVALID_EXPECTED_HEAD")
+        fail("INVALID_EXPECTED_HEAD")
     # Codec owns exact syntax validation for request_key and bounded content.
     digest = hashlib.sha256((f"{repository}#{issue}\n" + request_key).encode("utf-8")).hexdigest()[:32] \
              if type(request_key) is str else ""
@@ -77,11 +74,11 @@ def make_request(
     if matching:
         cid, existing = matching[0]
         if existing["message_id"] not in accepted_ids:
-            _fail("REQUEST_KEY_COLLISION")
+            fail("REQUEST_KEY_COLLISION")
         if fingerprint(existing) != fingerprint(req):
-            _fail("REQUEST_KEY_COLLISION")
+            fail("REQUEST_KEY_COLLISION")
         if not _matching_actor(actors[cid], expect_existing_actor):
-            _fail("EXISTING_ACTOR_MISMATCH")
+            fail("EXISTING_ACTOR_MISMATCH")
         return req, cid
     return req, None
 
@@ -93,7 +90,7 @@ def send_request(
     do_send: bool = False, offline_pages: str | None = None,
 ) -> dict[str, Any]:
     if do_send and offline_pages is not None:
-        _fail("OFFLINE_POST_FORBIDDEN")
+        fail("OFFLINE_POST_FORBIDDEN")
     source = offline_pages if offline_pages is not None else fetch_gh_pages(repository, issue)
     req, existing_id = make_request(
         source, repository=repository, issue=issue, recipient=recipient,
@@ -148,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.offline_pages is not None and args.send:
-            _fail("OFFLINE_POST_FORBIDDEN")
+            fail("OFFLINE_POST_FORBIDDEN")
         result = send_request(
             repository=args.repository, issue=args.issue, recipient=args.recipient,
             intent=args.intent, request_key=args.request_key,
