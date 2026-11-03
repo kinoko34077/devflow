@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterator
 
 
-_HEADING = re.compile(r"^## ([^#].*?)\\s*$")
+_HEADING = re.compile(r"^## ([^#].*?)\s*$")
 _DEVFLOW_BLOCK_BEGIN = re.compile(r"^<!--\\s*DEVFLOW_[A-Z0-9_]+_BEGIN\\s*-->\\s*$")
 
 
