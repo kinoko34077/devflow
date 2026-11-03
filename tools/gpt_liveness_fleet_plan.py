@@ -16,7 +16,7 @@ import sys
 from typing import Any
 
 from tools.gpt_liveness_pilot import enrollment, utc
-from tools.kaep_mailbox_codec import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail as _fail
 
 SCHEMA = "gpt-liveness-fleet-plan.v0.1"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
@@ -25,10 +25,6 @@ MAX_TARGETS = 12
 MAX_ISSUE_BYTES = 200_000
 TICKS_PER_DAY = 24 * 60 // 5
 THIRTY_DAY_TICKS = 30 * TICKS_PER_DAY
-
-
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
 
 
 def parse_manifest(raw: str) -> list[str]:
