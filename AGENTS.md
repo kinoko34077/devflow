@@ -54,7 +54,7 @@ For `kinoko34077/<repo>`:
 
 ### Codex Cloud with no exposed Devflow MCP tools
 
-For an incomplete result, `has_unknown_work=true` and the machine TASKs view remain observations. Use the existing #503 pointer fallback; do not start a model or infer absence of work.
+For an incomplete result, `has_unknown_work=true` and the machine TASKs view remain observations. `PARTIAL_UNKNOWN` is not absence. Use the existing #503 pointer fallback; do not start a model or infer absence of work.
 
 ```sh
 python -m tools.kaep_live_union_cli --recipient codex --response-format agent-api
@@ -83,7 +83,7 @@ The approved public successor [#789](https://github.com/kinoko34077/devflow/issu
 ```sh
 python -m tools.kaep_discovery_reader --dual-shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
 ```
-It GETs #503 + #789 and strictly verifies KAEP v0.2 original sources. `PARTIAL_UNKNOWN` exit code **2** can still contain `source_verified_roots`; inspect `index_diagnostics`/`index_status`. Duplicate pointers require source verification before collapse. RC2, empty #789 or `BOUNDED_DUAL_INDEX_READ` **never proves absence/completeness**. Recheck original Issue, actor, addressed recipient, HEAD and owning Control before any authorized answer. No historical #726 replay, synthetic ACK/ANSWER, Claude wake or unsupported claim that Claude invoked #789. Owners [#771](https://github.com/kinoko34077/devflow/issues/771), [#680](https://github.com/kinoko34077/devflow/issues/680).
+It GETs #503 + #789 and strictly verifies KAEP v0.2 original sources. `PARTIAL_UNKNOWN` returns exit code 2 (the exact exit code 2 can still contain `source_verified_roots`); inspect `index_diagnostics`/`index_status`. Duplicate pointers require source verification before collapse. RC2, empty #789 or `BOUNDED_DUAL_INDEX_READ` **never proves absence/completeness**. Recheck original Issue, actor, addressed recipient, HEAD and owning Control before any authorized answer. No historical #726 replay, synthetic ACK/ANSWER, Claude wake or unsupported claim that Claude invoked #789. Owners [#771](https://github.com/kinoko34077/devflow/issues/771), [#680](https://github.com/kinoko34077/devflow/issues/680).
 
 ### Machine-first KAEP source discovery for any already-active agent (B6)
 
