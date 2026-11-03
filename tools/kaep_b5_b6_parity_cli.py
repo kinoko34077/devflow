@@ -13,6 +13,7 @@ import re
 import sys
 from typing import Any
 
+from tools.kaep_mailbox_codec import fail
 from tools.kaep_inbox_reader import InvalidMessage
 
 MAX_REPORT_BYTES = 2_000_000
@@ -24,15 +25,12 @@ MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
 REASONS = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 
 
-def _deny(reason: str) -> None:
-    raise InvalidMessage(reason)
-
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for k, v in pairs:
         if k in result:
-            _deny("DUPLICATE_REPORT_FIELD")
+            fail("DUPLICATE_REPORT_FIELD")
         result[k] = v
     return result
 
@@ -40,7 +38,7 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _issue_key(url: Any) -> tuple[str, int]:
     m = ISSUE_URL.fullmatch(url) if type(url) is str else None
     if m is None:
-        _deny("INVALID_REPORT_ISSUE_URL")
+        fail("INVALID_REPORT_ISSUE_URL")
     return m.group(1), int(m.group(2))
 
 
@@ -58,29 +56,29 @@ def _validate_shadow(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str
             or len(doc["issues"]) > SHADOW_LIMIT
             or type(doc.get("errors")) is not list
             or len(doc["errors"]) > 100):
-        _deny("INVALID_SHADOW_REPORT")
+        fail("INVALID_SHADOW_REPORT")
     valid: dict[tuple[str, int], set[tuple[int, str]]] = {}
     covered: set[tuple[str, int]] = set()
     for issue in doc["issues"]:
         if type(issue) is not dict:
-            _deny("INVALID_SHADOW_ISSUE")
+            fail("INVALID_SHADOW_ISSUE")
         key = _issue_key(issue.get("owning_issue"))
         roots = issue.get("roots")
         if (key in covered or type(roots) is not list or len(roots) > 500
                 or type(issue.get("root_count")) is not int
                 or issue["root_count"] != len(roots)
                 or issue.get("source_state") != "AVAILABLE"):
-            _deny("INVALID_SHADOW_ISSUE")
+            fail("INVALID_SHADOW_ISSUE")
         covered.add(key)
         entries: set[tuple[int, str]] = set()
         for root in roots:
             if type(root) is not dict:
-                _deny("INVALID_SHADOW_ROOT")
+                fail("INVALID_SHADOW_ROOT")
             cid, mid = root.get("source_comment_id"), root.get("source_message_id")
             if (type(cid) is not int or cid <= 0
                     or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                     or (cid, mid) in entries):
-                _deny("INVALID_SHADOW_ROOT")
+                fail("INVALID_SHADOW_ROOT")
             entries.add((cid, mid))
         valid[key] = entries
     errors = doc["errors"]
@@ -88,7 +86,7 @@ def _validate_shadow(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str
     for err in errors:
         if (type(err) is not dict or type(err.get("reason_code")) is not str
                 or REASONS.fullmatch(err["reason_code"]) is None):
-            _deny("INVALID_SHADOW_ERROR")
+            fail("INVALID_SHADOW_ERROR")
         if err.get("owning_issue") is None:
             global_unknown = True
         else:
@@ -115,12 +113,12 @@ def _validate_union(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str]
             or len(doc["live_rows"]) > MAX_UNION_ROWS
             or type(doc.get("source_errors")) is not list
             or len(doc["source_errors"]) > 100):
-        _deny("INVALID_UNION_REPORT")
+        fail("INVALID_UNION_REPORT")
     valid: dict[tuple[str, int], set[tuple[int, str]]] = {}
     covered: set[tuple[str, int]] = set()
     for c in doc["source_candidates"]:
         if type(c) is not dict:
-            _deny("INVALID_UNION_CANDIDATE")
+            fail("INVALID_UNION_CANDIDATE")
         key = _issue_key(c.get("issue_url"))
         if (c.get("repository") != key[0]
                 or type(c.get("issue_number")) is not int or c["issue_number"] != key[1]
@@ -131,13 +129,13 @@ def _validate_union(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str]
                     "ACCEPTED_RECIPIENT_ROOTS", "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED",
                     "SOURCE_VALIDATION_UNKNOWN")
                 or key in covered):
-            _deny("INVALID_UNION_CANDIDATE")
+            fail("INVALID_UNION_CANDIDATE")
         covered.add(key)
         if c["source_observation"] != "SOURCE_VALIDATION_UNKNOWN":
             valid[key] = set()
     for row in doc["live_rows"]:
         if type(row) is not dict:
-            _deny("INVALID_UNION_ROOT")
+            fail("INVALID_UNION_ROOT")
         key = _issue_key(row.get("issue_url"))
         cid, mid = row.get("source_comment_id"), row.get("message_id")
         if (key not in covered or row.get("repository") != key[0]
@@ -147,20 +145,20 @@ def _validate_union(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str]
                 or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                 or row.get("recipient") != "claude-code"
                 or row.get("source_validation") != "STRICT_COMPLETE_FOR_CANDIDATE"):
-            _deny("INVALID_UNION_ROOT")
+            fail("INVALID_UNION_ROOT")
         if key not in valid:
             continue  # an invalid original Issue cannot prove parity
         if (cid, mid) in valid[key]:
-            _deny("DUPLICATE_UNION_ROOT")
+            fail("DUPLICATE_UNION_ROOT")
         valid[key].add((cid, mid))
     for c in doc["source_candidates"]:
         key = _issue_key(c["issue_url"])
         if key in valid and c["matching_recipient_roots"] != len(valid[key]):
-            _deny("INVALID_UNION_ROOT_COUNT")
+            fail("INVALID_UNION_ROOT_COUNT")
     global_unknown = False
     for err in doc["source_errors"]:
         if type(err) is not dict or type(err.get("reason_code")) is not str or REASONS.fullmatch(err["reason_code"]) is None:
-            _deny("INVALID_UNION_ERROR")
+            fail("INVALID_UNION_ERROR")
         # Existing B6 live-union report uses source_errors[].issue_url, not
         # the owning_issue field emitted by the original strict reader.
         url = err.get("issue_url")
@@ -235,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         def read(path: Path) -> Any:
             raw = path.read_bytes()
             if len(raw) > MAX_REPORT_BYTES:
-                _deny("REPORT_TOO_LARGE")
+                fail("REPORT_TOO_LARGE")
             return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
         out = compare_reports(read(args.shadow_report), read(args.union_report))
     except (InvalidMessage, OSError, ValueError, UnicodeError, RecursionError) as exc:
