@@ -17,7 +17,12 @@ import sys
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages
-from tools.kaep_mailbox_codec import InvalidMessage, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    InvalidMessage,
+    fail as _fail,
+    read_mailbox,
+    verify_reply_chain,
+)
 from tools.kaep_request_sender import send_request
 
 MARKER = "<!-- gpt-liveness:enrollment:v0.1 "
@@ -28,10 +33,6 @@ ACTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
 MAX_ENROLLMENT = timedelta(hours=2)
 PING_INTERVAL = 300
 MAX_UNANSWERED = 3
-
-
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
 
 
 def utc(value: str) -> datetime:

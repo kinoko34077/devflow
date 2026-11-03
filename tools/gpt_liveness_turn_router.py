@@ -15,13 +15,14 @@ from typing import Any
 
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
 from tools.gpt_liveness_pilot import enrollment, challenge, answer, utc
-from tools.kaep_mailbox_codec import InvalidMessage, validate, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    InvalidMessage,
+    fail as _fail,
+    validate,
+    verify_reply_chain,
+)
 
 SCHEMA = "gpt.liveness.turn-routing.v0.1"
-
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def new_turn_id() -> str:
