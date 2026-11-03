@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
-from tools.kaep_mailbox_codec import matches
+from tools.kaep_mailbox_codec import fail, matches
 from tools.kaep_reply_sender import ACTOR, _mailbox
 from tools.kaep_request_sender import send_request
 from tools.github_issue_trust import is_trusted_principal
@@ -28,28 +28,25 @@ SourceMailbox = tuple[
 ]
 
 
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
-
 
 def verify_public_source(repository: str) -> None:
     """Fail closed: never publish a private task locator into public #503."""
     if not REPOSITORY.fullmatch(repository):
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     try:
         run = subprocess.run(
             ["gh", "api", f"repos/{repository}", "--method", "GET"],
             capture_output=True, text=True, timeout=20, check=False)
         if run.returncode != 0 or len(run.stdout.encode("utf-8")) > 65536:
-            _fail("SOURCE_VISIBILITY_UNVERIFIED")
+            fail("SOURCE_VISIBILITY_UNVERIFIED")
         meta = json.loads(run.stdout)
     except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired) as exc:
         raise InvalidMessage("SOURCE_VISIBILITY_UNVERIFIED") from exc
     if (type(meta) is not dict or meta.get("full_name") != repository
             or type(meta.get("private")) is not bool):
-        _fail("SOURCE_VISIBILITY_UNVERIFIED")
+        fail("SOURCE_VISIBILITY_UNVERIFIED")
     if meta["private"] is not False:
-        _fail("SOURCE_NOT_PUBLIC")
+        fail("SOURCE_NOT_PUBLIC")
 
 
 def _verify_source_request_from_snapshot(
@@ -63,17 +60,17 @@ def _verify_source_request_from_snapshot(
     an unverified network/actor claim as authority.
     """
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     if (repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE):
-        _fail("DISCOVERY_LOOP")
+        fail("DISCOVERY_LOOP")
     if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
-        _fail("INVALID_MESSAGE_ID")
+        fail("INVALID_MESSAGE_ID")
     if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
-        _fail("INVALID_ACTOR")
+        fail("INVALID_ACTOR")
     comments, items = snapshot
     matches_found = [(cid, msg) for cid, msg in items if msg["message_id"] == message_id]
     if len(matches_found) != 1:
-        _fail("SOURCE_MESSAGE_NOT_UNIQUE")
+        fail("SOURCE_MESSAGE_NOT_UNIQUE")
     cid, root = matches_found[0]
     actors = {comment["id"]: comment for comment in comments}
     actor = actors[cid]
@@ -84,12 +81,12 @@ def _verify_source_request_from_snapshot(
     else:
         trusted = actor["actor_login"].casefold() == expected_actor.casefold()
     if not trusted:
-        _fail("SOURCE_ACTOR_MISMATCH")
+        fail("SOURCE_ACTOR_MISMATCH")
     if (root["kind"] != "REQUEST" or root["in_reply_to"] is not None
             or root["recipient"] != "claude-code"
             or root["scope"]["effect"] != "READ_ONLY"
             or root["intent"] not in ("ANALYZE", "REPORT")):
-        _fail("SOURCE_NOT_SUPPORTED_REQUEST")
+        fail("SOURCE_NOT_SUPPORTED_REQUEST")
     return {
         "type": POINTER_VERSION,
         "owning_issue": f"https://github.com/{repository}/issues/{issue}",
@@ -106,13 +103,13 @@ def verify_source_request(
 ) -> dict[str, Any]:
     """Public entry retains full-history preflight and previous errors."""
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     if (repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE):
-        _fail("DISCOVERY_LOOP")
+        fail("DISCOVERY_LOOP")
     if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
-        _fail("INVALID_MESSAGE_ID")
+        fail("INVALID_MESSAGE_ID")
     if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
-        _fail("INVALID_ACTOR")
+        fail("INVALID_ACTOR")
     snapshot = _mailbox(pages, repository=repository, issue=issue)
     return _verify_source_request_from_snapshot(
         snapshot, repository=repository, issue=issue,
@@ -131,20 +128,20 @@ def route_request(
     # when explicitly selected by the caller. The default remains legacy #503.
     # Arbitrary IDs remain offline fixtures only; never become live targets.
     if type(discovery_issue) is not int or discovery_issue < 1:
-        _fail("INVALID_DISCOVERY_INDEX")
+        fail("INVALID_DISCOVERY_INDEX")
     if discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
         if do_send:
-            _fail("SUCCESSOR_INDEX_NOT_APPROVED")
+            fail("SUCCESSOR_INDEX_NOT_APPROVED")
         if offline_source_pages is None or offline_discovery_pages is None:
-            _fail("SUCCESSOR_REQUIRES_OFFLINE_FIXTURE")
+            fail("SUCCESSOR_REQUIRES_OFFLINE_FIXTURE")
     # Neither old nor new public discovery index can be an original source.
     if repository == DISCOVERY_REPOSITORY and issue in (
             DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, discovery_issue):
-        _fail("DISCOVERY_LOOP")
+        fail("DISCOVERY_LOOP")
     if do_send and (offline_source_pages is not None or offline_discovery_pages is not None):
-        _fail("OFFLINE_POST_FORBIDDEN")
+        fail("OFFLINE_POST_FORBIDDEN")
     if (offline_source_pages is None) != (offline_discovery_pages is None):
-        _fail("INCOMPLETE_OFFLINE_FIXTURE")
+        fail("INCOMPLETE_OFFLINE_FIXTURE")
     if do_send:
         verify_public_source(repository)
     source = (offline_source_pages if offline_source_pages is not None
