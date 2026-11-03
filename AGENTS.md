@@ -54,7 +54,7 @@ For `kinoko34077/<repo>`:
 
 ### Codex Cloud with no exposed Devflow MCP tools
 
-For an incomplete result, `has_unknown_work=true` and the machine TASKs view remain observations. `PARTIAL_UNKNOWN` is not absence. Use the existing #503 pointer fallback; do not start a model or infer absence of work.
+For an incomplete result, `has_unknown_work=true` and the machine TASKs view remain observations. `PARTIAL_UNKNOWN` is not absence. Use the existing #503 pointer fallback. Do not start a model or infer absence of work.
 
 ```sh
 python -m tools.kaep_live_union_cli --recipient codex --response-format agent-api
