@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 try:
+    from .markdown_scalar import strip_scalar as _strip_scalar
     from .repository_bootstrap import (
         BootstrapError,
         normalize_request,
@@ -82,16 +83,6 @@ class DevflowMCPError(RuntimeError):
         super().__init__(message)
         self.reason_code = reason_code
 
-
-def _strip_scalar(value: str) -> str:
-    value = value.strip()
-    if value.startswith("```") and value.endswith("```"):
-        lines = value.splitlines()
-        if len(lines) >= 3:
-            value = "\n".join(lines[1:-1]).strip()
-    if len(value) >= 2 and value[0] == value[-1] == "`":
-        value = value[1:-1].strip()
-    return value
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
