@@ -44,8 +44,6 @@ except ImportError:  # direct script execution
     if _repository_root not in sys.path:
         sys.path.insert(0, _repository_root)
 
-    from markdown_scalar import strip_scalar as _strip_scalar
-
     from repository_bootstrap import (
         BootstrapError,
         normalize_request,
@@ -53,6 +51,7 @@ except ImportError:  # direct script execution
         parse_provenance_document,
         parse_request_body,
     )
+    from markdown_scalar import strip_scalar as _strip_scalar
     import github_issue_trust
     import acceptance_evidence_preflight
     import human_portfolio
@@ -84,7 +83,6 @@ class DevflowMCPError(RuntimeError):
     def __init__(self, message: str, *, reason_code: str = "DEVFLOW_READ_UNAVAILABLE") -> None:
         super().__init__(message)
         self.reason_code = reason_code
-
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
