@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from tools import maintenance_sync_check, marker_json
+from tools.repository_identity import is_repository_name
 
 
 CACHE_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->"
@@ -19,7 +20,6 @@ CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_TASK_SUMMARIES = 20
 MAX_ALL_STATE_TASK_RECORDS = 20
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _OPTIONAL_TOP_LEVEL_FIELDS = frozenset({"all_state_tasks"})
 _ALL_STATE_FIELDS = frozenset({"status", "total", "records"})
@@ -113,7 +113,7 @@ def _require_exact_fields(
 
 
 def _require_repository(value: object, field: str = "repository") -> str:
-    if not isinstance(value, str) or _REPOSITORY.fullmatch(value.strip()) is None:
+    if not is_repository_name(value):
         raise RepositoryProjectionCacheError(f"{field} must be owner/repository")
     return value.strip()
 
