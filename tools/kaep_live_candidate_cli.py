@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from functools import partial
 import json
 from pathlib import Path
-import re
 import sys
 import urllib.error
 import urllib.request
@@ -22,14 +21,14 @@ from tools.kaep_inbox_reader import (
 )
 from tools.kaep_link_validation import safe_comment_link, safe_issue_link
 from tools.kaep_issue_search_view import build_search_list, fetch_issue
-from tools.kaep_mailbox_codec import RECIPIENTS, unique_pairs
+from tools.kaep_mailbox_codec import MESSAGE_ID as MESSAGE_ID_PATTERN, RECIPIENTS, unique_pairs
 
 PUBLIC_INDEX_URL = "https://kinoko34077.github.io/devflow/kaep/index.json"
 MAX_INDEX_BYTES = 1_000_000
 MAX_CANDIDATE_ISSUES = 40
 MAX_ROWS = 4000
 SCHEMA = "kaep.public-source-index.v1"
-MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
+MESSAGE = MESSAGE_ID_PATTERN
 
 
 

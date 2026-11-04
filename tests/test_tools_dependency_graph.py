@@ -141,6 +141,16 @@ class ToolsDependencyGraphTests(unittest.TestCase):
             self.graph["kaep_live_union_cli"],
         )
 
+    def test_kaep_message_id_aliases_reuse_mailbox_codec(self) -> None:
+        from tools import kaep_agent_api_projection as projection
+        from tools import kaep_b5_b6_parity_cli as parity
+        from tools import kaep_live_candidate_cli as candidate
+        from tools import kaep_mailbox_codec as codec
+
+        self.assertIs(projection._MESSAGE, codec.MESSAGE_ID)
+        self.assertIs(parity.MESSAGE_ID, codec.MESSAGE_ID)
+        self.assertIs(candidate.MESSAGE, codec.MESSAGE_ID)
+
 
 if __name__ == "__main__":
     unittest.main()
