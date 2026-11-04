@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+
+from tools import kaep_inbox_reader, kaep_mailbox_codec
 
 from tools.kaep_inbox_reader import (
     MAX_RESPONSE_BYTES, InvalidMessage, fetch_gh_pages,
@@ -46,6 +49,14 @@ def pages(*groups):
 
 
 class ReadOnlyInboxTests(unittest.TestCase):
+    def test_recipient_set_uses_codec_owner(self):
+        sentinel = object()
+        with patch.object(kaep_mailbox_codec, "RECIPIENTS", sentinel):
+            reloaded = importlib.reload(kaep_inbox_reader)
+            self.assertIs(reloaded.RECIPIENTS, sentinel)
+        importlib.reload(kaep_inbox_reader)
+
+
     def assert_blocked(self, text, code):
         with self.assertRaisesRegex(InvalidMessage, code):
             inspect_pages(text, repository=REPO, issue=503,
