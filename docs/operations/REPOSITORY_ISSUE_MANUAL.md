@@ -137,6 +137,12 @@ Use the repository's own template when present. Otherwise include, at minimum:
 
 Repository-local naming does not have to be exactly `Work Order:`. Information ownership matters more than identical labels.
 
+### Issue authoring language standard (2026-11-04 user direction)
+
+Write every newly created Issue (including Work Orders, audits, specifications, minutes and handoffs) **簡潔・平易・明瞭に。冗長な表現を避け、意味や情報量を保ちつつ圧縮的に記述する。** Remove redundant phrasing, repeated explanations and unnecessary preambles; link the authoritative specification/evidence instead of reproducing it wholesale. Preserve the actual user request, higher goal, constraints, definitions, numeric values, causal relationships, exception cases, permissions/Human Gates, acceptance criteria, verification references and actionable next step. Never substitute a shorter but less precise summary for an operative condition or machine-readable marker. Length reduction is **not** an independent acceptance criterion; if faithful compression is not possible, keep the necessary text.
+
+This standard applies **when authoring new Issues now**. The separate fleet-wide cleanup of already existing Open/Closed Issues is [devflow #914](https://github.com/kinoko34077/devflow/issues/914), deliberately **HOLD** until the presently prioritized major Issues are compressed; its appearance here is not a task trigger. Original user direction is recorded under [devflow #49](https://github.com/kinoko34077/devflow/issues/49#issuecomment-6623682424).
+
 ### 4.0 Goal lineage at Issue authoring (devflow #761 / M1)
 
 **Why this exists:** an Issue that says only *what to implement* can lose the higher-order user outcome that justified the request. At Issue creation, for nontrivial changes, the **trusted authoring agent** reconstructs enough *why / user success / fixed conditions* from the current user request and live owning specifications to distinguish the intended result from a convenient substitute. **Do not invent the user's intent.**
