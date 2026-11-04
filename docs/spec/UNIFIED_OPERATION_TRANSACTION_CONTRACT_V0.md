@@ -1,6 +1,6 @@
-# Unified Operation Transaction Contract v0 — Read-first, bounded effect, verified outcome
+# 統一操作トランザクション契約 v0 — 事前読取・限定変更・結果検証
 
-Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner: [devflow #487](https://github.com/kinoko34077/devflow/issues/487). This document is not an active dispatch API, executable permission, approval receipt, or override of any repository-local contract. User authorized the shared design direction; effectful activation remains subject to each already accepted technical/security/Human gate.
+**状態：提案段階・非稼働の横断操作設計**（2026-10-12）。**担当正本：** [devflow #487](https://github.com/kinoko34077/devflow/issues/487). この文書は稼働中の依頼振分API、実行権限、承認証拠ではなく、各リポジトリの契約を上書きしない。共通設計方針はユーザー承認済みだが、実際の変更の有効化には既存の技術・安全性・人間承認条件を別途満たす必要がある。
 
 ## 0. 既存契約と責務（参照索引）
 
@@ -87,25 +87,25 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 - **execution-coordinator:** agent所有の仕事だけfresh fenceを照合。通常の直接GitHub API操作へ架空のclaimを要求しない。
 - **repository-local:** source/CI/policyとJO固定pinが優先。adapterはversion付きとし、歴史的受入版の互換性を守る。
 
-## 7. Roadmap and independent acceptance
+## 7. 実施順序と段階別の受入
 
-**A0 — LIVE inventory COMPLETE:** #487にowner、interface、merged/unmerged SHA、危険なAPI意味論を記録済み。#465/#474のコードは変更しない。
+**A0 — 現行棚卸し完了：** #487にowner、interface、merged/unmerged SHA、危険なAPI意味論を記録済み。#465/#474のコードは変更しない。
 
 **A1 — 仕様書のみ：** この非稼働仕様を独立docs PRで公開し、exact-head Review・既存Required CIを通す。#413 G1・#439との整合を確認。変更範囲は新規仕様文書だけで、trigger・権限は有効化しない。
 
-**A2 — 別タスク、offline-only：** 信頼済みparser・provenance・validatorをimportし、generic plan/outcomeの**表示用adapter**を構築する。writerを複製しない。テストは偽actor/caller、stale SHA、別target、JSON重複key、予期しないwrite、無署名plan、権限誤分類、競合/再試行、HEAD/CAS不足、timeout。READMEに合否を記録。通信・live書込なし。
+**A2 — 別タスク・通信なし：** 信頼済みparser・provenance・validatorをimportし、generic plan/outcomeの**表示用adapter**を構築する。writerを複製しない。テストは偽actor/caller、stale SHA、別target、JSON重複key、予期しないwrite、無署名plan、権限誤分類、競合/再試行、HEAD/CAS不足、timeout。READMEに合否を記録。通信・live書込なし。
 
 **A3 — ownerとの非干渉確認後：** #465の受入済みartifact previewからread-only evidence adapterを1件、独立受入された#474 native writer receiptからoutcome adapterを1件。古いR1の上書きや、#474の特権書込経路を有効化したとみなすことは禁止。
 
 **A4 — 別途許可された実操作：** 接続済みGitHub APIで可能な影響の小さい具体的Public effectを選び、read→plan→実行直前の権限/状態再取得→限定effect→readback→reconcileと負例・replayを実証。対象がPR/head/refかIssueかに応じて原子的更新保証を評価する。HOLD中の#474で試験書込しない。
 
-**A5 — 必要なPublic範囲だけopt-in展開：** 単一dispatcher workflowが本当に有効か検証し、command毎のworkflow乱立とjob別最小権限の両方を考慮する。
+**A5 — 必要な公開対象だけに任意導入：** 単一dispatcher workflowが本当に有効か検証し、command毎のworkflow乱立とjob別最小権限の両方を考慮する。
 
-**A6 — Private・特権操作：** runner/課金/認可の現行実証と対象を特定したHuman承認がある場合のみ。A0〜A5で目的達成なら**STOP**。
+**A6 — 非公開・特権操作：** runner/課金/認可の現行実証と対象を特定したHuman承認がある場合のみ。A0〜A5で目的達成なら**STOP**。
 
 **段階の独立性：** A1は**非稼働仕様の受入だけ**。汎用executor、共通認可token、GitHub-hosted Private runner、allowlist拡大、複数repoの特権writerは承認されない。次の段階はlive owner・実装・証拠を確認して個別判断する。
 
-## 8. Required negative / failure-mode matrix
+## 8. 必須の異常系・失敗時検証
 
 以下の14ケースを区別してfail-closed検証する。正常入力の成功だけでは受入しない。
 
@@ -124,6 +124,6 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 13. 別agentがcoordinator claim/leaseを保持中なのに#487に第二の所有権を作る。
 14. Feature flag/catalog v2移行時に既存JO/G1 v1のfail-closed意味を変える。
 
-## 9. Design decision / global replan
+## 9. 設計判断と全体方針
 
-**Preferred:** Policy/contract as shared **thin semantic layer**; operation-specific trusted planner and effect executor remain in their owners; native GitHub API/direct operations FIRST. Reuse proven source as dependencies rather than wholesale extracting or relocating #465 writer. A0+A1 can finish safely now. A2+ are conditioned on true integration value and actual acceptance evidence. No second generic task engine.
+**共通化するのは必要最小限の意味・契約だけ。** 操作固有の信頼済み計画処理と変更実行処理は各担当正本に残し、既存のGitHub APIによる直接操作を優先する。#465の書込処理を一括移設・再実装せず、検証済み実装を依存先として再利用する。A0・A1は安全に終了できる範囲であり、A2以降は実際の統合効果と受入証拠によって進行可否を判断する。第二の汎用タスク実行基盤は作らない。
