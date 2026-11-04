@@ -18,7 +18,8 @@ FIELDS = set("schema_version exchange_id message_id in_reply_to task_ref recipie
 KINDS = set("REQUEST ACK QUESTION ANSWER PROGRESS RESULT REVIEW_REQUEST REVIEW_FEEDBACK CANCEL_REQUEST CANCEL_ACK ERROR BLOCKED".split())
 REPLIES = set("ACK ANSWER PROGRESS RESULT REVIEW_FEEDBACK CANCEL_ACK ERROR BLOCKED".split())
 INTENTS = set("PING ANALYZE IMPLEMENT TEST REVIEW REVISE REPORT CANCEL".split())
-RECIPIENTS = set("claude-code chatgpt codex coordinator".split())
+RECIPIENT_ORDER = ("claude-code", "chatgpt", "codex", "coordinator")
+RECIPIENTS = set(RECIPIENT_ORDER)
 
 class InvalidMessage(ValueError):
     """Only fixed reason codes, not untrusted content."""
