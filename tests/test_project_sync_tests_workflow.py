@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
 import re
 import unittest
@@ -36,6 +37,15 @@ class ProjectSyncTestsWorkflowTests(unittest.TestCase):
             (ROOT / "docs" / "spec" / "DEVELOPMENT_RECONCILIATION.md").is_file(),
             "representative current specification must exist",
         )
+        for spec_path in (
+            "docs/spec/DEVELOPMENT_RECONCILIATION.md",
+            "docs/spec/examples/chat-worker-bootstrap/01-broad-instruction-fresh-claim.json",
+        ):
+            with self.subTest(spec_path=spec_path):
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(spec_path, pattern) for pattern in patterns),
+                    f"canonical specification path must match the main push filters: {spec_path}",
+                )
 
         jobs = re.search(
             r"(?ms)^jobs:\s*\n(?P<section>.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:|\Z)",
