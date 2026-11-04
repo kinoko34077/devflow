@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from functools import partial
 import json
 from pathlib import Path
 import re
@@ -19,6 +20,7 @@ from typing import Any, Callable
 from tools.kaep_inbox_reader import InvalidMessage, RECIPIENTS, fetch_gh_pages
 from tools.kaep_issue_list_html import _safe_link
 from tools.kaep_issue_search_view import build_search_list, fetch_issue
+from tools.kaep_mailbox_codec import unique_pairs
 
 PUBLIC_INDEX_URL = "https://kinoko34077.github.io/devflow/kaep/index.json"
 MAX_INDEX_BYTES = 1_000_000
@@ -33,13 +35,7 @@ def _block(code: str) -> None:
     raise InvalidMessage(code)
 
 
-def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out = {}
-    for k, value in pairs:
-        if k in out:
-            _block("DUPLICATE_INDEX_FIELD")
-        out[k] = value
-    return out
+_unique_pairs = partial(unique_pairs, duplicate_code="DUPLICATE_INDEX_FIELD")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
