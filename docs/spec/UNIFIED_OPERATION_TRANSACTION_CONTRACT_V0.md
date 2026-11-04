@@ -31,15 +31,15 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 
 各依頼には有限の重複排除キーと対象・版の範囲を定める。ただし、キーだけで重複実行は防げない。実行の所有者が既存の永続化・直列化機構で再実行を制御し、独立に認証した実行ID・試行回数と結果の証拠を照合する。
 
-## 2. Three separate data domains (strict no-trust transfer)
+## 2. 独立した三つのデータ契約（信頼の引継ぎ禁止）
 
-**OperationDefinition — trusted catalog record.** Versioned action identifier; owning component/technical handler; fixed backend and reviewed executable/file SHA; exact repository/resource class; allowed read capabilities; allowed effects and path/field set; target-comparison mechanism and its guarantee level; source/caller/actor provenance requirements; resource limits; expected postconditions; idempotency mode; compensation/recovery class; Human/reviewer predicate aligned with accepted policy. The requester MUST NOT choose raw URL, shell, arbitrary workflow file, executor module, token, arbitrary ref or new action name. Definitions loaded only from immutable reviewed source, never from Issue/PR input.
+**OperationDefinition（信頼済み操作定義）：** 版付き操作ID、所有コンポーネント・処理担当、固定された処理基盤とレビュー済み実行物・ファイルSHA、対象リポジトリ・資源種別、読取権限、許可された変更・パス・項目、対象の競合判定と保証水準、ソース・呼出元・実行者の認証条件、資源上限・期待する変更後状態、重複実行防止方式、補償・復旧分類、受入済み方針に沿った人間承認・レビュー判定を含む。依頼者に任意のURL・シェル・ワークフローファイル・実行モジュール・トークン・参照先・新操作名を選ばせない。Issue・PR入力ではなく、変更不能なレビュー済みソースから取得する。
 
-**PreflightEvidence — no-authority result.** Request ID, schema/definition version+trusted catalog source SHA, normalized resource IDs, authenticated *observation provenance* (e.g. actor, GitHub run ID/attempt/verified Workflow/caller SHA), observed versions/PR-head/base/head/ETag where supported, minimal bound diff/action intent, explicit read/validation results, dependency/CI/reviewer state, time/freshness class and digest. Redact credentials/private content. The planner does not mint executable bearer capabilities.
+**PreflightEvidence（事前検証の証拠・認可効力なし）：** 依頼ID、スキーマ・操作定義の版と信頼済みカタログのSHA、正規化した対象ID、独立認証した観測の来歴（実行者、GitHub実行ID・試行回数、検証済みワークフロー・呼出元SHAなど）、対応時の観測版・PR HEAD/base/head・ETag、限定された変更差分・目的、読み取り・検証結果、依存・CI・レビュー状態、時刻・鮮度区分・ダイジェストを含む。認証情報・非公開内容を秘匿し、計画段階で実行可能な権限証票を発行しない。
 
-**EffectReceipt — observed effect and verification.** Validated request/definition ID, authenticated writer identity/source/run+attempt, target exact prior/current identities, permitted mutations and observed commit/field deltas, status, verification proofs, risk containment/rollback, replay link and durable owner Issue. Neither a planner `PASS` nor command exit code 0 alone constitutes successful completion.
+**EffectReceipt（変更結果の検証記録）：** 検証済み依頼ID・定義ID、認証済み書込者・ソース・実行ID/試行回数、対象の厳密な変更前後の識別情報、許可された変更と実際のコミット・項目差分、結果状態、検証証拠、封じ込め・ロールバック、再実行への参照、記録先の所有Issueを含む。計画の`PASS`やコマンドの終了コード0だけで完了としない。
 
-Reject missing/extra security-critical fields; never substitute a self-asserted actor, archive manifest or generic timestamp for separately authenticated GitHub evidence. Distinguish raw data hashing from authentically signed/verified provenance; canonical hashing should include schema/version and exact target to prevent cross-target replay.
+安全性に関わる必須項目の不足・余分な項目は拒否する。実行者や保存用manifestの自己申告、単なる時刻を、GitHubで独立認証した証拠に代用しない。データのハッシュと認証済みの来歴を区別する。再実行を別対象へ転用されないよう、正規化ハッシュにはスキーマ・版と正確な対象を含める。
 
 ## 3. Endpoint-specific concurrency and freshness — essential correction
 
