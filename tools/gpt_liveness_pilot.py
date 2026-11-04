@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import hashlib
 import json
 import re
@@ -21,6 +22,7 @@ from tools.kaep_mailbox_codec import (
     InvalidMessage,
     fail as _fail,
     read_mailbox,
+    unique_pairs,
     verify_reply_chain,
 )
 from tools.kaep_request_sender import send_request
@@ -54,15 +56,11 @@ def iso(value: datetime) -> str:
 
 
 def strict_json(raw: str) -> dict[str, Any]:
-    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for k, v in items:
-            if k in out:
-                _fail("DUPLICATE_FIELD")
-            out[k] = v
-        return out
     try:
-        obj = json.loads(raw, object_pairs_hook=pairs)
+        obj = json.loads(
+            raw,
+            object_pairs_hook=partial(unique_pairs, duplicate_code="DUPLICATE_FIELD"),
+        )
     except (ValueError, UnicodeError, TypeError):
         _fail("INVALID_JSON")
     if type(obj) is not dict:
