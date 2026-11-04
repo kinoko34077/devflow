@@ -14,6 +14,50 @@ CMD = (
 
 
 class V2ActiveRecipientDocsTests(unittest.TestCase):
+    def test_mcp_runbook_records_reported_transaction_without_identity_overclaim(self):
+        source = (ROOT / "docs/operations/DEVFLOW_MCP.md").read_text(encoding="utf-8")
+        block = source.split(
+            "### Approved #789 public pointer discovery (already-running Claude only)", 1
+        )[1].split(
+            "Exit code 0 means the read method returned structured data;", 1
+        )[0]
+        for required in (
+            "#771@6337489614",
+            "#789@6337496561",
+            "6338334466",
+            "6338343220",
+            "25dde358cd4514aab914d589855d94ef3662ecf2",
+            "self-reports",
+            "not independently authenticated",
+            "No live Claude runtime invocation of #789 has been independently verified",
+        ):
+            self.assertIn(required, block)
+
+    def test_proposal_records_bounded_live_delivery_and_residual_gates(self):
+        proposal = (ROOT / "docs/spec/KAEP_DISCOVERY_INDEX_RECOVERY_PROPOSAL_V01.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "#774 MERGED",
+            "#791 MERGED",
+            "#792 MERGED",
+            "6337489614",
+            "6337496561",
+            "6338334466",
+            "6338343220",
+            "25dde358cd4514aab914d589855d94ef3662ecf2",
+            "not independently authenticated",
+            "#503/Control fallback",
+            "full cutover remains unaccepted",
+        ):
+            self.assertIn(required, proposal)
+
+        self.assertNotIn(
+            "[PR #774](https://github.com/kinoko34077/devflow/pull/774) is an **OPEN, UNMERGED",
+            proposal,
+        )
+        self.assertNotIn("S2 code-only; live REQUEST not sent", proposal)
+
     def test_agent_entrypoint_uses_existing_a3_not_an_automatic_wake(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         chunk = agents.split(
