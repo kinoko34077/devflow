@@ -67,25 +67,25 @@
 
 この結果分類は、**既存の操作別結果を共通表示するためのもの**。#384/#465固有の結果値を直接置き換えず、個別の細かい区別を失わせない。
 
-## 5. 能力分類・承認条件
+## 5. 能力分類と承認条件
 
 | 分類 | 境界 |
 | --- | --- |
-| **READ_DATA** | 認証済みmetadataのread。repo変更はしないが、privacy/外部compute費用は別途検査。 |
-| **READ_EXECUTE** | test/build/benchmarkなどの計算実行。tokenがread-onlyでもPR由来codeとrunner資源の危険を評価。 |
-| **REVERSIBLE_EFFECT** | 限定Issue編集、scratch branch変更、安全なPR merge等。実際の変更と復旧根拠を審査し、#439上必要なreviewと既存権限を満たす場合のみ。独立reviewが不要な場合はself-review可。 |
-| **PRIVILEGED_EFFECT** | workflow/権限/secret/security境界、任意外部実行、Privateデータ露出、復旧困難な破壊。個別Human/security gateと必要な独立reviewを要する。 |
-| **RELEASE_EFFECT** | 外部公開・deploy・release。Git操作自体が復元可能でも明示ユーザー承認が必要。 |
+| **READ_DATA** | 認証済みの関連情報を読み取る。リポジトリは変更しないが、秘密情報・外部計算費用は別途審査する。 |
+| **READ_EXECUTE** | テスト・ビルド・性能測定などを実行。トークンが読み取り専用でも、PR由来コードと実行資源の危険を評価する。 |
+| **REVERSIBLE_EFFECT** | 限定的なIssue編集、試験ブランチ変更、安全なPR統合など。実際の差分・復旧根拠・既存権限と#439の審査条件を満たす。独立レビューが不要な場合は自己レビュー可。 |
+| **PRIVILEGED_EFFECT** | ワークフロー・権限・秘密情報・安全境界の変更、任意の外部実行、非公開データ露出、復旧困難な破壊。個別の人間・安全審査と必要な独立レビューを要する。 |
+| **RELEASE_EFFECT** | 外部公開・配備・リリース。Git操作自体が復元可能でも、ユーザーの明示承認が必要。 |
 
-**ReviewとHuman承認は独立判定。** G1 v1のwrite→`NEEDS_HUMAN`をv0設計だけで緩和しない。v2移行には#439に従うG1個別review・互換性確認・指定effectのpilotが必要。同じmodel/providerのself-reviewは別systemの独立reviewではない。
+**レビューと人間の承認は別の判断。** G1 v1の書込→`NEEDS_HUMAN`をv0設計だけで緩和しない。v2への移行では#439に沿ったG1の個別レビュー・互換性確認・実際の変更試験が必要。同じモデル・提供元による自己レビューを独立レビューと呼ばない。
 
 ## 6. 接続先（既存実装の所有権は移さない）
 
-- **#413 G1:** trusted catalog ID付きの**未信頼request**だけをshared planner/guardへ渡す。既存の単純GitHub API操作は直接実行優先。Issue comment入口は未対応かつ個別review済み固定commandに限る。
-- **#465:** 受入済みread-only artifact previewの実source/provenance/ZIP/targetから`PreflightEvidence`へ変換。固有の検証算法を変更せず、writerを公開しない。
-- **#474:** 独立受入済みのnative writer receiptだけを`EffectReceipt`へ変換。#487を#474の既存保護・Human/Review gateの成立/解除条件にしない。
-- **execution-coordinator:** agent所有の仕事だけfresh fenceを照合。通常の直接GitHub API操作へ架空のclaimを要求しない。
-- **repository-local:** source/CI/policyとJO固定pinが優先。adapterはversion付きとし、歴史的受入版の互換性を守る。
+- **#413 G1：** 信頼済みカタログの操作IDを含む**未信頼依頼**だけを共通の計画・判定処理へ渡す。既存GitHub APIで実行できる軽微な操作は直接実行を優先。Issueコメント入口は、未対応かつ個別レビュー済みの固定操作に限る。
+- **#465：** 受入済み生成物の読み取り専用事前確認から、実際のソース・来歴・ZIP・対象を`PreflightEvidence`へ変換する。固有の検証方式を変更・迂回せず、書込機能を公開しない。
+- **#474：** 独立に受入済みの書込結果記録だけを`EffectReceipt`へ変換する。#487を理由に#474の既存保護・人間承認・レビュー条件を追加・解除しない。
+- **execution-coordinator：** エージェント所有の仕事だけ最新の占有権を照合。通常のGitHub API操作に架空の占有権を要求しない。
+- **各リポジトリ：** 固有のソース・CI・方針とJOの固定SHAを優先。接続処理は版を付け、過去の受入済み実行経路との互換性を保つ。
 
 ## 7. 実施順序と段階別の受入
 
