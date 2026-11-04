@@ -11,7 +11,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "project-sync-tests.yml"
 
 
 class ProjectSyncTestsWorkflowTests(unittest.TestCase):
-    def test_main_push_filter_covers_feature_and_canonical_spec_routes(self) -> None:
+    def test_main_push_filter_covers_feature_spec_and_operations_routes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         push = re.search(
             r"(?ms)^  push:\s*\n(?P<section>.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:|\Z)",
@@ -45,6 +45,25 @@ class ProjectSyncTestsWorkflowTests(unittest.TestCase):
                 self.assertTrue(
                     any(fnmatch.fnmatchcase(spec_path, pattern) for pattern in patterns),
                     f"canonical specification path must match the main push filters: {spec_path}",
+                )
+
+        self.assertIn(
+            "docs/operations/**",
+            patterns,
+            "operational guidance and its nested templates must trigger main verification",
+        )
+        for operations_path in (
+            "docs/operations/AGENT_OPERATING_MANUAL.md",
+            "docs/operations/templates/verified-artifacts-pilot.yml",
+        ):
+            with self.subTest(operations_path=operations_path):
+                self.assertTrue(
+                    (ROOT / operations_path).is_file(),
+                    f"representative operational source must exist: {operations_path}",
+                )
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(operations_path, pattern) for pattern in patterns),
+                    f"operational source must match the main push filters: {operations_path}",
                 )
 
         jobs = re.search(

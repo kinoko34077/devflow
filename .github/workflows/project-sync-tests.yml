@@ -18,10 +18,8 @@ on:
       - '.devflow/WORKFLOW.yaml'
       - 'schemas/repository-bootstrap.v1.schema.json'
       - 'docs/project/**'
-      - 'docs/operations/DEVFLOW_MCP.md'
-      - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
+      - 'docs/operations/**'
       - 'docs/spec/**'
-      - 'docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md'
       - '.devflow/maintenance.yaml'
       - 'requirements-mcp.txt'
 
