@@ -10,10 +10,10 @@ from __future__ import annotations
 import argparse
 from bisect import bisect_right
 import json
-import re
 import sys
 from typing import Callable, Any
 
+from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
     fail,
@@ -32,8 +32,7 @@ _mailbox = mailbox
 _matching_actor = matching_actor
 _verify_source_request_from_snapshot = verify_source_request_from_snapshot
 
-SOURCE_URL = re.compile(
-    r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
+SOURCE_URL = ISSUE_URL_PATTERN
 POINTER_FIELDS = {"type", "owning_issue", "message_id", "comment_id"}
 MAX_INDEX_BATCH = 20
 REPLY_KINDS = {"ACK", "ANSWER", "BLOCKED"}
