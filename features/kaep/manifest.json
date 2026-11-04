@@ -3,10 +3,21 @@
   "id": "kaep",
   "authority": "index_only",
   "source_repository": "kinoko34077/devflow",
+  "source_ref": "102bf968caf529f607ed0c8bfebd5cab17039488",
   "entry": "features/kaep/README.md",
   "routes": {
     "inbox": {
       "when": "an existing agent needs a recipient-scoped Inbox read",
+      "semantic_fields": [
+        "actor",
+        "trigger",
+        "action",
+        "exception",
+        "exit_status",
+        "authority_boundary",
+        "source_owner"
+      ],
+      "source_owners": ["kinoko34077/devflow#531"],
       "documents": [
         "docs/spec/KAEP_AGENT_INBOX_V01.md",
         "docs/spec/KAEP_V0_2.md",
@@ -14,7 +25,8 @@
       ],
       "code": [
         "tools/kaep_inbox_reader.py",
-        "tools/kaep_agent_inbox_cli.py"
+        "tools/kaep_agent_inbox_cli.py",
+        "tools/kaep_repository_validation.py"
       ],
       "tests": [
         "tests/test_kaep_inbox_reader.py",
@@ -23,23 +35,52 @@
     },
     "discovery": {
       "when": "an existing agent needs bounded source-candidate discovery",
+      "semantic_fields": [
+        "actor",
+        "trigger",
+        "action",
+        "exception",
+        "exit_status",
+        "authority_boundary",
+        "source_owner"
+      ],
+      "source_owners": ["kinoko34077/devflow#680"],
       "documents": [
         "docs/spec/KAEP_AGENT_FIRST_API_V1.md",
         "docs/spec/KAEP_READ_PATH_RESPONSIBILITIES.md"
       ],
       "code": [
         "tools/kaep_live_union_cli.py",
+        "tools/kaep_live_candidate_cli.py",
         "tools/kaep_discovery_reader.py",
-        "tools/kaep_public_incremental_cli.py"
+        "tools/kaep_public_incremental_cli.py",
+        "tools/kaep_public_index.py",
+        "tools/kaep_link_validation.py",
+        "tools/kaep_repository_validation.py",
+        "tools/kaep_agent_api_projection.py"
       ],
       "tests": [
         "tests/test_kaep_live_union_cli.py",
+        "tests/test_kaep_live_candidate_cli.py",
         "tests/test_kaep_discovery_reader.py",
-        "tests/test_kaep_public_incremental_cli.py"
+        "tests/test_kaep_public_incremental_cli.py",
+        "tests/test_kaep_public_index.py",
+        "tests/test_kaep_link_validation.py",
+        "tests/test_kaep_agent_api_projection.py"
       ]
     },
     "send": {
       "when": "reviewing or changing authorized send or reply code",
+      "semantic_fields": [
+        "actor",
+        "trigger",
+        "action",
+        "exception",
+        "exit_status",
+        "authority_boundary",
+        "source_owner"
+      ],
+      "source_owners": ["kinoko34077/devflow#503"],
       "documents": [
         "docs/spec/KAEP_V0_2.md",
         "docs/spec/KAEP_SEND_PATH_RESPONSIBILITIES.md",
@@ -56,6 +97,20 @@
     },
     "audit": {
       "when": "auditing source-to-route preservation or source verification boundaries",
+      "semantic_fields": [
+        "actor",
+        "trigger",
+        "action",
+        "exception",
+        "exit_status",
+        "authority_boundary",
+        "source_owner"
+      ],
+      "source_owners": [
+        "kinoko34077/devflow#503",
+        "kinoko34077/devflow#531",
+        "kinoko34077/devflow#680"
+      ],
       "documents": [
         "docs/spec/KAEP_READ_PATH_RESPONSIBILITIES.md",
         "docs/spec/KAEP_SEND_PATH_RESPONSIBILITIES.md"
@@ -69,6 +124,20 @@
     },
     "history": {
       "when": "investigating prior incidents, acceptance, or migration evidence",
+      "semantic_fields": [
+        "actor",
+        "trigger",
+        "action",
+        "exception",
+        "exit_status",
+        "authority_boundary",
+        "source_owner"
+      ],
+      "source_owners": [
+        "kinoko34077/devflow#503",
+        "kinoko34077/devflow#531",
+        "kinoko34077/devflow#680"
+      ],
       "documents": [],
       "code": [],
       "tests": []
@@ -81,6 +150,7 @@
   ],
   "notes": [
     "Resolve every path relative to the source repository at the current revision.",
+    "semantic_fields and source_owners are navigation checklists; they do not copy the contract or grant authority.",
     "Read-only discovery metadata is not a work assignment or execution authority.",
     "Current state, review, CI, and authorization are always read live."
   ]

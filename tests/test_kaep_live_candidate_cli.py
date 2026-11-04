@@ -1,9 +1,11 @@
 """B6-D actual published candidate locator -> canonical live original GET checks."""
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone, timedelta
 import importlib
 import json
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -69,6 +71,18 @@ def index_with(*elements, age_seconds=120, status="BOUNDED_SEARCH_READ"):
 
 
 class LiveCandidateTests(unittest.TestCase):
+    def test_candidate_reads_recipient_set_from_codec(self):
+        source = Path(kaep_live_candidate_cli.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(kaep_live_candidate_cli.__file__))
+        codec_imports = {
+            alias.name
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module == "tools.kaep_mailbox_codec")
+            for alias in node.names
+        }
+        self.assertIn("RECIPIENTS", codec_imports)
+
     def test_repository_pattern_uses_inbox_reader_owner(self):
         sentinel = object()
         with mock.patch.object(kaep_inbox_reader, "REPOSITORY", sentinel):
