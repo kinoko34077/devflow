@@ -123,6 +123,11 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         locator = self.graph["kaep_public_locator_cli"]
         self.assertIn("kaep_repository_validation", locator)
 
+    def test_kaep_public_locator_does_not_depend_on_live_delta(self) -> None:
+        locator = self.graph["kaep_public_locator_cli"]
+        self.assertNotIn("kaep_live_delta_view", locator)
+        self.assertIn("kaep_link_validation", locator)
+
     def test_kaep_issue_url_parsers_reuse_link_validation(self) -> None:
         for module in (
             "kaep_b5_b6_parity_cli",

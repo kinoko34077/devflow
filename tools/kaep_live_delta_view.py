@@ -15,6 +15,7 @@ import sys
 from typing import Any, Callable
 
 from tools import kaep_issue_search_view as search
+from tools.kaep_link_validation import API_ISSUE_URL
 from tools.kaep_mailbox_codec import InvalidMessage, MARKER
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -23,9 +24,9 @@ MAX_WINDOW = 100
 MAX_UPDATED_PAGES = 3
 MAX_BYTES = 2_000_000
 MAX_SOURCE_ISSUES = 40
-API_ISSUE = re.compile(
-    r"https://api\.github\.com/repos/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z"
-)
+# Compatibility name retained for union/public readers; the low-level link
+# validator owns the API locator pattern.
+API_ISSUE = API_ISSUE_URL
 
 
 def _error(code: str) -> None:

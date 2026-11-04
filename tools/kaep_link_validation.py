@@ -11,6 +11,10 @@ ISSUE_URL = re.compile(
 # Compatibility name used by presentation validators; ISSUE_URL is the
 # canonical capture-capable pattern for KAEP Issue locators.
 ISSUE_LINK = ISSUE_URL
+API_ISSUE_URL = re.compile(
+    r"https://api\.github\.com/repos/(kinoko34077/[A-Za-z0-9_.-]+)"
+    r"/issues/([1-9][0-9]*)\Z"
+)
 COMMENT_LINK = re.compile(
     r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*"
     r"#issuecomment-[1-9][0-9]*\Z"
