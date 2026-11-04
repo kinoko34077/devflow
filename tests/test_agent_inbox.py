@@ -4,6 +4,16 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from execution_coordinator.model import (
+    Claim,
+    CoordinatorState,
+    ExecutionState,
+    Role,
+    WaitReason,
+)
+from execution_coordinator.github_state import IssueBodyRead
+from execution_coordinator.query import StateReadResult
+from execution_coordinator.snapshot import render_issue_body
 from tools import agent_inbox, devflow_mcp_core, maintenance_supply, repository_projection
 from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_mailbox_codec import encode_comment
@@ -534,6 +544,191 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "INVALID_RECIPIENT"):
             service.get_agent_workspace("demo", recipient="invalid")
         self.assertEqual(reader.calls, [])
+
+
+def coordinator_claim(
+    claim_id, *, task_ref, role=Role.IMPLEMENTER,
+    state=ExecutionState.CLAIMED, wait_reason=None, lease_until,
+):
+    claimed_at = datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)
+    return Claim(
+        claim_id=claim_id,
+        generation=1,
+        task=task_ref,
+        role=role,
+        worker_id=f"worker-{claim_id}",
+        conflict_keys=(f"task:{task_ref}",),
+        claimed_at=claimed_at,
+        heartbeat_at=claimed_at,
+        last_progress_at=claimed_at,
+        lease_until=lease_until,
+        state=state,
+        wait_reason=wait_reason,
+    )
+
+
+class CoordinatorWorkspaceProjectionTests(unittest.TestCase):
+    OBSERVED_AT = "2026-11-05T12:00:00Z"
+    SOURCE_UPDATED_AT = "2026-11-05T11:45:00Z"
+    COORDINATOR_SOURCE = "https://github.com/kinoko34077/execution-coordinator/issues/3"
+
+    def _workspace(self, state_result):
+        reader = fixture_reader([task()])
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: self.OBSERVED_AT,
+            coordinator_state_loader=lambda: state_result,
+        )
+        return service.get_agent_workspace("demo", recipient="codex")
+
+    def test_workspace_projects_live_waiting_and_expired_claims_without_authority(self):
+        observed = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+        claims = {
+            "claim-live": coordinator_claim(
+                "claim-live", task_ref="kinoko34077/demo#21",
+                lease_until=observed.replace(hour=13),
+            ),
+            "claim-waiting": coordinator_claim(
+                "claim-waiting", task_ref="kinoko34077/demo#22",
+                role=Role.REVIEWER, state=ExecutionState.WAITING,
+                wait_reason=WaitReason.REVIEW,
+                lease_until=observed.replace(hour=13),
+            ),
+            "claim-expired": coordinator_claim(
+                "claim-expired", task_ref="kinoko34077/demo#23",
+                role=Role.RECOVERY, state=ExecutionState.RUNNING,
+                lease_until=observed.replace(hour=11),
+            ),
+            "claim-other-repo": coordinator_claim(
+                "claim-other-repo", task_ref="kinoko34077/other#9",
+                lease_until=observed.replace(hour=13),
+            ),
+        }
+        result = self._workspace(StateReadResult(
+            CoordinatorState(claims=claims), self.SOURCE_UPDATED_AT,
+        ))
+
+        ongoing = result["sections"]["ongoing"]
+        self.assertEqual(ongoing["status"], "AVAILABLE")
+        self.assertEqual(ongoing["freshness"], "CURRENT")
+        self.assertEqual(ongoing["source_ref"], self.COORDINATOR_SOURCE)
+        self.assertEqual(ongoing["repository_scope"], REPO)
+        self.assertEqual(ongoing["observation_scope"], "UNEXPIRED_CLAIMED_OR_RUNNING")
+        self.assertEqual(
+            ongoing["worker_scope"],
+            "ALL_COORDINATOR_WORKERS_FOR_REQUESTED_REPOSITORY",
+        )
+        self.assertEqual(ongoing["source_updated_at"], self.SOURCE_UPDATED_AT)
+        self.assertEqual([row["claim_id"] for row in ongoing["entries"]], ["claim-live"])
+        self.assertEqual(ongoing["entries"][0]["task_ref"], "kinoko34077/demo#21")
+        self.assertEqual(ongoing["entries"][0]["lease_status"], "LIVE")
+        self.assertEqual(ongoing["entries"][0]["claimability"], "NOT_EVALUATED")
+
+        waiting = result["sections"]["waiting_recovery"]
+        self.assertEqual(waiting["status"], "PARTIAL")
+        self.assertEqual(waiting["repository_scope"], REPO)
+        self.assertEqual(waiting["observation_scope"], "WAITING_OR_EXPIRED_CLAIMS_ONLY")
+        self.assertEqual(waiting["recovery_candidates_status"], "NOT_INTEGRATED")
+        self.assertEqual(
+            {row["claim_id"] for row in waiting["entries"]},
+            {"claim-waiting", "claim-expired"},
+        )
+        by_id = {row["claim_id"]: row for row in waiting["entries"]}
+        self.assertEqual(by_id["claim-waiting"]["wait_reason"], "REVIEW")
+        self.assertEqual(by_id["claim-expired"]["lease_status"], "EXPIRED")
+        self.assertEqual(by_id["claim-expired"]["recovery_eligibility"], "NOT_EVALUATED")
+        self.assertTrue(all(row["can_authorize_execution"] is False for row in waiting["entries"]))
+
+        offers = result["sections"]["offers"]
+        self.assertEqual(offers["status"], "NOT_INTEGRATED")
+        self.assertIsNone(offers["entries"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_unavailable_coordinator_source_preserves_independent_workspace_sections(self):
+        reader = fixture_reader([task()])
+
+        def unavailable():
+            raise RuntimeError("sensitive transport detail")
+
+        result = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: self.OBSERVED_AT,
+            coordinator_state_loader=unavailable,
+        ).get_agent_workspace("demo", recipient="codex")
+
+        for name in ("ongoing", "waiting_recovery"):
+            section = result["sections"][name]
+            self.assertEqual(section["status"], "UNKNOWN")
+            self.assertIsNone(section["entries"])
+            self.assertEqual(section["reason_code"], "COORDINATOR_SOURCE_UNAVAILABLE")
+            self.assertEqual(section["source_ref"], self.COORDINATOR_SOURCE)
+            self.assertNotIn("sensitive transport detail", json.dumps(section))
+        self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
+        self.assertEqual(result["sections"]["offers"]["status"], "NOT_INTEGRATED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_empty_valid_coordinator_snapshot_is_distinct_from_unavailable(self):
+        result = self._workspace(StateReadResult(CoordinatorState.empty(), self.SOURCE_UPDATED_AT))
+        for name in ("ongoing", "waiting_recovery"):
+            section = result["sections"][name]
+            self.assertEqual(section["status"], "AVAILABLE" if name == "ongoing" else "PARTIAL")
+            self.assertEqual(section["entries"], [])
+        self.assertTrue(result["has_unknown_work"])
+
+    def test_missing_coordinator_freshness_metadata_is_unknown_not_empty(self):
+        result = self._workspace(StateReadResult(CoordinatorState.empty(), None))
+        for name in ("ongoing", "waiting_recovery"):
+            section = result["sections"][name]
+            self.assertEqual(section["status"], "UNKNOWN")
+            self.assertIsNone(section["entries"])
+
+    def test_malformed_claim_map_is_unknown_not_a_partial_empty_result(self):
+        result = self._workspace(StateReadResult(
+            CoordinatorState(claims={"bad": object()}), self.SOURCE_UPDATED_AT,
+        ))
+        for name in ("ongoing", "waiting_recovery"):
+            section = result["sections"][name]
+            self.assertEqual(section["status"], "UNKNOWN")
+            self.assertIsNone(section["entries"])
+            self.assertEqual(section["reason_code"], "COORDINATOR_SNAPSHOT_INVALID")
+
+    def test_default_workspace_reader_uses_pinned_read_api_without_mutation(self):
+        store_calls = []
+        store_reads = []
+        source_updated_at = self.SOURCE_UPDATED_AT
+
+        class ReadOnlyStateStore:
+            def __init__(self, **kwargs):
+                store_calls.append(kwargs)
+
+            def load_body_with_metadata(self):
+                store_reads.append("GET")
+                return IssueBodyRead(
+                    render_issue_body("", CoordinatorState.empty()),
+                    source_updated_at,
+                )
+
+            def save_body(self, _body):
+                raise AssertionError("Workspace must never write coordinator state")
+
+        reader = devflow_mcp_core.GitHubReader(
+            token="read-only-test-token", api_base="https://api.github.com",
+        )
+        with patch.object(devflow_mcp_core.GitHubReader, "from_env", return_value=reader):
+            service = devflow_mcp_core.default_service()
+        with patch("execution_coordinator.github_state.GitHubStateStore", ReadOnlyStateStore):
+            state_result = service._coordinator_state_loader()
+
+        self.assertEqual(store_reads, ["GET"])
+        self.assertEqual(store_calls, [{
+            "token": "read-only-test-token",
+            "repository": "kinoko34077/execution-coordinator",
+            "issue_number": 3,
+            "api_base_url": "https://api.github.com",
+        }])
+        self.assertEqual(state_result.source_updated_at, self.SOURCE_UPDATED_AT)
 
 
 class AgentInboxProjectionTests(unittest.TestCase):

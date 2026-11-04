@@ -1,1 +1,2 @@
 mcp[cli]==2.2.0
+kinotch-execution-coordinator @ git+https://github.com/kinoko34077/execution-coordinator.git@00fb0a76268b45d13c0d6fe5598fa961f3298d7d
