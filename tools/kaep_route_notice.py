@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
-from tools.kaep_mailbox_codec import fail, matches
+from tools.kaep_mailbox_codec import MESSAGE_ID, fail
 from tools.kaep_mailbox_support import ACTOR, mailbox
 from tools.kaep_request_sender import send_request
 from tools.github_issue_trust import is_trusted_principal
@@ -36,7 +36,7 @@ def _validate_source_request_identity(
         fail("INVALID_TARGET")
     if repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE:
         fail("DISCOVERY_LOOP")
-    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
+    if type(message_id) is not str or MESSAGE_ID.fullmatch(message_id) is None:
         fail("INVALID_MESSAGE_ID")
     if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
         fail("INVALID_ACTOR")

@@ -1,0 +1,86 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "cross-repository-core",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/cross-repository-core/README.md",
+  "routes": {
+    "bootstrap-control": {
+      "when": "a managed repository session needs bootstrap, Control, read-view, or MCP context",
+      "documents": [
+        "AGENTS.md",
+        ".devflow/WORKFLOW.yaml",
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md",
+        "docs/operations/AGENT_OPERATING_MANUAL.md"
+      ],
+      "code": [
+        "tools/devflow_read_cli.py",
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": [
+        "tests/test_devflow_read_cli.py",
+        "tests/test_devflow_mcp_core.py"
+      ]
+    },
+    "issue-goal": {
+      "when": "Issue lineage, goal context, plan effects, or outcome observations need review",
+      "documents": [
+        "docs/operations/REPOSITORY_ISSUE_MANUAL.md",
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md"
+      ],
+      "code": [
+        "tools/issue_goal_context.py",
+        "tools/goal_plan_assessment.py"
+      ],
+      "tests": [
+        "tests/test_issue_goal_context.py",
+        "tests/test_goal_plan_assessment.py",
+        "tests/test_outcome_observation_pilot.py"
+      ]
+    },
+    "handoff": {
+      "when": "a long-running chat needs durable minutes or a successor handoff",
+      "documents": [
+        "docs/operations/CHAT_ROLLOVER_ARCHIVE.md",
+        "docs/operations/AGENT_OPERATING_MANUAL.md"
+      ],
+      "code": [],
+      "tests": [
+        "tests/test_chat_rollover_archive_contract.py"
+      ]
+    },
+    "semantic-control": {
+      "when": "Control semantics, drift detection, or post-merge evidence needs review",
+      "documents": [
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md",
+        "docs/operations/AGENT_OPERATING_MANUAL.md"
+      ],
+      "code": [
+        "tools/control_semantic_drift.py",
+        "tools/control_semantic_pilot.py",
+        "tools/control_semantic_postmerge_event.py"
+      ],
+      "tests": [
+        "tests/test_control_semantic_drift.py",
+        "tests/test_control_semantic_pilot.py",
+        "tests/test_control_semantic_postmerge_event.py",
+        "tests/test_control_semantic_postmerge_workflow.py",
+        "tests/test_control_semantic_reusable_workflow.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#49",
+    "kinoko34077/devflow#567",
+    "kinoko34077/devflow#734",
+    "kinoko34077/devflow#761",
+    "kinoko34077/devflow#914"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; live Control, Issue, and owner records remain authoritative.",
+    "Current state, source lineage, review, CI, and runtime boundaries must be checked live."
+  ]
+}

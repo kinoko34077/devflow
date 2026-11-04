@@ -13,7 +13,6 @@ import argparse
 from functools import partial
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 from typing import Any
@@ -27,13 +26,11 @@ from tools.kaep_mailbox_codec import (
     isolate_cross_exchange_replies,
     unique_pairs,
 )
+from tools.kaep_repository_validation import REPOSITORY
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_COMMENT_PAGES = 100
 PAGE_SIZE = 100
-REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
-
-
 
 _no_duplicate_json_keys = partial(
     unique_pairs, duplicate_code="DUPLICATE_GITHUB_FIELD"

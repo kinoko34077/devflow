@@ -8,16 +8,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from tools.kaep_issue_list_html import _safe_link
+from tools.kaep_link_validation import safe_comment_link, safe_issue_link
+from tools.kaep_repository_validation import REPOSITORY
 
 _ROW_KEYS = ("repository", "issue_number", "issue_url", "source_url",
              "issue_state", "issue_role", "issue_type", "role_source",
              "recipient", "intent", "reply_observation",
              "source_validation", "message_id", "source_comment_id",
              "head_freshness")
-_REPO = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
-
-
 def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
     """Fail closed on blocked/malformed source; publish no raw Issue bodies."""
     if type(result) is not dict or result.get("status") not in (
@@ -28,7 +26,7 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
     repos = result.get("repositories")
     if type(rows) is not list or type(errors) is not list or type(repos) is not list:
         raise ValueError("PUBLIC_INDEX_INVALID_SOURCE")
-    if len(repos) > 3 or any(type(x) is not str or not _REPO.fullmatch(x)
+    if len(repos) > 3 or any(type(x) is not str or not REPOSITORY.fullmatch(x)
                             for x in repos):
         raise ValueError("PUBLIC_INDEX_INVALID_REPOSITORY")
     if len(rows) > 4000 or len(errors) > 100:
@@ -45,8 +43,8 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
                 or type(row["source_comment_id"]) is not int
                 or row["source_comment_id"] < 1
                 or row["issue_url"] != f'https://github.com/{row["repository"]}/issues/{row["issue_number"]}'
-                or not _safe_link(row["issue_url"], source=False)
-                or not _safe_link(row["source_url"], source=True)
+                or not safe_issue_link(row["issue_url"])
+                or not safe_comment_link(row["source_url"])
                 or not str(row["source_url"]).startswith(row["issue_url"] + "#issuecomment-")):
             raise ValueError("PUBLIC_INDEX_INVALID_LOCATOR")
         for key in _ROW_KEYS:
@@ -67,7 +65,7 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("PUBLIC_INDEX_INVALID_DIAGNOSTIC")
         locator = item.get("owning_issue")
         # Unknown/bad URLs are not published as active links.
-        if locator is not None and not _safe_link(locator, source=False):
+        if locator is not None and not safe_issue_link(locator):
             locator = None
         public_errors.append({"reason_code": reason, "owning_issue": locator})
 

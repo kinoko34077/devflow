@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import unittest
 
+from tests.feature_route_support import (
+    assert_indexed_source_paths_exist,
+    assert_index_only_manifest,
+    assert_readme_routes,
+    load_feature_route,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-FEATURE = ROOT / "features" / "repository-bootstrap"
-MANIFEST = FEATURE / "manifest.json"
-README = FEATURE / "README.md"
 EXPECTED_ROUTES = {
     "request",
     "validation",
@@ -21,34 +24,25 @@ EXPECTED_ROUTES = {
 class RepositoryBootstrapFeatureRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        cls.readme = README.read_text(encoding="utf-8")
+        cls.manifest, cls.readme = load_feature_route(ROOT, "repository-bootstrap")
 
     def test_manifest_is_an_index_only_route(self) -> None:
-        self.assertEqual(self.manifest["schema"], "feature-document-route.v1")
-        self.assertEqual(self.manifest["authority"], "index_only")
-        self.assertEqual(self.manifest["source_repository"], "kinoko34077/devflow")
-        self.assertEqual(self.manifest["source_ref"], "3dce241581dd8dc931d2aafaef3af546ff522845")
-        self.assertEqual(self.manifest["entry"], "features/repository-bootstrap/README.md")
+        assert_index_only_manifest(
+            self,
+            self.manifest,
+            source_ref="b18606558e5292b93f9efb115b3d776fce9b0a4a",
+            entry="features/repository-bootstrap/README.md",
+        )
 
     def test_routes_cover_the_pilot_without_execution_authority(self) -> None:
         self.assertEqual(set(self.manifest["routes"]), EXPECTED_ROUTES)
         self.assertEqual(self.manifest["authority"], "index_only")
 
     def test_every_indexed_source_path_exists_and_is_unique(self) -> None:
-        for route in self.manifest["routes"].values():
-            for key in ("documents", "code", "tests"):
-                paths = route.get(key, [])
-                self.assertEqual(len(paths), len(set(paths)), f"duplicate {key} path")
-                for relative in paths:
-                    path = Path(relative)
-                    self.assertFalse(path.is_absolute(), relative)
-                    self.assertNotIn("..", path.parts, relative)
-                    self.assertTrue((ROOT / path).is_file(), relative)
+        assert_indexed_source_paths_exist(self, ROOT, self.manifest)
 
     def test_readme_preserves_fail_closed_and_human_gate_boundaries(self) -> None:
-        for route in sorted(EXPECTED_ROUTES):
-            self.assertIn(f"## {route}", self.readme)
+        assert_readme_routes(self, self.readme, EXPECTED_ROUTES)
         lower = self.readme.lower()
         self.assertIn("proposal", lower)
         self.assertIn("fail closed", lower)

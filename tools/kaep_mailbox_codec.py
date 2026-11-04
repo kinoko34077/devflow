@@ -20,6 +20,7 @@ REPLIES = set("ACK ANSWER PROGRESS RESULT REVIEW_FEEDBACK CANCEL_ACK ERROR BLOCK
 INTENTS = set("PING ANALYZE IMPLEMENT TEST REVIEW REVISE REPORT CANCEL".split())
 RECIPIENT_ORDER = ("claude-code", "chatgpt", "codex", "coordinator")
 RECIPIENTS = set(RECIPIENT_ORDER)
+MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
 
 class InvalidMessage(ValueError):
     """Only fixed reason codes, not untrusted content."""
@@ -49,9 +50,13 @@ def validate(raw: object, *, task_ref: str | None = None) -> dict[str, Any]:
     d: dict[str, Any] = raw
     if d["schema_version"] != "kaep.message.v0.2": fail("UNSUPPORTED_VERSION")
     if not matches(r"ex_[A-Za-z0-9_-]{1,72}", d["exchange_id"]): fail("INVALID_EXCHANGE_ID")
-    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", d["message_id"]): fail("INVALID_MESSAGE_ID")
+    if (type(d["message_id"]) is not str
+            or MESSAGE_ID.fullmatch(d["message_id"]) is None):
+        fail("INVALID_MESSAGE_ID")
     parent = d["in_reply_to"]
-    if parent is not None and not matches(r"msg_[A-Za-z0-9_-]{1,72}", parent): fail("INVALID_PARENT")
+    if (parent is not None and (type(parent) is not str
+            or MESSAGE_ID.fullmatch(parent) is None)):
+        fail("INVALID_PARENT")
     if type(d["kind"]) is not str or d["kind"] not in KINDS: fail("INVALID_KIND")
     if parent is None and d["kind"] in REPLIES: fail("MISSING_PARENT")
     if parent == d["message_id"]: fail("SELF_REPLY")

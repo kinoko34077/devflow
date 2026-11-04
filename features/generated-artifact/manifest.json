@@ -1,0 +1,74 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "generated-artifact",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/generated-artifact/README.md",
+  "routes": {
+    "contract": {
+      "when": "generated artifact identity, recipe, digest, path, or receipt semantics change",
+      "documents": [
+        "docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md"
+      ],
+      "code": [
+        "tools/generated_artifact_contract.py",
+        "tools/generated_artifact_packager.py"
+      ],
+      "tests": [
+        "tests/test_generated_artifact_contract.py",
+        "tests/test_generated_artifact_packager.py"
+      ]
+    },
+    "pilot": {
+      "when": "the accepted single-repository JO pilot or its operational boundaries need review",
+      "documents": [
+        "docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md",
+        "docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md"
+      ],
+      "code": [
+        "tools/generated_artifact_pilot.py",
+        "tools/generated_artifact_replay_probe.py"
+      ],
+      "tests": [
+        "tests/test_generated_artifact_pilot.py",
+        "tests/test_generated_artifact_replay_probe.py"
+      ]
+    },
+    "admission": {
+      "when": "writer admission, dry-run, rollout, stale-head, or testapp boundary changes",
+      "documents": [
+        "docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md"
+      ],
+      "code": [
+        "tools/generated_artifact_admission.py",
+        "tools/generated_artifact_rollout.py",
+        "tools/generated_artifact_rollout_admission.py",
+        "tools/generated_artifact_rollout_dryrun.py",
+        "tools/generated_artifact_rollout_testapp_write.py",
+        "tools/generated_artifact_rollout_writer.py",
+        "tools/generated_artifact_writer.py"
+      ],
+      "tests": [
+        "tests/test_generated_artifact_admission.py",
+        "tests/test_generated_artifact_rollout.py",
+        "tests/test_generated_artifact_rollout_admission.py",
+        "tests/test_generated_artifact_rollout_dryrun.py",
+        "tests/test_generated_artifact_rollout_testapp_write.py",
+        "tests/test_generated_artifact_rollout_writer.py",
+        "tests/test_generated_artifact_writer.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#384",
+    "kinoko34077/devflow#386",
+    "kinoko34077/devflow#415",
+    "kinoko34077/japanese-orthography#300"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; the accepted single-repository pilot is not a general rollout.",
+    "Current Issue, PR, workflow, receipt, review, and rollback state must be checked live."
+  ]
+}

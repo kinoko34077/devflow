@@ -6,6 +6,12 @@ Mandatory entry for KiNoTch. managed-repository development. **Live GitHub autho
 
 **Read live [devflow #734](https://github.com/kinoko34077/devflow/issues/734) and this file** at each new agent/chat/session's first managed-development task, interrupted-work resume, or change of repository, task scope or governing sources. Read #734's *body* and the applicable original GitHub/Google Drive sources, including `03_Development_Specification_Principles.md` for substantive development/design/spec work when accessible. The index is not the original authority, a substitute for Control/local specifications, or a permission grant. Name inaccessible private sources as unread; do not pretend to know them, publish them or carry out work that depends on them. Continue unrelated authorized work and record a recovery path.
 
+For feature-specific work, use the [feature route catalog](features/README.md)
+to choose the smallest relevant documentation, implementation, and test owner.
+The catalog and each feature route are navigation metadata only; live Control,
+owning Issues/PRs, current HEAD, CI, and canonical specifications remain the
+authority.
+
 For `kinoko34077/<repo>`:
 1. Read the unique open devflow `[REPO] <repo>` Control: `Work Status`, `Repository State`, `Audit SHA`, `Active Work`, `Next Action`, `Canonical Entry Points`, `Control Notes`; read legacy `Detailed Current State` if present, but do not require it. If missing, **do not invent managed state**; follow onboarding in the [Operating Manual](https://github.com/kinoko34077/devflow/blob/main/docs/operations/AGENT_OPERATING_MANUAL.md). A bot-authored Control is canonical **only with verified Repository Bootstrap provenance**; a matching `[REPO]` title or legacy `VERIFIED` marker alone cannot establish trust. See the [MCP Manual](https://github.com/kinoko34077/devflow/blob/main/docs/operations/DEVFLOW_MCP.md).
 2. Follow that repository's local entry; read its owning Issue/Work Order, eligible Task Checkpoint Cursor (`first_unfinished`), designated durable progress, active/relevant Execution Sessions, linked PR/head/checks and task-specific specifications/code/tests. Check current Audit SHA against HEAD. Read only relevant history.

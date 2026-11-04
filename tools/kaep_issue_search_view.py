@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from tools import agent_inbox, repository_projection
 from tools.kaep_issue_list_html import to_html
+from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_public_index import to_public_index
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
@@ -35,7 +36,7 @@ MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
 SEARCH_PAGE_SIZE = 100
 RECIPIENTS = RECIPIENT_ORDER
-URL = re.compile(r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
+URL = ISSUE_URL_PATTERN
 
 
 

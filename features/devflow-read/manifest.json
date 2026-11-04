@@ -2,7 +2,7 @@
   "schema": "feature-document-route.v1",
   "authority": "index_only",
   "source_repository": "kinoko34077/devflow",
-  "source_ref": "3dce241581dd8dc931d2aafaef3af546ff522845",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
   "entry": "features/devflow-read/README.md",
   "routes": {
     "bootstrap": {
