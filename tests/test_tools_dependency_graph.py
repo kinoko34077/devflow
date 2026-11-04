@@ -187,6 +187,13 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIs(evidence.ID, ids.OPAQUE_ID)
         self.assertIs(pilot.ID, ids.OPAQUE_ID)
 
+    def test_gpt_liveness_nonce_validators_reuse_pilot_boundary(self) -> None:
+        from tools import gpt_liveness_mailbox as mailbox
+        from tools import gpt_liveness_pilot as pilot
+
+        self.assertIs(mailbox.NONCE, pilot.NONCE)
+
 
 if __name__ == "__main__":
     unittest.main()
+

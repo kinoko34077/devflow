@@ -34,6 +34,8 @@ END = " -->"
 SCHEMA = "gpt.liveness.v0.1"
 # Compatibility alias; the canonical opaque-ID contract lives with the generators.
 ID = OPAQUE_ID
+# Compatibility-preserving syntax for GPT-liveness challenge nonces.
+NONCE = re.compile(r"[0-9a-f]{32}\Z")
 # Compatibility alias; the canonical human-login contract lives in the codec.
 ACTOR = ACTOR_LOGIN
 MAX_ENROLLMENT = timedelta(hours=2)
@@ -114,7 +116,7 @@ def challenge(text: str) -> dict[str, Any]:
         _fail("INVALID_CHALLENGE")
     if not ID.fullmatch(str(data["session_id"])) or not ID.fullmatch(str(data["turn_id"])):
         _fail("INVALID_SESSION")
-    if not re.fullmatch(r"[0-9a-f]{32}", str(data["nonce"])):
+    if not NONCE.fullmatch(str(data["nonce"])):
         _fail("INVALID_NONCE")
     if utc(data["expires_at"]) <= utc(data["issued_at"]) or utc(data["expires_at"]) - utc(data["issued_at"]) > timedelta(minutes=20):
         _fail("INVALID_CHALLENGE_DURATION")
@@ -211,7 +213,7 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
         return {"status": "ALREADY_PINGED", "unanswered": len(pending)}
     if len(pending) >= MAX_UNANSWERED:
         return {"status": "SUSPECT_NO_REPLY", "unanswered": len(pending), "claim_authority": False}
-    if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+    if not NONCE.fullmatch(nonce):
         _fail("INVALID_NONCE")
     payload = {
         "schema": SCHEMA, "session_id": en["session_id"],
@@ -297,3 +299,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
