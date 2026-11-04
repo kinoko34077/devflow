@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import re
 import sys
 from typing import Any, Callable
 
@@ -17,7 +16,9 @@ from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
-from tools.kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, fail
+from tools.kaep_mailbox_codec import (
+    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, fail,
+)
 from tools.kaep_repository_validation import REPOSITORY
 
 MAX_SOURCES = 40
@@ -77,8 +78,7 @@ def _validated_previous_report(
         if (type(repo) is not str or type(issue) is not int
                 or (repo, issue) not in sources
                 or type(cid) is not int or cid <= 0
-                or type(mid) is not str
-                or re.fullmatch(r"msg_[A-Za-z0-9_-]{1,72}", mid) is None
+                or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                 or row.get("recipient") != recipient
                 or row.get("issue_url") != f"https://github.com/{repo}/issues/{issue}"
                 or row.get("source_url") !=

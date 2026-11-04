@@ -10,12 +10,12 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from tools.kaep_mailbox_codec import InvalidMessage, RECIPIENTS, fail
+from tools.kaep_mailbox_codec import InvalidMessage, MESSAGE_ID, RECIPIENTS, fail
 from tools.kaep_repository_validation import REPOSITORY
 
 SCHEMA = "kaep.agent-current-view.v0.1"
 UNION_SCHEMA = "kaep.live-union-check.v0.1"
-_MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
+_MESSAGE = MESSAGE_ID
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 _ORIGIN = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 MAX_ROWS = 4000

@@ -17,8 +17,8 @@ from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
     fail,
-    MARKER, decode_comment, fingerprint, reject_constant, unique_pairs,
-    matches,
+    MARKER, MESSAGE_ID, decode_comment, fingerprint, reject_constant,
+    unique_pairs,
 )
 from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
 from tools.kaep_route_notice import (
@@ -62,7 +62,8 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
     if set(obj) != POINTER_FIELDS or type(obj["owning_issue"]) is not str:
         fail("INVALID_DISCOVERY_POINTER")
     target = SOURCE_URL.fullmatch(obj["owning_issue"])
-    if target is None or not matches(r"msg_[A-Za-z0-9_-]{1,72}", obj["message_id"]):
+    if (target is None or type(obj["message_id"]) is not str
+            or MESSAGE_ID.fullmatch(obj["message_id"]) is None):
         fail("INVALID_DISCOVERY_POINTER")
     if type(obj["comment_id"]) is not int or obj["comment_id"] < 1:
         fail("INVALID_DISCOVERY_POINTER")
