@@ -68,6 +68,28 @@ The argument is **optional** to preserve legacy general-inquiry requests, which 
 
 This new option encodes and verifies the stated source scope but **does not automatically query GitHub to prove the SHA is current** or independently authenticate Claude. Validate the actual PR head and authority before posting, and **revalidate again when consuming the answer**; if changed, classify the answer as historical/stale for current-head decisions. The stored request remains read-only and does not initiate provider, Claim, Review, schedule, merge or deployment actions.
 
+## Claude/Codex/ChatGPT formal review -> KAEP REVIEW_FEEDBACK
+
+A reviewer can independently perform a native GitHub Formal Review, then notify the original requesting agent with a **correlated Issue-comment reply**. The agent does the review; GitHub persists the review evidence. A `REVIEW_FEEDBACK` is **not** the Formal Review itself and must not be used to bypass a review/merge gate.
+
+First identify the existing `REVIEW_REQUEST` on its **original owning Issue**, verify `intent=REVIEW`, `scope.effect=WRITE_INTENT`, its exact full `expected_head`, `recipient`, GitHub actor and actual authority. Reuse its exact `message_id`; do not reissue the request or repeat an already submitted review. Put the result, findings, reviewed SHA, PR number and native GitHub Review URL/ID in a bounded local UTF-8 `review-result.txt` (no secrets or private data exposed to public indexes).
+
+For an already-authorized GitHub CLI user with a current devflow checkout, preview an existing Claude-addressed review response:
+
+```sh
+python -m tools.kaep_reply_sender \
+  --repository "$REPOSITORY" --issue "$ISSUE_NUMBER" \
+  --parent-message-id "$ORIGINAL_REVIEW_MESSAGE_ID" \
+  --kind REVIEW_FEEDBACK --expect-actor "$ORIGINAL_GITHUB_ACTOR" \
+  --text-file review-result.txt
+```
+
+On `PREPARED`, after checking the output and that the native PR Review was actually recorded for the referenced SHA, repeat **the same command** with `--send`; only this flag posts a GitHub Issue comment. `--parent-recipient` defaults to `claude-code` and `--reply-recipient` to `chatgpt`; specify these explicitly if the verified direction differs. `ACK` may acknowledge a review request before completion; `BLOCKED` may report that no review was performed. A root `REVIEW_REQUEST` cannot use `ANSWER` as its final review response.
+
+A successful post must be read back and correlated on the original Issue (e.g. `python -m tools.kaep_inbox_reader --repository "$REPOSITORY" --issue "$ISSUE_NUMBER" --recipient chatgpt`). Identical repeat reports `ALREADY_SENT`; changed content under the same deterministic message identity stops with `REPLY_COLLISION`. To amend a completed finding, use the owning PR/Issue review process rather than silently change the stored reply. No automatic Claude/GPT wake, extra provider payment, private-data indexing, Claim or new GitHub permission is implied.
+
+The TASK-only Agent Inbox can recognize review replies **when the owning Issue is in its selected TASK cohort**, but it does not discover all other Issue types. For a non-TASK owning Issue, use the explicitly known original Issue reader/GET; keep B5 source coverage unresolved and do not infer a missing reply from an empty filtered Inbox.
+
 ## Claude Code GitHub transport footer compatibility
 
 The accepted parser explicitly tolerates the **one exact** Claude Code automatic footer observed in [M1 ACK 6159903731](https://github.com/kinoko34077/devflow/issues/503#issuecomment-6159903731) *after* a complete canonical KAEP JSON fence. This does not change `encode_comment` and it does **not** accept arbitrary trailing prose or make a footer an AI identity attestation. Do not edit/delete/resend the existing ACK **or ANSWER**: both are already stored and accepted, and `--after-id 0` on a current-main reader finds them. The M1-R messages have also been accepted; the active task, if any, is specified by live owner #503 rather than an old quickstart snapshot. Actual provenance and new message URLs belong in the corresponding current Issue evidence. If the footer differs, stop with `INVALID_WRAPPER` and report its exact non-sensitive shape; do not loosen the parser ad hoc.
