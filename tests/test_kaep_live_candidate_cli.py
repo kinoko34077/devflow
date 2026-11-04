@@ -76,6 +76,7 @@ class LiveCandidateTests(unittest.TestCase):
             self.assertIs(reloaded.REPOSITORY, sentinel)
         importlib.reload(kaep_live_candidate_cli)
 
+
     def audit(self, snapshot, sources, *, recipient="claude-code"):
         calls = []
         def get_issue(repo, number):
@@ -194,4 +195,3 @@ class LiveCandidateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

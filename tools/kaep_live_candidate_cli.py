@@ -32,6 +32,7 @@ SCHEMA = "kaep.public-source-index.v1"
 MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
 
 
+
 def _block(code: str) -> None:
     raise InvalidMessage(code)
 
@@ -245,4 +246,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
