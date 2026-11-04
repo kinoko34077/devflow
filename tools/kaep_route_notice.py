@@ -28,6 +28,20 @@ SourceMailbox = tuple[
 ]
 
 
+def _validate_source_request_identity(
+    *, repository: str, issue: int, message_id: str, expected_actor: str,
+) -> None:
+    """Apply the shared, side-effect-free source request preflight."""
+    if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
+        fail("INVALID_TARGET")
+    if repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE:
+        fail("DISCOVERY_LOOP")
+    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
+        fail("INVALID_MESSAGE_ID")
+    if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
+        fail("INVALID_ACTOR")
+
+
 
 def verify_public_source(repository: str) -> None:
     """Fail closed: never publish a private task locator into public #503."""
@@ -59,14 +73,10 @@ def verify_source_request_from_snapshot(
     canonical _mailbox() of the exact owning Issue. This never accepts
     an unverified network/actor claim as authority.
     """
-    if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        fail("INVALID_TARGET")
-    if (repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE):
-        fail("DISCOVERY_LOOP")
-    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
-        fail("INVALID_MESSAGE_ID")
-    if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
-        fail("INVALID_ACTOR")
+    _validate_source_request_identity(
+        repository=repository, issue=issue, message_id=message_id,
+        expected_actor=expected_actor,
+    )
     comments, items = snapshot
     matches_found = [(cid, msg) for cid, msg in items if msg["message_id"] == message_id]
     if len(matches_found) != 1:
@@ -106,14 +116,10 @@ def verify_source_request(
     message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
     """Public entry retains full-history preflight and previous errors."""
-    if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        fail("INVALID_TARGET")
-    if (repository == DISCOVERY_REPOSITORY and issue == DISCOVERY_ISSUE):
-        fail("DISCOVERY_LOOP")
-    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", message_id):
-        fail("INVALID_MESSAGE_ID")
-    if type(expected_actor) is not str or not ACTOR.fullmatch(expected_actor):
-        fail("INVALID_ACTOR")
+    _validate_source_request_identity(
+        repository=repository, issue=issue, message_id=message_id,
+        expected_actor=expected_actor,
+    )
     snapshot = mailbox(pages, repository=repository, issue=issue)
     return verify_source_request_from_snapshot(
         snapshot, repository=repository, issue=issue,
