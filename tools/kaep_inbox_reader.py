@@ -22,6 +22,7 @@ from tools.kaep_mailbox_codec import (
     fail,
     InvalidMessage,
     MARKER,
+    RECIPIENTS,
     read_mailbox,
     isolate_cross_exchange_replies,
     unique_pairs,
@@ -30,7 +31,6 @@ from tools.kaep_mailbox_codec import (
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_COMMENT_PAGES = 100
 PAGE_SIZE = 100
-RECIPIENTS = {"claude-code", "chatgpt", "codex", "coordinator"}
 REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 
 
