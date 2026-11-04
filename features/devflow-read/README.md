@@ -2,9 +2,15 @@
 
 This is a feature-first navigation index for the read-only Devflow MCP and
 CLI. It does not duplicate the normative contract, move implementation files,
-or change the live Repository Control. The current source owner is
-`kinoko34077/devflow` at main `3552f1ec39e65ec34b11cbcf99ebe50107f5f3ac`.
-The route does not grant execution, write access, or permission.
+or change the live Repository Control. The manifest's `source_ref`,
+`3552f1ec39e65ec34b11cbcf99ebe50107f5f3ac`, records the audited source
+snapshot used to build this route; the route itself was added later in
+[PR #909](https://github.com/kinoko34077/devflow/pull/909). This SHA is dated
+provenance, not a statement about the current `main` head.
+
+For current behavior or status, bootstrap the live Control, read the current
+`main` head, and recheck the linked sources at that revision. The route does not grant
+execution, write access, or permission.
 
 Open only the route needed for the task. The linked documents, implementation,
 tests, live Control, current HEAD, CI, and human gates remain authoritative at
