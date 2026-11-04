@@ -13,8 +13,8 @@ import subprocess
 import sys
 from typing import Any, Callable
 
+from tools.kaep_link_validation import API_ISSUE_URL as API_ISSUE
 from tools.kaep_mailbox_codec import InvalidMessage, MARKER, fail
-from tools.kaep_live_delta_view import API_ISSUE
 from tools.kaep_repository_validation import REPOSITORY
 
 OWNER = "kinoko34077"
