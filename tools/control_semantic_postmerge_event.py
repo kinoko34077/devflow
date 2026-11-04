@@ -275,20 +275,100 @@ def check_native_postmerge_once(
     return checked
 
 
+
+def check_owner_transition_once(
+    owner_repository: str, owner_number: int, control_id: int = 15,
+) -> dict[str, str]:
+    """Read-only Issue/Control status pilot; never interpret a dated Audit SHA."""
+    # Explicit one-repository pilot. A cross-repository event subscription,
+    # token scope, or fleet-wide writer is NOT created by this reader.
+    if (
+        owner_repository != "kinoko34077/dev_agent"
+        or type(owner_number) is not int or not 1 <= owner_number <= 1_000_000_000
+        or type(control_id) is not int or control_id != 15
+    ):
+        return _result("UNKNOWN", "OUT_OF_SCOPE_OWNER_OR_CONTROL")
+    owner_url = f"https://github.com/{owner_repository}/issues/{owner_number}"
+    control_url = f"https://github.com/kinoko34077/devflow/issues/{control_id}"
+    control_receipt = pilot._read_json(f"repos/kinoko34077/devflow/issues/{control_id}")
+    owner_receipt = pilot._read_json(f"repos/{owner_repository}/issues/{owner_number}")
+    if control_receipt is None or owner_receipt is None:
+        return _result("UNKNOWN", "SOURCE_READ_FAILED", owner_number, owner_repository)
+    control, _ = control_receipt
+    owner, _ = owner_receipt
+    if (
+        type(control.get("number")) is not int or control["number"] != control_id
+        or control.get("title") != "[REPO] dev_agent"
+        or control.get("html_url") != control_url
+        or control.get("state") != "open"
+        or type(control.get("body")) is not str
+        or type(owner.get("number")) is not int or owner["number"] != owner_number
+        or owner.get("html_url") != owner_url
+        or type(owner.get("pull_request")) is dict
+        or owner.get("state") not in ("open", "closed")
+    ):
+        return _result("UNKNOWN", "SOURCE_IDENTITY_NOT_PROVEN", owner_number, owner_repository)
+    active = re.findall(
+        r"^## Active Work[ \t]*\n([\s\S]*?)(?=^## |\Z)",
+        control["body"], re.MULTILINE,
+    )
+    if len(active) != 1:
+        return _result("UNKNOWN", "CURRENT_ACTIVE_WORK_NOT_PROVEN", owner_number, owner_repository)
+    current = active[0].split("**HISTORICAL", 1)[0]
+    link = rf"\]\({re.escape(owner_url)}\)"
+    links = re.findall(link, current)
+    if not links:
+        return _result("NOT_APPLICABLE", "OWNER_NOT_IN_CURRENT_ACTIVE_WORK", owner_number, owner_repository)
+    if len(links) != 1:
+        return _result("UNKNOWN", "AMBIGUOUS_OWNER_CLAIM", owner_number, owner_repository)
+    stage = re.findall(
+        link + r"\s+is\s+\*\*(OPEN|CLOSED / COMPLETED|CLOSED / NOT_PLANNED)\*\*",
+        current,
+    )
+    if len(stage) != 1:
+        return _result("RECONCILIATION_REVIEW_REQUIRED", "OWNER_CLAIM_NOT_CANONICAL", owner_number, owner_repository)
+    if owner["state"] == "open":
+        observed = "OPEN"
+    elif owner.get("state_reason") == "completed":
+        observed = "CLOSED / COMPLETED"
+    elif owner.get("state_reason") == "not_planned":
+        observed = "CLOSED / NOT_PLANNED"
+    else:
+        return _result("UNKNOWN", "CLOSED_REASON_NOT_PROVEN", owner_number, owner_repository)
+    answer = _result(
+        "ALIGNED" if stage[0] == observed else "POTENTIAL_MISMATCH",
+        "EXACT_OWNER_STAGE_MATCH" if stage[0] == observed else "OWNER_STAGE_DIFFERS",
+        owner_number, owner_repository,
+    )
+    answer["claimed_stage"] = stage[0]
+    answer["observed_stage"] = observed
+    answer["control_url"] = control_url
+    answer["owner_issue_url"] = owner_url
+    return answer
+
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Devflow read-only merged-PR Control check")
-    parser.add_argument("--event-path", required=True)
+    parser.add_argument("--event-path")
+    parser.add_argument("--owner-issue", type=int)
+    parser.add_argument("--owner-repository", default="kinoko34077/dev_agent")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--control", type=int, default=CONTROL_NUMBER)
     args = parser.parse_args(argv)
-    try:
-        if Path(args.event_path).stat().st_size > EVENT_MAX_BYTES:
-            raise ValueError("event too large")
-        event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeError):
-        result = _result("UNKNOWN", "EVENT_UNAVAILABLE_OR_INVALID")
+    if args.owner_issue is not None:
+        result = check_owner_transition_once(args.owner_repository, args.owner_issue, args.control)
+    elif not args.event_path:
+        result = _result("UNKNOWN", "EVENT_PATH_REQUIRED")
     else:
-        result = check_native_postmerge_once(event, args.repository, args.control)
+        try:
+            if Path(args.event_path).stat().st_size > EVENT_MAX_BYTES:
+                raise ValueError("event too large")
+            event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            result = _result("UNKNOWN", "EVENT_UNAVAILABLE_OR_INVALID")
+        else:
+            result = check_native_postmerge_once(event, args.repository, args.control)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     if result["status"] in ("ALIGNED", "NOT_APPLICABLE"):
         return 0
