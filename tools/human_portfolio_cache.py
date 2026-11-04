@@ -652,4 +652,3 @@ def replace_cached_human_portfolio(
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
     return prefix + block + suffix
-
