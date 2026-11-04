@@ -1,8 +1,13 @@
 # Repository Bootstrap feature route
 
 This entry is an index-only route for the repository-bootstrap feature. The
-normative contract remains in the linked devflow documents and source files at
-the pinned source revision in `manifest.json`.
+manifest's `source_ref`, `3dce241581dd8dc931d2aafaef3af546ff522845`,
+identifies the audited source snapshot for the indexed paths, not the live
+`main` head.
+
+For current behavior or status, read the live Repository Control and current
+`main` head, then recheck the linked sources at that revision. The normative
+contract remains in the linked devflow documents and source files.
 
 This route does not emit a bootstrap request, create or provision a repository,
 grant credentials or permissions, bypass a Human Gate, or become runtime

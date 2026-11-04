@@ -78,7 +78,8 @@
     "kinoko34077/devflow#16"
   ],
   "notes": [
-    "Resolve every path relative to source_repository at source_ref.",
+    "Resolve routes.documents, routes.code, and routes.tests relative to source_repository at source_ref; entry identifies this route document in the current repository tree.",
+    "source_ref is the audited source snapshot used for the route, not a live-main pointer.",
     "This is read-only navigation metadata, not an execution or authorization mechanism.",
     "Credential, permission, provisioning, and Human Gate state must be read live."
   ]
