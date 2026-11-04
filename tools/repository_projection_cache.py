@@ -9,6 +9,11 @@ import re
 from typing import Any
 
 from tools import maintenance_sync_check, marker_json
+from tools.cache_generation import (
+    canonical_digest as _canonical_digest,
+    generation_material as _generation_material,
+    recompute_generation_id,
+)
 from tools.repository_identity import is_repository_name
 
 
@@ -76,16 +81,6 @@ class RepositoryProjectionCacheError(ValueError):
 @dataclass(frozen=True)
 class CachedRepositoryProjection:
     payload: dict[str, Any]
-
-
-def _canonical_digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def _require_mapping(value: object, field: str) -> dict[str, Any]:
@@ -435,18 +430,6 @@ def _source_identity_material(live_projection: dict[str, Any]) -> dict[str, Any]
     # seen. They belong to cache generation/freshness, not source identity.
     value.pop("observed_at", None)
     value.pop("source_freshness", None)
-    return value
-
-
-def _generation_material(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value.pop("generation_id", None)
-    return value
-
-
-def recompute_generation_id(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value["generation_id"] = _canonical_digest(_generation_material(value))
     return value
 
 
