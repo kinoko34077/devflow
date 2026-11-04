@@ -66,7 +66,8 @@
         "tests/test_kaep_public_incremental_cli.py",
         "tests/test_kaep_public_index.py",
         "tests/test_kaep_link_validation.py",
-        "tests/test_kaep_agent_api_projection.py"
+        "tests/test_kaep_agent_api_projection.py",
+        "tests/test_tools_dependency_graph.py"
       ]
     },
     "send": {

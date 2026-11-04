@@ -96,6 +96,12 @@ class ToolsDependencyGraphTests(unittest.TestCase):
             self.graph["kaep_public_index"],
         )
 
+    def test_kaep_live_delta_validation_does_not_depend_on_inbox_transport(self) -> None:
+        delta = self.graph["kaep_live_delta_view"]
+        self.assertNotIn("kaep_inbox_reader", delta)
+        self.assertIn("kaep_mailbox_codec", delta)
+        self.assertIn("kaep_repository_validation", delta)
+
 
 if __name__ == "__main__":
     unittest.main()
