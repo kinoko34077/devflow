@@ -624,6 +624,42 @@ class OwnerIssueControlReadOnlyTests(unittest.TestCase):
                 self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
                 self.assertEqual(result["reason"], "NONCANONICAL_OWNER_CLAIM")
 
+    def test_autolinks_and_spaced_owner_references_require_review(self):
+        for reference in (
+            "dev_agent #157",
+            "kinoko34077/dev_agent #157",
+            f"<https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}>",
+            f"`https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}`",
+            f"https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}/",
+        ):
+            with self.subTest(reference=reference):
+                control, _, _, lookup = self.fixture(reference=False)
+                control["body"] = control["body"].replace(
+                    "- unrelated task", f"- {reference} is **OPEN**"
+                )
+                with patch.object(target.pilot, "_read_json", side_effect=lookup):
+                    result = target.check_owner_transition_once(
+                        self.OWNER_REPO, self.OWNER
+                    )
+                self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
+
+    def test_conflicting_canonical_and_noncanonical_claims_require_review(self):
+        for reference in (
+            "dev_agent#157",
+            "dev_agent #157",
+            f"<https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}>",
+        ):
+            with self.subTest(reference=reference):
+                control, _, _, lookup = self.fixture()
+                control["body"] = control["body"].replace(
+                    "\\n## Next Action", f"\\n- {reference} is **OPEN**\\n## Next Action"
+                )
+                with patch.object(target.pilot, "_read_json", side_effect=lookup):
+                    result = target.check_owner_transition_once(
+                        self.OWNER_REPO, self.OWNER
+                    )
+                self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
+
     def test_noncanonical_reference_does_not_match_other_issue(self):
         control, _, _, lookup = self.fixture(reference=False)
         control["body"] = control["body"].replace(
