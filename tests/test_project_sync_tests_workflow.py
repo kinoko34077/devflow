@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from fnmatch import fnmatchcase
 from pathlib import Path
 import re
 import unittest
@@ -10,48 +9,38 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "project-sync-tests.yml"
 
 
-def _github_path_pattern_matches(pattern: str, path: str) -> bool:
-    pattern_parts = pattern.split("/")
-    path_parts = path.split("/")
-
-    def match(pattern_index: int, path_index: int) -> bool:
-        if pattern_index == len(pattern_parts):
-            return path_index == len(path_parts)
-        if pattern_parts[pattern_index] == "**":
-            return any(
-                match(pattern_index + 1, candidate)
-                for candidate in range(path_index, len(path_parts) + 1)
-            )
-        return (
-            path_index < len(path_parts)
-            and fnmatchcase(path_parts[path_index], pattern_parts[pattern_index])
-            and match(pattern_index + 1, path_index + 1)
-        )
-
-    return match(0, 0)
-
-
 class ProjectSyncTestsWorkflowTests(unittest.TestCase):
-    def test_feature_route_only_push_triggers_main_required_verification(self) -> None:
+    def test_main_push_filter_includes_feature_routes_and_required_job(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         push = re.search(
             r"(?ms)^  push:\s*\n(?P<section>.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:|\Z)",
             workflow,
         )
-        self.assertIsNotNone(push, "main push trigger must be declared")
+        self.assertIsNotNone(push, "push trigger must be declared")
+        branches = re.search(
+            r"(?m)^    branches:\s*\[([^\]]*)\]\s*$", push.group("section")
+        )
+        self.assertIsNotNone(branches, "push trigger must declare its branches")
+        branch_names = [name.strip().strip("'\"") for name in branches.group(1).split(",")]
+        self.assertIn("main", branch_names, "Required push gate must include main")
+
         paths = re.search(
             r"(?ms)^    paths:\s*\n(?P<list>(?:^      - .*\n)+)",
             push.group("section"),
         )
-        self.assertIsNotNone(paths, "main push trigger must have an explicit path list")
+        self.assertIsNotNone(paths, "push trigger must have an explicit path list")
         patterns = re.findall(r"^      - ['\"]([^'\"]+)['\"]\s*$", paths.group("list"), re.MULTILINE)
+        self.assertIn("features/**", patterns, "feature routes must trigger main verification")
 
-        self.assertTrue(
-            any(
-                _github_path_pattern_matches(pattern, "features/kaep/manifest.json")
-                for pattern in patterns
-            ),
-            "feature-route-only changes must schedule the main Required PR gate",
+        jobs = re.search(
+            r"(?ms)^jobs:\s*\n(?P<section>.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:|\Z)",
+            workflow,
+        )
+        self.assertIsNotNone(jobs, "Required workflow must declare jobs")
+        self.assertRegex(
+            jobs.group("section"),
+            r"(?m)^  verify:\s*$",
+            "Required verify job must remain present",
         )
 
 
