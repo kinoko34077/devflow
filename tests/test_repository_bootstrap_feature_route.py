@@ -28,7 +28,7 @@ class RepositoryBootstrapFeatureRouteTests(unittest.TestCase):
         self.assertEqual(self.manifest["schema"], "feature-document-route.v1")
         self.assertEqual(self.manifest["authority"], "index_only")
         self.assertEqual(self.manifest["source_repository"], "kinoko34077/devflow")
-        self.assertEqual(self.manifest["source_ref"], "36f59b8b1d27350dd4a07d14f43e49d54ad6c29d")
+        self.assertEqual(self.manifest["source_ref"], "c83c4df50fbd0b1c6fbfce36718a1a34b38ec0d5")
         self.assertEqual(self.manifest["entry"], "features/repository-bootstrap/README.md")
 
     def test_routes_cover_the_pilot_without_execution_authority(self) -> None:

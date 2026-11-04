@@ -3,10 +3,9 @@
 This is a feature-first navigation index for the read-only Devflow MCP and
 CLI. It does not duplicate the normative contract, move implementation files,
 or change the live Repository Control. The manifest's `source_ref`,
-`3552f1ec39e65ec34b11cbcf99ebe50107f5f3ac`, records the audited source
-snapshot used to build this route; the route itself was added later in
-[PR #909](https://github.com/kinoko34077/devflow/pull/909). This SHA is dated
-provenance, not a statement about the current `main` head.
+`c83c4df50fbd0b1c6fbfce36718a1a34b38ec0d5`, records the audited source
+snapshot used for this route; it is dated provenance, not a pointer to the
+current `main` head.
 
 For current behavior or status, bootstrap the live Control, read the current
 `main` head, and recheck the linked sources at that revision. The route does not grant

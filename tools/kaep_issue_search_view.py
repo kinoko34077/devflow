@@ -22,12 +22,19 @@ from tools.kaep_public_index import to_public_index
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
-from tools.kaep_mailbox_codec import fail, MARKER, decode_comment, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    RECIPIENT_ORDER,
+    fail,
+    MARKER,
+    decode_comment,
+    read_mailbox,
+    verify_reply_chain,
+)
 
 MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
 SEARCH_PAGE_SIZE = 100
-RECIPIENTS = ("claude-code", "chatgpt", "codex", "coordinator")
+RECIPIENTS = RECIPIENT_ORDER
 URL = re.compile(r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
 
 
