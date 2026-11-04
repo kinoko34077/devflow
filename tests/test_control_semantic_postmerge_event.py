@@ -551,5 +551,96 @@ class PostMergeEventTests(unittest.TestCase):
         self.assertEqual(code, 3)
 
 
+class OwnerIssueControlReadOnlyTests(unittest.TestCase):
+    OWNER_REPO = "kinoko34077/dev_agent"
+    OWNER = 157
+    CONTROL = 15
+
+    def fixture(self, stage="CLOSED / COMPLETED", *, state="closed",
+                reason="completed", reference=True):
+        owner_url = f"https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}"
+        control = {
+            "number": self.CONTROL,
+            "title": "[REPO] dev_agent",
+            "html_url": f"https://github.com/kinoko34077/devflow/issues/{self.CONTROL}",
+            "state": "open",
+            "body": (
+                "## Active Work\n"
+                + (f"- [dev_agent #157]({owner_url}) is **{stage}**.\n"
+                   if reference else "- unrelated task\n")
+                + "\n## Next Action\n- next source\n"
+            ),
+        }
+        owner = {
+            "number": self.OWNER, "html_url": owner_url,
+            "state": state, "state_reason": reason,
+        }
+        reads = []
+        def lookup(path):
+            reads.append(path)
+            if path == f"repos/kinoko34077/devflow/issues/{self.CONTROL}":
+                return control, NOW
+            if path == f"repos/{self.OWNER_REPO}/issues/{self.OWNER}":
+                return owner, NOW
+            raise AssertionError("unexpected source: " + path)
+        return control, owner, reads, lookup
+
+    def test_closed_owner_and_control_are_aligned(self):
+        _, _, reads, lookup = self.fixture()
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["status"], "ALIGNED")
+        self.assertEqual(result["observed_stage"], "CLOSED / COMPLETED")
+        self.assertEqual(len(reads), 2)
+
+    def test_stale_claim_detected_without_write(self):
+        _, _, _, lookup = self.fixture("OPEN")
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["status"], "POTENTIAL_MISMATCH")
+        self.assertEqual(result["claimed_stage"], "OPEN")
+
+    def test_unreferenced_owner_never_claims_alignment(self):
+        _, _, _, lookup = self.fixture(reference=False)
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["status"], "NOT_APPLICABLE")
+
+    def test_foreign_scope_rejected_without_source_read(self):
+        with patch.object(target.pilot, "_read_json") as read:
+            for repository, number, control in (
+                ("other/repo", 157, 15),
+                (self.OWNER_REPO, True, 15),
+                (self.OWNER_REPO, 157, 16),
+            ):
+                result = target.check_owner_transition_once(repository, number, control)
+                self.assertEqual(result["status"], "UNKNOWN")
+            read.assert_not_called()
+
+    def test_ambiguous_and_incomplete_sources_fail_closed(self):
+        control, owner, _, lookup = self.fixture()
+        control["body"] = control["body"].replace(
+            "\n## Next Action", "\n" + control["body"].splitlines()[1] + "\n## Next Action"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["reason"], "AMBIGUOUS_OWNER_CLAIM")
+        control["body"] = control["body"].replace(
+            "\n" + control["body"].splitlines()[1], "", 1
+        )
+        owner["state_reason"] = None
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["status"], "UNKNOWN")
+
+    def test_read_only_cli_has_distinct_mismatch_exit_code(self):
+        with patch.object(target, "check_owner_transition_once",
+                          return_value={"status": "POTENTIAL_MISMATCH", "reason": "fixture"}):
+            with redirect_stdout(StringIO()) as output:
+                code = target.main(["--owner-issue", "157", "--control", "15"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue())["status"], "POTENTIAL_MISMATCH")
+
+
 if __name__ == "__main__":
     unittest.main()
