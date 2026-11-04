@@ -318,6 +318,24 @@ def check_owner_transition_once(
     link = rf"\]\({re.escape(owner_url)}\)"
     links = re.findall(link, current)
     if not links:
+        # A qualified plain-text reference or bare canonical URL is a real
+        # owner mention, not proof that no current owner work exists.
+        # Only an exact Markdown-link stage may yield ALIGNED.
+        qualified = re.search(
+            rf"(?<![A-Za-z0-9_./-])(?:{re.escape(owner_repository)}|"
+            rf"{re.escape(owner_repository.rsplit('/', 1)[1])})#{owner_number}(?![0-9])",
+            current,
+        )
+        bare_url = re.search(
+            re.escape(owner_url) + r"(?=$|[\s)\],;.!?])",
+            current,
+        )
+        if qualified is not None or bare_url is not None:
+            return _result(
+                "RECONCILIATION_REVIEW_REQUIRED",
+                "NONCANONICAL_OWNER_CLAIM",
+                owner_number, owner_repository,
+            )
         return _result("NOT_APPLICABLE", "OWNER_NOT_IN_CURRENT_ACTIVE_WORK", owner_number, owner_repository)
     if len(links) != 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_CLAIM", owner_number, owner_repository)
