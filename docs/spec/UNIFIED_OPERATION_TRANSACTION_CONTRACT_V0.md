@@ -41,17 +41,17 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 
 安全性に関わる必須項目の不足・余分な項目は拒否する。実行者や保存用manifestの自己申告、単なる時刻を、GitHubで独立認証した証拠に代用しない。データのハッシュと認証済みの来歴を区別する。再実行を別対象へ転用されないよう、正規化ハッシュにはスキーマ・版と正確な対象を含める。
 
-## 3. Endpoint-specific concurrency and freshness — essential correction
+## 3. API別の競合・鮮度保証
 
-| GitHub effect | Supported guard from verified docs/implemented path | Guarantee / operational disposition |
+| GitHubで変更する対象 | 確認済みの仕組み | 保証範囲と実行条件 |
 | --- | --- | --- |
-| PR merge endpoint | GitHub REST merge accepts expected PR HEAD sha and returns conflict if mismatched | Use exactly the server-checked expected HEAD, plus required CI/review and target/base revalidation. Do not infer that the original plan's other facts were atomically checked. |
-| Update Git ref (PATCH git/refs) | GitHub REST with force:false enforces **fast-forward**, not a documented expected-old-head argument | This is **not a generic atomic CAS**. Re-fetch exact head, build candidate single-parent commit from that head, restrict branch and protected/main targets, serialize writer where required, demand fast-forward, read back actual ref/commit, and document the residual race. Require stronger channel where an atomic expected-old-head condition is materially necessary. |
-| Issue/PR metadata PATCH and comments | Read-before-write and post-readback available; no universal atomic conditional old-value check established by this design | Weakly guarded: use exclusive owner/serialized mutation or scope narrowly, detect intervening state, never claim serializable compare-and-swap. For uncertain effects, reconcile receipt before retry. |
-| Generated artifact ZIP/files | Existing #384/#465 data-only checks, exact path/digest/max-size, trusted runner/caller/source/run, protected/default branch denial | Reuse the existing operation-specific helpers without expanding their accepted target sets or claiming artifact hash alone authorizes writes. |
-| Provider execution / deployment | External side-effects and computed runner capacity differ from GitHub repo reads | Per-effect Human/security gate, independent provider/runner identity/ack proof; no generic automatic deployment or Private compute admission. |
+| **PRマージ** | GitHub RESTのマージAPIは指定したPR HEAD SHAを照合し、不一致を拒否する。 | 実際にサーバーが照合するHEADを指定し、必須CI・レビュー・対象/baseを再検証する。計画に含むその他の条件まで原子的に検証されたとは扱わない。 |
+| **Git参照の更新（PATCH git/refs）** | `force:false`が保証するのは**早送り更新**。期待する旧HEADとの原子的比較条件は文書化されていない。 | **一般的な原子的CASではない。** 正確なHEADを再取得→そのHEADを単独の親とするコミットを生成→許可ブランチ・保護/main拒否→必要な書込直列化→早送り更新→実際の参照・コミット再取得。残る競合を明記し、厳密な旧HEAD一致が不可欠ならより強い更新手段を使う。 |
+| **Issue・PRの情報更新／コメント** | 更新前GETと事後再取得は可能だが、任意の旧値を原子的に照合する共通機構は未確認。 | 排他所有者・更新直列化または変更範囲制限で競合を抑え、途中の状態変化を検出する。原子的な更新保証を宣言しない。結果不明時は再試行前に検証記録を照合。 |
+| **生成物ZIP・ファイル** | #384/#465のデータ専用検査：固定パス・ダイジェスト・最大サイズ、信頼済み実行環境・呼出元・ソース・実行ID、保護/既定ブランチの拒否。 | 既存の操作専用検証機構を再利用。対象範囲を勝手に拡大せず、生成物のハッシュだけで書込を認可しない。 |
+| **外部サービス実行・公開** | 外部への実作用と計算資源の利用はGitHubのリポジトリ情報読取とは別。 | 操作別の人間・安全性承認、サービス/実行環境の本人性と応答確認を要する。一般的な自動公開や非公開計算処理を認可しない。 |
 
-Sources: [Git refs REST](https://docs.github.com/en/rest/git/refs), [PR merge REST](https://docs.github.com/en/rest/pulls/pulls), #384 accepted writeback. A read immediately before PATCH reduces—but does not necessarily eliminate—the time-of-check/time-of-use race. **Do not call all target classes CAS-capable** or convert `force:false` into an atomic expected-value predicate in documentation/tests.
+根拠：[Git参照REST](https://docs.github.com/en/rest/git/refs)、[PRマージREST](https://docs.github.com/en/rest/pulls/pulls)、#384の書戻し受入記録。変更直前のGETも、確認時点と変更時点の競合を完全には消せない。**全対象をCAS対応と呼んだり、`force:false`を旧値一致の原子的更新として扱ったりしない。**
 
 ## 4. Proposed outcome taxonomy and mapping
 
