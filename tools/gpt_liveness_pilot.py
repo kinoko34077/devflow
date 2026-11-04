@@ -19,6 +19,7 @@ from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
+    ACTOR_LOGIN,
     InvalidMessage,
     fail as _fail,
     read_mailbox,
@@ -31,7 +32,8 @@ MARKER = "<!-- gpt-liveness:enrollment:v0.1 "
 END = " -->"
 SCHEMA = "gpt.liveness.v0.1"
 ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
-ACTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
+# Compatibility alias; the canonical human-login contract lives in the codec.
+ACTOR = ACTOR_LOGIN
 MAX_ENROLLMENT = timedelta(hours=2)
 PING_INTERVAL = 300
 MAX_UNANSWERED = 3
@@ -86,7 +88,7 @@ def enrollment(body: str, *, now: datetime) -> dict[str, Any] | None:
         _fail("INVALID_ENROLLMENT")
     if not ID.fullmatch(str(data["session_id"])) or not ID.fullmatch(str(data["turn_id"])):
         _fail("INVALID_SESSION")
-    if not isinstance(data["expected_actor"], str) or not ACTOR.fullmatch(data["expected_actor"]):
+    if not isinstance(data["expected_actor"], str) or not ACTOR_LOGIN.fullmatch(data["expected_actor"]):
         _fail("INVALID_ACTOR")
     start, end = utc(data["started_at"]), utc(data["expires_at"])
     if end <= start or end - start > MAX_ENROLLMENT:

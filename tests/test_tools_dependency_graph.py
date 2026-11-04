@@ -171,6 +171,14 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIs(search.ACTOR_LOGIN, codec.ACTOR_LOGIN)
         self.assertIs(delta.ACTOR_LOGIN, codec.ACTOR_LOGIN)
 
+    def test_gpt_liveness_actor_validators_reuse_mailbox_codec(self) -> None:
+        from tools import gpt_liveness_evidence as evidence
+        from tools import gpt_liveness_pilot as pilot
+        from tools import kaep_mailbox_codec as codec
+
+        self.assertIs(evidence.ACTOR_LOGIN, codec.ACTOR_LOGIN)
+        self.assertIs(pilot.ACTOR_LOGIN, codec.ACTOR_LOGIN)
+
 
 if __name__ == "__main__":
     unittest.main()
