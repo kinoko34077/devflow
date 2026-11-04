@@ -21,6 +21,7 @@ INTENTS = set("PING ANALYZE IMPLEMENT TEST REVIEW REVISE REPORT CANCEL".split())
 RECIPIENT_ORDER = ("claude-code", "chatgpt", "codex", "coordinator")
 RECIPIENTS = set(RECIPIENT_ORDER)
 MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
+REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 
 class InvalidMessage(ValueError):
     """Only fixed reason codes, not untrusted content."""
