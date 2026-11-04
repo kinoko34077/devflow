@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from tools import kaep_issue_search_view as search
 from tools.kaep_link_validation import API_ISSUE_URL
-from tools.kaep_mailbox_codec import InvalidMessage, MARKER
+from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER
 from tools.kaep_repository_validation import REPOSITORY
 
 MAX_REPOSITORIES = 3
@@ -126,7 +126,7 @@ def read_live_candidates(
             or any(type(r) is not str or not REPOSITORY.fullmatch(r) for r in repositories)
             or recipient not in ("all",) + search.RECIPIENTS
             or type(expected_actor) is not str
-            or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", expected_actor)):
+            or not ACTOR_LOGIN.fullmatch(expected_actor)):
         _error("INVALID_LIVE_FILTER")
 
     source_results: dict[str, dict[str, Any]] = {}
