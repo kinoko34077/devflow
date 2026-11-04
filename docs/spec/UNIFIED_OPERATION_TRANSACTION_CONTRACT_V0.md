@@ -67,15 +67,17 @@ Sources: [Git refs REST](https://docs.github.com/en/rest/git/refs), [PR merge RE
 
 The generic taxonomy is a **projection** of existing operation-specific native statuses. Do NOT rewrite existing #384/#465 receipt enums in place or make a generic result discard their richer distinctions.
 
-## 5. Capability classes and approval model
+## 5. 能力分類・承認条件
 
-- READ_DATA: ordinary authenticated metadata access; no repository mutation; guard privacy and external compute/cost.
-- READ_EXECUTE: code/test/build/benchmark using a runner; token can be read-only, yet PR-origin code and compute resource are separately risk-classified.
-- REVERSIBLE_EFFECT: narrowly bounded Issue edits / scratch branch mutation / safe PR merge with reviewed actual effects and recovery evidence; applicable self-review and existing per-effect permissions may suffice under #439.
-- PRIVILEGED_EFFECT: action/permission/secret/source/safety-boundary mutation, arbitrary external execution, private-data exposure, or difficult-to-reverse destructive change. Separate explicit Human/security gates and distinct reviewers if actually justified.
-- RELEASE_EFFECT: external publishing/deploy/release; explicit user confirmation even where underlying Git operation seems reversible.
+| 分類 | 境界 |
+| --- | --- |
+| **READ_DATA** | 認証済みmetadataのread。repo変更はしないが、privacy/外部compute費用は別途検査。 |
+| **READ_EXECUTE** | test/build/benchmarkなどの計算実行。tokenがread-onlyでもPR由来codeとrunner資源の危険を評価。 |
+| **REVERSIBLE_EFFECT** | 限定Issue編集、scratch branch変更、安全なPR merge等。実際の変更と復旧根拠を審査し、#439上必要なreviewと既存権限を満たす場合のみ。独立reviewが不要な場合はself-review可。 |
+| **PRIVILEGED_EFFECT** | workflow/権限/secret/security境界、任意外部実行、Privateデータ露出、復旧困難な破壊。個別Human/security gateと必要な独立reviewを要する。 |
+| **RELEASE_EFFECT** | 外部公開・deploy・release。Git操作自体が復元可能でも明示ユーザー承認が必要。 |
 
-Review and Human approval are different questions: do not make the generic v0 design secretly relax existing G1 `write -> NEEDS_HUMAN`; if v2 approval policy is later adopted, update/review G1 independently with backward compatibility, grounded in #439 and a named effectful pilot. A provider/model self-review is never a distinct-system independent review.
+**ReviewとHuman承認は独立判定。** G1 v1のwrite→`NEEDS_HUMAN`をv0設計だけで緩和しない。v2移行には#439に従うG1個別review・互換性確認・指定effectのpilotが必要。同じmodel/providerのself-reviewは別systemの独立reviewではない。
 
 ## 6. 接続先（既存実装の所有権は移さない）
 
