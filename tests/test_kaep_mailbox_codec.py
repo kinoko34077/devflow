@@ -4,7 +4,8 @@ import copy
 import unittest
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
-    read_mailbox, validate, verify_reply_chain, isolate_cross_exchange_replies,
+    read_mailbox, unique_pairs, validate, verify_reply_chain,
+    isolate_cross_exchange_replies,
 )
 
 TASK = "kinoko34077/devflow#503"
@@ -131,6 +132,11 @@ class KAEPMailboxContract(unittest.TestCase):
         body = encode_comment(envelope())
         body = body.replace('"kind": "REQUEST",', '"kind": "REQUEST",\n  "kind": "ACK",')
         with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_JSON_KEY"): decode_comment(body)
+
+    def test_duplicate_json_keys_can_keep_caller_specific_reason(self):
+        with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_MANIFEST_FIELD"):
+            unique_pairs([("schema", "one"), ("schema", "two")],
+                         duplicate_code="DUPLICATE_MANIFEST_FIELD")
 
     def test_utf8_size_and_text_length(self):
         self.reject(payload={"text": "a" * 4001})

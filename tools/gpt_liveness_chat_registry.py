@@ -7,6 +7,7 @@ The caller must verify GitHub actors using trusted REST metadata.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from functools import partial
 import json
 import re
 import secrets
@@ -17,6 +18,7 @@ from tools.gpt_liveness_pilot import answer, challenge, enrollment, utc
 from tools.kaep_mailbox_codec import (
     InvalidMessage,
     fail,
+    unique_pairs,
     validate as validate_message,
     verify_reply_chain,
 )
@@ -51,15 +53,6 @@ def binding_marker(*, chat_id: str, mailbox_ref: str) -> str:
     return MARKER + json.dumps(data, separators=(",", ":"), sort_keys=True) + END
 
 
-def _strict_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for key, val in pairs:
-        if key in out:
-            fail("DUPLICATE_CHAT_BINDING_FIELD")
-        out[key] = val
-    return out
-
-
 def parse_binding(body: str, *, mailbox_ref: str) -> dict[str, str]:
     if not isinstance(body, str) or len(body.encode("utf-8")) > MAX_BODY_BYTES:
         fail("INVALID_CHAT_BINDING_BODY")
@@ -71,7 +64,12 @@ def parse_binding(body: str, *, mailbox_ref: str) -> dict[str, str]:
     if END not in piece or len(piece.split(END, 1)[0]) > 300:
         fail("INVALID_CHAT_BINDING")
     try:
-        raw = json.loads(piece.split(END, 1)[0], object_pairs_hook=_strict_pairs)
+        raw = json.loads(
+            piece.split(END, 1)[0],
+            object_pairs_hook=partial(
+                unique_pairs, duplicate_code="DUPLICATE_CHAT_BINDING_FIELD"
+            ),
+        )
     except (ValueError, TypeError) as exc:
         if isinstance(exc, InvalidMessage):
             raise

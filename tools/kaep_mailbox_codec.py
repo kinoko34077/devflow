@@ -29,10 +29,14 @@ def fail(code: str) -> None:
 def matches(pattern: str, value: object) -> bool:
     return type(value) is str and re.fullmatch(pattern, value) is not None
 
-def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+def unique_pairs(
+    pairs: list[tuple[str, object]], *,
+    duplicate_code: str = "DUPLICATE_JSON_KEY",
+) -> dict[str, object]:
+    """Build one JSON object while preserving the caller's failure code."""
     out: dict[str, object] = {}
     for k, v in pairs:
-        if k in out: fail("DUPLICATE_JSON_KEY")
+        if k in out: fail(duplicate_code)
         out[k] = v
     return out
 
