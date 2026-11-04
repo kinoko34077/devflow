@@ -11,10 +11,10 @@ import re
 from typing import Any
 
 from tools.kaep_mailbox_codec import InvalidMessage, RECIPIENTS, fail
+from tools.kaep_repository_validation import REPOSITORY
 
 SCHEMA = "kaep.agent-current-view.v0.1"
 UNION_SCHEMA = "kaep.live-union-check.v0.1"
-_REPO = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 _MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 _ORIGIN = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
@@ -79,7 +79,7 @@ def project_agent_view(union: dict[str, Any], *, now: datetime | None = None,
     if (recipient not in RECIPIENTS
             or type(repos) is not list or not 1 <= len(repos) <= 3
             or len(set(map(str, repos))) != len(repos)
-            or any(type(r) is not str or not _REPO.fullmatch(r) for r in repos)
+            or any(type(r) is not str or not REPOSITORY.fullmatch(r) for r in repos)
             or type(rows) is not list or len(rows) > MAX_ROWS
             or type(candidates) is not list or len(candidates) > MAX_SOURCES
             or type(errors) is not list or len(errors) > MAX_ERRORS
