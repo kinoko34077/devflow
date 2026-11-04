@@ -102,6 +102,23 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIn("kaep_mailbox_codec", delta)
         self.assertIn("kaep_repository_validation", delta)
 
+    def test_kaep_low_level_readers_do_not_depend_on_inbox_transport(self) -> None:
+        expected_codec_users = {
+            "kaep_agent_api_projection",
+            "kaep_b5_b6_parity_cli",
+            "kaep_public_incremental_cli",
+            "kaep_public_locator_cli",
+            "kaep_live_union_cli",
+        }
+        for module in expected_codec_users:
+            with self.subTest(module=module):
+                self.assertNotIn("kaep_inbox_reader", self.graph[module])
+                self.assertIn("kaep_mailbox_codec", self.graph[module])
+        self.assertIn(
+            "kaep_repository_validation",
+            self.graph["kaep_live_union_cli"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,8 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from tools.kaep_mailbox_codec import RECIPIENTS, fail
-from tools.kaep_inbox_reader import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, RECIPIENTS, fail
 
 SCHEMA = "kaep.agent-current-view.v0.1"
 UNION_SCHEMA = "kaep.live-union-check.v0.1"

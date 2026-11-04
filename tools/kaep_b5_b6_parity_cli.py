@@ -14,8 +14,7 @@ import re
 import sys
 from typing import Any
 
-from tools.kaep_mailbox_codec import fail, unique_pairs
-from tools.kaep_inbox_reader import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail, unique_pairs
 
 MAX_REPORT_BYTES = 2_000_000
 SHADOW_LIMIT = 40  # shadow default 20; explicit bounded max40 since accepted PR #743

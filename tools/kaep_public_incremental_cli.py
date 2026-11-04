@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import kaep_public_locator_cli as locator
-from tools.kaep_mailbox_codec import fail, unique_pairs
-from tools.kaep_inbox_reader import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail, unique_pairs
 
 CURSOR_SCHEMA = "kaep.public-marker-head-cursor.v0.1"
 RESULT_SCHEMA = "kaep.public-marker-incremental.v0.1"

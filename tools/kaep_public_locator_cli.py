@@ -14,8 +14,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
-from tools.kaep_mailbox_codec import fail
-from tools.kaep_inbox_reader import InvalidMessage, MARKER
+from tools.kaep_mailbox_codec import InvalidMessage, MARKER, fail
 from tools.kaep_live_delta_view import API_ISSUE
 
 OWNER = "kinoko34077"
