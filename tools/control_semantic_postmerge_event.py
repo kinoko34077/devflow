@@ -353,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event-path")
     parser.add_argument("--owner-issue", type=int)
     parser.add_argument("--owner-repository", default="kinoko34077/dev_agent")
-    parser.add_argument("--repository", required=True)
+    parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("--control", type=int, default=CONTROL_NUMBER)
     args = parser.parse_args(argv)
     if args.owner_issue is not None:
