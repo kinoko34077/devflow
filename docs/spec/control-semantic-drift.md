@@ -26,60 +26,15 @@ The last two axes were added after actual #752 R1/R2 code-only vs runtime confus
 
 `UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
 
-## M2 bounded native-read pilot (2026-10-22; accepted in one exact Public scope)
+## M2 bounded native-read pilot（2026-10-22、単一Public PR限定）
 
-The production-authority gap is **not** closed by a pure comparator. The
-first bounded adapter lives at `tools/control_semantic_pilot.py`; it calls the
-existing owner-authenticated `gh api` CLI with only two fixed GET paths:
-`devflow/issues/705` and `kinotch-editor-platform/pulls/14`. This pilot is
-intentionally **one public repository and one PR** and is not a fleet crawler,
-GitHub App, new credential holder, scheduler, auto-writer or source of claims.
+M1 comparatorだけでは、入力が現実の認証済みsourceであることを証明できない。既存`tools/control_semantic_pilot.py`は、既存認証`gh api`を使いControl #705と`kinotch-editor-platform` PR #14の**2本の固定GET**を行い、CURRENT `## Next Action`にある単一のcanonical exact PR linkと明示stageを、実PRのidentity/base/head・取得順序と照合する。PRの`MERGED`／`CLOSED_UNMERGED`は実GitHub終端属性で判定する一方、`OPEN`だけでreview readinessは証明できない。曖昧な文面・複数claim・歴史節・認証/GET失敗・入力不一致は`UNKNOWN`。M1 `compare_claim`を再利用し、`POTENTIAL_MISMATCH`は候補であって自動修正指示ではない。
 
-Source truth is created after successful native reads, not accepted as a
-caller-provided JSON flag. It verifies exact open Control identity, one
-current `## Next Action` claim with a canonical exact PR link and explicit
-stage token, exact owning PR identity/base/head and result chronology.
-`MERGED` and `CLOSED_UNMERGED` are determined from GitHub's PR terminal
-fields. An open PR alone **does not prove review readiness**, so the adapter
-reports `UNKNOWN`; ambiguous prose, multiple claims, historical sections,
-unexpected fields, failed/unauthenticated reads and changing source shapes
-also return `UNKNOWN` without effect. The existing
-`compare_claim` remains the single comparator and returns a **candidate**
-`POTENTIAL_MISMATCH`, never a Control mutation instruction.
+実行は承認済みCLI環境の`python -m tools.control_semantic_pilot`。URL・観測時刻・PR HEADのsanitized出力のみとし、token/Issue原文を公開しない。合成REST fixtureによる単体テストだけでlive GET成立と扱わない。
 
-Run once, explicitly, from an existing authorized CLI session:
-`python -m tools.control_semantic_pilot`.
-Output is a sanitized structured result with exact source URLs, observed
-times and PR HEAD SHA; no raw Issue body or authentication credential is
-printed. Unit tests substitute the subprocess with synthetic REST shapes and
-do **not** alone count as a real authenticated GET pilot. The real
-one-shot and post-main Required CI have been independently completed:
+**当時の実証：** [PR #768](https://github.com/kinoko34077/devflow/pull/768)はmain `f7453ce4e018f8a834943c33fe31b3ab3df397a1`にmerge、exact-head Required [#39639341465](https://github.com/kinoko34077/devflow/actions/runs/39639341465) 2,093 PASS（14追加）、Formal Review #5603251343／Readiness [#39639341473 attempt2](https://github.com/kinoko34077/devflow/actions/runs/39639341473)／post-main Required [#39639606165](https://github.com/kinoko34077/devflow/actions/runs/39639606165)成功。既存認証のowner PCで、2026-10-21T17:00:16.629669ZのControl GETと17:00:19.125984ZのPR GETから`MERGED=MERGED/ALIGNED/exit0`を確認（PR HEAD `f6ef6f9980a80e5fbfa881db766f8231d2bb3e38`、一時ファイル清掃）。[受入証拠](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6321748478)。
 
-- [devflow PR #768](https://github.com/kinoko34077/devflow/pull/768)
-  merged at exact main `f7453ce4e018f8a834943c33fe31b3ab3df397a1`.
-- Exact-head [Required #39639341465](https://github.com/kinoko34077/devflow/actions/runs/39639341465)
-  SUCCESS, 2,093 tests including 14 new tests; native Formal Review
-  #5603251343 and readiness [#39639341473 attempt 2](https://github.com/kinoko34077/devflow/actions/runs/39639341473) SUCCESS.
-- [Post-main Required #39639606165](https://github.com/kinoko34077/devflow/actions/runs/39639606165)
-  SUCCESS, authenticated owner CLI query.
-- Real owner-PC existing authenticated `gh api` two-GET execution
-  of the merged Python module returned `ALIGNED / SAME_SCOPED_STAGE`
-  for Control #705 `MERGED` and PR #14 `MERGED`, exact
-  PR head `f6ef6f9980a80e5fbfa881db766f8231d2bb3e38`.
-  Direct request times 2026-10-21T17:00:16.629669+00:00 and
-  2026-10-21T17:00:19.125984+00:00; process exit 0, transient
-  files removed. [Owning acceptance #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6321748478).
-  This evidence is confined to this one Public PR and does
-  not prove a live detector for arbitrary Controls.
-The static target/grammar intentionally avoids silently inferring arbitrary
-Control prose. Extending to a different PR requires its own scope and
-source-backed parser contract rather than guessing from status keywords.
-
-This *pilot adapter* does not establish M2 comprehensive producer-owned
-update prevention, M3 projection signals, M4 fleet coverage or durable
-cross-repository automatically triggered detection. Results must be
-correlated with an actual current Control text snapshot before a producer
-edits only their directly affected fields, with independent readback.
+**受入境界：** この1 Public PRの認証付き観測であり、他Controlへの自然言語解析、常時検出、producer所有の更新防止、M3 projection、M4 fleet coverage、特権writer、schedulerや追加credentialを実装したものではない。拡張は別の正確な対象scope/parse契約と独立証拠を要する。
 
 ## Historical M0 observed cases (as of 2026-10-19; non-normative, not live current state)
 
