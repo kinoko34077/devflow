@@ -4,15 +4,15 @@
 
 ## 0. 既存契約と責務（参照索引）
 
-| 正本 | 受入範囲と維持すべき境界 |
+| 正本 | 受入範囲と維持する境界 |
 | --- | --- |
-| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 | offline G1案とPublicのowner限定read-onlyコメント操作2件を受入済み。request受付・固定command catalog・初期分類を担当。**Issueコメントを認可としない**。schema・catalog IDのみ共有し、任意shell/Workflow ID実行へ拡張しない。 |
-| [#439](https://github.com/kinoko34077/devflow/issues/439) Review/Human | 受入済み。変更対象・保護判断・不可逆性でゲートを決定。G1 v1の**write→NEEDS_HUMAN**は、別途審査済みv2へ正式移行するまで維持。 |
-| [#384](https://github.com/kinoko34077/devflow/issues/384)／[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | S0–S5の単一JO Pilot受入済み。read生成jobと特権writer分離、run/caller/manifest認証、限定path、非force更新、事後検証・replayを維持。**JO固定pin/稼働経路は変更しない**。 |
-| [#465](https://github.com/kinoko34077/devflow/issues/465)／[PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1はmain `ebd20bb76d38a1c18b85f730a0a96753c02390e7`でmerge。固定recipe、run/actor/caller認証GET、ZIP/manifest、read-only previewと**休止中writer adapter**を所有。adapter経由で再利用し、勝手に再実装・有効化しない。 |
-| [#474](https://github.com/kinoko34077/devflow/issues/474)／[PR #475](https://github.com/kinoko34077/devflow/pull/475) | 当時のtestapp writerは**HOLD**。対象branch保護/PR限定、独立最終security review、live replay/revertが固有受入条件。#487からこれを解除しない。以後の実状態はownerで確認。 |
-| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator)／[Control #107](https://github.com/kinoko34077/devflow/issues/107) | agentのclaim/lease/generation/fencingの唯一の正本。必要時だけfresh fenceを確認し、第二のqueue/lease DBを作らない。 |
-| 各repositoryのowner Issue/PR | 対象の資源・HEAD、CI/review、job権限、許可されたeffect/rollbackの詳細正本。devflowは共通語彙のみ所有。 |
+| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 | オフラインのG1案と、公開リポジトリの所有者に限定した読み取り専用コメント操作2件を受入済み。依頼受付・固定操作カタログ・初期分類を担当。**Issueコメントを認可として扱わない。** 入力形式と操作IDだけを共有し、任意シェルや任意ワークフロー起動へ拡張しない。 |
+| [#439](https://github.com/kinoko34077/devflow/issues/439) 審査・人間承認 | 受入済み。実際の変更対象・保護条件・不可逆性で審査を判断。G1 v1の**書込→`NEEDS_HUMAN`**は、別途審査したv2へ正式移行するまで維持する。 |
+| [#384](https://github.com/kinoko34077/devflow/issues/384)／[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | S0〜S5の単一JO試験を受入済み。生成側の読取ジョブと特権書込処理を分離し、実行・呼出元・目録の認証、限定パス、強制しない更新、書込後検証・再実行制御を維持。**JOの固定SHA・稼働経路を変更しない。** |
+| [#465](https://github.com/kinoko34077/devflow/issues/465)／[PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1はmain `ebd20bb76d38a1c18b85f730a0a96753c02390e7`に統合済み。固定生成手順、実行者・呼出元の認証GET、ZIP・目録、読み取り専用の事前確認と**休止中の書込接続処理**を所有。既存実装を再利用し、無断で再実装・有効化しない。 |
+| [#474](https://github.com/kinoko34077/devflow/issues/474)／[PR #475](https://github.com/kinoko34077/devflow/pull/475) | 当時のtestapp書込機能は**保留**。対象ブランチの保護・PR限定・独立した最終安全審査・実際の再実行と取り消しの証拠が固有条件。#487から保留を解除しない。後続の状態は所有Issueで確認する。 |
+| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator)／[Control #107](https://github.com/kinoko34077/devflow/issues/107) | エージェントの占有権・有効期限・世代・競合防止の唯一の管理元。必要な場合だけ最新の占有条件を確認し、第二の作業待ち行列や占有データベースを作らない。 |
+| 各リポジトリの所有Issue・PR | 資源・HEAD、CI・レビュー、ジョブ権限、許可された変更・復旧の詳細正本。devflowは共通用語だけを管理する。 |
 
 ## 1. 基本原則と処理順序
 
