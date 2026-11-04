@@ -157,6 +157,7 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         from tools import kaep_mailbox_codec as codec
         from tools import kaep_public_index as public_index
 
+        self.assertIn("kaep_mailbox_codec", self.graph["kaep_public_index"])
         self.assertIs(projection._CODE, codec.REASON_CODE)
         self.assertIs(projection._ORIGIN, codec.REASON_CODE)
         self.assertIs(parity.REASONS, codec.REASON_CODE)
@@ -165,3 +166,4 @@ class ToolsDependencyGraphTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
