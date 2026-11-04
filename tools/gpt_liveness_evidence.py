@@ -16,9 +16,11 @@ from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages, REPOSITORY
 from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, fail as _fail
+from tools.gpt_liveness_ids import OPAQUE_ID
 from tools.gpt_liveness_pilot import challenge, answer, extract, utc, iso
 
-ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
+# Compatibility alias; the canonical opaque-ID contract lives with the generators.
+ID = OPAQUE_ID
 # Compatibility alias; the canonical human-login contract lives in the codec.
 ACTOR = ACTOR_LOGIN
 BOT = "github-actions[bot]"

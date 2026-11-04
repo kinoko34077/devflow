@@ -1,7 +1,13 @@
 """Shared opaque identifiers for the GPT liveness read-only routes."""
 from __future__ import annotations
 
+import re
 import secrets
+
+
+OPAQUE_ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
+"""Compatibility-preserving syntax for GPT-liveness session/turn IDs."""
+
 
 
 def new_chat_id() -> str:

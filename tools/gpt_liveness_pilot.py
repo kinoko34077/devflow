@@ -27,11 +27,13 @@ from tools.kaep_mailbox_codec import (
     verify_reply_chain,
 )
 from tools.kaep_request_sender import send_request
+from tools.gpt_liveness_ids import OPAQUE_ID
 
 MARKER = "<!-- gpt-liveness:enrollment:v0.1 "
 END = " -->"
 SCHEMA = "gpt.liveness.v0.1"
-ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
+# Compatibility alias; the canonical opaque-ID contract lives with the generators.
+ID = OPAQUE_ID
 # Compatibility alias; the canonical human-login contract lives in the codec.
 ACTOR = ACTOR_LOGIN
 MAX_ENROLLMENT = timedelta(hours=2)
