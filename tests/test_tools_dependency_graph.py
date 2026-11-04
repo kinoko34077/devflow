@@ -114,6 +114,10 @@ class ToolsDependencyGraphTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertNotIn("kaep_inbox_reader", self.graph[module])
                 self.assertIn("kaep_mailbox_codec", self.graph[module])
+
+    def test_kaep_agent_projection_reuses_repository_validation(self) -> None:
+        projection = self.graph["kaep_agent_api_projection"]
+        self.assertIn("kaep_repository_validation", projection)
         self.assertIn(
             "kaep_repository_validation",
             self.graph["kaep_live_union_cli"],
