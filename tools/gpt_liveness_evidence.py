@@ -15,11 +15,12 @@ import sys
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages, REPOSITORY
-from tools.kaep_mailbox_codec import InvalidMessage, fail as _fail
+from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, fail as _fail
 from tools.gpt_liveness_pilot import challenge, answer, extract, utc, iso
 
 ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
-ACTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
+# Compatibility alias; the canonical human-login contract lives in the codec.
+ACTOR = ACTOR_LOGIN
 BOT = "github-actions[bot]"
 
 
@@ -54,7 +55,7 @@ def project_from_pages(*, raw: str, repository: str, issue: int,
         _fail("INVALID_TARGET")
     if any(type(v) is not str or not ID.fullmatch(v) for v in (session_id, turn_id)):
         _fail("INVALID_SESSION")
-    if type(expected_reply_actor) is not str or not ACTOR.fullmatch(expected_reply_actor):
+    if type(expected_reply_actor) is not str or not ACTOR_LOGIN.fullmatch(expected_reply_actor):
         _fail("INVALID_REPLY_ACTOR")
     comments = validated_comments(raw, repository=repository, issue=issue)
     items = extract(comments, repo=repository, issue=issue)
