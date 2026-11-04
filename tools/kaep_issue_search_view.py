@@ -24,7 +24,7 @@ from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
 )
 from tools.kaep_mailbox_codec import (
-    RECIPIENT_ORDER,
+    ACTOR_LOGIN, RECIPIENT_ORDER,
     fail,
     MARKER,
     decode_comment,
@@ -273,7 +273,7 @@ def build_search_list(
         type(max_candidates) is not int or not 1 <= max_candidates <= MAX_CANDIDATES
     ):
         fail("INVALID_FILTER")
-    if type(expected_actor) is not str or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", expected_actor):
+    if type(expected_actor) is not str or not ACTOR_LOGIN.fullmatch(expected_actor):
         fail("INVALID_EXPECTED_ACTOR")
     if type(source_workers) is not int or source_workers not in (1, 2):
         fail("INVALID_SOURCE_WORKERS")

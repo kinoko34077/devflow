@@ -163,6 +163,14 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIs(parity.REASONS, codec.REASON_CODE)
         self.assertIs(public_index.REASON_CODE, codec.REASON_CODE)
 
+    def test_kaep_actor_login_validators_reuse_mailbox_codec(self) -> None:
+        from tools import kaep_issue_search_view as search
+        from tools import kaep_live_delta_view as delta
+        from tools import kaep_mailbox_codec as codec
+
+        self.assertIs(search.ACTOR_LOGIN, codec.ACTOR_LOGIN)
+        self.assertIs(delta.ACTOR_LOGIN, codec.ACTOR_LOGIN)
+
 
 if __name__ == "__main__":
     unittest.main()
