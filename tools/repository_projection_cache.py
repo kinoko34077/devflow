@@ -909,4 +909,3 @@ def replace_cached_projection(
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
     return prefix + block + suffix
-
