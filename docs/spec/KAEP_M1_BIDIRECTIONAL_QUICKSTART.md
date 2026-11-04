@@ -6,7 +6,7 @@
 
 - `tools/kaep_mailbox_codec.py` — v0.2 bounded issue-comment wire format / correlation.
 - `tools/kaep_inbox_reader.py` — read-only Issue comments, pagination, actor metadata, fail-closed validation.
-- `tools/kaep_reply_sender.py` — `ACK` / `ANSWER` / `BLOCKED` for a valid existing READ_ONLY request, opt-in POST only, exact readback.
+- `tools/kaep_reply_sender.py` — `ACK` / `ANSWER` / `BLOCKED` for existing READ_ONLY consultations, and `ACK` / `REVIEW_FEEDBACK` / `BLOCKED` for verified `REVIEW_REQUEST / REVIEW / WRITE_INTENT` roots with exact expected HEAD. Opt-in POST only, exact readback.
 - `tools/kaep_request_sender.py` — creates new `REQUEST` to Claude, GPT or Codex, with stable sender-supplied idempotency key, read-only scope, opt-in ordinary Issue-comment POST, exact readback.
 
 All commands are run at the repository root with an already-authorized `gh` CLI session and Python. The code does not acquire, expose or modify credentials.
