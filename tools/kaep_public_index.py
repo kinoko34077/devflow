@@ -5,11 +5,13 @@ the canonical source Issue and strict KAEP reply chain before any action.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from tools.kaep_link_validation import safe_comment_link, safe_issue_link
+from tools.kaep_mailbox_codec import REASON_CODE as REASON_CODE_PATTERN
 from tools.kaep_repository_validation import REPOSITORY
+
+REASON_CODE = REASON_CODE_PATTERN
 
 _ROW_KEYS = ("repository", "issue_number", "issue_url", "source_url",
              "issue_state", "issue_role", "issue_type", "role_source",
@@ -61,7 +63,7 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
         if type(item) is not dict or type(item.get("reason_code")) is not str:
             raise ValueError("PUBLIC_INDEX_INVALID_DIAGNOSTIC")
         reason = item["reason_code"]
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", reason):
+        if REASON_CODE.fullmatch(reason) is None:
             raise ValueError("PUBLIC_INDEX_INVALID_DIAGNOSTIC")
         locator = item.get("owning_issue")
         # Unknown/bad URLs are not published as active links.
