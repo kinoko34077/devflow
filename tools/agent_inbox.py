@@ -18,7 +18,7 @@ except ImportError:  # direct stdio script from the tools directory
 
 MAX_INBOX_TASKS = 20
 MAX_ISSUE_COMMENTS = 500
-KNOWN_REPLY_KINDS = frozenset({"ACK", "ANSWER", "BLOCKED", "ERROR", "RESULT"})
+KNOWN_REPLY_KINDS = frozenset({"ACK", "ANSWER", "BLOCKED", "ERROR", "RESULT", "REVIEW_FEEDBACK"})
 MAX_TITLE_CHARS = 120
 
 
@@ -152,10 +152,22 @@ def _issue_messages_for_recipients(
                 and msg["recipient"] == "chatgpt"
                 and cid in trusted_actor_ids):
             replies_by_parent.setdefault(parent_id, []).append(msg)
-        if msg["kind"] != "REQUEST" or msg["in_reply_to"] is not None:
+        if msg["in_reply_to"] is not None:
+            continue
+        is_consultation = (
+            msg["kind"] == "REQUEST"
+            and msg["scope"]["effect"] == "READ_ONLY"
+        )
+        is_review_request = (
+            msg["kind"] == "REVIEW_REQUEST"
+            and msg["intent"] == "REVIEW"
+            and msg["scope"]["effect"] == "WRITE_INTENT"
+            and msg["scope"]["expected_head"] is not None
+        )
+        if not (is_consultation or is_review_request):
             continue
         recipient_roots = roots_by_recipient.get(msg["recipient"])
-        if recipient_roots is None or msg["scope"]["effect"] != "READ_ONLY":
+        if recipient_roots is None:
             continue
         if cid not in trusted_actor_ids:
             warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_ROOT_ACTOR"})
@@ -171,15 +183,21 @@ def _issue_messages_for_recipients(
                 and msg["task_ref"] == root["task_ref"]
                 and msg["scope"] == root["scope"]
                 and msg["intent"] == root["intent"]
+                and (root["kind"] != "REVIEW_REQUEST"
+                     or msg["kind"] in ("ACK", "REVIEW_FEEDBACK", "BLOCKED"))
             })
             out.append({
                 "source_comment_id": cid,
                 "source_message_id": message_id,
                 "exchange_id": root["exchange_id"],
+                "kind": root["kind"],
                 "intent": root["intent"],
                 "expected_head": root["scope"]["expected_head"],
                 "reply_kinds_observed": reply_kinds,
-                "status": "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
+                "status": "REVIEW_FEEDBACK_OBSERVED" if (
+                    root["kind"] == "REVIEW_REQUEST"
+                    and "REVIEW_FEEDBACK" in reply_kinds
+                ) else "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
                           "BLOCKED_OBSERVED" if "BLOCKED" in reply_kinds else
                           "ACK_OBSERVED" if "ACK" in reply_kinds else "PENDING_REPLY",
                 "source_url": f"https://github.com/{repository}/issues/{issue_number}#issuecomment-{cid}",
