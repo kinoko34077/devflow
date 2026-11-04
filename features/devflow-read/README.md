@@ -3,7 +3,7 @@
 This is a feature-first navigation index for the read-only Devflow MCP and
 CLI. It does not duplicate the normative contract, move implementation files,
 or change the live Repository Control. The current source owner is
-`kinoko34077/devflow` at main `c83c4df50fbd0b1c6fbfce36718a1a34b38ec0d5`.
+`kinoko34077/devflow` at main `3dce241581dd8dc931d2aafaef3af546ff522845`.
 The route does not grant execution, write access, or permission.
 
 Open only the route needed for the task. The linked documents, implementation,
