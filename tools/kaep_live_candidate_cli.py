@@ -17,7 +17,9 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable
 
-from tools.kaep_inbox_reader import InvalidMessage, RECIPIENTS, fetch_gh_pages
+from tools.kaep_inbox_reader import (
+    InvalidMessage, RECIPIENTS, REPOSITORY, fetch_gh_pages,
+)
 from tools.kaep_issue_list_html import _safe_link
 from tools.kaep_issue_search_view import build_search_list, fetch_issue
 from tools.kaep_mailbox_codec import unique_pairs
@@ -28,7 +30,7 @@ MAX_CANDIDATE_ISSUES = 40
 MAX_ROWS = 4000
 SCHEMA = "kaep.public-source-index.v1"
 MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
-REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
+
 
 
 def _block(code: str) -> None:

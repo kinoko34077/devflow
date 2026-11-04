@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import importlib
 import json
 import unittest
 from unittest import mock
 
+from tools import kaep_inbox_reader, kaep_live_candidate_cli
 from tools.kaep_live_candidate_cli import (
     read_live_candidate_cohort, validate_index, fetch_public_json, _unique_pairs,
 )
@@ -67,6 +69,14 @@ def index_with(*elements, age_seconds=120, status="BOUNDED_SEARCH_READ"):
 
 
 class LiveCandidateTests(unittest.TestCase):
+    def test_repository_pattern_uses_inbox_reader_owner(self):
+        sentinel = object()
+        with mock.patch.object(kaep_inbox_reader, "REPOSITORY", sentinel):
+            reloaded = importlib.reload(kaep_live_candidate_cli)
+            self.assertIs(reloaded.REPOSITORY, sentinel)
+        importlib.reload(kaep_live_candidate_cli)
+
+
     def audit(self, snapshot, sources, *, recipient="claude-code"):
         calls = []
         def get_issue(repo, number):
