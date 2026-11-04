@@ -8,6 +8,7 @@ to GitHub, credentials, source text or assignment.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import os
 import stat
 import tempfile
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import kaep_public_locator_cli as locator
-from tools.kaep_mailbox_codec import fail
+from tools.kaep_mailbox_codec import fail, unique_pairs
 from tools.kaep_inbox_reader import InvalidMessage
 
 CURSOR_SCHEMA = "kaep.public-marker-head-cursor.v0.1"
@@ -229,14 +230,12 @@ def _read_cursor_file(path: Path) -> tuple[dict[str, Any], bytes]:
     raw = path.read_bytes()
     if not 0 < len(raw) <= MAX_CURSOR_BYTES:
         fail("INVALID_PUBLIC_CURSOR_FILE")
-    def pairs_unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for key, val in pairs:
-            if key in out:
-                fail("DUPLICATE_PUBLIC_CURSOR_FIELD")
-            out[key] = val
-        return out
-    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs_unique)
+    obj = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=partial(
+            unique_pairs, duplicate_code="DUPLICATE_PUBLIC_CURSOR_FIELD"
+        ),
+    )
     validate_cursor(obj)
     return obj, raw
 
@@ -305,14 +304,12 @@ def main(argv: list[str] | None = None) -> int:
             data = args.cursor_in.read_bytes()
             if len(data) > MAX_CURSOR_BYTES:
                 fail("INVALID_PUBLIC_CURSOR")
-            def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-                out: dict[str, Any] = {}
-                for key, val in pairs:
-                    if key in out:
-                        fail("DUPLICATE_PUBLIC_CURSOR_FIELD")
-                    out[key] = val
-                return out
-            previous = json.loads(data.decode("utf-8"), object_pairs_hook=unique_pairs)
+            previous = json.loads(
+                data.decode("utf-8"),
+                object_pairs_hook=partial(
+                    unique_pairs, duplicate_code="DUPLICATE_PUBLIC_CURSOR_FIELD"
+                ),
+            )
         result = discover_incremental(
             prior=previous, max_repo_pages=args.max_repo_pages,
             max_comment_pages=args.max_comment_pages,

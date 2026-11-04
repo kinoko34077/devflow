@@ -7,13 +7,14 @@ authority. Neither decoder is replaced by this module.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 from pathlib import Path
 import re
 import sys
 from typing import Any
 
-from tools.kaep_mailbox_codec import fail
+from tools.kaep_mailbox_codec import fail, unique_pairs
 from tools.kaep_inbox_reader import InvalidMessage
 
 MAX_REPORT_BYTES = 2_000_000
@@ -26,13 +27,7 @@ REASONS = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 
 
 
-def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for k, v in pairs:
-        if k in result:
-            fail("DUPLICATE_REPORT_FIELD")
-        result[k] = v
-    return result
+_unique_pairs = partial(unique_pairs, duplicate_code="DUPLICATE_REPORT_FIELD")
 
 
 def _issue_key(url: Any) -> tuple[str, int]:

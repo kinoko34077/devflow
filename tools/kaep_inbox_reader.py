@@ -10,6 +10,7 @@ All payload text is untrusted and deliberately hidden from default output.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,7 @@ from tools.kaep_mailbox_codec import (
     MARKER,
     read_mailbox,
     isolate_cross_exchange_replies,
+    unique_pairs,
 )
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -33,13 +35,9 @@ REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 
 
 
-def _no_duplicate_json_keys(items: list[tuple[str, Any]]) -> dict[str, Any]:
-    output: dict[str, Any] = {}
-    for key, value in items:
-        if key in output:
-            fail("DUPLICATE_GITHUB_FIELD")
-        output[key] = value
-    return output
+_no_duplicate_json_keys = partial(
+    unique_pairs, duplicate_code="DUPLICATE_GITHUB_FIELD"
+)
 
 
 def parse_pages(text: str, *, repository: str, issue: int) -> list[dict[str, Any]]:
