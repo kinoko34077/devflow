@@ -101,22 +101,22 @@
 
 ## 8. 必須の異常系・失敗時検証
 
-以下の14ケースを区別してfail-closed検証する。正常入力の成功だけでは受入しない。
+次の14条件を区別し、証拠不足・禁止条件では**安全側に拒否**する。正常例だけの成功では受け入れない。
 
-1. Issueコメント/manifestが自称するactorとGitHub認証actorが異なる、runner環境偽造、owner Issue取り違え。
-2. 未登録action・対象外resource、任意shell/ref/workflow、壊れたJSON・重複key。
-3. 信頼済みcatalog/workflow SHAが変更、repo・PR・source identity不一致。
-4. live GETのないpreflight、弱いHEAD証明、事前read省略要求。
-5. 同じplan文面でもrepo/SHA/run・attempt/recipe/body bytes/actorが異なるreplay。
-6. 計画後のPR HEAD/対象branch/CI変化、coordinator lease失効。
-7. Tokenには広い権限があるが実操作が許可済みeffect/path集合を超える。
-8. PR由来ZIP/artifactの重複・追加path、link/traversal、zip bomb、digest不一致。writer権限で中のコードを実行しない。
-9. workflow `SKIPPED`、API受付、exit 0、未監査artifactを偽の成功として扱う。
-10. effect実行後のtimeout・receipt不明を、未検証の成功や盲目的再書込に変える。
-11. Private/特権callerの実runner・security capabilityを未確認のまま通す。
-12. 同じGit refへの複数writer・異なる子commit、`force:false`のfast-forwardを原子的expected-old-ref CASと混同。
-13. 別agentがcoordinator claim/leaseを保持中なのに#487に第二の所有権を作る。
-14. Feature flag/catalog v2移行時に既存JO/G1 v1のfail-closed意味を変える。
+1. コメント・目録が申告する実行者とGitHub認証済み実行者の不一致、実行環境の偽装、所有Issueの取り違え。
+2. 操作カタログにない命令・対象、任意のシェル・Git参照・ワークフロー、壊れたJSON・重複キー。
+3. 信頼済みカタログ・ワークフローのSHA変更、リポジトリ・PR・ソースの識別不一致。
+4. 実際のGETをしていない事前検証、弱いHEAD根拠、読取省略の要求。
+5. 計画文が同じでも、対象リポジトリ、SHA、実行ID・試行回数、生成手順、本文バイト列、実行者が異なる再実行。
+6. 計画後のPR HEAD・対象ブランチ・CI状態の変化、調整機構の占有期限切れ。
+7. 権限の広いトークンで、操作ごとの許可済み変更・パスを越える処理。
+8. 未信頼の生成物・ZIPに重複/余分なファイル、シンボリックリンク、パス逸脱、展開時の過大容量、ダイジェスト不一致が含まれる場合。特権書込環境ではコードを実行しない。
+9. ワークフローの`SKIPPED`、APIによる依頼受付、終了コード0、未検証生成物を処理成功と誤認。
+10. 変更処理後の時間切れ・結果記録不明から、確認なしに再書込する事態。
+11. 非公開・特権呼出元について、実行環境・安全上の能力が未検証なのに許可。
+12. 同じGit参照への複数書込・異なる子コミット。早送り更新`force:false`を期待旧参照との原子的CASと誤認。
+13. 別エージェントが所有権・有効期限を保持中なのに、#487側に第二の占有管理を作る事態。
+14. 機能切替設定・カタログv2への移行で、受入済みJO/G1 v1の安全側拒否条件を破壊。
 
 ## 9. 設計判断と全体方針
 
