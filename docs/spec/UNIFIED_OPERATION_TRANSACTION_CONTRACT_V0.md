@@ -2,17 +2,17 @@
 
 Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner: [devflow #487](https://github.com/kinoko34077/devflow/issues/487). This document is not an active dispatch API, executable permission, approval receipt, or override of any repository-local contract. User authorized the shared design direction; effectful activation remains subject to each already accepted technical/security/Human gate.
 
-## 0. Sources, ownership, non-duplication
+## 0. 既存契約と責務（参照索引）
 
-| Existing contract | Verified state | Preserve / share / exclude |
-| --- | --- | --- |
-| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 safe dispatch | Offline proposed G1; two real Public owner-only read-only comment commands accepted | G1 owns request transport, trusted command catalog selection and initial classification. **Never derive authorization from an Issue comment**. Share strict request/schema parsing and catalog identity; not an arbitrary shell/Workflow ID facility. |
-| [#439](https://github.com/kinoko34077/devflow/issues/439) review/Human gates | Closed accepted | Determine review and Human gate from **actual changed surface**, explicit protected decisions and irreversibility. Old G1 v1 forces all write requests to NEEDS_HUMAN: preserve that v1 fail-closed rule until a separately reviewed v2 policy migration; do not silently weaken it. |
-| [#384](https://github.com/kinoko34077/devflow/issues/384) + [JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | Accepted S0–S5, immutable v1 trusted pin | Separate source generation/verification and privileged writer; exact caller/producer and archive manifest, limited target, non-force branch update, post-write verification/replay. **Keep JO pin and runtime unchanged**. |
-| [#465](https://github.com/kinoko34077/devflow/issues/465) R1, [PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1 actually merged at ebd20bb76d38a1c18b85f730a0a96753c02390e7 | Owns static recipes, source producer, run/triggering actor/caller provenance GET verification, trusted source bytes, bounded ZIP/manifest, read-only preview and **dormant** write adapter. Reuse through an adapter, do not recode or edit its active lane without coordination. |
-| [#474](https://github.com/kinoko34077/devflow/issues/474), [PR #475](https://github.com/kinoko34077/devflow/pull/475) | Distinct effectful testapp writer pilot **HOLD** | Owner of actual writer branch, target protection/PR-only constraint, independent final security review, live replay/revert evidence. testapp default main presently not demonstrated protected/PR-only; #487 must NOT bypass or activate. |
-| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator) / [Control #107](https://github.com/kinoko34077/devflow/issues/107) | Existing claim/lease/generation/fencing authority | Agent task ownership/dispatch only. Contract may require valid external coordinator claim for an agent-owned task, but never starts a second queue, lease DB or claim state. |
-| Repo-local owner Issue/PR | Durable technical truth | Owns actual resource-specific constraints, observed HEAD, CI/readiness, job permissions and accepted effect/rollback. devflow owns generic vocabulary, not local feature implementation. |
+| 正本 | 受入範囲と維持すべき境界 |
+| --- | --- |
+| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 | offline G1案とPublicのowner限定read-onlyコメント操作2件を受入済み。request受付・固定command catalog・初期分類を担当。**Issueコメントを認可としない**。schema・catalog IDのみ共有し、任意shell/Workflow ID実行へ拡張しない。 |
+| [#439](https://github.com/kinoko34077/devflow/issues/439) Review/Human | 受入済み。変更対象・保護判断・不可逆性でゲートを決定。G1 v1の**write→NEEDS_HUMAN**は、別途審査済みv2へ正式移行するまで維持。 |
+| [#384](https://github.com/kinoko34077/devflow/issues/384)／[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | S0–S5の単一JO Pilot受入済み。read生成jobと特権writer分離、run/caller/manifest認証、限定path、非force更新、事後検証・replayを維持。**JO固定pin/稼働経路は変更しない**。 |
+| [#465](https://github.com/kinoko34077/devflow/issues/465)／[PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1はmain `ebd20bb76d38a1c18b85f730a0a96753c02390e7`でmerge。固定recipe、run/actor/caller認証GET、ZIP/manifest、read-only previewと**休止中writer adapter**を所有。adapter経由で再利用し、勝手に再実装・有効化しない。 |
+| [#474](https://github.com/kinoko34077/devflow/issues/474)／[PR #475](https://github.com/kinoko34077/devflow/pull/475) | 当時のtestapp writerは**HOLD**。対象branch保護/PR限定、独立最終security review、live replay/revertが固有受入条件。#487からこれを解除しない。以後の実状態はownerで確認。 |
+| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator)／[Control #107](https://github.com/kinoko34077/devflow/issues/107) | agentのclaim/lease/generation/fencingの唯一の正本。必要時だけfresh fenceを確認し、第二のqueue/lease DBを作らない。 |
+| 各repositoryのowner Issue/PR | 対象の資源・HEAD、CI/review、job権限、許可されたeffect/rollbackの詳細正本。devflowは共通語彙のみ所有。 |
 
 ## 1. Central principle and non-equivalence
 
