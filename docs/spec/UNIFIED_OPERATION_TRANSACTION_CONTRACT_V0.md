@@ -14,22 +14,22 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 | [execution-coordinator](https://github.com/kinoko34077/execution-coordinator)／[Control #107](https://github.com/kinoko34077/devflow/issues/107) | agentのclaim/lease/generation/fencingの唯一の正本。必要時だけfresh fenceを確認し、第二のqueue/lease DBを作らない。 |
 | 各repositoryのowner Issue/PR | 対象の資源・HEAD、CI/review、job権限、許可されたeffect/rollbackの詳細正本。devflowは共通語彙のみ所有。 |
 
-## 1. Central principle and non-equivalence
+## 1. 基本原則と処理順序
 
-**Every mutation MUST pass a genuine read-only observation and a plan validation before effect.** This is an invariant of the effect path, not a requirement to start a separate GitHub Actions job for trivial API mutations. For low-risk Issue/PR metadata edits, a bounded inline GET+diff+validation suffices; for untrusted code/artifacts or privileged effects, isolate a separate read-only producer/planner job from a job holding write privileges. The writer MUST independently obtain fresh target/auth context before effect regardless of the earlier read.
+**すべての状態変更は、実際の読み取り専用の観測と計画の検証を経てから実行しなければならない。** これは処理の意味上の順序であり、軽微なIssue・PRの情報更新に別のGitHub Actionsジョブを必須とするものではない。低リスクな変更には対象を限定したGET・差分・検証で足りる。一方、未信頼コードや生成物、特権操作では、読み取り専用の生成・計画処理と書込権限を持つ処理を分離する。書込側は、**事前観測とは独立して実行直前の対象状態・権限を再取得する。**
 
-A successful read/plan does **NOT** grant write permission, prove the requester's identity, guarantee fresh state, establish runtime claim ownership, or prove an effect will commit. A hash/digest proves equality only with a verified original; an untrusted manifest or Issue comment cannot authenticate itself. A read-only job can still run hostile code or consume expensive computation; treat compute execution and third-party output as separate exposure.
+観測・計画の成功だけでは、書込権限、依頼者の本人性、状態の鮮度、実行中タスクの占有権、変更の成立は証明できない。ハッシュは検証済みの原本との一致を示すだけであり、未信頼のmanifestやIssueコメントだけでは認証できない。読み取り専用ジョブでも悪意あるコードの実行や計算費用が発生し得るため、実行環境と外部出力を別途評価する。
 
-### Sequence (semantic states, not necessarily six separate processes)
+### 処理の6段階（必ずしも独立した6プロセスではない）
 
-1. **Identify:** a pre-reviewed versioned operation from an immutable trusted catalog; verified actor/caller/source and exact target identity (not text-input assertions).
-2. **Observe (READ):** use only the minimal trusted reader to fetch the exact relevant target, capability/permission snapshot, branch/ruleset, PR/CI/review, active owner/collision if required, and current version/head.
-3. **Plan (READ):** compare requested transition against allowed effects, bounded deltas, static paths/fields, budgets, safe reversibility and trust conditions. Produce a non-authorizing plan plus evidence/provenance and an observed-state fingerprint.
-4. **Gate (READ):** separately decide required Human/reviewer policy, actual actor rights, runtime coordinator fence when relevant, plan version, immutable trusted source, source verification and current target. Reject incomplete/missing evidence.
-5. **Effect:** a narrowly permitted operation-specific writer re-fetches the latest target/state immediately before write, checks an endpoint-specific conditional update/concurrency rule and imposes caps. Never execute untrusted PR/artifact contents inside a privileged writer. Changes must be constrained to a reviewed resource/field/path, not general repository privileges just because a token can access them.
-6. **Verify/reconcile (READ):** inspect actual resulting target, changed paths or PR state, accepted source/CI and any external effects. Record a scoped receipt; uncertainty triggers read-only reconciliation BEFORE any retry or correction.
+1. **対象確定：** レビュー済みの変更不能な操作カタログから版付き操作を選び、実行者・呼出元・ソースと対象の同一性を検証する。入力文の自己申告を証拠にしない。
+2. **観測（読取）：** 最小限の信頼できる読取経路で、対象、権限、ブランチ保護、PR・CI・レビュー、必要な所有者・競合、現行版・HEADを取得する。
+3. **計画（読取）：** 許可済み操作・変更差分・固定パスや項目・上限・安全な復元可能性・信頼条件を検証する。**実行を認可しない**計画と根拠・来歴、観測状態の識別情報を出力する。
+4. **許可判定（読取）：** 人間の承認・レビュー要否、実行者の権限、必要時の調整機構の占有検証、計画版・固定ソース・現在の対象を独立に確認する。証拠が不足すれば拒否する。
+5. **変更実行：** 操作ごとの限定書込処理が最新状態を再取得し、API固有の条件付き更新・競合制御・上限を適用する。特権書込環境で未信頼PR・生成物のコードを実行しない。権限が広くても、変更対象を審査済みの資源・項目・パスに限定する。
+6. **結果検証・整合（読取）：** 実際の変更後状態、差分・PR状態、受入済みソース・CI、外部への作用を確認し、範囲を限定した検証記録を残す。結果が不明なら、**再試行・再修正より先に読み取り専用の照合**を行う。
 
-Each request has a finite idempotency key and target/version scope, but the key alone does not provide deduplication. Implement replay prevention in the effect-owning existing durable/serialized surface, with independent authenticated run/attempt and target outcome evidence.
+各依頼には有限の重複排除キーと対象・版の範囲を定める。ただし、キーだけで重複実行は防げない。実行の所有者が既存の永続化・直列化機構で再実行を制御し、独立に認証した実行ID・試行回数と結果の証拠を照合する。
 
 ## 2. Three separate data domains (strict no-trust transfer)
 
