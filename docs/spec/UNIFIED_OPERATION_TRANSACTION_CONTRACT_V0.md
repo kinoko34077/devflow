@@ -77,13 +77,13 @@ The generic taxonomy is a **projection** of existing operation-specific native s
 
 Review and Human approval are different questions: do not make the generic v0 design secretly relax existing G1 `write -> NEEDS_HUMAN`; if v2 approval policy is later adopted, update/review G1 independently with backward compatibility, grounded in #439 and a named effectful pilot. A provider/model self-review is never a distinct-system independent review.
 
-## 6. Integration interfaces, not code ownership transfer
+## 6. 接続先（既存実装の所有権は移さない）
 
-- #413 ingress/G1 may emit an **untrusted request** with a trusted catalog action ID, then invoke the shared planner/guard. Continue direct installed GitHub API for already supported simple edits; Issue-comment ingress only for specifically missing actions and fully reviewed commands.
-- #465 R1 read-only authenticated preview remains the operation-specific planner for artifact writeback. An adapter may translate its actual source-provenance/ZIP/target/dry-run report into generic PreflightEvidence, without modifying its verification algorithm or exposing a write-capable transport. The shared v0 planner must never bypass archive-specific checks.
-- #474 writer remains the **sole** effectful testapp owner if independently accepted. An adapter may translate a verified writer receipt into generic EffectReceipt. **No #487 dependency is allowed to block or unblock #474's existing protection/Human/reviewer gate**; do not merge or activate it from a generic contract.
-- execution-coordinator remains the unique agent claim and lease service. For workflows that operate on an agent-owned work item, the effect gate queries a fresh coordinator fence; for ordinary direct GitHub API operations, do not fabricate coordinator claims.
-- Repository-local trusted source/CI/policy and any immutable JO Caller pin remain authoritative. Always version adapter contracts; historical accepted runtime remains backward compatible.
+- **#413 G1:** trusted catalog ID付きの**未信頼request**だけをshared planner/guardへ渡す。既存の単純GitHub API操作は直接実行優先。Issue comment入口は未対応かつ個別review済み固定commandに限る。
+- **#465:** 受入済みread-only artifact previewの実source/provenance/ZIP/targetから`PreflightEvidence`へ変換。固有の検証算法を変更せず、writerを公開しない。
+- **#474:** 独立受入済みのnative writer receiptだけを`EffectReceipt`へ変換。#487を#474の既存保護・Human/Review gateの成立/解除条件にしない。
+- **execution-coordinator:** agent所有の仕事だけfresh fenceを照合。通常の直接GitHub API操作へ架空のclaimを要求しない。
+- **repository-local:** source/CI/policyとJO固定pinが優先。adapterはversion付きとし、歴史的受入版の互換性を守る。
 
 ## 7. Roadmap and independent acceptance
 
