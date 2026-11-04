@@ -14,13 +14,14 @@ import re
 import sys
 from typing import Any
 
+from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_mailbox_codec import InvalidMessage, fail, unique_pairs
 
 MAX_REPORT_BYTES = 2_000_000
 SHADOW_LIMIT = 40  # shadow default 20; explicit bounded max40 since accepted PR #743
 UNION_LIMIT = 40
 MAX_UNION_ROWS = 5000
-ISSUE_URL = re.compile(r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
+ISSUE_URL = ISSUE_URL_PATTERN
 MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
 REASONS = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 

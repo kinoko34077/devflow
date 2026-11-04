@@ -122,6 +122,15 @@ class ToolsDependencyGraphTests(unittest.TestCase):
     def test_kaep_public_locator_reuses_repository_validation(self) -> None:
         locator = self.graph["kaep_public_locator_cli"]
         self.assertIn("kaep_repository_validation", locator)
+
+    def test_kaep_issue_url_parsers_reuse_link_validation(self) -> None:
+        for module in (
+            "kaep_b5_b6_parity_cli",
+            "kaep_discovery_reader",
+            "kaep_issue_search_view",
+        ):
+            with self.subTest(module=module):
+                self.assertIn("kaep_link_validation", self.graph[module])
         self.assertIn(
             "kaep_repository_validation",
             self.graph["kaep_live_union_cli"],
