@@ -1,0 +1,104 @@
+{
+  "schema": "feature-document-route.v1",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "3552f1ec39e65ec34b11cbcf99ebe50107f5f3ac",
+  "entry": "features/devflow-read/README.md",
+  "routes": {
+    "bootstrap": {
+      "when": "managed-repository-resume-or-current-state-audit",
+      "documents": [
+        "docs/operations/DEVFLOW_MCP.md",
+        "docs/operations/REPOSITORY_ISSUE_MANUAL.md"
+      ],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": ["tests/test_devflow_mcp_core.py"]
+    },
+    "work_view": {
+      "when": "current-all-status-task-observation",
+      "documents": ["docs/operations/DEVFLOW_MCP.md"],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": ["tests/test_devflow_mcp_core.py"]
+    },
+    "inbox": {
+      "when": "explicit-recipient-bounded-inbox-observation",
+      "documents": [
+        "docs/operations/DEVFLOW_MCP.md",
+        "docs/spec/KAEP_AGENT_INBOX_V01.md"
+      ],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py",
+        "tools/agent_inbox.py"
+      ],
+      "tests": [
+        "tests/test_devflow_mcp_core.py",
+        "tests/test_agent_inbox.py"
+      ]
+    },
+    "workspace": {
+      "when": "explicit-combined-work-and-kaep-observation",
+      "documents": ["docs/operations/DEVFLOW_MCP.md"],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": ["tests/test_devflow_mcp_core.py"]
+    },
+    "issue_goal_context": {
+      "when": "one-issue-source-linked-goal-context-read",
+      "documents": ["docs/operations/DEVFLOW_MCP.md"],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py",
+        "tools/goal_plan_assessment.py"
+      ],
+      "tests": [
+        "tests/test_devflow_mcp_core.py",
+        "tests/test_goal_plan_assessment.py"
+      ]
+    },
+    "assessment": {
+      "when": "advisory-plan-or-outcome-comparison",
+      "documents": ["docs/operations/DEVFLOW_MCP.md"],
+      "code": [
+        "tools/devflow_mcp.py",
+        "tools/devflow_mcp_core.py",
+        "tools/goal_plan_assessment.py"
+      ],
+      "tests": [
+        "tests/test_devflow_mcp_core.py",
+        "tests/test_goal_plan_assessment.py"
+      ]
+    },
+    "cloud_fallback": {
+      "when": "existing-cloud-checkout-without-devflow-mcp-registration",
+      "documents": [
+        "docs/operations/DEVFLOW_MCP.md",
+        "docs/operations/CODEX_CLOUD_GITHUB_ACCESS.md",
+        "docs/operations/CODEX_CLOUD_ROUTE_A.md",
+        "docs/operations/LOCAL_WORKER_FIXED_READONLY.md"
+      ],
+      "code": [
+        "tools/devflow_read_cli.py",
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": ["tests/test_devflow_read_cli.py"]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#16",
+    "kinoko34077/devflow#734"
+  ],
+  "notes": [
+    "Resolve every path relative to the source repository at source_ref.",
+    "Read-only navigation metadata is not an execution mechanism.",
+    "Current state, review, CI, and authorization are always read live."
+  ]
+}
