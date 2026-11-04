@@ -11,6 +11,7 @@ on:
       - 'scripts/maintenance_audit.py'
       - 'tools/**'
       - 'tests/**'
+      - 'features/**'
       - '.github/workflows/project-sync*.yml'
       - '.github/workflows/repository-bootstrap.yml'
       - '.github/workflows/maintenance-audit.yml'
