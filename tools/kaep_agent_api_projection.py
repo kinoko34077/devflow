@@ -7,17 +7,18 @@ emits redacted fixed fields only, and never creates execution authority.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import re
 from typing import Any
 
-from tools.kaep_mailbox_codec import InvalidMessage, MESSAGE_ID, RECIPIENTS, fail
+from tools.kaep_mailbox_codec import (
+    InvalidMessage, MESSAGE_ID, REASON_CODE, RECIPIENTS, fail,
+)
 from tools.kaep_repository_validation import REPOSITORY
 
 SCHEMA = "kaep.agent-current-view.v0.1"
 UNION_SCHEMA = "kaep.live-union-check.v0.1"
 _MESSAGE = MESSAGE_ID
-_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
-_ORIGIN = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
+_CODE = REASON_CODE
+_ORIGIN = REASON_CODE
 MAX_ROWS = 4000
 MAX_SOURCES = 40
 MAX_ERRORS = 100

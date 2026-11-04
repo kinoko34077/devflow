@@ -10,13 +10,13 @@ import argparse
 from functools import partial
 import json
 from pathlib import Path
-import re
 import sys
 from typing import Any
 
 from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_mailbox_codec import (
-    InvalidMessage, MESSAGE_ID as MESSAGE_ID_PATTERN, fail, unique_pairs,
+    InvalidMessage, MESSAGE_ID as MESSAGE_ID_PATTERN,
+    REASON_CODE as REASON_CODE_PATTERN, fail, unique_pairs,
 )
 
 MAX_REPORT_BYTES = 2_000_000
@@ -25,7 +25,7 @@ UNION_LIMIT = 40
 MAX_UNION_ROWS = 5000
 ISSUE_URL = ISSUE_URL_PATTERN
 MESSAGE_ID = MESSAGE_ID_PATTERN
-REASONS = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
+REASONS = REASON_CODE_PATTERN
 
 
 
