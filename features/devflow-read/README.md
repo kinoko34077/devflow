@@ -3,7 +3,7 @@
 This is a feature-first navigation index for the read-only Devflow MCP and
 CLI. It does not duplicate the normative contract, move implementation files,
 or change the live Repository Control. The manifest's `source_ref`,
-`c83c4df50fbd0b1c6fbfce36718a1a34b38ec0d5`, records the audited source
+`3dce241581dd8dc931d2aafaef3af546ff522845`, records the audited source
 snapshot used for this route; it is dated provenance, not a pointer to the
 current `main` head.
 
