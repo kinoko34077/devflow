@@ -179,6 +179,14 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIs(evidence.ACTOR_LOGIN, codec.ACTOR_LOGIN)
         self.assertIs(pilot.ACTOR_LOGIN, codec.ACTOR_LOGIN)
 
+    def test_gpt_liveness_opaque_id_validators_reuse_id_boundary(self) -> None:
+        from tools import gpt_liveness_evidence as evidence
+        from tools import gpt_liveness_ids as ids
+        from tools import gpt_liveness_pilot as pilot
+
+        self.assertIs(evidence.ID, ids.OPAQUE_ID)
+        self.assertIs(pilot.ID, ids.OPAQUE_ID)
+
 
 if __name__ == "__main__":
     unittest.main()
