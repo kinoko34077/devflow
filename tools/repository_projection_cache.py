@@ -9,9 +9,21 @@ import re
 from typing import Any
 
 from tools import maintenance_sync_check, marker_json
-from tools.repository_identity import is_repository_name
-
-
+from tools.cache_generation import (
+    canonical_digest as _canonical_digest,
+    generation_material as _generation_material,
+    recompute_generation_id,
+)
+from tools.cache_validation import (
+    format_timestamp as _shared_format_timestamp,
+    require_bool as _shared_require_bool,
+    require_exact_fields as _shared_require_exact_fields,
+    require_mapping as _shared_require_mapping,
+    require_optional_string as _shared_require_optional_string,
+    require_repository as _shared_require_repository,
+    require_timestamp as _shared_require_timestamp,
+    timestamp_value as _shared_timestamp_value,
+)
 CACHE_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->"
 CACHE_MARKER_END = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
 CACHE_SCHEMA_VERSION = "repository-projection-cache.v1"
@@ -78,20 +90,8 @@ class CachedRepositoryProjection:
     payload: dict[str, Any]
 
 
-def _canonical_digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
 def _require_mapping(value: object, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise RepositoryProjectionCacheError(f"{field} must be an object")
-    return dict(value)
+    return _shared_require_mapping(value, field, RepositoryProjectionCacheError)
 
 
 def _require_exact_fields(
@@ -99,49 +99,29 @@ def _require_exact_fields(
     allowed: frozenset[str],
     field: str,
 ) -> None:
-    keys = set(value)
-    missing = sorted(allowed - keys)
-    unknown = sorted(keys - allowed)
-    if missing:
-        raise RepositoryProjectionCacheError(
-            f"{field} missing fields: " + ", ".join(missing)
-        )
-    if unknown:
-        raise RepositoryProjectionCacheError(
-            f"{field} has unknown fields: " + ", ".join(unknown)
-        )
+    _shared_require_exact_fields(
+        value, allowed, field, RepositoryProjectionCacheError
+    )
 
 
 def _require_repository(value: object, field: str = "repository") -> str:
-    if not is_repository_name(value):
-        raise RepositoryProjectionCacheError(f"{field} must be owner/repository")
-    return value.strip()
+    return _shared_require_repository(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _require_timestamp(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise RepositoryProjectionCacheError(f"{field} must be an RFC-3339 timestamp")
-    text = value.strip()
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise RepositoryProjectionCacheError(
-            f"{field} must be an RFC-3339 timestamp"
-        ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise RepositoryProjectionCacheError(
-            f"{field} must include an RFC-3339 timezone offset"
-        )
-    return text
+    return _shared_require_timestamp(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _timestamp_value(value: object, field: str) -> datetime:
-    text = _require_timestamp(value, field)
-    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return _shared_timestamp_value(value, field, RepositoryProjectionCacheError)
 
 
 def _format_timestamp(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return _shared_format_timestamp(value)
 
 
 def _require_nonnegative_int(value: object, field: str) -> int:
@@ -151,9 +131,7 @@ def _require_nonnegative_int(value: object, field: str) -> int:
 
 
 def _require_bool(value: object, field: str) -> bool:
-    if not isinstance(value, bool):
-        raise RepositoryProjectionCacheError(f"{field} must be boolean")
-    return value
+    return _shared_require_bool(value, field, RepositoryProjectionCacheError)
 
 
 def _require_sha256(value: object, field: str) -> str:
@@ -165,13 +143,9 @@ def _require_sha256(value: object, field: str) -> str:
 
 
 def _require_optional_string(value: object, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise RepositoryProjectionCacheError(
-            f"{field} must be a non-empty string or null"
-        )
-    return value.strip()
+    return _shared_require_optional_string(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _compact_issue_ref(value: object) -> dict[str, Any] | None:
@@ -435,18 +409,6 @@ def _source_identity_material(live_projection: dict[str, Any]) -> dict[str, Any]
     # seen. They belong to cache generation/freshness, not source identity.
     value.pop("observed_at", None)
     value.pop("source_freshness", None)
-    return value
-
-
-def _generation_material(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value.pop("generation_id", None)
-    return value
-
-
-def recompute_generation_id(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value["generation_id"] = _canonical_digest(_generation_material(value))
     return value
 
 
@@ -926,3 +888,4 @@ def replace_cached_projection(
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
     return prefix + block + suffix
+

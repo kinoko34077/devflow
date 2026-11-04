@@ -1,4 +1,4 @@
-"""KAEP M1 explicit reply transport for existing READ_ONLY Issue requests.
+"""KAEP explicit reply transport for READ_ONLY consultations and REVIEW_REQUESTs.
 
 Requires caller-chosen existing GitHub comment actor and an explicitly invoked
 --send flag for any write. No Claude launch, Actions, Claim or credentials changes.
@@ -26,7 +26,7 @@ from tools.kaep_mailbox_support import (
     post_comment as _shared_post_comment,
 )
 
-KINDS = {"ACK", "ANSWER", "BLOCKED"}
+KINDS = {"ACK", "ANSWER", "BLOCKED", "REVIEW_FEEDBACK"}
 ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
@@ -62,11 +62,26 @@ def _eligible_reply_parent(
     cid, parent = matching[0]
     if not _matching_actor(actors[cid], expect_actor):
         fail("PARENT_ACTOR_MISMATCH")
-    if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
+    if parent["recipient"] != parent_recipient:
+        fail("INVALID_PARENT_INTENT")
+    if parent["kind"] == "REVIEW_REQUEST" and parent["in_reply_to"] is None:
+        # A native PR review can be performed by Claude, Codex or another
+        # authorized reviewer. This only permits a correlated message about it.
+        # WRITE_INTENT is metadata, never a write permission or Review grant.
+        if (parent["intent"] != "REVIEW"
+                or parent["scope"]["effect"] != "WRITE_INTENT"
+                or parent["scope"]["expected_head"] is None):
+            fail("UNSUPPORTED_REVIEW_PARENT")
+        if kind not in ("ACK", "REVIEW_FEEDBACK", "BLOCKED"):
+            fail("INVALID_REPLY_KIND")
+        return parent
+    if parent["kind"] not in ("REQUEST", "QUESTION"):
         fail("INVALID_PARENT_INTENT")
     if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
         fail("UNSUPPORTED_EFFECT")
     if kind == "ACK" and parent["kind"] != "REQUEST":
+        fail("INVALID_REPLY_KIND")
+    if kind == "REVIEW_FEEDBACK":
         fail("INVALID_REPLY_KIND")
     return parent
 
@@ -146,11 +161,7 @@ def make_reply(
         "kind": kind,
         "intent": parent["intent"],
         "idempotency_key": "kaep.m1.reply." + digest,
-        "scope": {
-            "repository": repository,
-            "expected_head": parent["scope"]["expected_head"],
-            "effect": "READ_ONLY",
-        },
+        "scope": dict(parent["scope"]),
         "payload": {"text": response_text},
         "evidence_refs": parent["evidence_refs"],
     }

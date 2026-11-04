@@ -981,5 +981,129 @@ def fake_work_view(issues):
     }
 
 
+class KAEPReviewInboxTests(unittest.TestCase):
+    """The owning-Issue reader records Claude review feedback without granting work."""
+
+    def root(self, issue=21):
+        data = message(issue=issue)
+        data["kind"] = "REVIEW_REQUEST"
+        data["intent"] = "REVIEW"
+        data["scope"]["effect"] = "WRITE_INTENT"
+        data["evidence_refs"] = [f"https://github.com/{REPO}/pull/54"]
+        return data
+
+    def response(self, root, kind="REVIEW_FEEDBACK"):
+        data = dict(root)
+        data.update({
+            "message_id": "msg_review_inbox_response_" + kind.lower(),
+            "in_reply_to": root["message_id"],
+            "kind": kind, "recipient": "chatgpt",
+            "idempotency_key": "kaep.review.inbox." + kind.lower(),
+            "payload": {"text": "Claude reviewed the requested exact SHA."},
+        })
+        return data
+
+    def test_real_review_feedback_is_observed_but_never_authorizes_task(self):
+        root = self.root()
+        answer = self.response(root)
+        reader = fixture_reader([task()], {
+            (REPO, 21): [issue_comment(11, root), issue_comment(12, answer)]})
+        result = devflow_mcp_core.DevflowService(reader).get_agent_inbox(
+            "demo", recipient="claude-code")
+        self.assertEqual(len(result["issues"][0]["requests"]), 1)
+        req = result["issues"][0]["requests"][0]
+        self.assertEqual(req["kind"], "REVIEW_REQUEST")
+        self.assertEqual(req["intent"], "REVIEW")
+        self.assertEqual(req["status"], "REVIEW_FEEDBACK_OBSERVED")
+        self.assertEqual(req["reply_kinds_observed"], ["REVIEW_FEEDBACK"])
+        self.assertEqual(req["expected_head"], "a"*40)
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["is_authoritative_assignment"])
+        self.assertFalse(result["is_live_agent_delivery"])
+        self.assertNotIn("Claude reviewed", json.dumps(result))
+
+    def test_review_ack_pending_and_blocked(self):
+        root = self.root()
+        scenarios = (
+            ([], "PENDING_REPLY"),
+            (["ACK"], "ACK_OBSERVED"),
+            (["BLOCKED"], "BLOCKED_OBSERVED"),
+            (["ACK", "REVIEW_FEEDBACK"], "REVIEW_FEEDBACK_OBSERVED"),
+        )
+        for kinds, expected_status in scenarios:
+            with self.subTest(kinds=kinds):
+                comments = [issue_comment(11, root)]
+                for i, kind in enumerate(kinds):
+                    comments.append(issue_comment(12+i, self.response(root, kind=kind)))
+                result, warnings = agent_inbox._issue_messages(
+                    comments, repository=REPO, issue_number=21,
+                    recipient="claude-code", expected_actor=OWNER)
+                self.assertEqual(warnings, [])
+                self.assertEqual(result[0]["status"], expected_status)
+
+    def test_incompatible_answer_or_wrong_scope_cannot_complete_review(self):
+        root = self.root()
+        wrong_scope = self.response(root)
+        wrong_scope["scope"] = dict(root["scope"], effect="READ_ONLY")
+        for bad in (self.response(root, kind="ANSWER"), wrong_scope):
+            with self.subTest(kind=bad["kind"], effect=bad["scope"]["effect"]):
+                result, warnings = agent_inbox._issue_messages(
+                    [issue_comment(11, root), issue_comment(12, bad)],
+                    repository=REPO, issue_number=21,
+                    recipient="claude-code", expected_actor=OWNER)
+                self.assertEqual(result[0]["status"], "PENDING_REPLY")
+                self.assertEqual(result[0]["reply_kinds_observed"], [])
+                self.assertEqual(warnings, [])
+
+    def test_untrusted_review_reply_and_other_recipient_do_not_complete(self):
+        root = self.root()
+        outsider = self.response(root)
+        observed, warnings = agent_inbox._issue_messages(
+            [issue_comment(11, root), issue_comment(12, outsider, "outsider")],
+            repository=REPO, issue_number=21,
+            recipient="claude-code", expected_actor=OWNER)
+        self.assertEqual(observed[0]["status"], "PENDING_REPLY")
+        self.assertEqual(warnings[0]["reason_code"], "UNTRUSTED_MARKER_COMMENT")
+        other, _ = agent_inbox._issue_messages(
+            [issue_comment(11, root)], repository=REPO, issue_number=21,
+            recipient="codex", expected_actor=OWNER)
+        self.assertEqual(other, [])
+
+    def test_review_root_requires_exact_head_and_matching_intent(self):
+        for effect, intent, head in (
+            ("READ_ONLY", "REVIEW", "a"*40),
+            ("WRITE_INTENT", "REPORT", "a"*40),
+            ("WRITE_INTENT", "REVIEW", None),
+        ):
+            with self.subTest(effect=effect, intent=intent, head=head):
+                root = self.root()
+                root["scope"]["effect"] = effect
+                root["scope"]["expected_head"] = head
+                root["intent"] = intent
+                records, warnings = agent_inbox._issue_messages(
+                    [issue_comment(11, root)], repository=REPO,
+                    issue_number=21, recipient="claude-code",
+                    expected_actor=OWNER)
+                self.assertEqual(records, [])
+                self.assertEqual(warnings, [])
+
+    def test_non_task_issue_still_requires_separate_discovery(self):
+        root = self.root(issue=22)
+        observed, warnings = agent_inbox._issue_messages(
+            [issue_comment(11, root)], repository=REPO, issue_number=22,
+            recipient="claude-code", expected_actor=OWNER)
+        self.assertEqual(observed[0]["status"], "PENDING_REPLY")
+        self.assertEqual(warnings, [])
+        non_task = unclassified_issue(22)
+        reader = fixture_reader([task(21), non_task], {
+            (REPO, 21): [issue_comment(10, message())],
+            (REPO, 22): [issue_comment(11, root)],
+        })
+        result = devflow_mcp_core.DevflowService(reader).get_agent_inbox(
+            "demo", recipient="claude-code")
+        self.assertEqual([item["issue_number"] for item in result["issues"]], [21])
+        self.assertTrue(result["has_unknown_work"])
+
+
 if __name__ == "__main__":
     unittest.main()

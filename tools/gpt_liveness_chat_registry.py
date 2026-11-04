@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from functools import partial
 import json
 import re
-import secrets
 from typing import Any
 
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
+from tools.gpt_liveness_ids import new_chat_id, new_session_id, new_turn_id
 from tools.gpt_liveness_pilot import answer, challenge, enrollment, utc
 from tools.kaep_mailbox_codec import (
     InvalidMessage,
@@ -29,19 +29,6 @@ END = " -->"
 CHAT_ID = re.compile(r"chat_[0-9a-f]{32}\Z")
 MAILBOX = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
 MAX_BODY_BYTES = 200_000
-
-
-def new_chat_id() -> str:
-    """128-bit cryptographic random routing ID; NOT an auth token."""
-    return "chat_" + secrets.token_hex(16)
-
-
-def new_session_id() -> str:
-    return "session_" + secrets.token_hex(16)
-
-
-def new_turn_id() -> str:
-    return "turn_" + secrets.token_hex(16)
 
 
 def binding_marker(*, chat_id: str, mailbox_ref: str) -> str:
@@ -186,3 +173,4 @@ def validate_heartbeat_pair(
         "observed_at": answer_created_at, "model_identity_attested": False,
         "current_liveness_proven": False, "claim_authority": False,
     }
+

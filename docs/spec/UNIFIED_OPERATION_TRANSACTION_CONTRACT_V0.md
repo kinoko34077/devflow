@@ -2,17 +2,17 @@
 
 Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner: [devflow #487](https://github.com/kinoko34077/devflow/issues/487). This document is not an active dispatch API, executable permission, approval receipt, or override of any repository-local contract. User authorized the shared design direction; effectful activation remains subject to each already accepted technical/security/Human gate.
 
-## 0. Sources, ownership, non-duplication
+## 0. 既存契約と責務（参照索引）
 
-| Existing contract | Verified state | Preserve / share / exclude |
-| --- | --- | --- |
-| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 safe dispatch | Offline proposed G1; two real Public owner-only read-only comment commands accepted | G1 owns request transport, trusted command catalog selection and initial classification. **Never derive authorization from an Issue comment**. Share strict request/schema parsing and catalog identity; not an arbitrary shell/Workflow ID facility. |
-| [#439](https://github.com/kinoko34077/devflow/issues/439) review/Human gates | Closed accepted | Determine review and Human gate from **actual changed surface**, explicit protected decisions and irreversibility. Old G1 v1 forces all write requests to NEEDS_HUMAN: preserve that v1 fail-closed rule until a separately reviewed v2 policy migration; do not silently weaken it. |
-| [#384](https://github.com/kinoko34077/devflow/issues/384) + [JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | Accepted S0–S5, immutable v1 trusted pin | Separate source generation/verification and privileged writer; exact caller/producer and archive manifest, limited target, non-force branch update, post-write verification/replay. **Keep JO pin and runtime unchanged**. |
-| [#465](https://github.com/kinoko34077/devflow/issues/465) R1, [PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1 actually merged at ebd20bb76d38a1c18b85f730a0a96753c02390e7 | Owns static recipes, source producer, run/triggering actor/caller provenance GET verification, trusted source bytes, bounded ZIP/manifest, read-only preview and **dormant** write adapter. Reuse through an adapter, do not recode or edit its active lane without coordination. |
-| [#474](https://github.com/kinoko34077/devflow/issues/474), [PR #475](https://github.com/kinoko34077/devflow/pull/475) | Distinct effectful testapp writer pilot **HOLD** | Owner of actual writer branch, target protection/PR-only constraint, independent final security review, live replay/revert evidence. testapp default main presently not demonstrated protected/PR-only; #487 must NOT bypass or activate. |
-| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator) / [Control #107](https://github.com/kinoko34077/devflow/issues/107) | Existing claim/lease/generation/fencing authority | Agent task ownership/dispatch only. Contract may require valid external coordinator claim for an agent-owned task, but never starts a second queue, lease DB or claim state. |
-| Repo-local owner Issue/PR | Durable technical truth | Owns actual resource-specific constraints, observed HEAD, CI/readiness, job permissions and accepted effect/rollback. devflow owns generic vocabulary, not local feature implementation. |
+| 正本 | 受入範囲と維持すべき境界 |
+| --- | --- |
+| [#413](https://github.com/kinoko34077/devflow/issues/413) G1 | offline G1案とPublicのowner限定read-onlyコメント操作2件を受入済み。request受付・固定command catalog・初期分類を担当。**Issueコメントを認可としない**。schema・catalog IDのみ共有し、任意shell/Workflow ID実行へ拡張しない。 |
+| [#439](https://github.com/kinoko34077/devflow/issues/439) Review/Human | 受入済み。変更対象・保護判断・不可逆性でゲートを決定。G1 v1の**write→NEEDS_HUMAN**は、別途審査済みv2へ正式移行するまで維持。 |
+| [#384](https://github.com/kinoko34077/devflow/issues/384)／[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300) | S0–S5の単一JO Pilot受入済み。read生成jobと特権writer分離、run/caller/manifest認証、限定path、非force更新、事後検証・replayを維持。**JO固定pin/稼働経路は変更しない**。 |
+| [#465](https://github.com/kinoko34077/devflow/issues/465)／[PR #470](https://github.com/kinoko34077/devflow/pull/470) | R1はmain `ebd20bb76d38a1c18b85f730a0a96753c02390e7`でmerge。固定recipe、run/actor/caller認証GET、ZIP/manifest、read-only previewと**休止中writer adapter**を所有。adapter経由で再利用し、勝手に再実装・有効化しない。 |
+| [#474](https://github.com/kinoko34077/devflow/issues/474)／[PR #475](https://github.com/kinoko34077/devflow/pull/475) | 当時のtestapp writerは**HOLD**。対象branch保護/PR限定、独立最終security review、live replay/revertが固有受入条件。#487からこれを解除しない。以後の実状態はownerで確認。 |
+| [execution-coordinator](https://github.com/kinoko34077/execution-coordinator)／[Control #107](https://github.com/kinoko34077/devflow/issues/107) | agentのclaim/lease/generation/fencingの唯一の正本。必要時だけfresh fenceを確認し、第二のqueue/lease DBを作らない。 |
+| 各repositoryのowner Issue/PR | 対象の資源・HEAD、CI/review、job権限、許可されたeffect/rollbackの詳細正本。devflowは共通語彙のみ所有。 |
 
 ## 1. Central principle and non-equivalence
 
@@ -67,58 +67,62 @@ Sources: [Git refs REST](https://docs.github.com/en/rest/git/refs), [PR merge RE
 
 The generic taxonomy is a **projection** of existing operation-specific native statuses. Do NOT rewrite existing #384/#465 receipt enums in place or make a generic result discard their richer distinctions.
 
-## 5. Capability classes and approval model
+## 5. 能力分類・承認条件
 
-- READ_DATA: ordinary authenticated metadata access; no repository mutation; guard privacy and external compute/cost.
-- READ_EXECUTE: code/test/build/benchmark using a runner; token can be read-only, yet PR-origin code and compute resource are separately risk-classified.
-- REVERSIBLE_EFFECT: narrowly bounded Issue edits / scratch branch mutation / safe PR merge with reviewed actual effects and recovery evidence; applicable self-review and existing per-effect permissions may suffice under #439.
-- PRIVILEGED_EFFECT: action/permission/secret/source/safety-boundary mutation, arbitrary external execution, private-data exposure, or difficult-to-reverse destructive change. Separate explicit Human/security gates and distinct reviewers if actually justified.
-- RELEASE_EFFECT: external publishing/deploy/release; explicit user confirmation even where underlying Git operation seems reversible.
+| 分類 | 境界 |
+| --- | --- |
+| **READ_DATA** | 認証済みmetadataのread。repo変更はしないが、privacy/外部compute費用は別途検査。 |
+| **READ_EXECUTE** | test/build/benchmarkなどの計算実行。tokenがread-onlyでもPR由来codeとrunner資源の危険を評価。 |
+| **REVERSIBLE_EFFECT** | 限定Issue編集、scratch branch変更、安全なPR merge等。実際の変更と復旧根拠を審査し、#439上必要なreviewと既存権限を満たす場合のみ。独立reviewが不要な場合はself-review可。 |
+| **PRIVILEGED_EFFECT** | workflow/権限/secret/security境界、任意外部実行、Privateデータ露出、復旧困難な破壊。個別Human/security gateと必要な独立reviewを要する。 |
+| **RELEASE_EFFECT** | 外部公開・deploy・release。Git操作自体が復元可能でも明示ユーザー承認が必要。 |
 
-Review and Human approval are different questions: do not make the generic v0 design secretly relax existing G1 `write -> NEEDS_HUMAN`; if v2 approval policy is later adopted, update/review G1 independently with backward compatibility, grounded in #439 and a named effectful pilot. A provider/model self-review is never a distinct-system independent review.
+**ReviewとHuman承認は独立判定。** G1 v1のwrite→`NEEDS_HUMAN`をv0設計だけで緩和しない。v2移行には#439に従うG1個別review・互換性確認・指定effectのpilotが必要。同じmodel/providerのself-reviewは別systemの独立reviewではない。
 
-## 6. Integration interfaces, not code ownership transfer
+## 6. 接続先（既存実装の所有権は移さない）
 
-- #413 ingress/G1 may emit an **untrusted request** with a trusted catalog action ID, then invoke the shared planner/guard. Continue direct installed GitHub API for already supported simple edits; Issue-comment ingress only for specifically missing actions and fully reviewed commands.
-- #465 R1 read-only authenticated preview remains the operation-specific planner for artifact writeback. An adapter may translate its actual source-provenance/ZIP/target/dry-run report into generic PreflightEvidence, without modifying its verification algorithm or exposing a write-capable transport. The shared v0 planner must never bypass archive-specific checks.
-- #474 writer remains the **sole** effectful testapp owner if independently accepted. An adapter may translate a verified writer receipt into generic EffectReceipt. **No #487 dependency is allowed to block or unblock #474's existing protection/Human/reviewer gate**; do not merge or activate it from a generic contract.
-- execution-coordinator remains the unique agent claim and lease service. For workflows that operate on an agent-owned work item, the effect gate queries a fresh coordinator fence; for ordinary direct GitHub API operations, do not fabricate coordinator claims.
-- Repository-local trusted source/CI/policy and any immutable JO Caller pin remain authoritative. Always version adapter contracts; historical accepted runtime remains backward compatible.
+- **#413 G1:** trusted catalog ID付きの**未信頼request**だけをshared planner/guardへ渡す。既存の単純GitHub API操作は直接実行優先。Issue comment入口は未対応かつ個別review済み固定commandに限る。
+- **#465:** 受入済みread-only artifact previewの実source/provenance/ZIP/targetから`PreflightEvidence`へ変換。固有の検証算法を変更せず、writerを公開しない。
+- **#474:** 独立受入済みのnative writer receiptだけを`EffectReceipt`へ変換。#487を#474の既存保護・Human/Review gateの成立/解除条件にしない。
+- **execution-coordinator:** agent所有の仕事だけfresh fenceを照合。通常の直接GitHub API操作へ架空のclaimを要求しない。
+- **repository-local:** source/CI/policyとJO固定pinが優先。adapterはversion付きとし、歴史的受入版の互換性を守る。
 
 ## 7. Roadmap and independent acceptance
 
-A0 — **LIVE inventory completed** (see #487): map owners, interfaces, actual merged/unmerged SHA, risky API semantics. No code changes to #465 or #474.
+**A0 — LIVE inventory COMPLETE:** #487にowner、interface、merged/unmerged SHA、危険なAPI意味論を記録済み。#465/#474のコードは変更しない。
 
-A1 — Publish this **non-operative spec** in a new standalone doc PR, exact-head review and existing Required CI. Validate it against accepted #413 G1 and #439; documentation alone does not activate any trigger/permissions. Branch/source scope exclusively new spec doc.
+**A1 — 仕様書のみ：** この非稼働仕様を独立docs PRで公開し、exact-head Review・既存Required CIを通す。#413 G1・#439との整合を確認。変更範囲は新規仕様文書だけで、trigger・権限は有効化しない。
 
-A2 — In a separate task when the spec is accepted, build an offline-only generic plan/outcome **projection adapter** by importing existing exact parser/provenance/validator rather than forking writer code. Tests: forged actor/caller, stale SHA, wrong target, duplicate JSON keys, unexpected write effect, unsigned plan, permission misclassification, race/retry, missing head/CAS, timeout; README with verdicts. No network or live write.
+**A2 — 別タスク、offline-only：** 信頼済みparser・provenance・validatorをimportし、generic plan/outcomeの**表示用adapter**を構築する。writerを複製しない。テストは偽actor/caller、stale SHA、別target、JSON重複key、予期しないwrite、無署名plan、権限誤分類、競合/再試行、HEAD/CAS不足、timeout。READMEに合否を記録。通信・live書込なし。
 
-A3 — Only once #465/#474 owners can use it without collision: one data-only read adapter around accepted artifact preview, one outcome adapter around a separately accepted native writer receipt. Confirm no stale R1 code override; do NOT assume #474 privileged route active.
+**A3 — ownerとの非干渉確認後：** #465の受入済みartifact previewからread-only evidence adapterを1件、独立受入された#474 native writer receiptからoutcome adapterを1件。古いR1の上書きや、#474の特権書込経路を有効化したとみなすことは禁止。
 
-A4 — Choose a **concrete**, low-impact and separately authorized Public effect already available through the connected GitHub API. Demonstrate read→plan→last-moment fresh authorization→bounded effect→readback→reconcile, including negative and replay cases; inspect target-specific branch/Issue atomicity before selecting. Not a pretext for a test write on #474's blocked repo.
+**A4 — 別途許可された実操作：** 接続済みGitHub APIで可能な影響の小さい具体的Public effectを選び、read→plan→実行直前の権限/状態再取得→限定effect→readback→reconcileと負例・replayを実証。対象がPR/head/refかIssueかに応じて原子的更新保証を評価する。HOLD中の#474で試験書込しない。
 
-A5 — Staged opt-in Public adoption where useful. Evaluate whether a single dispatcher workflow is actually beneficial; avoid per-command workflow proliferation without trading away job-level least privilege.
+**A5 — 必要なPublic範囲だけopt-in展開：** 単一dispatcher workflowが本当に有効か検証し、command毎のworkflow乱立とjob別最小権限の両方を考慮する。
 
-A6 — Private or privileged effects only with fresh actual runner/billing/authorization evidence and named approvals. STOP if A0–A5 already meet user goal.
+**A6 — Private・特権操作：** runner/課金/認可の現行実証と対象を特定したHuman承認がある場合のみ。A0〜A5で目的達成なら**STOP**。
 
-**A1 acceptance means specification only.** It neither accepts a generalized executor, reusable authorization token, GitHub-hosted Private runner, expanded target allowlist, or multi-repository privileged write. The next stage must be separately scoped and evaluated against current owner issues and verified implementation states.
+**段階の独立性：** A1は**非稼働仕様の受入だけ**。汎用executor、共通認可token、GitHub-hosted Private runner、allowlist拡大、複数repoの特権writerは承認されない。次の段階はlive owner・実装・証拠を確認して個別判断する。
 
 ## 8. Required negative / failure-mode matrix
 
-1. Actor from comment/manifest != trusted GitHub actor; forged runner environment; wrong original Issue owner.
-2. Unknown command/action, out-of-catalog target, arbitrary shell/ref/workflow, malformed or duplicate-key JSON.
-3. Trusted catalog or reviewed workflow SHA changed; target repository/PR/source mismatch.
-4. Preflight made no actual live GET, weak head proof, or user asks to skip read.
-5. Plan same text but different repository, SHA, run/attempt, recipe, body bytes or actor.
-6. Concurrent PR-head edit after planning; target branch moved; CI changed; coordinator lease expired.
-7. Token with broad repo rights but requested operation exceeds finite effect/path allowlist.
-8. Untrusted PR artifact/ZIP contains duplicate/extra files, link, traversal, decompression bomb, digest mismatch; never evaluate its code under writer credentials.
-9. False success from workflow `SKIPPED`, API request acceptance, zero exit code or unaudited artifact existence.
-10. Timeout after mutation with no verified receipt; no blind second write or optimistic success.
-11. Caller in private or privileged route whose actual runner/security capability has not been proven.
-12. Simultaneous writers on a Git ref with different descendants; force:false fast-forward vs missing atomic expected-old-ref argument.
-13. Separate claim lease already held by another agent; no duplicate new authority in #487.
-14. Feature flag/catalog v2 rollout mistakes: accepted JO/G1 v1 operation must retain its existing fail-closed semantics.
+以下の14ケースを区別してfail-closed検証する。正常入力の成功だけでは受入しない。
+
+1. Issueコメント/manifestが自称するactorとGitHub認証actorが異なる、runner環境偽造、owner Issue取り違え。
+2. 未登録action・対象外resource、任意shell/ref/workflow、壊れたJSON・重複key。
+3. 信頼済みcatalog/workflow SHAが変更、repo・PR・source identity不一致。
+4. live GETのないpreflight、弱いHEAD証明、事前read省略要求。
+5. 同じplan文面でもrepo/SHA/run・attempt/recipe/body bytes/actorが異なるreplay。
+6. 計画後のPR HEAD/対象branch/CI変化、coordinator lease失効。
+7. Tokenには広い権限があるが実操作が許可済みeffect/path集合を超える。
+8. PR由来ZIP/artifactの重複・追加path、link/traversal、zip bomb、digest不一致。writer権限で中のコードを実行しない。
+9. workflow `SKIPPED`、API受付、exit 0、未監査artifactを偽の成功として扱う。
+10. effect実行後のtimeout・receipt不明を、未検証の成功や盲目的再書込に変える。
+11. Private/特権callerの実runner・security capabilityを未確認のまま通す。
+12. 同じGit refへの複数writer・異なる子commit、`force:false`のfast-forwardを原子的expected-old-ref CASと混同。
+13. 別agentがcoordinator claim/leaseを保持中なのに#487に第二の所有権を作る。
+14. Feature flag/catalog v2移行時に既存JO/G1 v1のfail-closed意味を変える。
 
 ## 9. Design decision / global replan
 
