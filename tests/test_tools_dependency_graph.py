@@ -118,6 +118,10 @@ class ToolsDependencyGraphTests(unittest.TestCase):
     def test_kaep_agent_projection_reuses_repository_validation(self) -> None:
         projection = self.graph["kaep_agent_api_projection"]
         self.assertIn("kaep_repository_validation", projection)
+
+    def test_kaep_public_locator_reuses_repository_validation(self) -> None:
+        locator = self.graph["kaep_public_locator_cli"]
+        self.assertIn("kaep_repository_validation", locator)
         self.assertIn(
             "kaep_repository_validation",
             self.graph["kaep_live_union_cli"],

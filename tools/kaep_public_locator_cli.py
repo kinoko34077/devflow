@@ -9,22 +9,24 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
-import re
 import subprocess
 import sys
 from typing import Any, Callable
 
 from tools.kaep_mailbox_codec import InvalidMessage, MARKER, fail
 from tools.kaep_live_delta_view import API_ISSUE
+from tools.kaep_repository_validation import REPOSITORY
 
 OWNER = "kinoko34077"
+# Compatibility import for the incremental scanner; the shared validator owns
+# the pattern and this alias preserves the existing public module surface.
+REPO_NAME = REPOSITORY
 PAGE_SIZE = 100
 MAX_REPO_PAGES = 5
 MAX_COMMENT_PAGES = 100
 MAX_API_CALLS = 2000
 MAX_LOCATORS = 5000
 MAX_RESPONSE_BYTES = 4_000_000
-REPO_NAME = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
 
 
 
@@ -67,7 +69,7 @@ def _validated_public_repository_page(data: Any) -> list[str]:
             fail("INVALID_PUBLIC_REPOSITORY_PAGE")
         full = item.get("full_name")
         account = item.get("owner")
-        if (type(full) is not str or not REPO_NAME.fullmatch(full)
+        if (type(full) is not str or not REPOSITORY.fullmatch(full)
                 or type(account) is not dict
                 or account.get("id") != 79015263
                 or account.get("login") != OWNER
