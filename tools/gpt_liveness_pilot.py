@@ -35,7 +35,7 @@ SCHEMA = "gpt.liveness.v0.1"
 # Compatibility alias; the canonical opaque-ID contract lives with the generators.
 ID = OPAQUE_ID
 # Compatibility-preserving syntax for GPT-liveness challenge nonces.
-NONCE = re.compile(r"[0-9a-f]{32}\\Z")
+NONCE = re.compile(r"[0-9a-f]{32}\Z")
 # Compatibility alias; the canonical human-login contract lives in the codec.
 ACTOR = ACTOR_LOGIN
 MAX_ENROLLMENT = timedelta(hours=2)
