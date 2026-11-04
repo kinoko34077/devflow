@@ -26,60 +26,15 @@ The last two axes were added after actual #752 R1/R2 code-only vs runtime confus
 
 `UNVERIFIED` for FIELD_ACCEPTANCE or PUBLIC_ENTRY is an absence of recorded proof, **not a contradictory failure**; the comparator returns UNKNOWN unless both sides have affirmative, same-scope observations. The caller must still independently check stage/version equivalence and event chronology. The v1 comparator enforces read-order and freshness bounds but does not prove event causality, GitHub actor identity, review authenticity, actual public URL health or effective product acceptance. A field name or GitHub-shaped URL is not proof of verified provenance.
 
-## M2 bounded native-read pilot (2026-10-22; accepted in one exact Public scope)
+## M2 bounded native-read pilot（2026-10-22、単一Public PR限定）
 
-The production-authority gap is **not** closed by a pure comparator. The
-first bounded adapter lives at `tools/control_semantic_pilot.py`; it calls the
-existing owner-authenticated `gh api` CLI with only two fixed GET paths:
-`devflow/issues/705` and `kinotch-editor-platform/pulls/14`. This pilot is
-intentionally **one public repository and one PR** and is not a fleet crawler,
-GitHub App, new credential holder, scheduler, auto-writer or source of claims.
+M1 comparatorだけでは、入力が現実の認証済みsourceであることを証明できない。既存`tools/control_semantic_pilot.py`は、既存認証`gh api`を使いControl #705と`kinotch-editor-platform` PR #14の**2本の固定GET**を行い、CURRENT `## Next Action`にある単一のcanonical exact PR linkと明示stageを、実PRのidentity/base/head・取得順序と照合する。PRの`MERGED`／`CLOSED_UNMERGED`は実GitHub終端属性で判定する一方、`OPEN`だけでreview readinessは証明できない。曖昧な文面・複数claim・歴史節・認証/GET失敗・入力不一致は`UNKNOWN`。M1 `compare_claim`を再利用し、`POTENTIAL_MISMATCH`は候補であって自動修正指示ではない。
 
-Source truth is created after successful native reads, not accepted as a
-caller-provided JSON flag. It verifies exact open Control identity, one
-current `## Next Action` claim with a canonical exact PR link and explicit
-stage token, exact owning PR identity/base/head and result chronology.
-`MERGED` and `CLOSED_UNMERGED` are determined from GitHub's PR terminal
-fields. An open PR alone **does not prove review readiness**, so the adapter
-reports `UNKNOWN`; ambiguous prose, multiple claims, historical sections,
-unexpected fields, failed/unauthenticated reads and changing source shapes
-also return `UNKNOWN` without effect. The existing
-`compare_claim` remains the single comparator and returns a **candidate**
-`POTENTIAL_MISMATCH`, never a Control mutation instruction.
+実行は承認済みCLI環境の`python -m tools.control_semantic_pilot`。URL・観測時刻・PR HEADのsanitized出力のみとし、token/Issue原文を公開しない。合成REST fixtureによる単体テストだけでlive GET成立と扱わない。
 
-Run once, explicitly, from an existing authorized CLI session:
-`python -m tools.control_semantic_pilot`.
-Output is a sanitized structured result with exact source URLs, observed
-times and PR HEAD SHA; no raw Issue body or authentication credential is
-printed. Unit tests substitute the subprocess with synthetic REST shapes and
-do **not** alone count as a real authenticated GET pilot. The real
-one-shot and post-main Required CI have been independently completed:
+**当時の実証：** [PR #768](https://github.com/kinoko34077/devflow/pull/768)はmain `f7453ce4e018f8a834943c33fe31b3ab3df397a1`にmerge、exact-head Required [#39639341465](https://github.com/kinoko34077/devflow/actions/runs/39639341465) 2,093 PASS（14追加）、Formal Review #5603251343／Readiness [#39639341473 attempt2](https://github.com/kinoko34077/devflow/actions/runs/39639341473)／post-main Required [#39639606165](https://github.com/kinoko34077/devflow/actions/runs/39639606165)成功。既存認証のowner PCで、2026-10-21T17:00:16.629669ZのControl GETと17:00:19.125984ZのPR GETから`MERGED=MERGED/ALIGNED/exit0`を確認（PR HEAD `f6ef6f9980a80e5fbfa881db766f8231d2bb3e38`、一時ファイル清掃）。[受入証拠](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6321748478)。
 
-- [devflow PR #768](https://github.com/kinoko34077/devflow/pull/768)
-  merged at exact main `f7453ce4e018f8a834943c33fe31b3ab3df397a1`.
-- Exact-head [Required #39639341465](https://github.com/kinoko34077/devflow/actions/runs/39639341465)
-  SUCCESS, 2,093 tests including 14 new tests; native Formal Review
-  #5603251343 and readiness [#39639341473 attempt 2](https://github.com/kinoko34077/devflow/actions/runs/39639341473) SUCCESS.
-- [Post-main Required #39639606165](https://github.com/kinoko34077/devflow/actions/runs/39639606165)
-  SUCCESS, authenticated owner CLI query.
-- Real owner-PC existing authenticated `gh api` two-GET execution
-  of the merged Python module returned `ALIGNED / SAME_SCOPED_STAGE`
-  for Control #705 `MERGED` and PR #14 `MERGED`, exact
-  PR head `f6ef6f9980a80e5fbfa881db766f8231d2bb3e38`.
-  Direct request times 2026-10-21T17:00:16.629669+00:00 and
-  2026-10-21T17:00:19.125984+00:00; process exit 0, transient
-  files removed. [Owning acceptance #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6321748478).
-  This evidence is confined to this one Public PR and does
-  not prove a live detector for arbitrary Controls.
-The static target/grammar intentionally avoids silently inferring arbitrary
-Control prose. Extending to a different PR requires its own scope and
-source-backed parser contract rather than guessing from status keywords.
-
-This *pilot adapter* does not establish M2 comprehensive producer-owned
-update prevention, M3 projection signals, M4 fleet coverage or durable
-cross-repository automatically triggered detection. Results must be
-correlated with an actual current Control text snapshot before a producer
-edits only their directly affected fields, with independent readback.
+**受入境界：** この1 Public PRの認証付き観測であり、他Controlへの自然言語解析、常時検出、producer所有の更新防止、M3 projection、M4 fleet coverage、特権writer、schedulerや追加credentialを実装したものではない。拡張は別の正確な対象scope/parse契約と独立証拠を要する。
 
 ## Historical M0 observed cases (as of 2026-10-19; non-normative, not live current state)
 
@@ -135,135 +90,25 @@ It does not install a webhook, modify branch protection, update an Issue,
 or make a scheduler. A strict UNKNOWN is a reason to inspect the affected
 canonical surfaces, not permission to mark failure/complete.
 
-## M2 devflow-only automatic merged-PR event pilot (accepted for exact current claims)
+## M2 devflow-only merged-PR event（単一Controlの実証）
 
-The repository-local `.github/workflows/control-semantic-postmerge.yml`
-subscribes to GitHub's native `pull_request.closed` event only in **devflow**
-for a genuinely `merged=true` PR, using the existing read-only default
-GitHub Actions token (`contents:read`, `issues:read`,
-`pull-requests:read`). It invokes `tools/control_semantic_postmerge_event.py`
-from the now-current main branch. This adapter reuses the previously
-accepted `check_pr_transition_once` and `compare_claim` functions rather
-than creating a second comparator or cross-repository cache. No webhook
-server, periodic process, secret, broad permission, Control writer, or
-automatic pull-request merger is introduced.
+`.github/workflows/control-semantic-postmerge.yml`は**devflow内のみ**の`pull_request.closed && merged=true`を受信し、既存read-only `tools/control_semantic_postmerge_event.py`→`check_pr_transition_once`→M1 `compare_claim`へ渡す。権限は`contents:read`／`issues:read`／`pull-requests:read`のみ。認証済みeventのrepo/PR identity、Control #16のcurrent `## Next Action`と**そのPRの正確なリンク・stage**を照合する。ControlもPRも書かず、検査候補とsanitized結果をrun summaryへ記録する。
 
-- Only a trusted exact devflow PR event and exact open Control #16 current
-  `## Next Action` can be checked.
-- A canonical linked claim matching the *triggering PR* that remains OPEN
-  after the actual merge gives `POTENTIAL_MISMATCH`, the CI step exits 2
-  and a sanitized report appears in the **run summary**; a failed gate is
-  a producer reconciliation signal, not a rollback of the merged PR.
-- A canonical claim already MERGED gives `ALIGNED` / exit 0.
-- No *exact current PR link or scoped mention* gives `NOT_APPLICABLE` / exit 0:
-  **not** an endorsement that the Control contains no drift. A loose exact-number
-  PR mention without its canonical link, or an explicit target link with
-  incomplete/ambiguous stage, gives `UNKNOWN` / exit 3; similarly numbered
-  PRs must not be mistaken for the triggering PR.
-- Unexpected repository, bad event identity, missing canonical source,
-  API failures and malformed input all fail closed with `UNKNOWN`.
+- 実PRはMERGEDだがControlの対象claimがOPENなら`POTENTIAL_MISMATCH/exit2`、一致するMERGEDなら`ALIGNED/exit0`。
+- 正確な現行対象PR link/言及がない場合は`NOT_APPLICABLE/exit0`（**不整合不存在の証明ではない**）。同番号の曖昧な言及、stage欠落/多義は`UNKNOWN/exit3`。別repo・壊れたevent identity・認証不能/情報不足はfail-closed `UNKNOWN`。
+- 判定はmerge rollbackや自動Control更新ではなく、[#251](https://github.com/kinoko34077/devflow/issues/251)に沿い**producerが影響箇所を確認して修正・readbackする責務**。他repoのPR、未知の旧自然文、製品の公開/実機受入、fleet-wide event coverageは含まれない。
 
-The event pilot does **not** automatically correct a Control or claim
-every merged PR changed the repository-wide Next Action. A producer still
-owns the targeted repair and readback under #251. It cannot cover PRs
-in other repositories without their own authorized event routing and
-matching owner Control. It does not verify product deployment/physical
-acceptance or general semantics of unstructured old prose.
+**実際の正負例：** [PR #776](https://github.com/kinoko34077/devflow/pull/776) merge `af280d0c9d6e23b31d31cdee949a030380240cf9`、Required [#39695059094](https://github.com/kinoko34077/devflow/actions/runs/39695059094) 2,132 PASS、post-main [#39695388127](https://github.com/kinoko34077/devflow/actions/runs/39695388127)成功。実自動[event #39695388458](https://github.com/kinoko34077/devflow/actions/runs/39695388458)がControl #16の古いPR #776 OPENをexit2で検出。ownerが該当stageをMERGEDへ修正後、同run再試行attempt2成功。[記録](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6329124725)。一方docs [PR #777](https://github.com/kinoko34077/devflow/pull/777)の直接PR紐付けがない実[event #39696030967](https://github.com/kinoko34077/devflow/actions/runs/39696030967)は成功しても、`NOT_APPLICABLE`相当の限定負例であり`ALIGNED`と認定しない。一般化した自動修復・M3/M4受入は未達。
 
-**Accepted first live event:** [devflow PR #776](https://github.com/kinoko34077/devflow/pull/776)
-merged at `af280d0c9d6e23b31d31cdee949a030380240cf9`; Required
-[#39695059094](https://github.com/kinoko34077/devflow/actions/runs/39695059094)
-passed 2,132 tests, formal current-head Review/readiness accepted, and
-post-main Required [#39695388127](https://github.com/kinoko34077/devflow/actions/runs/39695388127)
-succeeded. A **real automatically GitHub-triggered**
-[pull_request run #39695388458](https://github.com/kinoko34077/devflow/actions/runs/39695388458)
-detected the actual stale Control #16 PR #776 `OPEN` claim after merge
-and failed exit 2. The producing worker then repaired only its own
-Control #16 stage to `MERGED` and reran the failed run: attempt 2
-**SUCCESS**. Both the actual triggering event and its repair recovery
-were independently observed. Durable owner receipt:
-[devflow #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6329124725).
+## M2 PR直結参照がない場合のowner-linked review（devflow限定）
 
-**Still unaccepted:** an event with no explicit current PR reference has
-only offline `NOT_APPLICABLE` tests until an actual run confirms it;
-this branch's normal documentation-only PR will provide a bounded native
-negative control. Neither a missing PR reference nor a successful workflow
-means all semantic claims are consistent. Other repositories do not inherit
-this workflow, and M2 cross-repository propagation, M3, M4 remain OPEN.
-No automatic Control writeback has been authorized.
+PRをControl #16の現行Next Actionへ明示していなくても、既存Work Orderに関係するmergeはあり得る。`NOT_APPLICABLE`を不整合なしと誤解しないため、同じ`tools/control_semantic_postmerge_event.py`がPR templateの**1件の実効所有宣言**（`- Owning-Issue: #726`またはcanonical URL、従来の非bullet `Owning-Issue: URL`も対応）を解析する。
 
-## M2 bounded missing-PR anchor review (2026-10-22; live event accepted in devflow only)
+- 認証付きGETで**実merge PR・owning Issue・現在Controlのowner参照**が同一対象であることを確認できた場合にのみ、`RECONCILIATION_REVIEW_REQUIRED/exit4`。これは**関連を調べる義務の発見**であり、Controlの記述が誤りと確定したわけでもIssueのclose/自動修正の許可でもない。
+- 宣言空欄は`NOT_APPLICABLE`（関連なしの保証ではない）、複数の実効宣言・不正・矛盾・GET不能/Identity不一致は`UNKNOWN/exit3`。コード中の引用・inline proseは所有欄ではない。`- Closes #N`は本当にmergeでIssueを終了させる場合に限り別の意味を持ち、単なる所有宣言の代用にはしない。
+- producerは、実際の受入済み変更と対象ControlのNext Actionが対応するか再照合し、**必要がある箇所だけ**直す。単にこのfieldがあるという理由で、全PRをControlへ加える運用にはしない。別のparser/comparator/書込権限・token・runnerは追加しない。
 
-The devflow-only native merged-PR event checker previously emitted
-`NOT_APPLICABLE` when no canonical current PR link existed in Control #16.
-This is not proof of non-impact: a PR can belong to an *already tracked*
-Work Order even when its number has not yet entered Next Action.
-
-To avoid introducing a second comparator or a general language heuristic, the
-existing `tools/control_semantic_postmerge_event.py` optionally follows
-a **single exact owner declaration** in the *merged* PR body:
-
-`Owning-Issue: https://github.com/kinoko34077/devflow/issues/726`
-
-Only when the actual owning PR and owner Issue are independently obtained
-via read-only native GitHub GET, correctly identified and open, and the same
-owner Issue is mentioned in Control #16 **current** Next Action, does the
-checker emit `RECONCILIATION_REVIEW_REQUIRED` (exit 4). It is a *producer
-review obligation*, **NOT** a proven stale Control, not an Issue mutation,
-not a work-complete status or a merge rollback. Missing marker → `NOT_APPLICABLE`,
-not `ALIGNED`; malformed/ambiguous marker, untrusted owner, missing current
-owner reference, invalid response or failed GET → `UNKNOWN` (exit 3).
-Exact current PR stage link continues to use the original M1 comparator.
-Never infer owner scope from a similarly numbered Issue or broad prose.
-
-**Existing input contract (devflow only):** author one owner reference in the
-existing PR template's `- Owning-Issue:` field under Implementer Provenance:
-`- Owning-Issue: #726` or the canonical full URL. The earlier unbulleted
-`Owning-Issue: <canonical URL>` remains backward compatible. A blank
-template field is unclaimed/not applicable, never proof that no current
-Control was affected. More than one populated declaration, invalid value,
-wrong Issue identity or failed native GET remains UNKNOWN. Prose and inline
-code quoting the field name do not count as extra declarations. Do not
-create an additional PR metadata field, and do not use `Closes #726` as a
-substitute unless the Work Order should **actually close on merge**.
-
-The owner marker is author-supplied and not an authority grant. It only
-raises a review signal, which requires the producer to compare actual
-accepted scope against the Control's Current Action and update only truly
-stale surfaces. It does not require adding every merged PR to a Control
-without a substantive reason. No privileged writeback, GitHub App, new
-token, additional repository runner, or background process.
-
-**Actual native acceptance evidence:** [PR #778](https://github.com/kinoko34077/devflow/pull/778)
-introduced the owner marker but its first real automatic
-[run #39706303305](https://github.com/kinoko34077/devflow/actions/runs/39706303305)
-exited 3: a quoted inline marker was miscounted as a second owner declaration.
-This first failed pilot is **not accepted** as proof of exit 4. The real
-defect was repaired in [PR #780](https://github.com/kinoko34077/devflow/pull/780),
-merged as `986884445b0e6f8fcbe6d24350200dd818d9b5ab`, with **2,137
-passing tests**, exact-head review/readiness, and
-[post-main Required #39706669943](https://github.com/kinoko34077/devflow/actions/runs/39706669943)
-SUCCESS. The fix counts only uniquely anchored complete declaration lines,
-including CRLF, rather than prose quotations.
-
-The actual unprompted GitHub
-[merged-PR event #39706669809](https://github.com/kinoko34077/devflow/actions/runs/39706669809)
-for #780, initially with no direct Control #16 PR #780 anchor but an
-explicit owner marker and current Control #726 work reference,
-**failed with exit 4** (producer reconciliation review candidate).
-The producer independently checked actual merge main, corrected only the
-meaningfully affected Control #16 current stage to PR #780 MERGED, and
-reran the failed event job: **attempt 2 SUCCESS**. The raw job step-summary
-JSON was not fetched; code's one-to-one exit4 status mapping and native job
-exit evidence support this bounded finding.
-
-This accepts one devflow-only owner-link trigger and producer repair,
-**not** universal provenance of owner relevance or unattended writeback.
-A PR lacking the optional marker still returns `NOT_APPLICABLE` without
-validating absence of semantic drift; do not distribute the partial
-detector broadly and claim complete fleet M2. Owning
-[Issue #726](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6330598972)
-holds the exact evidence and remaining gates.
+**修正と実証：** 最初の[PR #778](https://github.com/kinoko34077/devflow/pull/778)に対する実自動[event #39706303305](https://github.com/kinoko34077/devflow/actions/runs/39706303305)は引用`Owning-Issue`を2番目の宣言と誤読してexit3であり、exit4の受入例ではない。[PR #780](https://github.com/kinoko34077/devflow/pull/780)が完全な行先頭の所有宣言（CRLF含む）のみを数えるよう修正。main `986884445b0e6f8fcbe6d24350200dd818d9b5ab`、2,137件のテスト・post-main [#39706669943](https://github.com/kinoko34077/devflow/actions/runs/39706669943)成功。実[event #39706669809](https://github.com/kinoko34077/devflow/actions/runs/39706669809)はPR #780の直接stageがない状態でもowner #726への言及からexit4となり、producerが関連するControl #16のPR #780 stageをMERGEDへ修正、attempt2成功。raw step-summary JSONは未取得であり、job exitとコードの対応以上は断定しない。[詳細](https://github.com/kinoko34077/devflow/issues/726#issuecomment-6330598972)。devflow限定の実証で、全repo/所有関係/自動修復の一般受入ではない。
 
 ## M2 owner omission coverage: existing GitHub PR closing keyword (bounded; pending actual live event)
 
