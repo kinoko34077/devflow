@@ -652,7 +652,7 @@ class OwnerIssueControlReadOnlyTests(unittest.TestCase):
             with self.subTest(reference=reference):
                 control, _, _, lookup = self.fixture()
                 control["body"] = control["body"].replace(
-                    "\\n## Next Action", f"\\n- {reference} is **OPEN**\\n## Next Action"
+                    "\n## Next Action", f"\n- {reference} is **OPEN**\n## Next Action"
                 )
                 with patch.object(target.pilot, "_read_json", side_effect=lookup):
                     result = target.check_owner_transition_once(
