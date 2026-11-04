@@ -53,19 +53,19 @@ Status: **PROPOSED / non-operative cross-operation design** (2026-10-12). Owner:
 
 根拠：[Git参照REST](https://docs.github.com/en/rest/git/refs)、[PRマージREST](https://docs.github.com/en/rest/pulls/pulls)、#384の書戻し受入記録。変更直前のGETも、確認時点と変更時点の競合を完全には消せない。**全対象をCAS対応と呼んだり、`force:false`を旧値一致の原子的更新として扱ったりしない。**
 
-## 4. Proposed outcome taxonomy and mapping
+## 4. 共通の結果分類と既存実装への対応
 
-| Generic outcome | Meaning | Existing adapter caveat |
-| --- | --- | --- |
-| COMMITTED | Verified allowed effect and required postconditions | Must inspect authenticated target output/receipt, not infer from command request accepted or runner success alone |
-| NO_OP | Same desired state was already verified; no side effects | Requires actual current-state observation and idempotency proof |
-| REJECTED | Invalid/untrusted source or policy/input disallowed | A skipped workflow job is a guard refusal, not proof of operation success |
-| STALE | Observed target/ref/CI/claim snapshot no longer matches | No automatic stale-plan replay; fresh read and replan |
-| UNKNOWN_RECONCILE | Timeout or ambiguous external result | Read/lookup by request and run ID first; no blind duplicate mutation |
-| VERIFY_FAILED | Effect possibly ran but final conditions not proved | Preserve evidence, stop/contain and evaluate bounded compensating/revert PR |
-| HUMAN_GATE | Actually required named Human/security step missing | No conditional approval inferred from user-submitted comment or G1 ADMITTED state |
+| 結果 | 意味・必須の対応 |
+| --- | --- |
+| **COMMITTED** | 許可された変更と必要な事後条件を、認証済みの対象・検証記録から確認済み。依頼受付や実行環境の成功だけでは不足。 |
+| **NO_OP** | 目標状態を実際に再取得し、副作用がなく重複実行を防止できていると確認済み。 |
+| **REJECTED** | 不正なソース、方針・入力違反で拒否。ワークフローのスキップは成功ではなく、処理の拒否。 |
+| **STALE** | 対象・Git参照・CI・占有状態が観測後に変化。旧計画を自動再利用せず、再取得して計画を作り直す。 |
+| **UNKNOWN_RECONCILE** | 時間切れや外部処理の結果不明。依頼ID・実行IDで照合してから次の処理を決定し、盲目的な二重更新をしない。 |
+| **VERIFY_FAILED** | 変更が実行された可能性はあるが事後条件を証明できない。証拠を保持して停止・封じ込めし、必要なら限定した補償や取り消しPRを検討する。 |
+| **HUMAN_GATE** | 必須の明示的人間承認・安全性確認が不足。ユーザー投稿コメントやG1の`ADMITTED`を承認とみなさない。 |
 
-The generic taxonomy is a **projection** of existing operation-specific native statuses. Do NOT rewrite existing #384/#465 receipt enums in place or make a generic result discard their richer distinctions.
+この結果分類は、**既存の操作別結果を共通表示するためのもの**。#384/#465固有の結果値を直接置き換えず、個別の細かい区別を失わせない。
 
 ## 5. 能力分類・承認条件
 
