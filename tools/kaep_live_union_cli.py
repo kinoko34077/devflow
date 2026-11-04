@@ -17,8 +17,8 @@ from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
-from tools.kaep_mailbox_codec import RECIPIENTS, fail
-from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
+from tools.kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, fail
+from tools.kaep_repository_validation import REPOSITORY
 
 MAX_SOURCES = 40
 MAX_PUBLIC_MARKER_BYTES = 2_000_000
