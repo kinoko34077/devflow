@@ -606,6 +606,33 @@ class OwnerIssueControlReadOnlyTests(unittest.TestCase):
             result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
         self.assertEqual(result["status"], "NOT_APPLICABLE")
 
+    def test_noncanonical_qualified_or_bare_owner_reference_requires_review(self):
+        for reference in (
+            "dev_agent#157",
+            "kinoko34077/dev_agent#157",
+            f"https://github.com/{self.OWNER_REPO}/issues/{self.OWNER}",
+        ):
+            with self.subTest(reference=reference):
+                control, _, _, lookup = self.fixture(reference=False)
+                control["body"] = control["body"].replace(
+                    "- unrelated task", f"- {reference} is **OPEN**"
+                )
+                with patch.object(target.pilot, "_read_json", side_effect=lookup):
+                    result = target.check_owner_transition_once(
+                        self.OWNER_REPO, self.OWNER
+                    )
+                self.assertEqual(result["status"], "RECONCILIATION_REVIEW_REQUIRED")
+                self.assertEqual(result["reason"], "NONCANONICAL_OWNER_CLAIM")
+
+    def test_noncanonical_reference_does_not_match_other_issue(self):
+        control, _, _, lookup = self.fixture(reference=False)
+        control["body"] = control["body"].replace(
+            "- unrelated task", "- dev_agent#1570 is **OPEN**"
+        )
+        with patch.object(target.pilot, "_read_json", side_effect=lookup):
+            result = target.check_owner_transition_once(self.OWNER_REPO, self.OWNER)
+        self.assertEqual(result["status"], "NOT_APPLICABLE")
+
     def test_foreign_scope_rejected_without_source_read(self):
         with patch.object(target.pilot, "_read_json") as read:
             for repository, number, control in (
