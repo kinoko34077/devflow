@@ -15,7 +15,8 @@ import sys
 from typing import Any, Callable
 
 from tools import kaep_issue_search_view as search
-from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
+from tools.kaep_mailbox_codec import InvalidMessage, MARKER
+from tools.kaep_repository_validation import REPOSITORY
 
 MAX_REPOSITORIES = 3
 MAX_WINDOW = 100
