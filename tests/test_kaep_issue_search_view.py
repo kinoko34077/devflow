@@ -5,10 +5,21 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import MARKER, encode_comment
+from tools.kaep_mailbox_codec import (
+    MARKER,
+    RECIPIENTS,
+    RECIPIENT_ORDER,
+    encode_comment,
+)
 from tools import agent_inbox
 from tools.kaep_request_sender import make_request
-from tools.kaep_issue_search_view import build_search_list, to_markdown, machine_json, console_text
+from tools.kaep_issue_search_view import (
+    RECIPIENTS as SEARCH_RECIPIENTS,
+    build_search_list,
+    to_markdown,
+    machine_json,
+    console_text,
+)
 
 OWNER = "kinoko34077"
 DEV = "kinoko34077/devflow"
@@ -60,6 +71,10 @@ def comment(cid, msg, actor=OWNER):
 
 
 class SearchListTests(unittest.TestCase):
+    def test_recipient_display_order_has_one_codec_owner(self):
+        self.assertEqual(set(RECIPIENT_ORDER), RECIPIENTS)
+        self.assertEqual(SEARCH_RECIPIENTS, RECIPIENT_ORDER)
+
     def run_view(self, repositories, source_issues, source_comments, search=None,
                  *, max_candidates=40, recipient="claude-code"):
         queries = search if search is not None else {
