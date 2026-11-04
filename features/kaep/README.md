@@ -19,6 +19,10 @@ documents listed in the manifest. The result is read-only observation. An empty
 or filtered result, `PARTIAL_UNKNOWN`, `INCOMPLETE`, or `BLOCKED` result is not
 evidence that no work exists and is not execution authority.
 
+- Semantic checklist: actor, trigger, action, exception, exit status, authority
+  boundary (including Claim), and source owner.
+- Source owner: `kinoko34077/devflow#531`.
+
 ## discovery
 
 Use when an already-running agent needs bounded source-candidate discovery.
@@ -27,12 +31,25 @@ the original Issue, actor, recipient, nonce, reply chain, current head, and
 owning Control before treating a candidate as relevant. A pointer or JSON
 record is not a Claim.
 
+The explicit `--response-format agent-api` output is a same-run redacted
+projection of the strict union read. Its implementation and characterization
+tests are indexed with this route; it is not a hosted API or an authority
+boundary.
+
+- Semantic checklist: actor, trigger, action, exception, exit status, authority
+  boundary (including Claim), and source owner.
+- Source owner: `kinoko34077/devflow#680`.
+
 ## send
 
 Use when reviewing or changing authorized send/reply code. Start at the KAEP
 protocol, send responsibility document, and wire schema, then inspect the
 listed implementation and tests. Do not infer permission or authorization
 from this route; the live owner Issue and current repository policy decide it.
+
+- Semantic checklist: actor, trigger, action, exception, exit status, authority
+  boundary (including Claim), and source owner.
+- Source owner: `kinoko34077/devflow#503`.
 
 ## audit
 
@@ -41,12 +58,22 @@ verification and discovery. The audit tool and its tests are read-only
 evidence. They do not establish complete source coverage, current head
 freshness, recipient pickup, Claim, or permission.
 
+- Semantic checklist: actor, trigger, action, exception, exit status, authority
+  boundary (including Claim), and source owner.
+- Source owners: `kinoko34077/devflow#503`, `kinoko34077/devflow#531`,
+  `kinoko34077/devflow#680`.
+
 ## history
 
 Use when investigating prior incidents, acceptance, or migration evidence.
 The live owner Issues (`devflow#503`, `#531`, and `#680`) and their linked
 PR/CI/history records are the source of truth. Historical text is not copied
 into this entry and is never silently promoted to current state.
+
+- Semantic checklist: actor, trigger, action, exception, exit status, authority
+  boundary (including Claim), and source owner.
+- Source owners: `kinoko34077/devflow#503`, `kinoko34077/devflow#531`,
+  `kinoko34077/devflow#680`.
 
 ## Safety and ownership
 

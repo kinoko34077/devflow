@@ -1,6 +1,7 @@
 """KAEP M1 reply preflight/explicit-send tests; network is mocked."""
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from tools import kaep_reply_sender
 from tools.kaep_mailbox_codec import InvalidMessage, encode_comment, fingerprint, read_mailbox
 from tools.kaep_reply_sender import (
     FIXED_ACK, make_reply, post_comment, send_reply, main,
@@ -53,6 +55,18 @@ def build(source=None, **kwargs):
 
 
 class ReplyContractTests(unittest.TestCase):
+    def test_reply_roles_use_codec_recipient_set(self):
+        source = Path(kaep_reply_sender.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(kaep_reply_sender.__file__))
+        codec_imports = {
+            alias.name
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module == "tools.kaep_mailbox_codec")
+            for alias in node.names
+        }
+        self.assertIn("RECIPIENTS", codec_imports)
+
     def test_sender_preflight_decodes_each_issue_mailbox_once(self):
         source = pages([comment(11, parent())])
         with patch("tools.kaep_mailbox_support.read_mailbox",

@@ -1,7 +1,7 @@
 # Repository Bootstrap feature route
 
 This entry is an index-only route for the repository-bootstrap feature. The
-manifest's `source_ref`, `3dce241581dd8dc931d2aafaef3af546ff522845`,
+manifest's `source_ref`, `b18606558e5292b93f9efb115b3d776fce9b0a4a`,
 identifies the audited source snapshot for the indexed paths, not the live
 `main` head.
 

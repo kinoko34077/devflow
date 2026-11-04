@@ -16,7 +16,8 @@ from typing import Any, Callable
 from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
-from tools.kaep_mailbox_codec import fail
+from tools.kaep_agent_api_projection import project_agent_view
+from tools.kaep_mailbox_codec import RECIPIENTS, fail
 from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
 
 MAX_SOURCES = 40
@@ -128,10 +129,6 @@ def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str,
             fail("INVALID_MARKER_LOCATOR")
         found.add((repo, number))
     return found, data["status"] == "PARTIAL_UNKNOWN"
-
-
-RECIPIENTS = cached.RECIPIENTS
-
 
 
 def _recent_issue_keys(
@@ -564,7 +561,6 @@ def main(argv: list[str] | None = None) -> int:
             public_marker_discovery=public_markers,
             previous_report=prior)
         if args.response_format == "agent-api":
-            from tools.kaep_agent_api_projection import project_agent_view
             result = project_agent_view(result)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {

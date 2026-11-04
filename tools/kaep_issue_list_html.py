@@ -9,16 +9,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
-import re
 from typing import Any
 
-ISSUE_LINK = re.compile(
-    r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*\Z"
-)
-COMMENT_LINK = re.compile(
-    r"https://github\.com/kinoko34077/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*"
-    r"#issuecomment-[1-9][0-9]*\Z"
-)
+from tools.kaep_link_validation import safe_comment_link, safe_issue_link
 
 CSS = r"""
 :root{color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#17212c;background:#f6f8fb}
@@ -195,10 +188,9 @@ def _esc(value: Any) -> str:
 
 
 def _safe_link(value: Any, *, source: bool) -> str | None:
-    if type(value) is not str:
-        return None
-    pattern = COMMENT_LINK if source else ISSUE_LINK
-    return value if pattern.fullmatch(value) else None
+    # Compatibility wrapper for existing renderer callers; validation is
+    # owned by the non-presentational link module.
+    return safe_comment_link(value) if source else safe_issue_link(value)
 
 
 def _anchor(value: Any, label: str, *, source: bool) -> str:

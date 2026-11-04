@@ -1,0 +1,74 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "gpt-liveness",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/gpt-liveness/README.md",
+  "routes": {
+    "pilot": {
+      "when": "the opt-in pilot scope, enrollment, or scheduled observation semantics need review",
+      "documents": [
+        "docs/spec/GPT_LIVENESS_PILOT.md",
+        "docs/spec/GPT_LIVENESS_F6_ROLLOUT.md",
+        "docs/spec/GPT_LIVENESS_F7_DRYRUN.md"
+      ],
+      "code": [
+        "tools/gpt_liveness_pilot.py"
+      ],
+      "tests": [
+        "tests/test_gpt_liveness_pilot.py"
+      ]
+    },
+    "identity-routing": {
+      "when": "chat, session, turn identity, or turn-routing semantics change",
+      "documents": [
+        "docs/spec/GPT_LIVENESS_PER_CHAT_IDENTITY.md",
+        "docs/spec/GPT_LIVENESS_TURN_ROUTING.md",
+        "docs/spec/GPT_LIVENESS_TWO_TURN_E2E_PLAN.md"
+      ],
+      "code": [
+        "tools/gpt_liveness_ids.py",
+        "tools/gpt_liveness_chat_registry.py",
+        "tools/gpt_liveness_turn_router.py",
+        "tools/gpt_liveness_two_turn_preflight.py"
+      ],
+      "tests": [
+        "tests/test_gpt_liveness_ids.py",
+        "tests/test_gpt_liveness_chat_registry.py",
+        "tests/test_gpt_liveness_turn_router.py",
+        "tests/test_gpt_liveness_two_turn_preflight.py"
+      ]
+    },
+    "evidence-dispatch": {
+      "when": "liveness evidence, manual action, or dispatch-preview boundaries change",
+      "documents": [
+        "docs/spec/GPT_LIVENESS_EVIDENCE_PRODUCER.md",
+        "docs/spec/GPT_LIVENESS_F8_SINGLE_MAILBOX.md",
+        "docs/spec/GPT_LIVENESS_F8E_MANUAL_ACTION.md"
+      ],
+      "code": [
+        "tools/gpt_liveness_evidence.py",
+        "tools/gpt_liveness_f8_sender.py",
+        "tools/gpt_liveness_dispatch_preview.py"
+      ],
+      "tests": [
+        "tests/test_gpt_liveness_evidence.py",
+        "tests/test_gpt_liveness_f8_sender.py",
+        "tests/test_gpt_liveness_dispatch_preview.py",
+        "tests/test_gpt_liveness_f8_manual_action.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#516",
+    "kinoko34077/devflow#519",
+    "kinoko34077/devflow#542",
+    "kinoko34077/devflow#681"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; transport observations remain distinct from runtime state.",
+    "Current enrollment, Issue, mailbox, workflow, and downstream state must be checked live."
+  ]
+}

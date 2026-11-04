@@ -20,14 +20,14 @@ from typing import Any
 from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, REPOSITORY,
 )
-from tools.kaep_mailbox_codec import fail, encode_comment, fingerprint
+from tools.kaep_mailbox_codec import RECIPIENTS, fail, encode_comment, fingerprint
 from tools.kaep_mailbox_support import (
     ACTOR, mailbox, mailbox_snapshot, matching_actor, post_and_verify,
     post_comment as _shared_post_comment,
 )
 
 KINDS = {"ACK", "ANSWER", "BLOCKED", "REVIEW_FEEDBACK"}
-ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
+ROLES = RECIPIENTS
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
 
