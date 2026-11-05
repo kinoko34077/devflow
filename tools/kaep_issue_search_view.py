@@ -31,6 +31,7 @@ from tools.kaep_mailbox_codec import (
     read_mailbox,
     verify_reply_chain,
 )
+from tools.kaep_mailbox_support import matching_actor
 
 MAX_REPOSITORIES = 3
 MAX_CANDIDATES = 40
@@ -86,14 +87,19 @@ _DISPLAY_ONLY_QUARANTINE = frozenset({"INVALID_WRAPPER", "INVALID_REF"})
 
 
 def _display_only_trusted_comments(
-    trusted: list[dict[str, Any]], *, task_ref: str,
+    comments: list[dict[str, Any]], *, task_ref: str,
+    expected_actor: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     usable: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
-    for comment in trusted:
+    for comment in comments:
         if not comment["body"].startswith(MARKER):
             usable.append(comment)
             continue
+        if comment["actor_login"].casefold() != expected_actor.casefold():
+            continue
+        # Decode expected-login comments before the trust gate so malformed
+        # display-only records retain their quarantine/error contract.
         try:
             decode_comment(comment["body"], task_ref=task_ref)
         except InvalidMessage as exc:
@@ -105,7 +111,10 @@ def _display_only_trusted_comments(
                 "reason_code": "QUARANTINED_" + reason,
             })
             continue
-        usable.append(comment)
+        # A valid message still needs the shared numeric identity boundary;
+        # matching login alone is not enough for the canonical mailbox.
+        if matching_actor(comment, expected_actor):
+            usable.append(comment)
     return usable, quarantined
 
 
@@ -187,16 +196,15 @@ def _verify_candidate_mailbox(
     pages = parse_pages(raw, repository=repo, issue=number)
     if len(pages) > agent_inbox.MAX_ISSUE_COMMENTS:
         fail("ISSUE_COMMENTS_LIMIT")
-    trusted = [
+    comments = [
         {"id": c["id"], "body": c["body"],
+         "actor_id": c.get("actor_id"), "actor_login": c["actor_login"],
          "user": {"id": c.get("actor_id"),
                   "login": c["actor_login"]}}
         for c in pages
-        if not c["body"].startswith(MARKER)
-        or c["actor_login"].casefold() == expected_actor.casefold()
     ]
     trusted, quarantined = _display_only_trusted_comments(
-        trusted, task_ref=f"{repo}#{number}",
+        comments, task_ref=f"{repo}#{number}", expected_actor=expected_actor,
     )
     parsed = read_mailbox(trusted, task_ref=f"{repo}#{number}")
     verify_reply_chain([m for _, m in parsed])

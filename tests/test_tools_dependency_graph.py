@@ -217,6 +217,12 @@ if registry.MAILBOX is not task_ref:
 
         self.assertIs(roster.matching_actor, support.matching_actor)
 
+    def test_kaep_issue_search_uses_shared_actor_boundary(self) -> None:
+        from tools import kaep_issue_search_view as search
+        from tools import kaep_mailbox_support as support
+
+        self.assertIs(search.matching_actor, support.matching_actor)
+
     def test_kaep_actor_login_validators_reuse_mailbox_codec(self) -> None:
         from tools import kaep_issue_search_view as search
         from tools import kaep_live_delta_view as delta

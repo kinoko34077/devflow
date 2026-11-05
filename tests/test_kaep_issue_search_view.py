@@ -337,6 +337,21 @@ class SearchListTests(unittest.TestCase):
         self.assertEqual(out["rows"], [])
         self.assertEqual(out["unmatched_candidates"], 1)
 
+    def test_same_login_wrong_numeric_identity_cannot_collide_with_owner_root(self):
+        owner = root(n=555, number=71)
+        spoof = json.loads(json.dumps(owner))
+        spoof["payload"]["text"] = "wrong numeric identity must stay untrusted"
+        spoof_comment = comment(71, spoof)
+        spoof_comment["user"]["id"] = 123456789
+        out, _ = self.run_view(
+            [DEV], {(DEV, 555): issue(n=555)},
+            {(DEV, 555): [comment(70, owner), spoof_comment]},
+        )
+        self.assertEqual(out["status"], "BOUNDED_SEARCH_READ")
+        self.assertEqual(out["validated_source_issues"], 1)
+        self.assertEqual(len(out["rows"]), 1)
+        self.assertEqual(out["rows"][0]["source_comment_id"], 70)
+
     def test_cross_repo_bounded_positive_and_spare_negative(self):
         msg = root()
         out, seen = self.run_view(
