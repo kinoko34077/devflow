@@ -98,7 +98,8 @@ CLOSING_LINE = re.compile(
     # An ordinary bullet such as "- Fixes the post-merge handler" is NOT
     # an Issue closing declaration. Require an Issue-reference-shaped value;
     # the subsequent owner parser validates its exact repository and number.
-    r"^(?:- )?(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)[ \t]*:?[ \t]*"
+    r"^(?:- )?(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)"
+    r"(?:[ \t]+|:[ \t]+)"
     r"((?:#|https?://|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#)[^\r\n]*)\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -106,10 +107,12 @@ CLOSING_QUALIFIED = re.compile(
     r"(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})"
 )
 CLOSING_REFERENCE_IN_TAIL = re.compile(
-    r"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?#|#)"
-    r"[1-9][0-9]{0,8}(?![0-9])|"
+    # Qualified owner/repo#N references contain the same #N token; matching
+    # from that fixed marker avoids retrying an unbounded repo-name prefix at
+    # every character in long descriptions.
+    r"#[1-9][0-9]{0,8}(?![0-9])|"
     r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
-    r"[1-9][0-9]{0,8})",
+    r"[1-9][0-9]{0,8}",
     re.IGNORECASE,
 )
 FENCED_CODE_START = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")

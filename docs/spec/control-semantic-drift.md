@@ -126,7 +126,11 @@ for a *single populated* closing declaration when `Owning-Issue` is
 empty. It recognizes all nine documented GitHub keyword forms:
 `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, and
 `resolve`/`resolves`/`resolved`. The keyword must begin its line (an
-optional `- ` is accepted), followed by one supported Issue reference.
+optional `- ` is accepted), followed by whitespace and one supported
+Issue reference; the documented optional colon form is `Closes: #10`.
+Keyword case is ignored. This reader deliberately does not parse
+mid-sentence declarations, `*` or numbered list items, or commit-message
+references, even where native GitHub may recognize them.
 Trailing description text after that reference is allowed, including a
 possessive suffix such as `Fix #726's post-merge reader`; a second Issue
 reference remains ambiguous. This addresses source-level false negatives

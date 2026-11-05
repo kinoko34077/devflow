@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -235,6 +236,8 @@ class PostMergeEventTests(unittest.TestCase):
                 )
 
     def test_closing_reference_remains_bounded_and_ambiguous_fails_closed(self):
+        self.assertIsNone(target.CLOSING_LINE.search("Fixes#726 after merge"))
+        self.assertIsNone(target.CLOSING_LINE.search("Closes:#726 after merge"))
         self.assertIsNone(target.CLOSING_LINE.search(
             "The fix #726 is described below."
         ))
@@ -250,6 +253,19 @@ class PostMergeEventTests(unittest.TestCase):
         self.assertIsNone(target._parse_closing_issue(
             "#726 and kinoko34077/devflow#727", target.REPOSITORY
         ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#726 and https://github.com/kinoko34077/devflow/issues/727",
+            target.REPOSITORY,
+        ))
+
+    def test_closing_reference_tail_scan_is_bounded_for_long_description(self):
+        value = "#726 " + "a-" * 8_000
+        started = time.perf_counter()
+        parsed = target._parse_closing_issue(value, target.REPOSITORY)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(parsed, (target.REPOSITORY, 726))
+        self.assertLess(elapsed, 1.0, f"tail scan took {elapsed:.3f}s")
 
     def test_owner_outcome_ambiguity_and_absent_scope_fail_closed(self):
         e = event()
