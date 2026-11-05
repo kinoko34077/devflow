@@ -104,6 +104,56 @@ CLOSING_LINE = re.compile(
 CLOSING_QUALIFIED = re.compile(
     r"^(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})$"
 )
+FENCED_CODE_START = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _without_fenced_code_blocks(text: str) -> str:
+    """Keep prose while blanking Markdown fenced code blocks.
+
+    Owner and closing-keyword declarations are metadata only when they are
+    actual PR-body fields. Examples inside fenced code must not create an
+    ownership or GitHub closing-issue relation.
+    """
+    result: list[str] = []
+    fence_char: str | None = None
+    fence_length = 0
+
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        ending = (
+            "\r\n" if line.endswith("\r\n")
+            else "\n" if line.endswith("\n")
+            else "\r" if line.endswith("\r")
+            else ""
+        )
+        if fence_char is not None:
+            closing = re.fullmatch(
+                rf" {{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
+                content,
+            )
+            if closing is not None:
+                fence_char = None
+                fence_length = 0
+            result.append(ending)
+            continue
+
+        opening = FENCED_CODE_START.fullmatch(content)
+        if opening is not None:
+            fence, info = opening.groups()
+            # CommonMark does not permit backticks in a backtick fence's
+            # info string; treat that line as prose rather than opening a
+            # block that could hide later declarations.
+            if fence[0] == "`" and "`" in info:
+                result.append(line)
+                continue
+            fence_char = fence[0]
+            fence_length = len(fence)
+            result.append(ending)
+            continue
+
+        result.append(line)
+
+    return "".join(result)
 
 
 def _parse_closing_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
@@ -154,10 +204,11 @@ def _owner_reconciliation_candidate(
         body = ""
     if type(body) is not str:
         return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number, repository)
-    declarations = [part.strip() for part in OWNER_LINE.findall(body)]
+    declaration_text = _without_fenced_code_blocks(body)
+    declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
     # Blank template fields are not evidence; do not guess from prose.
     filled = [part for part in declarations if part]
-    closings = [part.strip() for part in CLOSING_LINE.findall(body)]
+    closings = [part.strip() for part in CLOSING_LINE.findall(declaration_text)]
     valid_closings = [part for part in closings if part not in ("", "#")]
     if len(filled) > 1:
         return _result("UNKNOWN", "AMBIGUOUS_OWNER_MARKER", number, repository)
