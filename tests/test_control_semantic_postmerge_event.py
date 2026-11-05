@@ -188,6 +188,8 @@ class PostMergeEventTests(unittest.TestCase):
         declarations.extend((
             "- Resolves kinoko34077/devflow#726 for this change",
             "- Closed https://github.com/kinoko34077/devflow/issues/726 after merge",
+            "- CLOSES: #726 after merge",
+            "FIXED: #726 after merge",
         ))
 
         for declaration in declarations:
