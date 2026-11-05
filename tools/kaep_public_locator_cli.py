@@ -13,7 +13,11 @@ import subprocess
 import sys
 from typing import Any, Callable
 
-from tools.kaep_link_validation import API_ISSUE_URL as API_ISSUE
+from tools.kaep_link_validation import (
+    API_ISSUE_URL as API_ISSUE,
+    owner_comment_url,
+    owner_issue_url,
+)
 from tools.kaep_mailbox_codec import InvalidMessage, MARKER, fail
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -100,13 +104,13 @@ def _validated_locator_candidate(
     if not body.startswith(MARKER):
         return cid, None
     issue = int(match.group(2))
-    url = f"https://github.com/{repository}/issues/{issue}"
+    url = owner_issue_url(repository, issue)
     return cid, {
         "locator": f"{repository.split('/', 1)[1]}#{issue}@{cid}",
         "repository": repository,
         "issue_number": issue,
         "comment_id": cid,
-        "source_url": f"{url}#issuecomment-{cid}",
+        "source_url": owner_comment_url(repository, issue, cid),
         "strict_source_validated": False,
         "is_authoritative_assignment": False,
     }
@@ -275,3 +279,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
