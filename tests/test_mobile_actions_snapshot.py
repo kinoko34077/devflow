@@ -93,7 +93,7 @@ class MobileSnapshotTests(unittest.TestCase):
         self.assertNotIn("schedule:", workflow)
         # Owner-only Pages refresh is independent of the F8 PING sender.
         self.assertIn("  workflow_dispatch:", workflow)
-        self.assertEqual(workflow.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(workflow.count("github.actor_id == '79015263'"), 2)
         self.assertEqual(workflow.count("github.triggering_actor == 'kinoko34077'"), 2)
         self.assertIn('eq 7', workflow)
         self.assertNotIn("secrets.", workflow)

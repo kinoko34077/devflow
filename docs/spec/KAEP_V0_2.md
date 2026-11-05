@@ -29,6 +29,21 @@ Kinds: `REQUEST, ACK, QUESTION, ANSWER, PROGRESS, RESULT, REVIEW_REQUEST, REVIEW
 
 An ACK proves **receipt only**, never execution Claim or provider RUNNING. A RESULT or REVIEW_FEEDBACK is not Task DONE, a passed CI or an actual formal GitHub Review.
 
+### REVIEW_REQUEST -> REVIEW_FEEDBACK compatibility (owner #503)
+
+The protocol already defines review message kinds; the existing GitHub mailbox reply command may now handle this **narrow explicit parent contract**, independently from its older READ_ONLY consultation path:
+
+| Original canonical message | Allowed immediate response kinds | Meaning |
+| --- | --- | --- |
+| `REQUEST / QUESTION` with `READ_ONLY` and `PING / ANALYZE / TEST / REPORT` | `ACK` (REQUEST only), `ANSWER`, `BLOCKED` | Legacy consultation, unchanged |
+| Root `REVIEW_REQUEST / REVIEW / WRITE_INTENT` with a non-null full `expected_head` | `ACK`, `REVIEW_FEEDBACK`, `BLOCKED` | Reviewer receipt, review result, or explicit inability |
+
+The responder must preserve the **exact original** `exchange_id`, `task_ref`, `intent`, `scope` (repository, reviewed SHA, effect) and `in_reply_to` linkage, and require a valid original parent, recipient, authenticated GitHub transport actor, complete mailbox and idempotency reservation. Unsupported parent/kind/effect combinations fail closed. `WRITE_INTENT` is a recorded intent, **never** a permission to review, write code, merge, Claim, launch Claude, or change security gates. Caller authority and actual PR review provenance are checked separately.
+
+A Claude, Codex or ChatGPT worker may perform a native GitHub Formal Review under normal repository permission/Review Provenance rules, then send a correlated `REVIEW_FEEDBACK` **about that already performed review**. The KAEP reply is not the native Review. Within v0.2's existing envelope, record the PR URL in the allowed `evidence_refs` where available; include the precise native Review URL/ID, reviewed SHA, findings and result in the bounded `payload.text` where necessary. Reader status `REVIEW_FEEDBACK_OBSERVED` only confirms a stored correlated reply, not independently verified native Review or current-head acceptance. Historical responses to now-merged PR HEADs remain history, not new current-head approvals.
+
+No new wire schema, public discovery index entries, agent auto-wake, private-data publication, or extra credential is authorized by this correction.
+
 ### Delivery and recovery
 
 - Before sending, read the owning Issue's complete mailbox for the stable idempotency key. On an ambiguous write result, **read before retry** to prevent duplicate posts. Identical replay is deduplicated; conflicting reuse is rejected.
@@ -36,6 +51,32 @@ An ACK proves **receipt only**, never execution Claim or provider RUNNING. A RES
 - Malformed wrappers, duplicate JSON keys, unknown fields, forged actors, missing owner evidence and stale heads fail closed. Do not echo untrusted raw text into logs.
 - Cancellation is cooperative messaging only; Claim is changed only by the existing serialized runtime path.
 - No automatic ChatGPT wakeup from a GitHub comment. GPT reads/replies while a user-initiated chat is running, or through a *separately* authorized future Codex/GPT API worker.
+
+## Narrow cross-exchange containment (2026-11-01)
+
+The strict `verify_reply_chain` contract remains unchanged and must be used
+when asserting that a complete history contains no correlation defects.
+For bounded ordinary read-only mailbox traffic, canonical reader and
+REQUEST/ACK/ANSWER sender preflight can instead quarantine **only** a
+strictly decoded message whose known prior parent belongs to a different
+`exchange_id` or `task_ref`. Every message belonging to the offending
+exchange, including its descendants, is excluded. Read-only inbox output
+reports the excluded exchange IDs with `CROSS_EXCHANGE_REPLY`. A direct
+reply to an excluded parent is rejected, while separately validated
+independent exchanges remain available.
+
+This is NOT a permissive parser: unknown/missing parents, incomplete paginated
+history, invalid wrappers/JSON/scope, duplicate/colliding message identities
+or idempotency keys, task mismatches and actor/authority checks still fail
+closed. The accepted remainder is checked again by the strict chain validator.
+**Outgoing message ID and idempotency collision checks still reserve identities
+from the complete validated history, including quarantined exchanges**; a
+conflicting quarantined identity blocks that send before POST.
+No quarantined data becomes a source of work/permission/approval. An ordinary
+native GitHub PR Review or Issue discussion is unaffected by KAEP correlation
+errors and must still satisfy its independent GitHub and project review gates.
+The containment rule is transport resilience, not a change to wire schema,
+Claude/GPT model identity, expected-HEAD validity, Claim or Human authority.
 
 ## P / optional low-latency wake
 

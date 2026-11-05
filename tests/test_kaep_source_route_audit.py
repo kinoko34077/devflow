@@ -23,7 +23,12 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {
+        "id": 79015263 if actor == ACTOR else (
+            41898282 if actor == "github-actions[bot]" else 123456789
+        ),
+        "login": actor,
+    }}
 
 
 def source():
@@ -94,7 +99,7 @@ class RouteAuditTests(unittest.TestCase):
     def test_malformed_or_wrong_actor_index_prevents_clear_negative(self):
         root = source()
         malformed = {"id": 301, "body": "<!-- kaep:message:v0.2 -->BAD",
-                     "user": {"login": ACTOR}}
+                     "user": {"id": 79015263, "login": ACTOR}}
         blocked = audited(root, malformed)
         self.assertEqual(blocked["status"], "PARTIAL_UNKNOWN")
         self.assertFalse(blocked["exact_pointer_observed"])
@@ -150,7 +155,8 @@ class RouteAuditTests(unittest.TestCase):
 
     def test_hard_index_comment_cap(self):
         root = source()
-        rows = [{"id": i, "body": "non-marker text", "user": {"login": ACTOR}}
+        rows = [{"id": i, "body": "non-marker text",
+                 "user": {"id": 79015263, "login": ACTOR}}
                 for i in range(1, 502)]
         with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_INDEX_TOO_LARGE"):
             audited(root, *rows)

@@ -9,6 +9,8 @@ import json
 import re
 from typing import Any, Mapping, Sequence
 
+from tools.kaep_repository_validation import REPOSITORY, TASK_REF
+
 MARKER = "<!-- kaep:message:v0.2 -->"
 FENCE = chr(96) * 3
 # Exact GitHub comment decoration observed from the Claude Code integration.
@@ -18,7 +20,11 @@ FIELDS = set("schema_version exchange_id message_id in_reply_to task_ref recipie
 KINDS = set("REQUEST ACK QUESTION ANSWER PROGRESS RESULT REVIEW_REQUEST REVIEW_FEEDBACK CANCEL_REQUEST CANCEL_ACK ERROR BLOCKED".split())
 REPLIES = set("ACK ANSWER PROGRESS RESULT REVIEW_FEEDBACK CANCEL_ACK ERROR BLOCKED".split())
 INTENTS = set("PING ANALYZE IMPLEMENT TEST REVIEW REVISE REPORT CANCEL".split())
-RECIPIENTS = set("claude-code chatgpt codex coordinator".split())
+RECIPIENT_ORDER = ("claude-code", "chatgpt", "codex", "coordinator")
+RECIPIENTS = set(RECIPIENT_ORDER)
+MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
+REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
+ACTOR_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
 
 class InvalidMessage(ValueError):
     """Only fixed reason codes, not untrusted content."""
@@ -29,10 +35,14 @@ def fail(code: str) -> None:
 def matches(pattern: str, value: object) -> bool:
     return type(value) is str and re.fullmatch(pattern, value) is not None
 
-def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+def unique_pairs(
+    pairs: list[tuple[str, object]], *,
+    duplicate_code: str = "DUPLICATE_JSON_KEY",
+) -> dict[str, object]:
+    """Build one JSON object while preserving the caller's failure code."""
     out: dict[str, object] = {}
     for k, v in pairs:
-        if k in out: fail("DUPLICATE_JSON_KEY")
+        if k in out: fail(duplicate_code)
         out[k] = v
     return out
 
@@ -44,20 +54,28 @@ def validate(raw: object, *, task_ref: str | None = None) -> dict[str, Any]:
     d: dict[str, Any] = raw
     if d["schema_version"] != "kaep.message.v0.2": fail("UNSUPPORTED_VERSION")
     if not matches(r"ex_[A-Za-z0-9_-]{1,72}", d["exchange_id"]): fail("INVALID_EXCHANGE_ID")
-    if not matches(r"msg_[A-Za-z0-9_-]{1,72}", d["message_id"]): fail("INVALID_MESSAGE_ID")
+    if (type(d["message_id"]) is not str
+            or MESSAGE_ID.fullmatch(d["message_id"]) is None):
+        fail("INVALID_MESSAGE_ID")
     parent = d["in_reply_to"]
-    if parent is not None and not matches(r"msg_[A-Za-z0-9_-]{1,72}", parent): fail("INVALID_PARENT")
+    if (parent is not None and (type(parent) is not str
+            or MESSAGE_ID.fullmatch(parent) is None)):
+        fail("INVALID_PARENT")
     if type(d["kind"]) is not str or d["kind"] not in KINDS: fail("INVALID_KIND")
     if parent is None and d["kind"] in REPLIES: fail("MISSING_PARENT")
     if parent == d["message_id"]: fail("SELF_REPLY")
-    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*", d["task_ref"]): fail("INVALID_TASK")
+    if (type(d["task_ref"]) is not str
+            or TASK_REF.fullmatch(d["task_ref"]) is None):
+        fail("INVALID_TASK")
     if task_ref is not None and task_ref != d["task_ref"]: fail("TASK_MISMATCH")
     if type(d["recipient"]) is not str or d["recipient"] not in RECIPIENTS: fail("INVALID_RECIPIENT")
     if type(d["intent"]) is not str or d["intent"] not in INTENTS: fail("INVALID_INTENT")
     if not matches(r"[A-Za-z0-9_.:-]{8,128}", d["idempotency_key"]): fail("INVALID_IDEMPOTENCY")
     s = d["scope"]
     if type(s) is not dict or set(s) != {"repository", "expected_head", "effect"}: fail("INVALID_SCOPE")
-    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+", s["repository"]): fail("INVALID_REPOSITORY")
+    if (type(s["repository"]) is not str
+            or REPOSITORY.fullmatch(s["repository"]) is None):
+        fail("INVALID_REPOSITORY")
     if d["task_ref"].partition("#")[0] != s["repository"]: fail("REPOSITORY_TASK_MISMATCH")
     if s["expected_head"] is not None and not matches(r"[0-9a-f]{40}", s["expected_head"]): fail("INVALID_HEAD")
     if type(s["effect"]) is not str or s["effect"] not in ("READ_ONLY", "WRITE_INTENT"): fail("INVALID_EFFECT")
@@ -137,3 +155,38 @@ def verify_reply_chain(messages: Sequence[Mapping[str, Any]]) -> None:
             if d["exchange_id"] != parent["exchange_id"] or d["task_ref"] != parent["task_ref"]:
                 fail("CROSS_EXCHANGE_REPLY")
         known[mid] = d
+
+
+def isolate_cross_exchange_replies(
+    messages: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Isolate only demonstrable cross-exchange linkage, not malformed history.
+
+    A complete caller-verified mailbox is required. Unknown parents, duplicate
+    identities, invalid envelopes and all other integrity errors remain fatal.
+    Any crossing quarantines the *entire originating exchange*, including its
+    otherwise well-formed descendants. The returned accepted messages retain
+    original order; no untrusted payload is returned as a diagnostic.
+    """
+    known: dict[str, dict[str, Any]] = {}
+    compromised: set[str] = set()
+    for msg in messages:
+        d = validate(msg)
+        mid, parent_id = d["message_id"], d["in_reply_to"]
+        if mid in known:
+            fail("DUPLICATE_MESSAGE_ID")
+        if parent_id is not None:
+            parent = known.get(parent_id)
+            if parent is None:
+                fail("UNKNOWN_PARENT")
+            if (d["exchange_id"] != parent["exchange_id"] or
+                    d["task_ref"] != parent["task_ref"]):
+                compromised.add(d["exchange_id"])
+        known[mid] = d
+    accepted = [
+        d for d in known.values() if d["exchange_id"] not in compromised
+    ]
+    # Recheck the result with the existing strict validator. Do not allow a
+    # partial chain or a dependency on a quarantined exchange to pass.
+    verify_reply_chain(accepted)
+    return accepted, sorted(compromised)

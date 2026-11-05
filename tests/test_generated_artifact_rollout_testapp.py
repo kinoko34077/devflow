@@ -21,6 +21,7 @@ def env(**changes):
     result = {
         "GITHUB_REPOSITORY": REPO,
         "GITHUB_ACTOR": "kinoko34077",
+        "GITHUB_ACTOR_ID": "79015263",
         "GITHUB_TRIGGERING_ACTOR": "kinoko34077",
         "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_REF": "refs/heads/main",
@@ -42,8 +43,8 @@ class TestappReader:
             "id": 812, "run_attempt": 1, "event": "workflow_dispatch",
             "status": "in_progress", "head_sha": CALLER_SHA,
             "head_branch": "main", "path": rollout.CALLER_PATH,
-            "actor": {"login": "kinoko34077"},
-            "triggering_actor": {"login": "kinoko34077"},
+            "actor": {"id": 79015263, "login": "kinoko34077"},
+            "triggering_actor": {"id": 79015263, "login": "kinoko34077"},
             "repository": {"full_name": REPO}, "workflow_id": 34,
         }
         self.run.update(run_change or {})

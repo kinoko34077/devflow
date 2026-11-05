@@ -259,6 +259,7 @@ class FakeTransport:
                 "body": self.ledger_body,
                 "html_url": "https://github.com/o/r/issues/7",
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }
         if (repository, number) == ("kinoko34077/devflow", 1):
             return {
@@ -267,6 +268,7 @@ class FakeTransport:
                 "title": "[REPO] r",
                 "body": self.control_body,
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }
         raise AssertionError((repository, number))
 
@@ -281,6 +283,7 @@ class FakeTransport:
         self.comments.append({
             "body": body,
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         })
         return True
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import encode_comment, fingerprint, InvalidMessage
+from tools.kaep_mailbox_codec import encode_comment, fingerprint, InvalidMessage, read_mailbox
 from tools.kaep_request_sender import make_request, send_request, main
 
 REPO = "kinoko34077/devflow"
@@ -22,7 +22,7 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor="kinoko34077"):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor, "id": 79015263 if actor == "kinoko34077" else 999999999}}
 
 
 def prepare(text=None, **kw):
@@ -34,6 +34,52 @@ def prepare(text=None, **kw):
 
 
 class RequestSenderTests(unittest.TestCase):
+    def test_sender_preflight_decodes_each_issue_mailbox_once(self):
+        with patch("tools.kaep_mailbox_support.read_mailbox",
+                   wraps=read_mailbox) as read:
+            request, existing = prepare()
+        self.assertIsNone(existing)
+        self.assertIsNone(request["in_reply_to"])
+        self.assertEqual(read.call_count, 1)
+
+    def test_unrelated_cross_exchange_does_not_block_new_root(self):
+        original, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.other0001",
+            request_text="safe analysis only", expect_existing_actor="kinoko34077",
+        )
+        broken = dict(original)
+        broken["exchange_id"] = "ex_broken003"
+        broken["message_id"] = "msg_broken003"
+        broken["idempotency_key"] = "kaep.broken.003"
+        broken["in_reply_to"] = original["message_id"]
+        new, existing = prepare(
+            pages([comment(11, original), comment(12, broken)]),
+            expected_head=HEAD,
+        )
+        self.assertIsNone(existing)
+        self.assertIsNone(new["in_reply_to"])
+
+    def test_quarantined_request_identity_cannot_be_reused(self):
+        other, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.other0001",
+            request_text="safe analysis only", expect_existing_actor="kinoko34077",
+        )
+        outgoing, _ = prepare()
+        for mode in ("message_id", "idempotency_key"):
+            with self.subTest(mode=mode):
+                invalid = dict(outgoing)
+                invalid["exchange_id"] = "ex_wrong003"
+                invalid["in_reply_to"] = other["message_id"]
+                if mode == "message_id":
+                    invalid["idempotency_key"] = "kaep.wrong.003"
+                else:
+                    invalid["message_id"] = "msg_wrong003"
+                source = pages([comment(11, other), comment(12, invalid)])
+                with self.assertRaisesRegex(InvalidMessage, "REQUEST_KEY_COLLISION"):
+                    prepare(source)
+
     def test_valid_request_shape(self):
         message, existing = prepare()
         self.assertIsNone(existing)
@@ -162,7 +208,7 @@ class RequestSenderTests(unittest.TestCase):
     def test_unrelated_comments_ignored(self):
         a,_=prepare()
         b,existing=prepare(pages([{"id":9,"body":"ordinary discussion",
-                                   "user":{"login":"kinoko34077"}}]))
+                                   "user":{"login":"kinoko34077", "id":79015263}}]))
         self.assertEqual(a,b)
         self.assertIsNone(existing)
 
@@ -306,5 +352,17 @@ class RequestSenderTests(unittest.TestCase):
             self.assertIn("OFFLINE_POST_FORBIDDEN",out.call_args.args[0])
 
 
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_existing_request_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        request, _ = prepare()
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, request)
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "EXISTING_ACTOR_MISMATCH"):
+                    prepare(pages([original]))
+
+
 if __name__=="__main__":
     unittest.main()
+

@@ -8,31 +8,35 @@ closed; this does not loosen the shared KAEP codec or Claim protections.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
-import re
 import sys
 from typing import Callable, Any
 
+from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
-    MARKER, decode_comment, fingerprint, reject_constant, unique_pairs,
-    matches,
+    fail,
+    MARKER, MESSAGE_ID, decode_comment, fingerprint, reject_constant,
+    unique_pairs,
 )
-from tools.kaep_reply_sender import ACTOR, _mailbox
+from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    verify_source_request,
+    verify_source_request_from_snapshot, SourceMailbox,
 )
 
-SOURCE_URL = re.compile(
-    r"https://github\.com/(kinoko34077/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)\Z")
+# Local compatibility aliases preserve established patch points while the
+# ownership boundary is now the shared mailbox/source helpers.
+_mailbox = mailbox
+_matching_actor = matching_actor
+_verify_source_request_from_snapshot = verify_source_request_from_snapshot
+
+SOURCE_URL = ISSUE_URL_PATTERN
 POINTER_FIELDS = {"type", "owning_issue", "message_id", "comment_id"}
 MAX_INDEX_BATCH = 20
 REPLY_KINDS = {"ACK", "ANSWER", "BLOCKED"}
 
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def parse_pointer(text: str) -> dict[str, Any] | None:
@@ -56,28 +60,29 @@ def parse_pointer(text: str) -> dict[str, Any] | None:
     if type(obj) is not dict or obj.get("type") != POINTER_VERSION:
         return None
     if set(obj) != POINTER_FIELDS or type(obj["owning_issue"]) is not str:
-        _fail("INVALID_DISCOVERY_POINTER")
+        fail("INVALID_DISCOVERY_POINTER")
     target = SOURCE_URL.fullmatch(obj["owning_issue"])
-    if target is None or not matches(r"msg_[A-Za-z0-9_-]{1,72}", obj["message_id"]):
-        _fail("INVALID_DISCOVERY_POINTER")
+    if (target is None or type(obj["message_id"]) is not str
+            or MESSAGE_ID.fullmatch(obj["message_id"]) is None):
+        fail("INVALID_DISCOVERY_POINTER")
     if type(obj["comment_id"]) is not int or obj["comment_id"] < 1:
-        _fail("INVALID_DISCOVERY_POINTER")
+        fail("INVALID_DISCOVERY_POINTER")
     if target.group(1) == DISCOVERY_REPOSITORY and int(target.group(2)) == DISCOVERY_ISSUE:
-        _fail("DISCOVERY_LOOP")
+        fail("DISCOVERY_LOOP")
     return obj
 
 
 def _source_context(
-    pages: str, *, repository: str, issue: int, message_id: str,
-    expected_actor: str,
+    snapshot: SourceMailbox,
+    *, message_id: str, expected_actor: str,
 ) -> dict[str, Any]:
-    """Observe original immutable scope and correlated replies (not model ID)."""
-    comments, items = _mailbox(pages, repository=repository, issue=issue)
+    """Observe original scope/replies from the same validated source snapshot."""
+    comments, items = snapshot
     matches_found = [(cid, msg) for cid, msg in items if msg["message_id"] == message_id]
     if len(matches_found) != 1:
-        _fail("SOURCE_MESSAGE_NOT_UNIQUE")
+        fail("SOURCE_MESSAGE_NOT_UNIQUE")
     _, root = matches_found[0]
-    actors = {comment["id"]: comment["actor_login"] for comment in comments}
+    actors = {comment["id"]: comment for comment in comments}
     replies = sorted({
         msg["kind"] for cid, msg in items
         if msg["in_reply_to"] == message_id
@@ -86,40 +91,153 @@ def _source_context(
         and msg["intent"] == root["intent"]
         and msg["scope"] == root["scope"]
         and msg["kind"] in REPLY_KINDS
-        and actors[cid].casefold() == expected_actor.casefold()
+        and _matching_actor(actors[cid], expected_actor)
     })
     return {"expected_head": root["scope"]["expected_head"],
             "observed_reply_kinds": replies}
 
 
-def discover_batch(
+def _verified_source_pointer(
+    pointer: dict[str, Any], *, repo: str, issue: int,
+    expected_source_actor: str,
+    fetch_source: Callable[[str, int], str],
+    source_cache: dict[tuple[str, int], SourceMailbox],
+    proof_cache: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate one pointer against its complete original Issue mailbox.
+
+    Both caches are scoped to the same discovery scan. A source snapshot is
+    decoded strictly once, but every pointer (including a proof-cache hit)
+    must match the original comment ID before it can become a visible hint.
+    """
+    source_key = (repo, issue)
+    if source_key not in source_cache:
+        # Failure here pins the caller's durable cursor: not an empty source.
+        source_cache[source_key] = _mailbox(
+            fetch_source(repo, issue), repository=repo, issue=issue,
+        )
+    snapshot = source_cache[source_key]
+    proof_key = (repo, issue, pointer["message_id"])
+    if proof_key not in proof_cache:
+        verified = _verify_source_request_from_snapshot(
+            snapshot, repository=repo, issue=issue,
+            message_id=pointer["message_id"],
+            expected_actor=expected_source_actor,
+        )
+        # Check the exact source pointer BEFORE reply-context work or caching.
+        if verified != pointer:
+            fail("DISCOVERY_SOURCE_MISMATCH")
+        context = _source_context(
+            snapshot, message_id=pointer["message_id"],
+            expected_actor=expected_source_actor,
+        )
+        proof_cache[proof_key] = (verified, context)
+    verified, context = proof_cache[proof_key]
+    # Cache hits cannot admit a forged comment ID referencing a real root.
+    if verified != pointer:
+        fail("DISCOVERY_SOURCE_MISMATCH")
+    return verified, context
+
+
+def _verified_pointer_hint(
+    index_comment_id: int, pointer: dict[str, Any],
+    verified: dict[str, Any], context: dict[str, Any],
+) -> dict[str, Any]:
+    """Project source-proven context into a non-authoritative index hint.
+
+    Source verification, transport and cursor decisions belong elsewhere.
+    No message body, identity certification or execution permission is output.
+    """
+    return {
+        "index_comment_id": index_comment_id,
+        "owning_issue": pointer["owning_issue"],
+        "source_comment_id": verified["comment_id"],
+        "source_message_id": verified["message_id"],
+        "expected_head": context["expected_head"],
+        "observed_reply_kinds": list(context["observed_reply_kinds"]),
+        "status": "POINTER_SOURCE_VERIFIED_ONLY",
+    }
+
+
+def _record_index_notice_identity(
+    msg: dict[str, Any], *,
+    seen_messages: dict[str, str], seen_keys: dict[str, str],
+    replay_history: tuple[dict[str, str], dict[str, str]] | None,
+) -> bool:
+    """Enforce same-batch replay suppression and cross-batch identity checks.
+
+    Return False only for an identical repeat within the SAME batch. The
+    shadow's identical cross-batch replay is intentionally revalidated so
+    it can be counted as a duplicate verified source pointer. Conflicting
+    message IDs or idempotency keys are always rejected before recording.
+    """
+    identity = fingerprint(msg)
+    message_id = msg["message_id"]
+    idempotency_key = msg["idempotency_key"]
+    old_msg = seen_messages.get(message_id)
+    old_key = seen_keys.get(idempotency_key)
+    if replay_history is not None:
+        earlier_messages, earlier_keys = replay_history
+        previous_message = earlier_messages.get(message_id)
+        previous_key = earlier_keys.get(idempotency_key)
+        if (previous_message is not None and previous_message != identity
+                or previous_key is not None and previous_key != identity):
+            fail("CONFLICTING_INDEX_REPLAY")
+    if (old_msg is not None and old_msg != identity
+            or old_key is not None and old_key != identity):
+        fail("CONFLICTING_INDEX_REPLAY")
+    if old_msg == identity or old_key == identity:
+        return False
+    seen_messages[message_id] = identity
+    seen_keys[idempotency_key] = identity
+    if replay_history is not None:
+        earlier_messages[message_id] = identity
+        earlier_keys[idempotency_key] = identity
+    return True
+
+
+def _discover_batch(
     index_pages: str, *, expected_notice_actor: str,
     expected_source_actor: str, fetch_source: Callable[[str, int], str],
     after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
     additional_forbidden_issue: int | None = None,
+    source_mailboxes: dict[tuple[str, int], SourceMailbox] | None = None,
+    index_comments: list[dict[str, Any]] | None = None,
+    replay_history: tuple[dict[str, str], dict[str, str]] | None = None,
+    source_proofs: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] | None = None,
 ) -> dict[str, Any]:
     if (type(index_issue) is not int or index_issue <= 0
             or additional_forbidden_issue is not None
             and (type(additional_forbidden_issue) is not int
                  or additional_forbidden_issue <= 0)):
-        _fail("INVALID_DISCOVERY_INDEX")
+        fail("INVALID_DISCOVERY_INDEX")
     if type(after_id) is not int or after_id < 0:
-        _fail("INVALID_CURSOR")
+        fail("INVALID_CURSOR")
     if (type(expected_notice_actor) is not str or not ACTOR.fullmatch(expected_notice_actor)
             or type(expected_source_actor) is not str or not ACTOR.fullmatch(expected_source_actor)):
-        _fail("INVALID_ACTOR")
+        fail("INVALID_ACTOR")
     # Provider pagination/order/user metadata remains globally verified. Only
     # individual untrusted Issue comment content gets per-item isolation.
-    comments = parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
-                           issue=index_issue)
-    remaining = [item for item in comments if item["id"] > after_id]
-    subset = remaining[:MAX_INDEX_BATCH]
+    # The public entry validates complete GitHub pages here. Shadow scans
+    # pass the same already-validated immutable-by-convention snapshot through
+    # successive batches instead of decoding the whole JSON input repeatedly.
+    comments = (parse_pages(index_pages, repository=DISCOVERY_REPOSITORY,
+                            issue=index_issue)
+                if index_comments is None else index_comments)
+    # parse_pages guarantees ascending IDs. Binary cursor lookup avoids
+    # copying/rechecking every prior index comment on each bounded batch.
+    start = bisect_right(comments, after_id, key=lambda item: item["id"])
+    subset = comments[start:start + MAX_INDEX_BATCH]
     result: dict[str, Any] = {
         "status": "READ_ONLY",
         "hints": [],
         "rejected": [],
         "blocked": [],
-        "truncated": len(remaining) > len(subset),
+        "truncated": start + len(subset) < len(comments),
         # Commit cursor stops at the first failed source; scan cursor is only
         # for traversing subsequent batches in this active check-in.
         "next_after_id": subset[-1]["id"] if subset else after_id,
@@ -127,7 +245,14 @@ def discover_batch(
         "read_only": True,
         "peer_identity_verified": False,
     }
-    source_cache: dict[tuple[str, int], str] = {}
+    source_cache: dict[tuple[str, int], SourceMailbox] = (
+        {} if source_mailboxes is None else source_mailboxes
+    )
+    # Proofs are valid only for the exact immutable source snapshot and fixed
+    # expected actor of this call. Never carry them into a later live read.
+    proof_cache: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] = {} if source_proofs is None else source_proofs
     seen_msg: dict[str, str] = {}
     seen_keys: dict[str, str] = {}
     for position, comment in enumerate(subset):
@@ -136,24 +261,17 @@ def discover_batch(
         body = comment["body"]
         if not body.startswith(MARKER):
             continue
-        if comment["actor_login"].casefold() != expected_notice_actor.casefold():
+        if not _matching_actor(comment, expected_notice_actor):
             result["rejected"].append({"index_comment_id": cid,
                                        "reason_code": "UNTRUSTED_DISCOVERY_ACTOR"})
             continue
         try:
             msg = decode_comment(body, task_ref=f"{DISCOVERY_REPOSITORY}#{index_issue}")
-            identity = fingerprint(msg)
-            old_msg = seen_msg.get(msg["message_id"])
-            old_key = seen_keys.get(msg["idempotency_key"])
-            if (old_msg is not None and old_msg != identity
-                    or old_key is not None and old_key != identity):
-                _fail("CONFLICTING_INDEX_REPLAY")
-            if old_msg == identity or old_key == identity:
-                # Identical repeated stored comments are transport replays,
-                # not two separately actionable task hints.
+            if not _record_index_notice_identity(
+                msg, seen_messages=seen_msg, seen_keys=seen_keys,
+                replay_history=replay_history,
+            ):
                 continue
-            seen_msg[msg["message_id"]] = identity
-            seen_keys[msg["idempotency_key"]] = identity
             if (msg["recipient"] != "claude-code" or msg["kind"] != "REQUEST"
                     or msg["intent"] != "REPORT" or msg["in_reply_to"] is not None
                     or msg["scope"]["effect"] != "READ_ONLY"):
@@ -168,31 +286,17 @@ def discover_batch(
             # or a second recognized index as an original task source.
             if (repo == DISCOVERY_REPOSITORY
                     and (issue == index_issue or issue == additional_forbidden_issue)):
-                _fail("DISCOVERY_LOOP")
-            key = (repo, issue)
+                fail("DISCOVERY_LOOP")
             source_validation = True
-            if key not in source_cache:
-                # A failed provider/source fetch is not a malformed index item:
-                # fail the entire scan so a cursor is NEVER advanced past it.
-                source_cache[key] = fetch_source(repo, issue)
-            verified = verify_source_request(
-                source_cache[key], repository=repo, issue=issue,
-                message_id=pointer["message_id"], expected_actor=expected_source_actor)
-            if verified != pointer:
-                _fail("DISCOVERY_SOURCE_MISMATCH")
-            context = _source_context(
-                source_cache[key], repository=repo, issue=issue,
-                message_id=pointer["message_id"],
-                expected_actor=expected_source_actor)
-            result["hints"].append({
-                "index_comment_id": cid,
-                "owning_issue": pointer["owning_issue"],
-                "source_comment_id": verified["comment_id"],
-                "source_message_id": verified["message_id"],
-                "expected_head": context["expected_head"],
-                "observed_reply_kinds": context["observed_reply_kinds"],
-                "status": "POINTER_SOURCE_VERIFIED_ONLY",
-            })
+            verified, context = _verified_source_pointer(
+                pointer, repo=repo, issue=issue,
+                expected_source_actor=expected_source_actor,
+                fetch_source=fetch_source, source_cache=source_cache,
+                proof_cache=proof_cache,
+            )
+            result["hints"].append(
+                _verified_pointer_hint(cid, pointer, verified, context)
+            )
         except InvalidMessage as exc:
             # Invalid index content/actor cannot starve later entries. Never
             # claim the invalid item is a verified task. Owning-Issue transport
@@ -217,6 +321,21 @@ def discover_batch(
     return result
 
 
+def discover_batch(
+    index_pages: str, *, expected_notice_actor: str,
+    expected_source_actor: str, fetch_source: Callable[[str, int], str],
+    after_id: int = 0, index_issue: int = DISCOVERY_ISSUE,
+    additional_forbidden_issue: int | None = None,
+) -> dict[str, Any]:
+    """Public entry never accepts a prevalidated cache from its caller."""
+    return _discover_batch(
+        index_pages, expected_notice_actor=expected_notice_actor,
+        expected_source_actor=expected_source_actor, fetch_source=fetch_source,
+        after_id=after_id, index_issue=index_issue,
+        additional_forbidden_issue=additional_forbidden_issue,
+    )
+
+
 MAX_SHADOW_BATCHES = 10
 
 
@@ -233,10 +352,20 @@ def discover_index_shadow(
     active requests, peer identity, current HEAD, or M3/Agent Inbox authority.
     """
     if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
-        _fail("INVALID_SHADOW_LIMIT")
+        fail("INVALID_SHADOW_LIMIT")
     # Preserve fail-closed provider transport/page validation in discover_batch.
+    # Strictly validate the complete provider history once per shadow scan.
+    # Repeated _discover_batch calls only traverse its validated comment data.
+    # No raw or caller-provided prevalidated snapshot enters this public API.
+    index_comments = parse_pages(
+        index_pages, repository=DISCOVERY_REPOSITORY, issue=index_issue,
+    )
     cursor = after_id
-    source_cache: dict[tuple[str, int], str] = {}
+    source_cache: dict[tuple[str, int], SourceMailbox] = {}
+    source_proofs: dict[
+        tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
+    ] = {}
+    replay_history: tuple[dict[str, str], dict[str, str]] = ({}, {})
     hints: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
@@ -244,19 +373,17 @@ def discover_index_shadow(
     duplicate_verified_pointers = 0
     batches = 0
 
-    def cached_source(repository: str, issue: int) -> str:
-        key = (repository, issue)
-        if key not in source_cache:
-            source_cache[key] = fetch_source(repository, issue)
-        return source_cache[key]
-
     for _ in range(max_batches):
-        batch = discover_batch(
+        batch = _discover_batch(
             index_pages, expected_notice_actor=expected_notice_actor,
             expected_source_actor=expected_source_actor,
-            fetch_source=cached_source, after_id=cursor,
+            fetch_source=fetch_source, after_id=cursor,
             index_issue=index_issue,
             additional_forbidden_issue=additional_forbidden_issue,
+            source_mailboxes=source_cache,
+            index_comments=index_comments,
+            replay_history=replay_history,
+            source_proofs=source_proofs,
         )
         batches += 1
         for hint in batch["hints"]:
@@ -311,7 +438,7 @@ def discover_dual_index_shadow(
     """
     if (type(successor_issue) is not int or successor_issue <= 0
             or successor_issue == DISCOVERY_ISSUE):
-        _fail("INVALID_SUCCESSOR_INDEX")
+        fail("INVALID_SUCCESSOR_INDEX")
     source_cache: dict[tuple[str, int], str] = {}
 
     def cached_source(repository: str, issue: int) -> str:
@@ -421,7 +548,7 @@ def discover(
     # Legacy consumers cannot receive blocked/cursor metadata. Preserve their
     # previous strict failure semantics instead of silently accepting partial.
     if batch["blocked"]:
-        _fail("DISCOVERY_SOURCE_BLOCKED")
+        fail("DISCOVERY_SOURCE_BLOCKED")
     return batch["hints"]
 
 
@@ -442,10 +569,10 @@ def main(argv: list[str] | None = None) -> int:
         # authority to write any new KAEP requests, mark work complete, or
         # retire legacy #503. Other caller-provided Issue IDs are rejected.
         if args.index_issue not in (DISCOVERY_ISSUE, 789) or type(args.index_issue) is not int:
-            _fail("DISCOVERY_INDEX_NOT_APPROVED")
+            fail("DISCOVERY_INDEX_NOT_APPROVED")
         if args.dual_shadow:
             if args.index_issue != DISCOVERY_ISSUE or args.after_id != 0 or args.shadow_all:
-                _fail("INVALID_DUAL_INDEX_ARGUMENTS")
+                fail("INVALID_DUAL_INDEX_ARGUMENTS")
             legacy_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
             successor_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, 789)
             result = discover_dual_index_shadow(
@@ -482,3 +609,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

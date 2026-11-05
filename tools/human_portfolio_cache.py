@@ -9,8 +9,21 @@ import re
 from typing import Any
 
 from tools import marker_json
-
-
+from tools.cache_generation import (
+    canonical_digest as _canonical_digest,
+    generation_material as _generation_material,
+    recompute_generation_id,
+)
+from tools.cache_validation import (
+    format_timestamp as _shared_format_timestamp,
+    require_bool as _shared_require_bool,
+    require_exact_fields as _shared_require_exact_fields,
+    require_mapping as _shared_require_mapping,
+    require_optional_string as _shared_require_optional_string,
+    require_repository as _shared_require_repository,
+    require_timestamp as _shared_require_timestamp,
+    timestamp_value as _shared_timestamp_value,
+)
 CACHE_MARKER_BEGIN = "<!-- DEVFLOW_HUMAN_PORTFOLIO_V1_BEGIN -->"
 CACHE_MARKER_END = "<!-- DEVFLOW_HUMAN_PORTFOLIO_V1_END -->"
 CACHE_SCHEMA_VERSION = "human-portfolio-cache.v1"
@@ -19,7 +32,6 @@ CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_ENTRIES = 200
 MAX_TASK_ERRORS = 100
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TASK_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
 _ENTRY_REF = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$"
@@ -91,90 +103,38 @@ class CachedHumanPortfolio:
     payload: dict[str, Any]
 
 
-def _canonical_digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
-def _generation_material(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value.pop("generation_id", None)
-    return value
-
-
-def recompute_generation_id(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value["generation_id"] = _canonical_digest(_generation_material(value))
-    return value
-
-
 def _require_exact_fields(
     value: dict[str, Any],
     allowed: frozenset[str],
     field: str,
 ) -> None:
-    missing = sorted(allowed - set(value))
-    unknown = sorted(set(value) - allowed)
-    if missing:
-        raise HumanPortfolioCacheError(
-            f"{field} missing fields: " + ", ".join(missing)
-        )
-    if unknown:
-        raise HumanPortfolioCacheError(
-            f"{field} has unknown fields: " + ", ".join(unknown)
-        )
-
-
-def _require_mapping(value: object, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise HumanPortfolioCacheError(f"{field} must be an object")
-    return dict(value)
-
-
-def _require_repository(value: object, field: str = "repository") -> str:
-    if not isinstance(value, str) or _REPOSITORY.fullmatch(value.strip()) is None:
-        raise HumanPortfolioCacheError(f"{field} must be owner/repository")
-    return value.strip()
-
-
-def _require_timestamp(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise HumanPortfolioCacheError(
-            f"{field} must be an RFC-3339 timestamp"
-        )
-    text = value.strip()
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise HumanPortfolioCacheError(
-            f"{field} must be an RFC-3339 timestamp"
-        ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise HumanPortfolioCacheError(
-            f"{field} must include an RFC-3339 timezone offset"
-        )
-    return text
-
-
-def _timestamp_value(value: object, field: str) -> datetime:
-    return datetime.fromisoformat(
-        _require_timestamp(value, field).replace("Z", "+00:00")
+    _shared_require_exact_fields(
+        value, allowed, field, HumanPortfolioCacheError
     )
 
 
+def _require_mapping(value: object, field: str) -> dict[str, Any]:
+    return _shared_require_mapping(value, field, HumanPortfolioCacheError)
+
+
+def _require_repository(value: object, field: str = "repository") -> str:
+    return _shared_require_repository(value, field, HumanPortfolioCacheError)
+
+
+def _require_timestamp(value: object, field: str) -> str:
+    return _shared_require_timestamp(value, field, HumanPortfolioCacheError)
+
+
+def _timestamp_value(value: object, field: str) -> datetime:
+    return _shared_timestamp_value(value, field, HumanPortfolioCacheError)
+
+
 def _format_timestamp(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return _shared_format_timestamp(value)
 
 
 def _require_bool(value: object, field: str) -> bool:
-    if not isinstance(value, bool):
-        raise HumanPortfolioCacheError(f"{field} must be boolean")
-    return value
+    return _shared_require_bool(value, field, HumanPortfolioCacheError)
 
 
 def _require_positive_int(value: object, field: str) -> int:
@@ -184,13 +144,9 @@ def _require_positive_int(value: object, field: str) -> int:
 
 
 def _require_optional_string(value: object, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise HumanPortfolioCacheError(
-            f"{field} must be a non-empty string or null"
-        )
-    return value.strip()
+    return _shared_require_optional_string(
+        value, field, HumanPortfolioCacheError
+    )
 
 
 def _validate_repository_source(value: object) -> dict[str, Any]:
@@ -669,3 +625,4 @@ def replace_cached_human_portfolio(
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
     return prefix + block + suffix
+

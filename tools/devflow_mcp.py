@@ -85,6 +85,21 @@ def get_agent_inbox(
 
 
 @mcp.tool()
+def get_agent_workspace(
+    repository: str, recipient: str = "codex",
+    limit: int = 20, offset: int = 0, work_status: str | None = None,
+    include_recent_kaep: bool = False,
+    include_published_supply: bool = False,
+) -> dict[str, Any]:
+    """Opt-in read-only unified Work/KAEP observation; unknown runtime sections remain unknown."""
+    return _service().get_agent_workspace(
+        repository, recipient, limit=limit, offset=offset,
+        work_status=work_status, include_recent_kaep=include_recent_kaep,
+        include_published_supply=include_published_supply,
+    )
+
+
+@mcp.tool()
 def get_portfolio_projection() -> dict[str, Any]:
     """Return a read-only summary projection across all currently managed repositories."""
     return _service().get_portfolio_projection()
@@ -100,6 +115,26 @@ def get_human_portfolio(repository: str) -> dict[str, Any]:
 def get_issue(repository: str, issue_number: int) -> dict[str, Any]:
     """Read one GitHub Issue from a repository. Private repositories require a read-capable token."""
     return _service().get_issue(repository, issue_number)
+
+
+@mcp.tool()
+def get_issue_goal_context(repository: str, issue_number: int) -> dict[str, Any]:
+    """Resolve source-linked effective Goal Context through bounded read-only Issue ancestry."""
+    return _service().get_issue_goal_context(repository, issue_number)
+
+
+@mcp.tool()
+def assess_issue_plan(repository: str, issue_number: int, plan: dict[str, Any]) -> dict[str, Any]:
+    """Compare declared plan effects with adopted source-linked conditions; advisory and read-only."""
+    return _service().assess_issue_plan(repository, issue_number, plan)
+
+
+@mcp.tool()
+def assess_outcome_observation(
+    repository: str, issue_number: int, evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compare declared outcome identities to the current Issue revision; does not verify use or acceptance."""
+    return _service().assess_outcome_observation(repository, issue_number, evidence)
 
 
 @mcp.tool()

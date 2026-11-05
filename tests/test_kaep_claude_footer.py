@@ -128,7 +128,7 @@ class ClaudeFooterInteropTests(unittest.TestCase):
         next_body = encode_comment(answer) + CLAUDE_CODE_FOOTER
         self.assertEqual(decode_comment(next_body, task_ref=TASK), answer)
         answer_comment = {"id": 6159903732, "body": next_body,
-                          "user": {"login": "kinoko34077"}}
+                          "user": {"login": "kinoko34077", "id": 79015263}}
         items = read_mailbox([ping, pages()[0][1], answer_comment], task_ref=TASK)
         verify_reply_chain([m for _, m in items])
         self.assertEqual([m["kind"] for _, m in items], ["REQUEST", "ACK", "ANSWER"])

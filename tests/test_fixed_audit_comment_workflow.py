@@ -24,10 +24,10 @@ class FixedAuditCommentTests(unittest.TestCase):
             "github.repository == 'kinoko34077/devflow'",
             "github.event.issue.pull_request == null",
             "github.event.issue.number == 413",
-            "github.event.issue.user.login == 'kinoko34077'",
-            "github.event.comment.user.login == 'kinoko34077'",
-            "github.event.sender.login == 'kinoko34077'",
-            "github.actor == 'kinoko34077'",
+            "github.event.issue.user.id == 79015263",
+            "github.event.comment.user.id == 79015263",
+            "github.event.sender.id == 79015263",
+            "github.actor_id == '79015263'",
             "github.event.comment.body == '/kinotch audit devflow'",
         ]
         self.assertEqual([part.strip() for part in guard.split("&&")], required)

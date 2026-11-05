@@ -7,25 +7,31 @@ from unittest.mock import patch
 
 from tools import agent_inbox
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
-from tools.kaep_inbox_reader import inspect_pages
+from tools.kaep_inbox_reader import inspect_pages, parse_pages
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import (
     discover, discover_batch, discover_index_shadow, parse_pointer,
     POINTER_VERSION, MAX_INDEX_BATCH, MAX_SHADOW_BATCHES,
 )
 from tools.kaep_route_notice import DISCOVERY_REPOSITORY, DISCOVERY_ISSUE
+from tools.kaep_reply_sender import _mailbox
 
 SOURCE_REPO = "kinoko34077/UniverseGenome"
 SOURCE_ISSUE = 336
 ACTOR = "kinoko34077"
+ACTOR_ID = 79015263
 
 
 def pages(*groups):
     return json.dumps(list(groups))
 
 
+def actor_user(actor=ACTOR):
+    return {"login": actor, "id": ACTOR_ID if actor == ACTOR else 999999999}
+
+
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": actor_user(actor)}
 
 
 def fixtures():
@@ -64,6 +70,110 @@ def read(index, source, *, after_id=0, notice_actor=ACTOR, source_actor=ACTOR):
 
 
 class DiscoveryReaderTests(unittest.TestCase):
+    def test_multiple_pointers_to_one_source_decode_one_complete_mailbox(self):
+        root, first_notice, pointer = fixtures()
+        second_notice = other_notice(
+            json.dumps(pointer), "kaep.discovery.second.notice0002",
+        )
+        original = pages([comment(77, root)])
+        index = pages([comment(88, first_notice), comment(89, second_notice)])
+        fetched = []
+
+        def fetch_source(repository, issue):
+            fetched.append((repository, issue))
+            return original
+
+        # Prior code: verify_source_request + _source_context per pointer,
+        # resulting in four full mailbox decodes for these two notices.
+        with patch("tools.kaep_discovery_reader._mailbox",
+                   wraps=_mailbox) as strict_read:
+            result = discover_batch(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=fetch_source,
+            )
+        self.assertEqual(fetched, [(SOURCE_REPO, SOURCE_ISSUE)])
+        self.assertEqual(strict_read.call_count, 1)
+        self.assertEqual(len(result["hints"]), 2)
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual(result["rejected"], [])
+        self.assertEqual(
+            {item["source_message_id"] for item in result["hints"]},
+            {root["message_id"]},
+        )
+
+    def test_source_proof_reused_for_same_root_but_each_pointer_is_checked(self):
+        root, first_notice, pointer = fixtures()
+        second_notice = other_notice(
+            json.dumps(pointer), "kaep.discovery.proof.second.notice",
+        )
+        forged = dict(pointer)
+        forged["comment_id"] = 78
+        tampered_notice = other_notice(
+            json.dumps(forged), "kaep.discovery.proof.tampered.notice",
+        )
+        index = pages([
+            comment(1000 + n, {
+                0: first_notice, 35: second_notice, 40: tampered_notice,
+            }[n]) if n in (0, 35, 40) else {
+                "id": 1000 + n, "body": "operator note",
+                "user": actor_user(),
+            }
+            for n in range(42)
+        ])
+        fetched = []
+        def fetch_source(repository, issue):
+            fetched.append((repository, issue))
+            return pages([comment(77, root)])
+        from tools import kaep_discovery_reader as reader
+        with (patch.object(reader, "_verify_source_request_from_snapshot",
+                           wraps=reader._verify_source_request_from_snapshot) as verified,
+              patch.object(reader, "_source_context",
+                           wraps=reader._source_context) as context):
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=fetch_source)
+        self.assertEqual(verified.call_count, 1)
+        self.assertEqual(context.call_count, 1)
+        self.assertEqual(fetched, [(SOURCE_REPO, SOURCE_ISSUE)])
+        self.assertEqual(out["scanned_batches"], 3)
+        self.assertEqual(len(out["hints"]), 1)
+        self.assertEqual(out["duplicate_verified_pointers"], 1)
+        self.assertEqual(out["rejected"], [{
+            "index_comment_id": 1040,
+            "reason_code": "DISCOVERY_SOURCE_MISMATCH",
+        }])
+        self.assertEqual(out["blocked"], [])
+        self.assertEqual(out["hints"][0]["source_comment_id"], 77)
+        self.assertFalse(out["complete_work_inventory"])
+
+    def test_forged_first_pointer_is_not_cached_before_valid_notice(self):
+        root, valid_notice, pointer = fixtures()
+        forged = dict(pointer)
+        forged["comment_id"] = 78
+        forged_notice = other_notice(
+            json.dumps(forged), "kaep.discovery.proof.first.forged",
+        )
+        original = pages([comment(77, root)])
+        from tools import kaep_discovery_reader as reader
+        with (patch.object(reader, "_verify_source_request_from_snapshot",
+                           wraps=reader._verify_source_request_from_snapshot) as verified,
+              patch.object(reader, "_source_context",
+                           wraps=reader._source_context) as context):
+            out = discover_batch(
+                pages([comment(88, forged_notice), comment(89, valid_notice)]),
+                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                fetch_source=lambda _r, _i: original,
+            )
+        self.assertEqual(verified.call_count, 2)
+        self.assertEqual(context.call_count, 1)
+        self.assertEqual(len(out["hints"]), 1)
+        self.assertEqual(out["hints"][0]["index_comment_id"], 89)
+        self.assertEqual(out["rejected"], [{
+            "index_comment_id": 88,
+            "reason_code": "DISCOVERY_SOURCE_MISMATCH",
+        }])
+        self.assertEqual(out["blocked"], [])
+
     def test_valid_pointer_has_actual_root_and_no_payload(self):
         root, hint, pointer = fixtures()
         x = read(pages([comment(88, hint)]), pages([comment(77, root)]))
@@ -246,16 +356,21 @@ class DiscoveryReaderTests(unittest.TestCase):
         index = pages([
             comment(1000 + n, hints[n]) if n in hints
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(65)
         ])
         reads = []
         def get_source(repo, issue):
             reads.append((repo, issue))
             return sources[(repo, issue)]
-        out = discover_index_shadow(
-            index, expected_notice_actor=ACTOR,
-            expected_source_actor=ACTOR, fetch_source=get_source)
+        with patch("tools.kaep_discovery_reader.parse_pages",
+                   wraps=parse_pages) as strict_pages:
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=get_source)
+        # Four 20-comment batches must share ONE complete, strictly
+        # validated index parse rather than rescanning the JSON four times.
+        self.assertEqual(strict_pages.call_count, 1)
         self.assertEqual(out["status"], "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY")
         self.assertEqual(len(out["hints"]), 21)
         self.assertEqual(out["scanned_batches"], 4)
@@ -271,18 +386,40 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertFalse(out["fallback_retirement_authorized"])
         self.assertNotIn("hidden source payload", json.dumps(out))
 
+    def test_shadow_and_public_batch_parse_once_per_independent_entry(self):
+        root, hint, _ = fixtures()
+        index = pages([comment(88, hint)])
+        source = lambda _repo, _issue: pages([comment(77, root)])
+        with patch("tools.kaep_discovery_reader.parse_pages",
+                   wraps=parse_pages) as strict_pages:
+            first = discover_batch(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=source)
+            self.assertEqual(strict_pages.call_count, 1)
+            shadow = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=source)
+            self.assertEqual(strict_pages.call_count, 2)
+        self.assertEqual(first["hints"], shadow["hints"])
+        self.assertFalse(shadow["truncated"])
+
     def test_shadow_cross_batch_replay_and_explicit_limit_are_not_new_work(self):
         root, hint, _ = fixtures()
         index = pages([
             comment(1000 + n, hint) if n in (0, 35)
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(42)
         ])
         read = lambda repo, issue: pages([comment(77, root)])
-        out = discover_index_shadow(
-            index, expected_notice_actor=ACTOR,
-            expected_source_actor=ACTOR, fetch_source=read)
+        with patch("tools.kaep_discovery_reader._mailbox",
+                   wraps=_mailbox) as strict_read:
+            out = discover_index_shadow(
+                index, expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=read)
+        # Both pointers refer to the same verified Issue across three
+        # batches. The source is decoded once, never re-decoded per pointer.
+        self.assertEqual(strict_read.call_count, 1)
         self.assertEqual(len(out["hints"]), 1)
         self.assertEqual(out["duplicate_verified_pointers"], 1)
         self.assertEqual(out["distinct_source_issue_count"], 1)
@@ -299,17 +436,49 @@ class DiscoveryReaderTests(unittest.TestCase):
                 expected_source_actor=ACTOR, fetch_source=read,
                 max_batches=MAX_SHADOW_BATCHES + 1)
 
+    def test_shadow_rejects_conflicting_index_identity_across_batches(self):
+        root, hint, pointer = fixtures()
+        for identity_field in ("message_id", "idempotency_key"):
+            with self.subTest(identity_field=identity_field):
+                altered = other_notice(
+                    json.dumps(pointer), "kaep.shadow.othernotice0002",
+                )
+                altered[identity_field] = hint[identity_field]
+                index = pages([
+                    comment(1000 + n, hint if n == 0 else altered)
+                    if n in (0, 35) else {
+                        "id": 1000 + n, "body": "operator note",
+                        "user": actor_user(),
+                    }
+                    for n in range(42)
+                ])
+                out = discover_index_shadow(
+                    index, expected_notice_actor=ACTOR,
+                    expected_source_actor=ACTOR,
+                    fetch_source=lambda _r, _i: pages([comment(77, root)]),
+                )
+                self.assertEqual(out["status"], "INDEX_EXHAUSTED_WITH_REJECTIONS")
+                self.assertEqual(len(out["hints"]), 1)
+                self.assertEqual(len(out["rejected"]), 1)
+                self.assertEqual(out["rejected"][0]["index_comment_id"], 1035)
+                self.assertEqual(
+                    out["rejected"][0]["reason_code"], "CONFLICTING_INDEX_REPLAY"
+                )
+                self.assertEqual(out["distinct_source_issue_count"], 1)
+                self.assertEqual(out["scanned_batches"], 3)
+                self.assertFalse(out["complete_work_inventory"])
+
     def test_shadow_blocked_original_pins_safe_cursor_not_full_index(self):
         root, hint, _ = fixtures()
         index = pages([
             comment(1021, hint) if n == 21
             else {"id": 1000 + n, "body": "operator note",
-                  "user": {"login": ACTOR}}
+                  "user": actor_user()}
             for n in range(42)
         ])
         bad_source = pages([
             {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-             "user": {"login": ACTOR}},
+             "user": actor_user()},
             comment(77, root)
         ])
         out = discover_index_shadow(
@@ -396,7 +565,7 @@ class DiscoveryReaderTests(unittest.TestCase):
     def test_malformed_marker_cannot_hide_later_valid_pointer(self):
         root, hint, _ = fixtures()
         malformed = {"id": 86, "body": "<!-- kaep:message:v0.2 -->malformed",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         result = discover_batch(pages([malformed, comment(88, hint)]),
                                 expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
                                 fetch_source=lambda r, i: pages([comment(77, root)]))
@@ -417,7 +586,7 @@ class DiscoveryReaderTests(unittest.TestCase):
 
     def test_bounded_scan_has_explicit_cursor_and_continuation(self):
         root, hint, _ = fixtures()
-        boring = [{"id": i, "body": "ordinary update", "user": {"login": ACTOR}}
+        boring = [{"id": i, "body": "ordinary update", "user": actor_user()}
                   for i in range(100, 100 + MAX_INDEX_BATCH)]
         index = pages(boring + [comment(100 + MAX_INDEX_BATCH, hint)])
         fetch = lambda r, i: pages([comment(77, root)])
@@ -455,7 +624,7 @@ class DiscoveryReaderTests(unittest.TestCase):
     def test_malformed_source_wrapper_blocks_safe_cursor_not_other_sources(self):
         root, hint, _ = fixtures()
         malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         corrupt_source = pages([malformed, comment(77, root)])
         index = pages([comment(88, hint)])
         out = discover_batch(index, expected_notice_actor=ACTOR,
@@ -533,9 +702,9 @@ class DiscoveryReaderTests(unittest.TestCase):
         }
         second = other_notice(json.dumps(other_ptr), "kaep.discovery.secondindex0001")
         malformed = {"id": 76, "body": "<!-- kaep:message:v0.2 -->bad",
-                     "user": {"login": ACTOR}}
+                     "user": actor_user()}
         index = pages([
-            {"id": 85, "body": "ordinary", "user": {"login": ACTOR}},
+            {"id": 85, "body": "ordinary", "user": actor_user()},
             comment(88, hint), comment(89, second),
         ])
         def fetch(repo, issue):
@@ -555,9 +724,9 @@ class DiscoveryReaderTests(unittest.TestCase):
 
     def test_bad_index_pagination_still_fatal_and_no_cursor_returned(self):
         bad = json.dumps([[{"id": 2, "body": "ordinary",
-                            "user": {"login": ACTOR}},
+                            "user": actor_user()},
                            {"id": 1, "body": "ordinary",
-                            "user": {"login": ACTOR}}]])
+                            "user": actor_user()} ]])
         with self.assertRaisesRegex(InvalidMessage, "INVALID_COMMENT_SEQUENCE"):
             discover_batch(bad, expected_notice_actor=ACTOR,
                            expected_source_actor=ACTOR,
@@ -581,6 +750,20 @@ class DiscoveryReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_SOURCE_BLOCKED"):
             discover(index, expected_notice_actor=ACTOR,
                      expected_source_actor=ACTOR, fetch_source=unavailable)
+
+
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_index_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        _, hint, _ = fixtures()
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(88, hint)
+                original["user"] = {"login": ACTOR, **identity}
+                result = discover_batch(
+                    pages([original]), expected_notice_actor=ACTOR,
+                    expected_source_actor=ACTOR,
+                    fetch_source=lambda _r, _i: pages([]))
+                self.assertEqual(result["rejected"][0]["reason_code"], "UNTRUSTED_DISCOVERY_ACTOR")
 
 
 if __name__ == "__main__":

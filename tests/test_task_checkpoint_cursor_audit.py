@@ -13,7 +13,8 @@ STATE = CursorState(1, TASK, 1, "M0", "M1", "a"*40, (),
 
 def c(body, trusted=True):
     return {"id": 1, "body": body, "author_association": "OWNER" if trusted else "NONE",
-            "user": {"login": "test"}}
+            "user": {"id": 79015263 if trusted else 123456789,
+                     "login": "kinoko34077" if trusted else "test"}}
 
 
 class Fake:

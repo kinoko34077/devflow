@@ -45,7 +45,8 @@ def verify_exact_caller(text: str, trusted_template: str, devflow_sha: str) -> N
 
 def _required_runner(env: Mapping[str, str]) -> dict[str, str]:
     fields = (
-        "GITHUB_REPOSITORY", "GITHUB_ACTOR", "GITHUB_TRIGGERING_ACTOR",
+        "GITHUB_REPOSITORY", "GITHUB_ACTOR", "GITHUB_ACTOR_ID",
+        "GITHUB_TRIGGERING_ACTOR",
         "GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_WORKFLOW_REF",
         "GITHUB_WORKFLOW_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
     )
@@ -102,6 +103,7 @@ def attest_authenticated_readonly(
         or run.get("head_branch") != "main"
         or run.get("path") != CALLER_PATH
         or not isinstance(run.get("actor"), dict)
+        or run["actor"].get("id") != 79015263
         or run["actor"].get("login") != actor
         or not isinstance(run.get("repository"), dict)
         or run["repository"].get("full_name") != repository
@@ -110,7 +112,7 @@ def attest_authenticated_readonly(
     ):
         raise ArtifactRejected("independent GitHub producer metadata mismatch")
     t = run.get("triggering_actor")
-    if not isinstance(t, dict) or t.get("login") != actor:
+    if not isinstance(t, dict) or t.get("id") != 79015263 or t.get("login") != actor:
         raise ArtifactRejected("missing or different-actor GitHub REST rerun rejected")
     raw = api.get(f"/contents/{CALLER_PATH}?ref={expected_workflow_sha}")
     if (

@@ -1,6 +1,6 @@
 # 検証済み生成物の書戻し v1 — 安全運用・監査Runbook
 
-**適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S3 Exit／S4は実証・独立Review・JO Caller postmain両OS CIを満たして受入済み**（[S3親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106230186)／[S4親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106251550)）。**S5は本Runbookと仕様のPR統合・統合後CI・Control/Issue整合によって独立判定する**。以下の旧草案部分は履歴として保持する。  
+**適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S0–S5は#384でCOMPLETE / ACCEPTED**（S3 [親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106230186)、S4 [親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106251550)、S5 [最終受入](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106565389)、[PR #429](https://github.com/kinoko34077/devflow/pull/429) / post-main Required [#38120459183](https://github.com/kinoko34077/devflow/actions/runs/38120459183) SUCCESS）。受入範囲は元の単一JO Pilotであり、他repoへのrolloutは[#386](https://github.com/kinoko34077/devflow/issues/386)が別に管理しNO_GO。以下の受入前草案は履歴として保持する。  
 **trusted devflow pin:** `f886877e7110f2499125ecc6e07294798c33fe93`。JO CallerはこのSHAを`uses`／`devflow_sha`へ両方固定し、devflow mainへの別案件コミットで自動更新しない。
 
 ## 実証済みの安全運用と再開条件（2026-10-11）
@@ -10,114 +10,47 @@
 3. **更新と競合:** 1 open same-repo PR＋expected HEAD、未保護scratch branchでCAS更新。commit parentはexpected HEAD、`force:false`、事後readback必須。競合/不明結果は停止し、新たな受入なしで再実行しない。
 4. **同一receiptの重複防止:** 受入専用`write-replay-test`は一時的な限定モードで実証を終えた。Run [#38072681245](https://github.com/kinoko34077/japanese-orthography/actions/runs/38072681245)は初回`COMMITTED`→同一runner/run/attempt/manifestで2回目`NO_OP_REPLAY`、追加書込0。**恒常Callerには同モードを残さない**。[PR #308](https://github.com/kinoko34077/japanese-orthography/pull/308)でUI選択肢とAPI経由のジョブ起動可能性をともに除去済み。
 5. **exact writer HEADのテスト:** token書込は通常のPR CIを自動起動しない。またPRイベントの通常checkoutは仮想マージになる場合がある。受入では一時的read-only手動[Verify #38078533001](https://github.com/kinoko34077/japanese-orthography/actions/runs/38078533001)のpilot-head両OSがwriter commit`87557afe9d3585252c94cf5352515943323dd708`を直接checkoutし、SHA assert→全check→Ubuntu buildを成功させた。GitHub run自体のhead SHA（手動起動元main）とは区別。通常運用で必要な場合も、権限変更なく**実際のcheckout SHA**で必要CIを判定する。
-6. **rollbackと清掃:** 非強制復旧commit`ce4042b9868141f5b0736b1063a22a2748d721c5`の親はwriter commitのみ、変更JSON1件で元blobへ復元。scratch PR#304は未統合Close。臨時Verify入口は[PR #307](https://github.com/kinoko34077/japanese-orthography/pull/307)で旧blobへ完全復元し、postmain [#38113279718](https://github.com/kinoko34077/japanese-orthography/actions/runs/38113279718) Ubuntu/Windows成功。Callerの一時Replayモード撤去後のmain CI [#38116891632](https://github.com/kinoko34077/japanese-orthography/actions/runs/38116891632)を必ず照合する。
+6. **rollbackと清掃:** 非強制復旧commit`ce4042b9868141f5b0736b1063a22a2748d721c5`の親はwriter commitのみ、変更JSON1件で元blobへ復元。scratch PR#304は未統合Close。臨時Verify入口は[PR #307](https://github.com/kinoko34077/japanese-orthography/pull/307)で旧blobへ完全復元し、postmain [#38113279718](https://github.com/kinoko34077/japanese-orthography/actions/runs/38113279718) Ubuntu/Windows成功。Callerの一時Replayモード撤去後のmain CI [#38116891632](https://github.com/kinoko34077/japanese-orthography/actions/runs/38116891632) SUCCESSは#384 S3 Exitの受入済み証拠であり、未完了ゲートではない。
 7. **負例と制約:** fork/偽run/actor/recipe/source/ZIP path・symlink・submodule・ZIP bomb・stale HEAD/race/replayの負例はdevflow全862 tests中の87 unit/staticで検証し、旧stale HEAD拒否Run [#37976552219](https://github.com/kinoko34077/japanese-orthography/actions/runs/37976552219)で実際のfail-closedも検証済み。Unit/staticの成功を、危険な特権live payload投入の成功と偽らない。ほかのrepoやrecipeへの展開・credential・settings・deploy等は別Human gate。
 8. **完了判定:** 初期PilotのS3 ExitはJO Owner #300とdevflow #415のrun/commit/review/CI/rollback/清掃の全根拠を読み直してから親#384へ記録。S4は独立Review・統合済コードのexact SHAとpostmain CI・権限境界を新規監査。S5は受入条件が揃ってから仕様、Runbook、両Control、3つのIssue/Cursorへ確定情報だけを反映。S3成功とS4／S5は独立の状態であり、一般展開#386は自動受入しない。
 
 ---
 
-## 以下はS2〜S3計画時点の歴史的草案（現在の受入状態ではない）
+## 受入前草案の整理：歴史的判断と現行運用の境界
 
-# 検証済み生成物の書戻し v1 — 安全運用・監査Runbook（受入前草案）
+以下は**S2〜S3設計時点の検討内容**のうち、現行の運用手順と重複しない原因・採否・停止条件を統合した記録。**S3/S4/S5が未受入という当時の表現は失効**している。現行の受入、正しい実行方法、最終SHAと個別の証拠は本書冒頭、および[親#384](https://github.com/kinoko34077/devflow/issues/384)・[子#415](https://github.com/kinoko34077/devflow/issues/415)・[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300)に従う。旧版全文は本ファイルのGit履歴（修正前blob `478eda4dbfb01e3fca14a2b95159ab9089552657`）に保持する。他repo展開は[別owner #386](https://github.com/kinoko34077/devflow/issues/386)であり、自動受入しない。
 
-**正本:** devflow #384、設計契約 \`docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md\`。  
-**対象:** single repo Pilot \`kinoko34077/japanese-orthography#300\`。  
-**現状:** S3実装審査中。**本書の存在はwriterの有効化・Review承認・Pilot成功・S4/S5完了を意味しない。**  
-**派生:** 各repository・各chatへの段階導入は別Issue devflow#386であり、今回のPilot承認を引き継がない。
+### 1. 当時の設計問題と採用境界
 
-## 1. 受入条件と安全境界
+**信頼済みSHAとPilotの循環依存：** S3の終了条件には実Pilotが必要だが、権限付きwriterは「mainへ受入済みのコードSHA」しか読み込めず、当初のS4 merge待ちでは両条件を同時に満たせなかった。**未レビューのPRブランチをwriterにロードして先にPilotを通す案、Pilot未実施を成功とみなす案は不採用。** 当時の解決案は、最終統合差分のセキュリティレビュー・Required CI・実装者以外の独立レビューと明示Human承認を前提に、修正版を原子的にbootstrap mergeした後、固定main SHAで限定Pilotを実施し、S4を改めて最終監査する段階分離。途中の脆弱なmainを作る#385/#390/#387/#391の逐次mergeは不可。bootstrap mergeだけではS3/S4/S5の受入にならない。実際の最終採否と完了証拠は#384の受入記録が優先する。
 
-1. 対象repo/recipe/actor/生成pathを信頼済みコード・固定設定に限定。初期対象は \`japanese-orthography\` の \`jo-orthography-accounting@1\` と \`data/reports/orthography-v2-source-accounting.json\` の1ファイルのみ。別repo/別recipeは別承認。
-2. 信頼済みdefault branchから明示的に起動された \`workflow_dispatch\` に限る。fork/PR起点の権限付き自動トリガーなし。対象branchは専用 \`artifact/devflow384/\` prefix内の単独open PR、exact expected commit SHA一致、main/default以外、保護/rulesets状態をGitHub APIで確認できること。
-3. generator jobは \`permissions: contents:read\`（secretsなし）。PR branchへcheckoutし、固定recipeの生成・検証を行うことはこのjobにのみ許容。アーティファクトはすべて低信頼データとして扱う。
-4. writer jobのみ承認済みの \`contents:write\` を利用。生成repo sourceのcheckout/build/install/script実行は禁止。writerヘルパは**受入済みdevflow SHA**を固定参照する。未merge・未review branchのコードを権限付きjobへロードしない。\`actions:read\` によるrun metadata検証を行う場合、read権限の有効性を実測する。
-5. producer manifestの \`actor\`、\`source_sha\`、\`producer_run_id\`、\`workflow_ref\` は自己申告であり、独立認証にならない。writerはGitHub Actions REST APIからrun/workflow情報を取得し、first-party workflow contextのrun ID、attempt、workflow SHA、actor、default branch、workflow pathとの**厳密一致**を確認してからmanifestと照合する。
-6. ZIP: 原bytes/SHA256/サイズ/ファイル数/圧縮率・symlink/実行可能mode・重複/未知/省略path・\`.github/\`/parent traversal等を拒否。targetの既存Git treeをpath要素ごと観測し、blob \`100644\` 以外と不正な親を拒否。差分は固定pathのみ、意図しない削除なし。
-7. Git commitのparentはexpected HEADに限定。更新前に再照会し、更新時は \`force:false\`。成功後に再照会し、新HEADと記録が一致すること。動いた場合は**新たなHuman-accepted admissionなしに再試行しない**。同一run/manifest、単一parent、正確なtarget bytes＋差分の裏付けがある場合だけ \`NO_OP_REPLAY\`。
-8. \`GITHUB_TOKEN\`を用いた通常のpushだけではrequired PR CIを起動できない。承認済みの明示的な検証経路で**新しいexact HEAD**にcheckoutしてUbuntu/Windows正式checkを実行し、runログ・実際にテストしたSHA・結果をIssueへ永続化する。\`repository_dispatch\` は \`contents:write\` のみで起動可能だが **runのCheckがdefault-branch SHAへ付く可能性**があるため、required PR checkが新HEADに付いたものとしては扱わず、正式merge gateの条件を別途確認する。\`workflow_dispatch\` REST経由には \`actions:write\` が必要となり、未承認なら実行しない。
-9. source PR codeやarchiveが悪意あるものとして無条件実行しない設計と、trusted workflow編集者への権限昇格を含めて独立セキュリティReviewで確認する。秘匿情報をログへ出さない。
+**許可された唯一の当初Pilot：** `kinoko34077/japanese-orthography#300`のrecipe `jo-orthography-accounting@1`、生成対象 `data/reports/orthography-v2-source-accounting.json` 1件。対象はfirst-partyのdefault branchで明示的に起動する`workflow_dispatch`と、`artifact/devflow384/`内の未保護scratch branch上の単一open PR、exact expected HEAD。別repo/recipe/path、fork/PR起点の権限付き自動実行、`actions:write`、PAT/GitHub App、settings/rulesets/protection変更、secrets、外部公開は別承認であり、このPilotには含まれない。
 
-## 1A. S3のtrusted SHA確立とPilot順序（S3/S4循環依存の解消案・独立Review/受入待ち）
+### 2. 信頼境界と停止条件（重複仕様を一元化）
 
-### 循環依存の原因
-現行の「S3出口にlive Pilot成功が必須」かつ「writerは受入済みdevflow SHAのみをロード」かつ「devflowへのmergeをS4で初めて行う」は、三条件を同時に満たせない。未mergeの権限付きコードを実行してPilotを先行させる方法、またはPilot未成功を成功と扱う方法は**採用しない**。
+| 境界 | 受入済み設計の必要条件・拒否条件 |
+| --- | --- |
+| **生成側** | `produce`は`contents:read`のみ、secretなし・checkout時`persist-credentials:false`。固定recipeの生成/検証だけ許容し、ZIP/manifestは全面的に**低信頼入力**。 |
+| **書込側** | `write`だけが`contents:write`、`actions:read`、`pull-requests:read`をjob単位で使用。対象repoのPRコードcheckout、`npm`/build/install/scriptの実行は禁止。共有helperとworkflowはJO Callerの`uses`／`devflow_sha`が示す**同じ受入済みdevflow SHA**のみ。非レビューHEADや中間のB1問題を持つtreeは不可。 |
+| **run由来の認証** | manifest中の`actor/source_sha/producer_run_id/workflow_ref`は自己申告。GitHub RESTのrun/workflow、実際のrunner context、run ID/attempt、actor、default branch、workflow pathと一致させる。変動する`workflow_sha`を静的pinせず、**当該workflow SHA時点のCallerの内容**から`uses`と`devflow_sha`が各1個・同一SHA、`workflow_dispatch`以外のtrigger・`secrets`・`run:`なしを検証し、run固有`producer_workflow_ref`を導く。 |
+| **アーカイブ/パス** | ZIP原bytes・SHA256・size・count・compression ratio・symlink/exec mode・重複/未知/不足path・parent traversal・`.github/`などの不許可pathを拒否。既存Git treeの各親要素とblob `100644`を検査し、固定path以外・不意の削除を禁止。 |
+| **書込み競合/再実行** | commit parentはexact expected HEAD、事前再取得、`force:false`でCAS、事後HEADと差分のreadbackが必須。競合・結果不明は停止して新たなadmissionへ戻す。同一runner/run/attempt/manifest・単一parent・正確なbytesを照合できたときだけ`NO_OP_REPLAY`。新HEADへ追随するforce pushは禁止。 |
+| **CI/レビュー** | GitHub `GITHUB_TOKEN` pushだけではPR CIは自動起動しない。PRイベントcheckoutの仮想merge SHAと、writerの**実際の新HEAD**を混同しない。新HEADで正規Ubuntu/Windows Required検証を明示的に行い、runと検査SHAを記録。別経路の`repository_dispatch` Checkがdefault branchに付けば新HEADのRequired通過としない。`workflow_dispatch` RESTの`actions:write`は未許可では使用不可。 |
+| **独立監査** | 未解決のsecurity finding、reviewed SHAとの不一致、現行HEADのRequired失敗、Human特例承認欠落、untrusted caller/別repoからの到達、Pilot/rollback未確認はいずれも当該段階HOLD。実装者が別モデルのレビューを偽装しない。単一Pilotの承認をfleet rolloutへ拡張しない。 |
 
-### 段階を区別する
-- **S3.4 — code security gate（未受入）:** 当該最終コードの統合PRのexact HEAD／base・完全なdiff・Required CI・正式な独立レビュー・未解決finding・job permission/actor/runner境界・現行の関連Issueをゼロから再監査する。GPTとClaudeの各担当差分への別Reviewは維持するが、**両者が実装した統合全体には両者以外の独立したセキュリティReviewer**が必要。特に#387のB1未修正の中間HEADを合格させない。成功してもPilot受入ではない。
-- **S3.5 — trusted-code bootstrap merge（特例・未許可）:** S3.4の全gateに加え、**security-sensitiveな前倒しの統合mergeについて対象・SHA・復旧方法を明示したHuman承認**がある場合に限り、B1修正済みの統合コードを**一つの原子的なPR merge**でdevflow default branchに反映する。#385/#390/#387/#391を順次mainへmergeして、途中で権限付きworkflowの未修正版が有効なmainを作ってはならない。merge前にPR/base HEADを再照合し、差分14ファイル等の観測を記録し、post-mainのRequired checksを当該main SHAで確認する。チェックがFAILならPilotへ進まずrevert PR等の復旧を判断する。これは「trusted codeのbootstrap受入」であり、**S3/S4の機能・Pilot完了ではない**。
-- **S3.6 — bounded Pilot:** 受入済みmain上の**正確なcommit SHA**だけをreusable workflowとtrusted helperに使用。Pilot対象repoがJO一件、recipeが`jo-orthography-accounting@1`、生成ファイルが`data/reports/orthography-v2-source-accounting.json` 1件であることを実行時に再確認。対象側callerは**別PRで独立レビューを経た後**、安全に有効化されたdefault branchでのみ`workflow_dispatch`実行可能。過去に拒否された特権workflow入口の作成を別tool/経路へ切り替えて回避しない。限定job権限の明示許可を超えたら停止。最初にdry-run、次に非force write、exact replay、競合拒否、不正入力拒否、rollback、writer HEADのreadback、新HEADの正規Ubuntu/Windows Required CIを実証する。初回scratch PRの意図的stale CI失敗は成功証拠に流用しない。
-- **S3出口 — operational Pilot gate:** 本節と§2のlive Pilot・不正入力・権限・復旧・CI・記録を全件満たして初めてS3をGREENとする。bootstrap merge完了だけの場合、Cursorは従来どおり`S3_SINGLE_REPO_PILOT`に留める。
-- **S4 — final acceptance / reconciliation gate:** §3に沿い、新たなmainの受入済みSHA／Pilot成果／正規CI／独立Review／merge履歴と、bootstrap後に変更があった場合の別PRの安全なmergeとpost-main checksを再監査する。追加変更がなければbootstrap mergeを唯一のcode mergeとして承認記録を照合し、同じコードを二重にmergeしない。S4はbootstrap mergeによって自動GREENとしない。全gate完了後にだけS5文書・Control同期へ進む。
+### 3. 当時のS3〜S5出口と復旧の整理
 
-### Bootstrap mergeに関する停止・復旧
-1. S3.4の独立レビューが無い、現行HEADのreview-readinessがFAIL、B1が統合最終treeに残る、Humanの特例承認が無い場合は**S3.5に進まない**。
-2. bootstrap mergeしてもJO側のcallerを導入するまではPilotの`workflow_dispatch`は存在しない。devflow側は単体で`workflow_call`入口を公開し得るため、merge前に**同じリポジトリ／他リポジトリから予期せず権限付きjobが起動できないこと**と、caller repo identity/actor/recipe/path allowlistの拒否を独立監査する。
-3. bootstrap後のmain CI/security観測が失敗、意図しないwriteが観測された、あるいはreviewed SHAと実行中のhelperが不一致なら、特権Pilotを停止し、revocation/close/revert PR等の復旧と再レビューへ戻す。default branchのforce/rewriteは禁止。
-4. 許可済みスコープは単一JO Pilotのwriter job`contents:write`とread用`actions:read`、`pull-requests:read`まで。`actions:write`、PAT、GitHub App、secrets、settings/rulesets/protection変更、他repoの有効化は別Human gateである。
-5. 本節は**受入前の仕様変更案**として別PRでレビューし、devflow#384の正式なphase-order決定と必要なHuman承認を得るまでは、既存§1–§3の安全境界を緩和しない。
+**S3段階：** trusted codeの受入と実Pilotを分ける。dry-run→non-force write→同一receipt replay（`COMMITTED→NO_OP_REPLAY`、追加書込0）→expected HEAD競合/悪意ある入力の拒否→rollback→一時PR/permission/workflow清掃→writer新HEADのexact CIまで完了して初めて限定Pilot受入。単にbootstrap mergeしただけならPilot成功とはしない。専用`write-replay-test`は受入検証後に恒常Callerから**UI選択肢とAPI起動経路の両方**を除去（JO [PR #308](https://github.com/kinoko34077/japanese-orthography/pull/308)）。実証runは冒頭を参照。
 
-## 2. S3 → S4：毎回ゼロベース監査
+**S4段階：** 統合時点のPR/base/HEAD、変更ファイル、Required CI、正式Review、Review Readiness、未解決threads、runner/job permissions、JO Caller pinと当時の実行証拠を再取得。変更したHEADで旧review/CIを流用しない。bootstrap時点のコードから変更がなければ二重mergeしない。merge後main SHAとpost-main CIを確認。実際のS4受入済み範囲は#384正本を参照。
 
-対象を固定せずに古いcheckpointを再利用しない。S3のexitで、次の項目を**現行正本から新規照合**し、合否・evidence URL・未解決findingをIssueに記録する。
+**S5段階：** Pilot・Review/CI・権限・cleanup・復旧証拠を最終照合してから、#384、Control #16、JO #300/Control #180、`docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md`、Task Cursorへ**現実に成立した事実だけ**反映。#291/#210/PR #296やdeploy/Pages/Phase5/6を勝手に変更しない。機能受入と新しいrepoでの展開は別ゲート。
 
-| 監査軸 | 必須の具体的証拠 | 判定 |
-| --- | --- | --- |
-| 正本/Scope | devflow \`AGENTS.md\`、Control #16、#384、Pilot #300、衝突する#291/#210/PR #296のlive状態 | 未確認ならHOLD |
-| 共有コード | producer packager、admission/manifest、writer、static policy、pin済みworkflow/callerのPR exact HEAD | 未実装ならHOLD |
-| job権限 | read jobにwrite token/secretなし、writerにPR-code execute/installなし、tokenは当該jobのみ | 欠けたらHOLD |
-| attacker negative | fork、偽run/actor/recipe/branch/source、未許可path、ZIP bomb、symlink/submodule、race/replay、変更file外混入 | 検証不足ならHOLD |
-| 生きたPilot | 専用PR branch、実write/no-op/競合拒否、非force、新HEAD readback、rollback実証、事後清掃 | 未実施ならHOLD |
-| CI/正式Review | exact-headの必須checkと独立のwriter security Reviewが成功、blockingなし | 不足ならHOLD |
-| Human gate | 日本語で指定された単一repoの\`contents:write\`のみ、別permission/settings変更なし | 範囲超過ならHOLD |
-| 操作記録 | manifest SHA、run ID/attempt、source/head、commit、CI runs、Review、障害時再開位置 | 欠けたらHOLD |
+**異常時：** 生成/検証失敗ならwriterは起動しない。run/actor/workflow/manifest不一致やZIP/path/mode失敗は入力を信用側へ書き換えず拒否。CAS競合は新admissionに戻す。commit object作成後にref更新拒否なら未参照objectが残っても強制pushしない。ref成功後にCIが未起動・失敗ならmergeをHOLD。実行途中で止まれば#384/#300と唯一のTask Cursorから最後の受入済み単位だけを復元。撤回はPR close／新規revert commitとし、shared historyはrewriteしない。証拠としてrun ID/attempt、recipe/version、source/expected/new HEAD、manifest SHA、PR、CI、Review、差分・rollbackと未完了点を残す（secret/raw tokenを記録しない）。
 
-S3 exitがHOLDの場合、S4を「完了」とは表記しない。進捗Cursorは最初の未完了checkpointに留める。
+### 4. 実装した入口（当時の仕様・現行pinは冒頭優先）
 
-## 3. S4：独立レビューとmerge gate
+- 共通workflow: `.github/workflows/generated-artifact-writeback.yml`。top-level `permissions: {}`、`produce`は固定recipeを`tools/generated_artifact_pilot.py`の`RECIPE_NPM_SCRIPT`経由でのみ生成し、`write`は上記認証/ZIP/CASを担当。
+- JO Caller雛形: `docs/operations/templates/verified-artifacts-pilot.yml`（devflowでは非稼働）。JO側のreviewed default branchでのみ起動する。固有の受入済み`<DEVFLOW_SHA>`を`uses`と`devflow_sha`へ固定し、意図しないpin更新を行わない。
+- 初期のexact-HEAD CI確保案：`actions:write`を新たに付与せず、Humanによるscratch PRのclose/reopenなど**GitHubの本来のPRイベント**で検証。認証・権限・実行境界を別tool/迂回経路で無効化しない。
 
-1. S3 exit auditを再読した上で、PR exact HEAD、base HEAD、diff/変更ファイル一覧、GitHub Required CI（同一SHA）、formal Review（実装者と異なるsystem/model）、未解決review threads、workflow権限/credential/branch protectionを**再取得**。
-2. 重大な指摘が1つでもあれば、PR commitを修正しexact-head CIと別担当Reviewを繰り返す。**旧HEADでGREENは現在のGREENではない**。
-3. GitHub上のReviewer-Provenanceは実レビュー提出者自身が訂正する。実装者がClaude等のReviewerを偽装して機械判定を通さない。
-4. 全gate GREEN、条件付き承認範囲内、衝突なし、変更対象が安全にrevert可能な場合のみ安全なmerge方法を使用する。main直接commit、force/history rewrite、deploy/release、shared secrets/settings変更は禁止。
-5. mergeしたmainのexact SHAを確認し、post-main CIとPilot side effectsを確認する。証拠のない成功は認めない。
-
-## 4. S4 → S5：新規開始監査
-
-- **S3:** 実writer/CAS/replay/negative/rollback/CI証拠を集めたか。
-- **S4:** merged PR/merge commit、formal Review、review-readiness、merge時のexpected base、新main HEAD、post-main checksをlive照合したか。
-- **Permission:** job-scoped write付与が対象Pilot以外へ波及していないか、削除すべき一時grant/workflowが残っていないか。
-- **Scope:** #291/#210/PR #296 とdeploy/Pages/Phase5/6を無変更に保っているか。
-- **Recovery:** 障害時のfirst unfinishedと最後の成功runがIssue/Task Cursorから再構築可能か。
-- いずれか不明なら **S5 ACCEPTANCE はHOLD** し、未検証の成功を記録しない。
-
-## 5. 障害分類・停止・復旧
-
-| 症状 | 保全する根拠 | 対処 |
-| --- | --- | --- |
-| 生成/検証失敗 | producer run、固定recipe/version、source SHA、stderr要約 | 書込jobを起動しない。PR source問題はownerへ戻す |
-| provenance mismatch | runner run ID、run metadata、workflow SHA、manifest SHA、actor | すべて拒否。manifestを信頼側として書き換えない |
-| ZIP/path/mode fail | path、digest、mode、limits（tokenやraw bytesを漏らさない） | 不正パスをallowlistに追加せず停止 |
-| expected HEAD競合 | old SHA、新しいlive SHA、PR diff | 非force CASを拒否。新たな正式admissionへ切り直す |
-| commit objects生成後refが拒否 | 作成済みcommit SHA、未更新target HEAD | orphan Git objectsは参照されない。強制pushしない |
-| ref成功後CI未実行/失敗 | 新HEAD、commit、run ID、required checkの対象SHA | mergeせずHOLD、別権限ゲートなしで明示verify可能な経路を選ぶ |
-| artifact/driverが停止 | #384/#300 Durable Progressと唯一のTask Cursor | 完了単位を再実装しない。current HEADを再読して必要最小の再開 |
-| Pilot撤回 | PRと最後の書込commit SHA、元source/生成物ハッシュ | 共有historyをrebase/forceしない。未mergeならPRを閉じるか、別revert commitで戻す |
-
-## 6. S5で更新する正本（受入が実際に成立した場合のみ）
-
-- devflow#384: 完了したS0–S5、exact accepted HEAD / run / Review、権限境界、残件、final first-unfinishedまたはCOMPLETE。
-- devflow Control #16: 受入済みの共通機能版と初期adoption \`PILOT\`、残る#386 roll-out gate。
-- japanese-orthography#300および関連Control #180: Pilot実証run/commit/rollback/permission cleanupとowner判定。
-- \`docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md\`: 観測した現実の動作、受入版schema/API、運用上の例外と残る制限を反映。
-- PRとSession/Task Cursor: SUCCESS と失敗の両方の実証、最終Review/CI、正しいユーザー承認範囲を復元可能にする。
-
-**結論:** 「コードテストが成功した」「単一Pilotが成功した」「全repositoriyで使える」「S5 ACCEPTED」は別状態であり、段階ごとに独立した根拠が必要。
-
-## 7. S3.3 実装（共通workflow・CLI・caller雛形）— 独立Review待ち
-
-- 共通 `workflow_call`: `.github/workflows/generated-artifact-writeback.yml`。top-level `permissions: {}`。
-  - `produce` job: `contents: read` のみ、secretsなし、`persist-credentials: false`。固定recipe（`tools/generated_artifact_pilot.py` の `RECIPE_NPM_SCRIPT`）だけを `npm run` し、出力は低信頼dataとしてrun限定artifactへ。
-  - `write` job: `contents: write` + `actions: read` + `pull-requests: read`（後2者はrun/PR観測用のread）。target repoのcheckout・npm・node・artifact実行なし。devflow helperは caller が `uses:` で固定した同一SHAを資格情報なしで取得し、`rev-parse` で一致検証。
-- Writer認証（#387 review F1の解消）: `workflow_sha` はJO mainのHEADで変動するため静的pinしない。runner context + `GET /actions/runs/{id}` + `GET /actions/workflows/{id}` の厳密一致に加え、**`workflow_sha` 時点のcaller内容**を取得し、`uses:` pinと `devflow_sha:` 入力が同一SHAで各1回、`workflow_dispatch` のみ、secrets/`run:`/他trigger無しを確認してから、run固有の `producer_workflow_ref` を導出する。
-- caller雛形: `docs/operations/templates/verified-artifacts-pilot.yml`（devflowでは非稼働）。JO導入は独立security Review合格後、レビュー済みSHAで `<DEVFLOW_SHA>` を2箇所置換し、JO側の通常PR/Review経由で行う。
-- 新HEADのexact CI: JO `Verify` は `pull_request` トリガー。`GITHUB_TOKEN` pushでは起動しないため、`actions:write` 無しでは **Humanによるscratch PRのclose/reopen等のPRイベント** が正当経路。これはHuman操作として記録する。

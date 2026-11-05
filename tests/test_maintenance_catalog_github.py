@@ -23,6 +23,11 @@ def issue(number, title, *, association="OWNER", body="", state="open"):
         "html_url": f"https://github.com/{REPO}/issues/{number}",
         "repository_url": f"https://api.github.com/repos/{REPO}",
         "author_association": association,
+        "user": (
+            {"id": 79015263, "login": "kinoko34077"}
+            if association in {"OWNER", "MEMBER", "COLLABORATOR"}
+            else {"id": 123456789, "login": "untrusted"}
+        ),
     }
 
 
@@ -69,6 +74,11 @@ class FakeTransport:
                 f"`{self.control_state}`\n"
             ),
             "author_association": self.control_association,
+            "user": (
+                {"id": 79015263, "login": "kinoko34077"}
+                if self.control_association in {"OWNER", "MEMBER", "COLLABORATOR"}
+                else {"id": 123456789, "login": "untrusted"}
+            ),
         }
 
     def list_issues(self, repository, state="open"):
@@ -194,7 +204,8 @@ class CatalogCollectionTests(unittest.TestCase):
             issues=[issue(7, "[MAINTENANCE] Audit Ledger")],
             comments={
                 7: [
-                    {"body": render_run_comment(trusted), "author_association": "OWNER"},
+                    {"body": render_run_comment(trusted), "author_association": "OWNER",
+                     "user": {"id": 79015263, "login": "kinoko34077"}},
                     {"body": render_run_comment(untrusted), "author_association": "NONE"},
                 ]
             },
@@ -272,6 +283,7 @@ class CatalogCollectionTests(unittest.TestCase):
             7: [{
                 "body": render_run_comment(prior),
                 "author_association": "OWNER",
+                "user": {"id": 79015263, "login": "kinoko34077"},
             }]
         }
         issues = [issue(7, "[MAINTENANCE] Audit Ledger")]
@@ -390,6 +402,7 @@ class MultiRepoTransport:
                 f"`{self.control_states.get(managed, 'ACTIVE')}`\n"
             ),
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
 
     def list_issues(self, repository, state="open"):
@@ -408,6 +421,7 @@ def portfolio_issue(repository, number=7):
         "html_url": f"https://github.com/{repository}/issues/{number}",
         "repository_url": f"https://api.github.com/repos/{repository}",
         "author_association": "OWNER",
+        "user": {"id": 79015263, "login": "kinoko34077"},
     }
 
 

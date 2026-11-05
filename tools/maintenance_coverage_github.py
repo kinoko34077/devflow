@@ -15,7 +15,7 @@ from tools.maintenance_catalog import (
     parse_repository_catalog_text, resolve_catalog,
 )
 from tools.maintenance_coverage import (
-    CoverageRow, LedgerEvidence, TRUSTED_ASSOCIATIONS,
+    CoverageRow, LedgerEvidence, _trusted,
 )
 from tools.maintenance_coverage_v2 import (
     AttestedLedgerEvidence, derive_dual_version_coverage,
@@ -97,6 +97,9 @@ def _comment_origin(comment: dict, repository: str, issue_number: int) -> str:
         raise CoverageCollectionError("Ledger comment does not belong to its Issue")
     if not isinstance(comment.get("author_association"), str):
         raise CoverageCollectionError("Ledger comment author association missing")
+    user = comment.get("user")
+    if not isinstance(user, dict):
+        raise CoverageCollectionError("Ledger comment author identity missing")
     return expected_html
 
 
@@ -160,7 +163,11 @@ def collect_repository_coverage(
                 raise CoverageCollectionError("malformed v2 machine audit run") from exc
             if proof is None or proof.record.repository != repository:
                 raise CoverageCollectionError("v2 machine record identity invalid")
-            attested.append(AttestedLedgerEvidence(proof, url, item["author_association"]))
+            attested.append(
+                AttestedLedgerEvidence(
+                    proof, url, item["author_association"], item["user"]
+                )
+            )
             continue
         try:
             record = parse_run_comment(body)
@@ -168,14 +175,21 @@ def collect_repository_coverage(
             raise CoverageCollectionError("malformed machine audit run comment") from exc
         if record is None or record.repository != repository:
             raise CoverageCollectionError("machine record identity invalid")
-        history.append(LedgerEvidence(record, url, item["author_association"]))
+        history.append(
+            LedgerEvidence(record, url, item["author_association"], item["user"])
+        )
 
     all_evidence = history + [
-        LedgerEvidence(item.attestation.record, item.source_url, item.author_association)
+        LedgerEvidence(
+            item.attestation.record,
+            item.source_url,
+            item.author_association,
+            item.author_user,
+        )
         for item in attested
     ]
     complete = {"CLEAN", "FINDINGS", "RECONCILED"}
-    trusted_history = [e for e in all_evidence if e.author_association in TRUSTED_ASSOCIATIONS]
+    trusted_history = [e for e in all_evidence if _trusted(e, repository)]
     current_digest = canonical_catalog_digest(shared, catalog)
     rows = derive_dual_version_coverage(
         slots, history, attested, current_fingerprints or {},

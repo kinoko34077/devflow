@@ -7,38 +7,29 @@ The caller must verify GitHub actors using trusted REST metadata.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from functools import partial
 import json
 import re
-import secrets
 from typing import Any
 
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
+from tools.gpt_liveness_ids import new_chat_id, new_session_id, new_turn_id
 from tools.gpt_liveness_pilot import answer, challenge, enrollment, utc
-from tools.kaep_mailbox_codec import InvalidMessage, validate as validate_message, verify_reply_chain
+from tools.kaep_repository_validation import TASK_REF
+from tools.kaep_mailbox_codec import (
+    InvalidMessage,
+    fail,
+    unique_pairs,
+    validate as validate_message,
+    verify_reply_chain,
+)
 
 BINDING_SCHEMA = "gpt.liveness.chat-binding.v0.1"
 MARKER = "<!-- gpt-liveness:chat-binding:v0.1 "
 END = " -->"
 CHAT_ID = re.compile(r"chat_[0-9a-f]{32}\Z")
-MAILBOX = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
+MAILBOX = TASK_REF
 MAX_BODY_BYTES = 200_000
-
-
-def fail(code: str) -> None:
-    raise InvalidMessage(code)
-
-
-def new_chat_id() -> str:
-    """128-bit cryptographic random routing ID; NOT an auth token."""
-    return "chat_" + secrets.token_hex(16)
-
-
-def new_session_id() -> str:
-    return "session_" + secrets.token_hex(16)
-
-
-def new_turn_id() -> str:
-    return "turn_" + secrets.token_hex(16)
 
 
 def binding_marker(*, chat_id: str, mailbox_ref: str) -> str:
@@ -48,15 +39,6 @@ def binding_marker(*, chat_id: str, mailbox_ref: str) -> str:
         fail("INVALID_CHAT_MAILBOX")
     data = {"schema": BINDING_SCHEMA, "chat_id": chat_id, "mailbox_ref": mailbox_ref}
     return MARKER + json.dumps(data, separators=(",", ":"), sort_keys=True) + END
-
-
-def _strict_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for key, val in pairs:
-        if key in out:
-            fail("DUPLICATE_CHAT_BINDING_FIELD")
-        out[key] = val
-    return out
 
 
 def parse_binding(body: str, *, mailbox_ref: str) -> dict[str, str]:
@@ -70,7 +52,12 @@ def parse_binding(body: str, *, mailbox_ref: str) -> dict[str, str]:
     if END not in piece or len(piece.split(END, 1)[0]) > 300:
         fail("INVALID_CHAT_BINDING")
     try:
-        raw = json.loads(piece.split(END, 1)[0], object_pairs_hook=_strict_pairs)
+        raw = json.loads(
+            piece.split(END, 1)[0],
+            object_pairs_hook=partial(
+                unique_pairs, duplicate_code="DUPLICATE_CHAT_BINDING_FIELD"
+            ),
+        )
     except (ValueError, TypeError) as exc:
         if isinstance(exc, InvalidMessage):
             raise
@@ -187,3 +174,4 @@ def validate_heartbeat_pair(
         "observed_at": answer_created_at, "model_identity_attested": False,
         "current_liveness_proven": False, "claim_authority": False,
     }
+

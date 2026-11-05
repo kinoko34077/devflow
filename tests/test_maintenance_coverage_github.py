@@ -36,11 +36,17 @@ def record(result="CLEAN", **changes):
 
 
 def comment(result="CLEAN", author="OWNER", **record_changes):
+    user = (
+        {"id": 79015263, "login": "kinoko34077"}
+        if author in {"OWNER", "MEMBER", "COLLABORATOR"}
+        else {"id": 123456789, "login": "untrusted"}
+    )
     return {
         "id": 123,
         "html_url": LEDGER_URL + "#issuecomment-123",
         "issue_url": API_ISSUE,
         "author_association": author,
+        "user": user,
         "body": render_run_comment(record(result, **record_changes)),
     }
 

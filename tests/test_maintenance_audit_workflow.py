@@ -44,7 +44,7 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
             self.audit,
         )
         self.assertIn(
-            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' }}",
+            "if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}",
             self.publish,
         )
         self.assertIn("MAINTENANCE_AUDIT_TOKEN:", self.audit)
@@ -53,13 +53,13 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         self.assertNotIn("--apply", self.audit)
 
     def test_projection_cache_has_distinct_central_schedule_and_non_cancelling_concurrency(self):
-        self.assertIn("- cron: '0 14 * * *'", self.text)
+        self.assertIn("- cron: '10 5,17 * * *'", self.text)
         self.assertIn(
             "github.event.schedule == '30 13 * * *'",
             self.audit,
         )
         self.assertIn(
-            "github.event.schedule == '0 14 * * *'",
+            "github.event.schedule == '10 5,17 * * *'",
             self.projection_cache,
         )
         self.assertIn(
@@ -68,6 +68,32 @@ class MaintenanceAuditWorkflowScheduleTests(unittest.TestCase):
         )
         self.assertIn("cancel-in-progress: false", self.projection_cache)
         self.assertNotIn("schedule:", self.publish)
+
+    def test_privileged_manual_modes_require_owner_numeric_actor(self):
+        for name in ("publish", "catalog-maintenance-publish", "catalog-maintenance-complete", "supply-credential-check"):
+            with self.subTest(job=name):
+                section = self.text.split("\n  " + name + ":\n", 1)[1]
+                section = re.split(r"\n  [a-z][a-z-]*:\n", section, maxsplit=1)[0]
+                self.assertIn("github.actor_id == '79015263'", section)
+                self.assertIn("github.ref == 'refs/heads/main'", section)
+                self.assertIn("environment:", section)
+                self.assertIn("name: maintenance-supply", section)
+
+    def test_projection_cache_manual_gate_preserves_unattended_schedule(self):
+        condition = next(line for line in self.projection_cache.splitlines() if line.strip().startswith("if:"))
+        self.assertIn("github.event_name == 'schedule'", condition)
+        self.assertIn("github.event.schedule == '10 5,17 * * *'", condition)
+        self.assertIn("inputs.mode == 'projection-cache' && github.actor_id == '79015263'", condition)
+        self.assertIn("||", condition)
+
+    def test_projection_cache_retries_only_same_fenced_producer_once(self):
+        self.assertIn("run_projection_cache() {", self.projection_cache)
+        self.assertIn("if ! run_projection_cache; then", self.projection_cache)
+        self.assertIn("sleep 10", self.projection_cache)
+        self.assertIn("run_projection_cache\n          fi", self.projection_cache)
+        self.assertEqual(self.projection_cache.count("--apply"), 2)
+        self.assertNotIn("continue-on-error:", self.projection_cache)
+        self.assertNotIn("repository_dispatch", self.projection_cache)
 
     def test_scheduled_projection_cache_uses_fleet_mode_without_target_inputs(self):
         self.assertIn("--fleet", self.projection_cache)

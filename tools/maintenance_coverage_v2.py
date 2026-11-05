@@ -26,11 +26,17 @@ class AttestedLedgerEvidence:
     attestation: AttestedRun
     source_url: str
     author_association: str
+    author_user: Mapping[str, object] | None = None
 
 
 def _trusted_attestation(item: AttestedLedgerEvidence, repo: str) -> bool:
     return _trusted(
-        LedgerEvidence(item.attestation.record, item.source_url, item.author_association),
+        LedgerEvidence(
+            item.attestation.record,
+            item.source_url,
+            item.author_association,
+            item.author_user,
+        ),
         repo,
     )
 

@@ -73,6 +73,7 @@ class PublicBrowserLiveTests(unittest.TestCase):
     def test_live_candidate_never_trusted_without_original_codec(self):
         src = LIVE_JS
         self.assertIn('startsWith("<!-- kaep:message:v0.2 -->")', src)
+        self.assertIn('c.user.id!==79015263', src)
         self.assertIn('c.user.login!=="kinoko34077"', src)
         self.assertIn('Number.isSafeInteger(c.id)', src)
         self.assertIn('seen.has(link)', src)
@@ -107,7 +108,7 @@ class PublicBrowserLiveTests(unittest.TestCase):
         self.assertIn("connect-src https://api.github.com", workflow)
         self.assertNotIn("issues: write", workflow)
         self.assertNotIn("schedule:", workflow)
-        self.assertEqual(workflow.count("github.actor == 'kinoko34077'"), 2)
+        self.assertEqual(workflow.count("github.actor_id == '79015263'"), 2)
         self.assertEqual(workflow.count("github.triggering_actor == 'kinoko34077'"), 2)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js unavailable")

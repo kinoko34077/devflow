@@ -1,0 +1,87 @@
+{
+  "schema": "feature-document-route.v1",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/repository-bootstrap/README.md",
+  "routes": {
+    "request": {
+      "when": "user-explicitly-requests-new-repository-from-established-context",
+      "documents": [
+        "docs/spec/REPOSITORY_BOOTSTRAP.md",
+        "docs/operations/REPOSITORY_BOOTSTRAP.md"
+      ],
+      "code": [
+        "scripts/repository_bootstrap.py"
+      ],
+      "tests": [
+        "tests/test_repository_bootstrap.py"
+      ]
+    },
+    "validation": {
+      "when": "reviewing-schema-trust-identity-or-visibility-boundary",
+      "documents": [
+        "docs/spec/REPOSITORY_BOOTSTRAP.md",
+        "schemas/repository-bootstrap.v1.schema.json"
+      ],
+      "code": [
+        "tools/repository_bootstrap.py"
+      ],
+      "tests": [
+        "tests/test_repository_bootstrap_policy.py",
+        "tests/test_repository_bootstrap_security_boundaries.py"
+      ]
+    },
+    "provisioning": {
+      "when": "authorized-bootstrap-execution-or-recovery",
+      "documents": [
+        "docs/spec/REPOSITORY_BOOTSTRAP.md",
+        "docs/operations/REPOSITORY_BOOTSTRAP.md"
+      ],
+      "code": [
+        "tools/repository_bootstrap.py",
+        "scripts/repository_bootstrap.py"
+      ],
+      "tests": [
+        "tests/test_repository_bootstrap_executor.py",
+        "tests/test_repository_bootstrap_repo_native_dispatch.py"
+      ]
+    },
+    "control-trust": {
+      "when": "reading-bootstrap-derived-repository-control",
+      "documents": [
+        "docs/spec/REPOSITORY_BOOTSTRAP.md",
+        "docs/operations/DEVFLOW_MCP.md"
+      ],
+      "code": [
+        "tools/devflow_mcp_core.py"
+      ],
+      "tests": [
+        "tests/test_devflow_mcp_core.py"
+      ]
+    },
+    "workflow": {
+      "when": "auditing-event-trigger-and-secret-fencing",
+      "documents": [
+        "docs/operations/REPOSITORY_BOOTSTRAP.md"
+      ],
+      "code": [
+        ".github/workflows/repository-bootstrap.yml"
+      ],
+      "tests": [
+        "tests/test_repository_bootstrap_workflow.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#181",
+    "kinoko34077/devflow#16"
+  ],
+  "notes": [
+    "Resolve routes.documents, routes.code, and routes.tests relative to source_repository at source_ref; entry identifies this route document in the current repository tree.",
+    "source_ref is the audited source snapshot used for the route, not a live-main pointer.",
+    "This is read-only navigation metadata, not an execution or authorization mechanism.",
+    "Credential, permission, provisioning, and Human Gate state must be read live."
+  ]
+}
+

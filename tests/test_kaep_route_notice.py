@@ -9,7 +9,7 @@ from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
 from tools.kaep_request_sender import make_request
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, POINTER_VERSION,
-    verify_source_request, route_request,
+    verify_source_request, verify_source_request_from_snapshot, route_request,
 )
 from tools.kaep_discovery_reader import discover_batch
 
@@ -25,7 +25,10 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg), "user": {
+        "id": 79015263 if actor == ACTOR else 123456789,
+        "login": actor,
+    }}
 
 
 def root_request():
@@ -288,6 +291,28 @@ class DiscoveryNoticeTests(unittest.TestCase):
             verify_source_request(
                 pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
                 message_id=root["message_id"], expected_actor=ACTOR)
+
+    def test_snapshot_and_public_source_validation_keep_same_preflight_errors(self):
+        root = root_request()
+        cases = (
+            (dict(repository="not-allowed/repo", issue=ISSUE,
+                  message_id=root["message_id"], expected_actor=ACTOR),
+             "INVALID_TARGET"),
+            (dict(repository=REPO, issue=ISSUE, message_id="bad",
+                  expected_actor=ACTOR),
+             "INVALID_MESSAGE_ID"),
+            (dict(repository=REPO, issue=ISSUE,
+                  message_id=root["message_id"], expected_actor="not allowed"),
+             "INVALID_ACTOR"),
+        )
+        for kwargs, error in cases:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(InvalidMessage, error):
+                    verify_source_request(
+                        pages([]), **kwargs)
+                with self.assertRaisesRegex(InvalidMessage, error):
+                    verify_source_request_from_snapshot(
+                        ([], []), **kwargs)
 
     def test_private_source_blocks_send_before_any_post(self):
         root = root_request()

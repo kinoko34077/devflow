@@ -1,9 +1,11 @@
 """P3 Agent API projection uses only same-run strict redacted results."""
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timedelta, timezone
 import io
 import json
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -54,6 +56,53 @@ def sample():
 
 
 class AgentProjectionTests(unittest.TestCase):
+    def test_projection_import_does_not_load_union_reader(self):
+        """The projection depends on the codec, not the union CLI entrypoint."""
+        source = Path(api.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(api.__file__))
+        imported_modules = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        imported_modules.update(
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        self.assertNotIn("tools.kaep_live_union_cli", imported_modules)
+
+    def test_union_owns_the_static_projection_dependency(self):
+        """The CLI-to-projection edge stays visible in the module graph."""
+        source = Path(union.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(union.__file__))
+        imported_modules = {
+            node.module
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        imported_modules.update(
+            alias.name
+            for node in tree.body
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        self.assertIn("tools.kaep_agent_api_projection", imported_modules)
+
+    def test_union_reads_recipient_set_from_codec(self):
+        """The codec remains the single owner of accepted recipients."""
+        source = Path(union.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(union.__file__))
+        codec_imports = {
+            alias.name
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module == "tools.kaep_mailbox_codec")
+            for alias in node.names
+        }
+        self.assertIn("RECIPIENTS", codec_imports)
+
     def test_partial_observation_is_redacted_and_does_not_grant_authority(self):
         data = api.project_agent_view(sample(), now=NOW)
         encoded = json.dumps(data)

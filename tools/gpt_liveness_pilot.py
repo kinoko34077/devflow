@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import hashlib
 import json
 import re
@@ -17,21 +18,29 @@ import sys
 from typing import Any
 
 from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages
-from tools.kaep_mailbox_codec import InvalidMessage, read_mailbox, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    ACTOR_LOGIN,
+    InvalidMessage,
+    fail as _fail,
+    read_mailbox,
+    unique_pairs,
+    verify_reply_chain,
+)
 from tools.kaep_request_sender import send_request
+from tools.gpt_liveness_ids import OPAQUE_ID
 
 MARKER = "<!-- gpt-liveness:enrollment:v0.1 "
 END = " -->"
 SCHEMA = "gpt.liveness.v0.1"
-ID = re.compile(r"[A-Za-z0-9_-]{8,72}\Z")
-ACTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\Z")
+# Compatibility alias; the canonical opaque-ID contract lives with the generators.
+ID = OPAQUE_ID
+# Compatibility-preserving syntax for GPT-liveness challenge nonces.
+NONCE = re.compile(r"[0-9a-f]{32}\Z")
+# Compatibility alias; the canonical human-login contract lives in the codec.
+ACTOR = ACTOR_LOGIN
 MAX_ENROLLMENT = timedelta(hours=2)
 PING_INTERVAL = 300
 MAX_UNANSWERED = 3
-
-
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
 
 
 def utc(value: str) -> datetime:
@@ -53,15 +62,11 @@ def iso(value: datetime) -> str:
 
 
 def strict_json(raw: str) -> dict[str, Any]:
-    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for k, v in items:
-            if k in out:
-                _fail("DUPLICATE_FIELD")
-            out[k] = v
-        return out
     try:
-        obj = json.loads(raw, object_pairs_hook=pairs)
+        obj = json.loads(
+            raw,
+            object_pairs_hook=partial(unique_pairs, duplicate_code="DUPLICATE_FIELD"),
+        )
     except (ValueError, UnicodeError, TypeError):
         _fail("INVALID_JSON")
     if type(obj) is not dict:
@@ -87,7 +92,7 @@ def enrollment(body: str, *, now: datetime) -> dict[str, Any] | None:
         _fail("INVALID_ENROLLMENT")
     if not ID.fullmatch(str(data["session_id"])) or not ID.fullmatch(str(data["turn_id"])):
         _fail("INVALID_SESSION")
-    if not isinstance(data["expected_actor"], str) or not ACTOR.fullmatch(data["expected_actor"]):
+    if not isinstance(data["expected_actor"], str) or not ACTOR_LOGIN.fullmatch(data["expected_actor"]):
         _fail("INVALID_ACTOR")
     start, end = utc(data["started_at"]), utc(data["expires_at"])
     if end <= start or end - start > MAX_ENROLLMENT:
@@ -111,7 +116,7 @@ def challenge(text: str) -> dict[str, Any]:
         _fail("INVALID_CHALLENGE")
     if not ID.fullmatch(str(data["session_id"])) or not ID.fullmatch(str(data["turn_id"])):
         _fail("INVALID_SESSION")
-    if not re.fullmatch(r"[0-9a-f]{32}", str(data["nonce"])):
+    if not NONCE.fullmatch(str(data["nonce"])):
         _fail("INVALID_NONCE")
     if utc(data["expires_at"]) <= utc(data["issued_at"]) or utc(data["expires_at"]) - utc(data["issued_at"]) > timedelta(minutes=20):
         _fail("INVALID_CHALLENGE_DURATION")
@@ -208,7 +213,7 @@ def plan(*, body: str, comments: list[dict[str, Any]], repo: str, issue: int,
         return {"status": "ALREADY_PINGED", "unanswered": len(pending)}
     if len(pending) >= MAX_UNANSWERED:
         return {"status": "SUSPECT_NO_REPLY", "unanswered": len(pending), "claim_authority": False}
-    if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+    if not NONCE.fullmatch(nonce):
         _fail("INVALID_NONCE")
     payload = {
         "schema": SCHEMA, "session_id": en["session_id"],

@@ -15,6 +15,7 @@ from typing import Callable, Any
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 
 from tools import agent_inbox
+from tools.github_issue_trust import is_trusted_principal
 from tools.kaep_discovery_reader import (
     SOURCE_URL, discover_index_shadow,
 )
@@ -191,13 +192,20 @@ def source_root_shadow(
             trusted = [
                 c for c in all_comments
                 if not c["body"].startswith(MARKER)
-                or c["actor_login"].casefold() == expected_source_actor.casefold()
+                or (
+                    expected_source_actor.casefold() == "kinoko34077"
+                    and is_trusted_principal({
+                        "user": {"id": c.get("actor_id"),
+                                 "login": c["actor_login"]}
+                    })
+                )
             ]
             decoded = read_mailbox(trusted, task_ref=f"{repo}#{issue}")
             verify_reply_chain([msg for _, msg in decoded])
             github_comments = [
                 {"id": c["id"], "body": c["body"],
-                 "user": {"login": c["actor_login"]}}
+                 "user": {"id": c.get("actor_id"),
+                          "login": c["actor_login"]}}
                 for c in all_comments
             ]
             roots, warnings = agent_inbox._issue_messages(

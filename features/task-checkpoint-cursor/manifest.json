@@ -1,0 +1,78 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "task-checkpoint-cursor",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/task-checkpoint-cursor/README.md",
+  "routes": {
+    "resume": {
+      "when": "a successor needs the current recovery frontier",
+      "documents": [
+        "docs/operations/TASK_CHECKPOINT_CURSOR.md",
+        "docs/superpowers/specs/2026-09-30-task-checkpoint-cursor-v1-reconciliation.md"
+      ],
+      "code": [
+        "tools/task_checkpoint_cursor.py"
+      ],
+      "tests": [
+        "tests/test_task_checkpoint_cursor.py",
+        "tests/test_task_checkpoint_cursor_contract.py"
+      ]
+    },
+    "audit": {
+      "when": "a read-only Cursor coverage or trust audit is needed",
+      "documents": [
+        "docs/operations/TASK_CHECKPOINT_CURSOR.md",
+        "docs/superpowers/specs/2026-09-29-task-checkpoint-cursor-design.md"
+      ],
+      "code": [
+        "tools/task_checkpoint_cursor_audit.py"
+      ],
+      "tests": [
+        "tests/test_task_checkpoint_cursor_audit.py",
+        "tests/test_task_cursor_audit_workflow.py"
+      ]
+    },
+    "write": {
+      "when": "an authorized single-writer Cursor update is being reviewed",
+      "documents": [
+        "docs/operations/TASK_CHECKPOINT_CURSOR.md",
+        "docs/superpowers/specs/2026-09-30-task-checkpoint-cursor-v1-reconciliation.md"
+      ],
+      "code": [
+        "tools/task_checkpoint_cursor_transport.py",
+        "tools/task_checkpoint_cursor.py"
+      ],
+      "tests": [
+        "tests/test_task_checkpoint_cursor_transport.py",
+        "tests/test_task_checkpoint_cursor_initialization_outcome.py",
+        "tests/test_task_checkpoint_cursor_resilience.py"
+      ]
+    },
+    "contract": {
+      "when": "parser, renderer, or specification consistency is changing",
+      "documents": [
+        "docs/operations/TASK_CHECKPOINT_CURSOR.md",
+        "docs/superpowers/specs/2026-09-29-task-checkpoint-cursor-design.md"
+      ],
+      "code": [
+        "tools/task_checkpoint_cursor.py"
+      ],
+      "tests": [
+        "tests/test_task_checkpoint_cursor_p3.py",
+        "tests/test_task_checkpoint_cursor_spec_consistency.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#233",
+    "kinoko34077/devflow#290",
+    "kinoko34077/devflow#576"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; operational state and authorization remain at the existing owners.",
+    "Current state, review, CI, and write authority must be checked live."
+  ]
+}

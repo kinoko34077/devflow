@@ -21,7 +21,9 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg),
+            "user": {"id": 79015263 if actor == ACTOR else 123456789,
+                     "login": actor}}
 
 
 def root(number, *, issue=ISSUE, recipient="claude-code"):
@@ -311,7 +313,7 @@ class SourceRootShadowTests(unittest.TestCase):
         note = pointer_notice(msg, cid=20001, notice_id=45)
         malformed = {"id": 20002,
                      "body": "<!-- kaep:message:v0.2 -->\n```json\n{}\n```\nUntrusted prose",
-                     "user": {"login": ACTOR}}
+                     "user": {"id": 79015263, "login": ACTOR}}
         res, _ = compare(
             pages([comment(30001, note)]),
             {(REPO, ISSUE): pages([comment(20001, msg), malformed])},
@@ -332,7 +334,7 @@ class SourceRootShadowTests(unittest.TestCase):
         notice = pointer_notice(msg, cid=501, notice_id=8)
         corrupt = {"id": 502,
                    "body": "<!-- kaep:message:v0.2 -->\nmalformed",
-                   "user": {"login": ACTOR}}
+                   "user": {"id": 79015263, "login": ACTOR}}
         out, _ = compare(
             pages([comment(601, notice)]),
             {(REPO, ISSUE): pages([comment(501, msg), corrupt])},

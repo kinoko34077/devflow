@@ -1,4 +1,4 @@
-"""KAEP M1 explicit reply transport for existing READ_ONLY Issue requests.
+"""KAEP explicit reply transport for READ_ONLY consultations and REVIEW_REQUESTs.
 
 Requires caller-chosen existing GitHub comment actor and an explicitly invoked
 --send flag for any write. No Claude launch, Actions, Claim or credentials changes.
@@ -12,35 +12,108 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from tools.kaep_inbox_reader import (
-    InvalidMessage, fetch_gh_pages, parse_pages, REPOSITORY, MAX_RESPONSE_BYTES,
+    InvalidMessage, fetch_gh_pages, REPOSITORY,
 )
-from tools.kaep_mailbox_codec import (
-    encode_comment, fingerprint, read_mailbox, verify_reply_chain,
+from tools.kaep_mailbox_codec import RECIPIENTS, fail, encode_comment, fingerprint
+from tools.kaep_mailbox_support import (
+    ACTOR, mailbox, mailbox_snapshot, matching_actor, post_and_verify,
+    post_comment as _shared_post_comment,
 )
 
-KINDS = {"ACK", "ANSWER", "BLOCKED"}
-ROLES = {"claude-code", "chatgpt", "codex", "coordinator"}
-ACTOR = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}|github-actions\[bot\])\Z")
+KINDS = {"ACK", "ANSWER", "BLOCKED", "REVIEW_FEEDBACK"}
+ROLES = RECIPIENTS
 FIXED_ACK = "Received the referenced KAEP message. This acknowledges receipt only; no task execution, provider run, or authorization is asserted."
 
 
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
+
+# Compatibility aliases retained for existing callers and test patch points.
+_matching_actor = matching_actor
+_mailbox_snapshot = mailbox_snapshot
+_mailbox = mailbox
 
 
-def _mailbox(text: str, *, repository: str, issue: int) -> tuple[list[dict[str, Any]], list[tuple[int, dict[str, Any]]]]:
-    comments = parse_pages(text, repository=repository, issue=issue)
-    task_ref = f"{repository}#{issue}"
-    items = read_mailbox(comments, task_ref=task_ref)
-    verify_reply_chain([item for _, item in items])
-    return comments, items
+def post_comment(*, repository: str, issue: int, body: str) -> int:
+    """Compatibility adapter preserving the established patch point."""
+    return _shared_post_comment(
+        repository=repository, issue=issue, body=body, run_func=subprocess.run,
+    )
+
+
+def _eligible_reply_parent(
+    items: list[tuple[int, dict[str, Any]]],
+    actors: dict[int, dict[str, Any]], *, parent_message_id: str,
+    expect_actor: str, parent_recipient: str, kind: str,
+) -> dict[str, Any]:
+    """Select one trusted READ_ONLY parent before composing a reply.
+
+    Only canonical, non-quarantined mailbox items may be a reply parent;
+    this boundary never reserves reply identities or posts a comment.
+    """
+    matching = [(cid, msg) for cid, msg in items
+                if msg["message_id"] == parent_message_id]
+    if len(matching) != 1:
+        fail("PARENT_NOT_FOUND")
+    cid, parent = matching[0]
+    if not _matching_actor(actors[cid], expect_actor):
+        fail("PARENT_ACTOR_MISMATCH")
+    if parent["recipient"] != parent_recipient:
+        fail("INVALID_PARENT_INTENT")
+    if parent["kind"] == "REVIEW_REQUEST" and parent["in_reply_to"] is None:
+        # A native PR review can be performed by Claude, Codex or another
+        # authorized reviewer. This only permits a correlated message about it.
+        # WRITE_INTENT is metadata, never a write permission or Review grant.
+        if (parent["intent"] != "REVIEW"
+                or parent["scope"]["effect"] != "WRITE_INTENT"
+                or parent["scope"]["expected_head"] is None):
+            fail("UNSUPPORTED_REVIEW_PARENT")
+        if kind not in ("ACK", "REVIEW_FEEDBACK", "BLOCKED"):
+            fail("INVALID_REPLY_KIND")
+        return parent
+    if parent["kind"] not in ("REQUEST", "QUESTION"):
+        fail("INVALID_PARENT_INTENT")
+    if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
+        fail("UNSUPPORTED_EFFECT")
+    if kind == "ACK" and parent["kind"] != "REQUEST":
+        fail("INVALID_REPLY_KIND")
+    if kind == "REVIEW_FEEDBACK":
+        fail("INVALID_REPLY_KIND")
+    return parent
+
+
+def _reserved_reply_comment(
+    reply: dict[str, Any], *,
+    eligible_items: list[tuple[int, dict[str, Any]]],
+    all_items: list[tuple[int, dict[str, Any]]],
+    actors: dict[int, dict[str, Any]], expected_reply_actor: str,
+) -> int | None:
+    """Reserve identities from the complete mailbox, even quarantined replies.
+
+    An eligible parent is not proof that a matching reply ID is available.
+    Compare the first pre-existing matching ID/key and require its original
+    actor; a matching transport login is not a verified model identity.
+    """
+    accepted_ids = {m["message_id"] for _, m in eligible_items}
+    existing = [
+        (c, m) for c, m in all_items
+        if (m["message_id"] == reply["message_id"] or
+            m["idempotency_key"] == reply["idempotency_key"])
+    ]
+    if existing:
+        existing_id, existing_msg = existing[0]
+        if existing_msg["message_id"] not in accepted_ids:
+            fail("REPLY_COLLISION")
+        if fingerprint(existing_msg) != fingerprint(reply):
+            fail("REPLY_COLLISION")
+        if not _matching_actor(actors[existing_id], expected_reply_actor):
+            fail("EXISTING_REPLY_ACTOR_MISMATCH")
+        return existing_id
+    return None
 
 
 def make_reply(
@@ -55,31 +128,26 @@ def make_reply(
     metadata. Caller must separately confirm task authority and provenance.
     """
     if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
+        fail("INVALID_TARGET")
     if kind not in KINDS or type(expect_actor) is not str or not ACTOR.fullmatch(expect_actor):
-        _fail("INVALID_REPLY_OPTIONS")
+        fail("INVALID_REPLY_OPTIONS")
     if type(response_text) is not str or not response_text.strip():
-        _fail("INVALID_REPLY_TEXT")
+        fail("INVALID_REPLY_TEXT")
     if (parent_recipient not in ROLES or reply_recipient not in ROLES
             or parent_recipient == reply_recipient):
-        _fail("INVALID_REPLY_ROUTE")
+        fail("INVALID_REPLY_ROUTE")
     effective_reply_actor = expect_actor if reply_actor is None else reply_actor
     if type(effective_reply_actor) is not str or not ACTOR.fullmatch(effective_reply_actor):
-        _fail("INVALID_REPLY_ACTOR")
-    comments, items = _mailbox(text, repository=repository, issue=issue)
-    actor_map = {item["id"]: item["actor_login"] for item in comments}
-    matching = [(cid, msg) for cid, msg in items if msg["message_id"] == parent_message_id]
-    if len(matching) != 1:
-        _fail("PARENT_NOT_FOUND")
-    cid, parent = matching[0]
-    if actor_map[cid].casefold() != expect_actor.casefold():
-        _fail("PARENT_ACTOR_MISMATCH")
-    if parent["recipient"] != parent_recipient or parent["kind"] not in ("REQUEST", "QUESTION"):
-        _fail("INVALID_PARENT_INTENT")
-    if parent["scope"]["effect"] != "READ_ONLY" or parent["intent"] not in ("PING", "ANALYZE", "TEST", "REPORT"):
-        _fail("UNSUPPORTED_EFFECT")
-    if kind == "ACK" and parent["kind"] != "REQUEST":
-        _fail("INVALID_REPLY_KIND")
+        fail("INVALID_REPLY_ACTOR")
+    comments, items, all_items = _mailbox_snapshot(
+        text, repository=repository, issue=issue,
+    )
+    actor_map = {item["id"]: item for item in comments}
+    parent = _eligible_reply_parent(
+        items, actor_map, parent_message_id=parent_message_id,
+        expect_actor=expect_actor, parent_recipient=parent_recipient,
+        kind=kind,
+    )
     digest = hashlib.sha256(
         (parent["task_ref"] + "\n" + parent_message_id + "\n" + kind).encode("utf-8")
     ).hexdigest()[:32]
@@ -93,82 +161,17 @@ def make_reply(
         "kind": kind,
         "intent": parent["intent"],
         "idempotency_key": "kaep.m1.reply." + digest,
-        "scope": {
-            "repository": repository,
-            "expected_head": parent["scope"]["expected_head"],
-            "effect": "READ_ONLY",
-        },
+        "scope": dict(parent["scope"]),
         "payload": {"text": response_text},
         "evidence_refs": parent["evidence_refs"],
     }
     # Use the canonical codec for strict size, allowed-fields and wire validation.
     encode_comment(reply)
-    existing = [(c, m) for c, m in items if m["message_id"] == reply["message_id"]]
-    if existing:
-        existing_id, existing_msg = existing[0]
-        if fingerprint(existing_msg) != fingerprint(reply):
-            _fail("REPLY_COLLISION")
-        if actor_map[existing_id].casefold() != effective_reply_actor.casefold():
-            _fail("EXISTING_REPLY_ACTOR_MISMATCH")
-        # Identical reply is already durable from the expected transport actor.
-        # Shared GitHub login is still not model/session identity.
-        return reply, existing_id
-    return reply, None
-
-
-def post_comment(*, repository: str, issue: int, body: str) -> int:
-    """Single ordinary Issue-comment POST, never an Action/Claim operation."""
-    if not REPOSITORY.fullmatch(repository) or type(issue) is not int or issue < 1:
-        _fail("INVALID_TARGET")
-    data = json.dumps({"body": body}, ensure_ascii=False)
-    try:
-        resp = subprocess.run(
-            ["gh", "api", "-X", "POST", "-H",
-             "Accept: application/vnd.github+json",
-             f"/repos/{repository}/issues/{issue}/comments", "--input", "-"],
-            input=data, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise InvalidMessage("POST_AMBIGUOUS_READ_BEFORE_RETRY") from exc
-    # Do not leak stderr or transport response body into failure messages.
-    if resp.returncode != 0:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    if len(resp.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    try:
-        info = json.loads(resp.stdout)
-    except (ValueError, TypeError) as exc:
-        raise InvalidMessage("POST_UNKNOWN_READ_BEFORE_RETRY") from exc
-    if type(info) is not dict or type(info.get("id")) is not int or info["id"] < 1:
-        _fail("POST_UNKNOWN_READ_BEFORE_RETRY")
-    return info["id"]
-
-
-def post_and_verify(
-    *, repository: str, issue: int, message: dict[str, Any],
-    post_func, fetch_func, expected_post_actor: str,
-) -> int:
-    """Single shared post/readback boundary; callable injection is for offline tests.
-
-    An Issue comment is only transport evidence, never provider identity,
-    task authorization, runtime Claim or formal GitHub Review.
-    """
-    if type(expected_post_actor) is not str or not ACTOR.fullmatch(expected_post_actor):
-        _fail("INVALID_POST_ACTOR")
-    posted_id = post_func(repository=repository, issue=issue,
-                          body=encode_comment(message))
-    after = fetch_func(repository, issue)
-    comments, observed = _mailbox(after, repository=repository, issue=issue)
-    exact = [(cid, msg) for cid, msg in observed if cid == posted_id and
-             msg["message_id"] == message["message_id"] and
-             fingerprint(msg) == fingerprint(message)]
-    if len(exact) != 1:
-        _fail("READBACK_UNCONFIRMED_READ_BEFORE_RETRY")
-    actors = {c["id"]: c["actor_login"] for c in comments}
-    if actors[posted_id].casefold() != expected_post_actor.casefold():
-        _fail("READBACK_ACTOR_MISMATCH")
-    return posted_id
+    existing_id = _reserved_reply_comment(
+        reply, eligible_items=items, all_items=all_items,
+        actors=actor_map, expected_reply_actor=effective_reply_actor,
+    )
+    return reply, existing_id
 
 
 def send_reply(
@@ -179,7 +182,7 @@ def send_reply(
     reply_actor: str | None = None,
 ) -> dict[str, Any]:
     if do_send and offline_pages is not None:
-        _fail("OFFLINE_POST_FORBIDDEN")
+        fail("OFFLINE_POST_FORBIDDEN")
     source = offline_pages if offline_pages is not None else fetch_gh_pages(repository, issue)
     reply, existing_id = make_reply(
         source, repository=repository, issue=issue,
@@ -240,9 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.text_file is not None:
             answer = args.text_file.read_text(encoding="utf-8")
         else:
-            _fail("REPLY_TEXT_REQUIRED")
+            fail("REPLY_TEXT_REQUIRED")
         if args.send and args.offline_pages is not None:
-            _fail("OFFLINE_POST_FORBIDDEN")
+            fail("OFFLINE_POST_FORBIDDEN")
         offline = (args.offline_pages.read_text(encoding="utf-8")
                    if args.offline_pages else None)
         result = send_reply(
@@ -263,3 +266,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+

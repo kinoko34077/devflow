@@ -182,6 +182,12 @@ class LiveDeltaTests(unittest.TestCase):
             live.read_live_candidates(
                 [REPO], recipient="all", expected_actor="bad name")
 
+    def test_rejects_expected_actor_with_leading_hyphen(self):
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_LIVE_FILTER"):
+            live.read_live_candidates(
+                [REPO], recipient="all", expected_actor="-alice",
+                recent_read=lambda *_a, **_k: [])
+
     def test_cli_valid_read_zero_rc_and_errors_explicit_unknown(self):
         with (mock.patch.object(live, "read_live_candidates", return_value={
                 "status": "LIVE_WINDOW_READ", "rows": [],

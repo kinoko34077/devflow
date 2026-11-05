@@ -4,7 +4,8 @@ import copy
 import unittest
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
-    read_mailbox, validate, verify_reply_chain,
+    read_mailbox, unique_pairs, validate, verify_reply_chain,
+    isolate_cross_exchange_replies,
 )
 
 TASK = "kinoko34077/devflow#503"
@@ -55,6 +56,10 @@ class KAEPMailboxContract(unittest.TestCase):
             decode_comment(encode_comment(envelope()), task_ref="kinoko34077/devflow#504")
         self.reject(scope={"repository": "kinoko34077/other", "expected_head": None, "effect": "READ_ONLY"})
 
+    def test_repository_and_task_types_fail_closed(self):
+        self.reject(task_ref=None)
+        self.reject(scope={"repository": None, "expected_head": None, "effect": "READ_ONLY"})
+
     def test_head_guard(self):
         self.reject(scope={"repository": "kinoko34077/devflow", "expected_head": "abcd", "effect": "READ_ONLY"})
         self.assertEqual(validate(envelope(scope={"repository": "kinoko34077/devflow", "expected_head": "a"*40, "effect": "WRITE_INTENT"}))["scope"]["effect"], "WRITE_INTENT")
@@ -82,6 +87,46 @@ class KAEPMailboxContract(unittest.TestCase):
         b = envelope(exchange_id="ex_wrong001", message_id="msg_ack002", idempotency_key="kaep.test.002", kind="ACK", in_reply_to="msg_test001")
         with self.assertRaisesRegex(InvalidMessage, "CROSS_EXCHANGE_REPLY"): verify_reply_chain([a,b])
 
+    def test_cross_exchange_isolated_without_weakening_strict_validator(self):
+        root = envelope()
+        corrupt = envelope(
+            exchange_id="ex_bad003", message_id="msg_bad003",
+            in_reply_to="msg_test001", idempotency_key="kaep.bad.003",
+        )
+        descendant = envelope(
+            exchange_id="ex_bad003", message_id="msg_bad_ack004",
+            kind="ACK", in_reply_to="msg_bad003",
+            idempotency_key="kaep.bad.004",
+        )
+        good = envelope(
+            exchange_id="ex_good005", message_id="msg_good005",
+            idempotency_key="kaep.good.005",
+        )
+        good_ack = envelope(
+            exchange_id="ex_good005", message_id="msg_good_ack006",
+            in_reply_to="msg_good005", kind="ACK",
+            idempotency_key="kaep.good.006",
+        )
+        history = [root, corrupt, descendant, good, good_ack]
+        with self.assertRaisesRegex(InvalidMessage, "CROSS_EXCHANGE_REPLY"):
+            verify_reply_chain(history)
+        valid, quarantined = isolate_cross_exchange_replies(history)
+        self.assertEqual(quarantined, ["ex_bad003"])
+        self.assertEqual(
+            [m["message_id"] for m in valid],
+            ["msg_test001", "msg_good005", "msg_good_ack006"],
+        )
+        verify_reply_chain(valid)
+
+    def test_isolation_still_rejects_unknown_parent(self):
+        root = envelope()
+        orphan = envelope(
+            exchange_id="ex_bad003", message_id="msg_orphan003",
+            in_reply_to="msg_missing", idempotency_key="kaep.bad.003",
+        )
+        with self.assertRaisesRegex(InvalidMessage, "UNKNOWN_PARENT"):
+            isolate_cross_exchange_replies([root, orphan])
+
     def test_no_comment_prefix_or_suffix(self):
         body = encode_comment(envelope())
         with self.assertRaises(InvalidMessage): decode_comment("extra\n" + body)
@@ -91,6 +136,11 @@ class KAEPMailboxContract(unittest.TestCase):
         body = encode_comment(envelope())
         body = body.replace('"kind": "REQUEST",', '"kind": "REQUEST",\n  "kind": "ACK",')
         with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_JSON_KEY"): decode_comment(body)
+
+    def test_duplicate_json_keys_can_keep_caller_specific_reason(self):
+        with self.assertRaisesRegex(InvalidMessage, "DUPLICATE_MANIFEST_FIELD"):
+            unique_pairs([("schema", "one"), ("schema", "two")],
+                         duplicate_code="DUPLICATE_MANIFEST_FIELD")
 
     def test_utf8_size_and_text_length(self):
         self.reject(payload={"text": "a" * 4001})

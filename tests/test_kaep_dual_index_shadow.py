@@ -13,6 +13,7 @@ from tools.kaep_request_sender import make_request
 from tools.kaep_route_notice import DISCOVERY_ISSUE, DISCOVERY_REPOSITORY
 
 ACTOR = "kinoko34077"
+ACTOR_ID = 79015263
 SOURCE_REPO = "kinoko34077/UniverseGenome"
 SOURCE_ISSUE = 336
 SUCCESSOR_ISSUE = 9001  # synthetic fixture ID, never publish
@@ -23,9 +24,13 @@ def pages(*groups):
     return json.dumps(list(groups))
 
 
+def actor_user(actor=ACTOR):
+    return {"login": actor, "id": ACTOR_ID if actor == ACTOR else 999999999}
+
+
 def comment(cid, payload, actor=ACTOR):
     body = encode_comment(payload) if isinstance(payload, dict) else payload
-    return {"id": cid, "body": body, "user": {"login": actor}}
+    return {"id": cid, "body": body, "user": actor_user(actor)}
 
 
 def source_and_pointer(index_issue):

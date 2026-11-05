@@ -1,6 +1,7 @@
 """KAEP M1 reply preflight/explicit-send tests; network is mocked."""
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import tempfile
@@ -8,7 +9,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import InvalidMessage, encode_comment, fingerprint
+from tools import kaep_reply_sender
+from tools.kaep_mailbox_codec import InvalidMessage, encode_comment, fingerprint, read_mailbox
 from tools.kaep_reply_sender import (
     FIXED_ACK, make_reply, post_comment, send_reply, main,
 )
@@ -37,7 +39,7 @@ def parent(*, effect="READ_ONLY", intent="PING", kind="REQUEST",
 
 
 def comment(cid, message, actor="kinoko34077"):
-    return {"id": cid, "body": encode_comment(message), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(message), "user": {"login": actor, "id": 79015263 if actor == "kinoko34077" else 999999999}}
 
 
 def pages(*pages_):
@@ -53,6 +55,62 @@ def build(source=None, **kwargs):
 
 
 class ReplyContractTests(unittest.TestCase):
+    def test_reply_roles_use_codec_recipient_set(self):
+        source = Path(kaep_reply_sender.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(kaep_reply_sender.__file__))
+        codec_imports = {
+            alias.name
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module == "tools.kaep_mailbox_codec")
+            for alias in node.names
+        }
+        self.assertIn("RECIPIENTS", codec_imports)
+
+    def test_sender_preflight_decodes_each_issue_mailbox_once(self):
+        source = pages([comment(11, parent())])
+        with patch("tools.kaep_mailbox_support.read_mailbox",
+                   wraps=read_mailbox) as read:
+            reply, existing = build(source)
+        self.assertIsNone(existing)
+        self.assertEqual(reply["in_reply_to"], PARENT)
+        # Prior implementation decoded the entire Issue twice to reserve
+        # quarantined IDs/keys after finding an eligible parent.
+        self.assertEqual(read.call_count, 1)
+
+    def test_unrelated_cross_exchange_is_not_a_global_reply_blocker(self):
+        good = parent()
+        bad = parent(message_id="msg_bad_root003")
+        bad["exchange_id"] = "ex_bad003"
+        bad["in_reply_to"] = PARENT
+        source = pages([comment(11, good), comment(12, bad)])
+        response, existing = build(source)
+        self.assertIsNone(existing)
+        self.assertEqual(response["in_reply_to"], PARENT)
+        with self.assertRaisesRegex(InvalidMessage, "PARENT_NOT_FOUND"):
+            make_reply(
+                source, repository=REPO, issue=503,
+                parent_message_id="msg_bad_root003", kind="ACK",
+                response_text=FIXED_ACK, expect_actor="kinoko34077",
+            )
+
+    def test_quarantined_reply_id_or_key_still_reserves_identity(self):
+        good = parent()
+        expected_reply, _ = build()
+        for mode in ("message_id", "idempotency_key"):
+            with self.subTest(mode=mode):
+                invalid = dict(expected_reply)
+                invalid["exchange_id"] = "ex_wrong003"
+                if mode == "message_id":
+                    invalid["idempotency_key"] = "kaep.wrong.003"
+                else:
+                    invalid["message_id"] = "msg_wrong003"
+                # The foreign parent remains known: this is a quarantinable
+                # cross-exchange link, not a truncated/unknown-parent mailbox.
+                source = pages([comment(11, good), comment(12, invalid)])
+                with self.assertRaisesRegex(InvalidMessage, "REPLY_COLLISION"):
+                    build(source)
+
     def test_ack_shape(self):
         reply, existing = build()
         self.assertIsNone(existing)
@@ -116,7 +174,7 @@ class ReplyContractTests(unittest.TestCase):
 
     def test_malformed_parent(self):
         with self.assertRaisesRegex(InvalidMessage, "PARENT_NOT_FOUND"):
-            build(pages([{"id": 11, "body": "ordinary", "user": {"login":"kinoko34077"}}]))
+            build(pages([{"id": 11, "body": "ordinary", "user": {"login":"kinoko34077", "id":79015263}}]))
 
     def test_wrong_target_recipient(self):
         src = pages([comment(11, parent(recipient="codex"))])
@@ -396,5 +454,147 @@ class ReplyContractTests(unittest.TestCase):
         self.assertIn("REPLY_TEXT_REQUIRED",output.call_args.args[0])
 
 
+class NumericOwnerTrustRegression(unittest.TestCase):
+    def test_parent_owner_id_rejected_when_missing_malformed_or_mismatched(self):
+        for identity in ({}, {"id": True}, {"id": 999999999}, {"id": "79015263"}, {"id": 79015263, "login": "spoof"}):
+            with self.subTest(identity=identity):
+                original = comment(11, parent())
+                original["user"] = {"login": "kinoko34077", **identity}
+                with self.assertRaisesRegex(InvalidMessage, "PARENT_ACTOR_MISMATCH"):
+                    build(pages([original]))
+
+
+class ReviewFeedbackCompatibilityTests(unittest.TestCase):
+    """Regression for archive #32 PR #54/#57/#58 Claude review replies."""
+
+    def review_root(self, *, head="a" * 40, effect="WRITE_INTENT",
+                    intent="REVIEW", kind="REVIEW_REQUEST"):
+        root = parent(kind=kind, intent=intent, effect=effect,
+                      message_id="msg_review_root_20261104")
+        root["scope"]["expected_head"] = head
+        root["evidence_refs"] = [f"https://github.com/{REPO}/pull/54"]
+        return root
+
+    def reply(self, root, *, kind="REVIEW_FEEDBACK", response="Native review submitted"):
+        return make_reply(
+            pages([comment(11, root)]), repository=REPO, issue=503,
+            parent_message_id=root["message_id"], kind=kind,
+            response_text=response, expect_actor="kinoko34077",
+        )
+
+    def test_review_feedback_exact_parent_scope_and_determinism(self):
+        root = self.review_root()
+        response, existing = self.reply(root)
+        self.assertIsNone(existing)
+        self.assertEqual(response["kind"], "REVIEW_FEEDBACK")
+        self.assertEqual(response["intent"], "REVIEW")
+        self.assertEqual(response["scope"], root["scope"])
+        self.assertEqual(response["task_ref"], root["task_ref"])
+        self.assertEqual(response["exchange_id"], root["exchange_id"])
+        self.assertEqual(response["in_reply_to"], root["message_id"])
+        self.assertEqual(response["evidence_refs"], root["evidence_refs"])
+        self.assertEqual(fingerprint(response), fingerprint(self.reply(root)[0]))
+
+    def test_review_ack_and_blocked_are_valid_receipts(self):
+        root = self.review_root()
+        for kind in ("ACK", "BLOCKED"):
+            with self.subTest(kind=kind):
+                response, _ = self.reply(root, kind=kind)
+                self.assertEqual(response["scope"]["effect"], "WRITE_INTENT")
+                self.assertEqual(response["kind"], kind)
+
+    def test_wrong_kind_and_scope_remain_rejected(self):
+        root = self.review_root()
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_REPLY_KIND"):
+            self.reply(root, kind="ANSWER")
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_REPLY_KIND"):
+            self.reply(parent(), kind="REVIEW_FEEDBACK")
+        for change in ({"intent": "REPORT"}, {"scope": {
+            "repository": REPO, "expected_head": "a"*40, "effect": "READ_ONLY"
+        }}, {"scope": {
+            "repository": REPO, "expected_head": None, "effect": "WRITE_INTENT"
+        }}):
+            with self.subTest(change=change):
+                invalid = self.review_root()
+                invalid.update(change)
+                with self.assertRaisesRegex(InvalidMessage, "UNSUPPORTED_REVIEW_PARENT"):
+                    self.reply(invalid)
+
+    def test_real_archive_review_request_shapes_without_private_payload(self):
+        archive = "kinoko34077/github-history-archive"
+        for pr, head in (
+            (54, "83a06f2fa1a4575b6f395e54279ced61f32722e7"),
+            (57, "311a92efdb83f51fb5cde75b8cc1a4ae9a90f460"),
+            (58, "7e91345fe40dcee66f31afe48c90da8f8ce8f52b"),
+        ):
+            with self.subTest(pr=pr):
+                root = self.review_root(head=head)
+                root["message_id"] = f"msg_archive32_pr{pr}_fixture"
+                root["task_ref"] = archive + "#32"
+                root["scope"]["repository"] = archive
+                root["evidence_refs"] = [f"https://github.com/{archive}/pull/{pr}"]
+                result, existing = make_reply(
+                    pages([comment(11, root)]), repository=archive, issue=32,
+                    parent_message_id=root["message_id"],
+                    kind="REVIEW_FEEDBACK",
+                    response_text=f"PR #{pr} reviewed at {head}; see native review",
+                    expect_actor="kinoko34077",
+                )
+                self.assertIsNone(existing)
+                self.assertEqual(result["scope"]["expected_head"], head)
+                self.assertEqual(result["scope"]["effect"], "WRITE_INTENT")
+
+    def test_review_duplicate_and_changed_result_collision(self):
+        root = self.review_root()
+        initial = pages([comment(11, root)])
+        response, _ = self.reply(root)
+        history = pages([comment(11, root), comment(12, response)])
+        with patch("tools.kaep_reply_sender.post_comment") as post:
+            existing = send_reply(
+                repository=REPO, issue=503,
+                parent_message_id=root["message_id"],
+                kind="REVIEW_FEEDBACK", response_text="Native review submitted",
+                expect_actor="kinoko34077", offline_pages=history,
+            )
+        post.assert_not_called()
+        self.assertEqual(existing["status"], "ALREADY_SENT")
+        with self.assertRaisesRegex(InvalidMessage, "REPLY_COLLISION"):
+            make_reply(history, repository=REPO, issue=503,
+                       parent_message_id=root["message_id"], kind="REVIEW_FEEDBACK",
+                       response_text="Different review result", expect_actor="kinoko34077")
+        with patch("tools.kaep_reply_sender.fetch_gh_pages", side_effect=[initial, history]):
+            with patch("tools.kaep_reply_sender.post_comment", return_value=12) as post:
+                sent = send_reply(
+                    repository=REPO, issue=503,
+                    parent_message_id=root["message_id"], kind="REVIEW_FEEDBACK",
+                    response_text="Native review submitted",
+                    expect_actor="kinoko34077", do_send=True,
+                )
+        post.assert_called_once()
+        self.assertEqual(sent["status"], "SENT_AND_READ_BACK")
+        self.assertEqual(sent["posted_comment_id"], 12)
+
+    def test_cli_review_dry_run_never_posts(self):
+        root = self.review_root()
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "pages.json"
+            txt = Path(d) / "review.txt"
+            p.write_text(pages([comment(11, root)]), encoding="utf-8")
+            txt.write_text("Claude review completed on exact head.", encoding="utf-8")
+            with patch("builtins.print") as result:
+                with patch("tools.kaep_reply_sender.subprocess.run") as net:
+                    rc = main([
+                        "--repository", REPO, "--issue", "503",
+                        "--parent-message-id", root["message_id"],
+                        "--kind", "REVIEW_FEEDBACK",
+                        "--expect-actor", "kinoko34077",
+                        "--text-file", str(txt), "--offline-pages", str(p),
+                    ])
+            self.assertEqual(rc, 0)
+            net.assert_not_called()
+            self.assertEqual(json.loads(result.call_args.args[0])["status"], "PREPARED")
+
+
 if __name__=="__main__":
     unittest.main()
+

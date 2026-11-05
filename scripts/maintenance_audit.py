@@ -21,6 +21,7 @@ from tools.maintenance_audit import (  # noqa: E402
     AuditContractError,
     classify_repository,
 )
+from tools.github_issue_trust import is_trusted_issue_author  # noqa: E402
 from tools.maintenance_triage import triage  # noqa: E402
 from tools.operation_issue_metadata_preflight import (  # noqa: E402
     MetadataPreflightRejected,
@@ -341,14 +342,10 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         control_repo, number = _split_issue_ref(control_ref)
         issue = self.get_issue(control_repo, number)
         expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
-        association = str(
-            issue.get("author_association") or ""
-        ).upper()
         if (
             str(issue.get("state") or "").lower() != "open"
             or issue.get("title") != expected_title
-            or association
-            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+            or not is_trusted_issue_author(issue)
         ):
             raise SyncCheckContractError(
                 "Control is not the trusted open canonical Repository Control"
@@ -394,10 +391,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
                 "owner repository does not match audit repository"
             )
         issue = self.get_issue(owner_repo, number)
-        association = str(
-            issue.get("author_association") or ""
-        ).upper()
-        if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        if not is_trusted_issue_author(issue):
             raise SyncCheckContractError(
                 "owning Issue is not trusted"
             )
@@ -463,8 +457,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             )
             if (
                 live.get("title") != expected_title
-                or str(live.get("author_association") or "").upper()
-                not in {"OWNER", "MEMBER", "COLLABORATOR"}
+                or not is_trusted_issue_author(live)
                 or _scalar_section(_sections(observation.body), "Repository")
                 != expected_control_repository
                 or not isinstance(body, str)
@@ -706,14 +699,7 @@ def _owner_supply_snapshot(
         raise MaintenanceSupplyError(
             "owning Issue body must be non-empty"
         )
-    association = str(
-        issue.get("author_association") or ""
-    ).upper()
-    trusted = association in {
-        "OWNER",
-        "MEMBER",
-        "COLLABORATOR",
-    }
+    trusted = is_trusted_issue_author(issue)
 
     work_order_ref = admission.get("work_order_ref")
     if work_order_ref is not None:
@@ -728,14 +714,10 @@ def _owner_supply_snapshot(
             work_order_repo,
             work_order_number,
         )
-        work_order_association = str(
-            work_order.get("author_association") or ""
-        ).upper()
         if (
             str(work_order.get("state") or "").lower() != "open"
             or "pull_request" in work_order
-            or work_order_association
-            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+            or not is_trusted_issue_author(work_order)
             or not str(work_order.get("title") or "")
             .strip()
             .startswith("[WORK ORDER]")
@@ -788,15 +770,11 @@ def _control_supply_snapshot(
     body = str(issue.get("body") or "")
     sections = _sections(body)
     managed = _scalar_section(sections, "Repository")
-    association = str(
-        issue.get("author_association") or ""
-    ).upper()
     if (
         managed != repository
         or str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != expected_title
-        or association
-        not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
     ):
         raise MaintenanceSupplyError(
             "Control is not the trusted open canonical Repository Control"
@@ -821,8 +799,7 @@ def _control_supply_snapshot(
             _scalar_section(sections, "Repository State")
             or ""
         ),
-        "trusted": association
-        in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "trusted": is_trusted_issue_author(issue),
         "human_gate": (
             "[USER_DECISION]" in next_action
             or "[HUMAN_GATE]" in next_action
@@ -1054,14 +1031,13 @@ def _catalog_ledger_snapshot(
     body: str,
     active: ActiveRun,
 ) -> dict[str, object]:
-    association = str(issue.get("author_association") or "").upper()
     return {
         "task_ref": ledger_ref,
         "repository": repository,
         "body_sha256": canonical_body_sha256(body),
         "state": str(issue.get("state") or "UNKNOWN").upper(),
         "work_status": ledger_work_status(body),
-        "trusted": association in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "trusted": is_trusted_issue_author(issue),
         "is_pull_request": "pull_request" in issue,
         "entry_ref": (
             "https://github.com/"
@@ -1098,11 +1074,10 @@ def execute_catalog_maintenance_publication(
         )
 
     issue = transport.get_issue(ledger_repo, ledger_number)
-    association = str(issue.get("author_association") or "").upper()
     if (
         str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != "[MAINTENANCE] Audit Ledger"
-        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
         or "pull_request" in issue
     ):
         raise MaintenanceSupplyError(
@@ -1438,11 +1413,10 @@ def execute_maintenance_completion(
         )
 
     issue = transport.get_issue(ledger_repo, ledger_number)
-    association = str(issue.get("author_association") or "").upper()
     if (
         str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != "[MAINTENANCE] Audit Ledger"
-        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
         or "pull_request" in issue
     ):
         raise MaintenanceSupplyError(

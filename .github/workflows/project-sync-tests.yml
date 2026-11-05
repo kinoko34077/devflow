@@ -11,20 +11,15 @@ on:
       - 'scripts/maintenance_audit.py'
       - 'tools/**'
       - 'tests/**'
+      - 'features/**'
       - '.github/workflows/project-sync*.yml'
       - '.github/workflows/repository-bootstrap.yml'
       - '.github/workflows/maintenance-audit.yml'
       - '.devflow/WORKFLOW.yaml'
       - 'schemas/repository-bootstrap.v1.schema.json'
       - 'docs/project/**'
-      - 'docs/operations/DEVFLOW_MCP.md'
-      - 'docs/operations/REPOSITORY_BOOTSTRAP.md'
-      - 'docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md'
-      - 'docs/spec/GENERATED_ARTIFACT_WRITEBACK_V1.md'
-      - 'docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md'
-      - 'docs/spec/REPOSITORY_BOOTSTRAP.md'
-      - 'docs/spec/maintenance/**'
-      - 'docs/spec/schemas/maintenance-catalog.v1.schema.json'
+      - 'docs/operations/**'
+      - 'docs/spec/**'
       - '.devflow/maintenance.yaml'
       - 'requirements-mcp.txt'
 
@@ -39,6 +34,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.x'
+      - name: Install MCP runtime dependencies
+        run: python -m pip install -r requirements-mcp.txt
       - name: Unit tests
         run: python -W error -m unittest discover -v
       - name: Compile check
