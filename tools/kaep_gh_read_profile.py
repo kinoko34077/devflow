@@ -16,6 +16,7 @@ from tools.kaep_inbox_reader import (
 )
 from tools.kaep_issue_search_view import fetch_issue
 from tools.kaep_live_delta_view import read_repository_recent
+from tools.kaep_link_validation import owner_issue_url
 
 REPOSITORY = "kinoko34077/devflow"
 SOURCE_ISSUES = (847, 680)
@@ -50,7 +51,7 @@ def profile(
             issue = issue_read(REPOSITORY, number)
             if type(issue) is not dict or issue.get("number") != number or (
                 issue.get("html_url") !=
-                f"https://github.com/{REPOSITORY}/issues/{number}"
+                owner_issue_url(REPOSITORY, number)
             ):
                 raise InvalidMessage("INVALID_PUBLIC_ISSUE")
             # Serializing decoded data estimates bytes and is not the exact
@@ -105,3 +106,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
