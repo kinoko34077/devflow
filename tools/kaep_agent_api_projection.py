@@ -12,6 +12,7 @@ from typing import Any
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MESSAGE_ID, REASON_CODE, RECIPIENTS, fail,
 )
+from tools.kaep_link_validation import owner_comment_url, owner_issue_url
 from tools.kaep_repository_validation import REPOSITORY
 
 SCHEMA = "kaep.agent-current-view.v0.1"
@@ -25,13 +26,10 @@ MAX_ERRORS = 100
 MAX_WARNINGS = 100
 
 
-
-def _issue_url(repo: str, number: int) -> str:
-    return f"https://github.com/{repo}/issues/{number}"
-
-
-def _source_url(repo: str, number: int, cid: int) -> str:
-    return f"{_issue_url(repo, number)}#issuecomment-{cid}"
+# Compatibility aliases preserve the projection's private helpers while the
+# canonical URL formatting remains owned by the link-validation boundary.
+_issue_url = owner_issue_url
+_source_url = owner_comment_url
 
 
 def _timestamp(text: Any, now: datetime) -> tuple[str, int]:
