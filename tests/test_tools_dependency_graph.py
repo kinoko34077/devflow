@@ -143,6 +143,16 @@ class ToolsDependencyGraphTests(unittest.TestCase):
             self.graph["kaep_live_union_cli"],
         )
 
+    def test_kaep_issue_url_formatters_reuse_link_validation(self) -> None:
+        from tools import kaep_agent_api_projection as projection
+        from tools import kaep_link_validation as links
+
+        for module in ("kaep_agent_api_projection", "kaep_b5_b6_parity_cli", "kaep_live_union_cli"):
+            with self.subTest(module=module):
+                self.assertIn("kaep_link_validation", self.graph[module])
+        self.assertIs(projection._issue_url, links.owner_issue_url)
+        self.assertIs(projection._source_url, links.owner_comment_url)
+
     def test_kaep_mailbox_reuses_repository_and_task_validation(self) -> None:
         from tools import kaep_mailbox_codec as codec
         from tools import kaep_repository_validation as repository

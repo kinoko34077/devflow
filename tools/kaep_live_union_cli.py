@@ -16,6 +16,7 @@ from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
+from tools.kaep_link_validation import owner_comment_url, owner_issue_url
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, fail,
 )
@@ -61,7 +62,7 @@ def _validated_previous_report(
         if (type(repo) is not str or not REPOSITORY.fullmatch(repo)
                 or repo not in repositories or type(number) is not int
                 or number <= 0 or row.get("issue_url")
-                != f"https://github.com/{repo}/issues/{number}"
+                != owner_issue_url(repo, number)
                 or row.get("grants_work_authority") is not False
                 or (repo, number) in sources):
             fail("INVALID_PREVIOUS_SOURCE")
@@ -80,9 +81,9 @@ def _validated_previous_report(
                 or type(cid) is not int or cid <= 0
                 or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                 or row.get("recipient") != recipient
-                or row.get("issue_url") != f"https://github.com/{repo}/issues/{issue}"
+                or row.get("issue_url") != owner_issue_url(repo, issue)
                 or row.get("source_url") !=
-                   f"https://github.com/{repo}/issues/{issue}#issuecomment-{cid}"
+                   owner_comment_url(repo, issue, cid)
                 or row.get("issue_state") not in ("open", "closed")
                 or type(row.get("reply_observation")) is not str
                 or key in old):
@@ -123,7 +124,7 @@ def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str,
                 or type(cid) is not int or cid <= 0
                 or row.get("locator") != f"{repo.split('/', 1)[1]}#{number}@{cid}"
                 or row.get("source_url") !=
-                  f"https://github.com/{repo}/issues/{number}#issuecomment-{cid}"
+                  owner_comment_url(repo, number, cid)
                 or row.get("strict_source_validated") is not False
                 or row.get("is_authoritative_assignment") is not False):
             fail("INVALID_MARKER_LOCATOR")
@@ -252,7 +253,7 @@ def _build_source_candidate_ledger(
     )
     candidates = []
     for repo, number in sources:
-        source_url = f"https://github.com/{repo}/issues/{number}"
+        source_url = owner_issue_url(repo, number)
         count = roots_by_issue.get((repo, number), 0)
         suspect = global_unknown or source_url in failed_issues
         candidates.append({
@@ -415,7 +416,7 @@ def read_union(
     locators: dict[str, dict[str, Any]] = {}
     for repo in repos:
         subset = [
-            {"html_url": f"https://github.com/{r}/issues/{issue}"}
+            {"html_url": owner_issue_url(r, issue)}
             for r, issue in all_sources if r == repo
         ]
         locators[repo] = {
