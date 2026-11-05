@@ -10,3 +10,4 @@ import re
 
 
 REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
+TASK_REF = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
