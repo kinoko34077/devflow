@@ -141,6 +141,14 @@ class ToolsDependencyGraphTests(unittest.TestCase):
             self.graph["kaep_live_union_cli"],
         )
 
+    def test_kaep_mailbox_reuses_repository_and_task_validation(self) -> None:
+        from tools import kaep_mailbox_codec as codec
+        from tools import kaep_repository_validation as repository
+
+        self.assertIn("kaep_repository_validation", self.graph["kaep_mailbox_codec"])
+        self.assertIs(codec.REPOSITORY, repository.REPOSITORY)
+        self.assertIs(codec.TASK_REF, repository.TASK_REF)
+
     def test_kaep_message_id_aliases_reuse_mailbox_codec(self) -> None:
         from tools import kaep_agent_api_projection as projection
         from tools import kaep_b5_b6_parity_cli as parity

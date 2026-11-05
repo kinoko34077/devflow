@@ -9,6 +9,8 @@ import json
 import re
 from typing import Any, Mapping, Sequence
 
+from tools.kaep_repository_validation import REPOSITORY, TASK_REF
+
 MARKER = "<!-- kaep:message:v0.2 -->"
 FENCE = chr(96) * 3
 # Exact GitHub comment decoration observed from the Claude Code integration.
@@ -62,14 +64,18 @@ def validate(raw: object, *, task_ref: str | None = None) -> dict[str, Any]:
     if type(d["kind"]) is not str or d["kind"] not in KINDS: fail("INVALID_KIND")
     if parent is None and d["kind"] in REPLIES: fail("MISSING_PARENT")
     if parent == d["message_id"]: fail("SELF_REPLY")
-    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*", d["task_ref"]): fail("INVALID_TASK")
+    if (type(d["task_ref"]) is not str
+            or TASK_REF.fullmatch(d["task_ref"]) is None):
+        fail("INVALID_TASK")
     if task_ref is not None and task_ref != d["task_ref"]: fail("TASK_MISMATCH")
     if type(d["recipient"]) is not str or d["recipient"] not in RECIPIENTS: fail("INVALID_RECIPIENT")
     if type(d["intent"]) is not str or d["intent"] not in INTENTS: fail("INVALID_INTENT")
     if not matches(r"[A-Za-z0-9_.:-]{8,128}", d["idempotency_key"]): fail("INVALID_IDEMPOTENCY")
     s = d["scope"]
     if type(s) is not dict or set(s) != {"repository", "expected_head", "effect"}: fail("INVALID_SCOPE")
-    if not matches(r"kinoko34077/[A-Za-z0-9_.-]+", s["repository"]): fail("INVALID_REPOSITORY")
+    if (type(s["repository"]) is not str
+            or REPOSITORY.fullmatch(s["repository"]) is None):
+        fail("INVALID_REPOSITORY")
     if d["task_ref"].partition("#")[0] != s["repository"]: fail("REPOSITORY_TASK_MISMATCH")
     if s["expected_head"] is not None and not matches(r"[0-9a-f]{40}", s["expected_head"]): fail("INVALID_HEAD")
     if type(s["effect"]) is not str or s["effect"] not in ("READ_ONLY", "WRITE_INTENT"): fail("INVALID_EFFECT")
