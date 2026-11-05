@@ -18,6 +18,7 @@ from tools.kaep_inbox_reader import InvalidMessage, parse_pages
 from tools.kaep_issue_search_view import fetch_issue
 from tools.kaep_inbox_reader import fetch_gh_pages
 from tools.kaep_live_delta_view import read_repository_recent
+from tools.kaep_link_validation import owner_issue_url
 
 
 REPOSITORY = "kinoko34077/devflow"
@@ -48,7 +49,7 @@ def _read_jobs(
             issue = issue_read(REPOSITORY, number)
             if (type(issue) is not dict or issue.get("number") != number
                     or issue.get("html_url")
-                    != f"https://github.com/{REPOSITORY}/issues/{number}"):
+                    != owner_issue_url(REPOSITORY, number)):
                 raise InvalidMessage("SOURCE_ISSUE_MISMATCH")
             payload = _canonical_bytes(issue)
             return issue, len(payload), 1, "canonical_json_estimate"
@@ -206,3 +207,4 @@ def main(
 
 if __name__ == "__main__":
     sys.exit(main())
+
