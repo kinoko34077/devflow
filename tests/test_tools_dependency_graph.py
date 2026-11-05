@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +157,29 @@ class ToolsDependencyGraphTests(unittest.TestCase):
 
         self.assertIn("kaep_repository_validation", self.graph["gpt_liveness_chat_registry"])
         self.assertIs(registry.MAILBOX, repository.TASK_REF)
+
+    def test_gpt_chat_mailbox_alias_survives_regex_cache_purge(self) -> None:
+        script = """
+import re
+from tools import kaep_repository_validation as repository
+
+task_ref = repository.TASK_REF
+re.purge()
+
+from tools import gpt_liveness_chat_registry as registry
+
+if registry.MAILBOX is not task_ref:
+    raise AssertionError("chat mailbox must reuse the canonical TASK_REF object")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_kaep_message_id_aliases_reuse_mailbox_codec(self) -> None:
         from tools import kaep_agent_api_projection as projection
