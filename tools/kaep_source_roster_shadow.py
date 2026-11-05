@@ -15,7 +15,6 @@ from typing import Callable, Any
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 
 from tools import agent_inbox
-from tools.github_issue_trust import is_trusted_principal
 from tools.kaep_discovery_reader import (
     SOURCE_URL, discover_index_shadow,
 )
@@ -25,6 +24,7 @@ from tools.kaep_inbox_reader import (
 from tools.kaep_mailbox_codec import (
     MARKER, read_mailbox, verify_reply_chain,
 )
+from tools.kaep_mailbox_support import matching_actor
 
 MAX_SOURCE_ISSUES = 20  # unchanged default for old callers
 MAX_OPT_IN_SOURCE_ISSUES = 40  # bounded explicit expansion only
@@ -192,13 +192,7 @@ def source_root_shadow(
             trusted = [
                 c for c in all_comments
                 if not c["body"].startswith(MARKER)
-                or (
-                    expected_source_actor.casefold() == "kinoko34077"
-                    and is_trusted_principal({
-                        "user": {"id": c.get("actor_id"),
-                                 "login": c["actor_login"]}
-                    })
-                )
+                or matching_actor(c, expected_source_actor)
             ]
             decoded = read_mailbox(trusted, task_ref=f"{repo}#{issue}")
             verify_reply_chain([msg for _, msg in decoded])
