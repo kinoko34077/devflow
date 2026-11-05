@@ -56,6 +56,10 @@ class KAEPMailboxContract(unittest.TestCase):
             decode_comment(encode_comment(envelope()), task_ref="kinoko34077/devflow#504")
         self.reject(scope={"repository": "kinoko34077/other", "expected_head": None, "effect": "READ_ONLY"})
 
+    def test_repository_and_task_types_fail_closed(self):
+        self.reject(task_ref=None)
+        self.reject(scope={"repository": None, "expected_head": None, "effect": "READ_ONLY"})
+
     def test_head_guard(self):
         self.reject(scope={"repository": "kinoko34077/devflow", "expected_head": "abcd", "effect": "READ_ONLY"})
         self.assertEqual(validate(envelope(scope={"repository": "kinoko34077/devflow", "expected_head": "a"*40, "effect": "WRITE_INTENT"}))["scope"]["effect"], "WRITE_INTENT")
