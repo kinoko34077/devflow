@@ -155,6 +155,19 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("cannot replace Control authority or create runtime claims", mcp)
         self.assertIn("does **not** retire manual Active Work", manual)
 
+    def test_mcp_runtime_minimum_matches_pinned_coordinator_floor(self):
+        mcp = (ROOT / "docs" / "operations" / "DEVFLOW_MCP.md").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-mcp.txt").read_text(encoding="utf-8")
+
+        self.assertIn("- Python 3.11+", mcp)
+        self.assertNotIn("- Python 3.10+", mcp)
+        self.assertIn(
+            "kinotch-execution-coordinator @ "
+            "git+https://github.com/kinoko34077/execution-coordinator.git@"
+            "00fb0a76268b45d13c0d6fe5598fa961f3298d7d",
+            requirements,
+        )
+
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
         spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(
             encoding="utf-8"
