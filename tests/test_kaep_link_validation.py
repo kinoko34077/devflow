@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from tools.kaep_link_validation import (
@@ -11,6 +12,19 @@ from tools.kaep_link_validation import (
 
 
 class KaepLinkValidationTests(unittest.TestCase):
+    def test_public_read_routes_use_shared_owner_url_formatters(self) -> None:
+        root = Path(__file__).parents[1]
+        routes = (
+            "tools/kaep_issue_search_view.py",
+            "tools/kaep_live_candidate_cli.py",
+            "tools/kaep_public_index.py",
+            "tools/kaep_public_locator_cli.py",
+        )
+        for route in routes:
+            with self.subTest(route=route):
+                source = (root / route).read_text(encoding="utf-8")
+                self.assertNotIn("https://github.com/{", source)
+
     def test_owner_url_formatters_preserve_canonical_shape(self) -> None:
         issue = owner_issue_url("kinoko34077/devflow", 576)
         comment = owner_comment_url("kinoko34077/devflow", 576, 123)
@@ -42,3 +56,4 @@ class KaepLinkValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
