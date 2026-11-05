@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+
+from tools import kaep_inbox_reader, kaep_mailbox_codec
 
 from tools.kaep_inbox_reader import (
     MAX_RESPONSE_BYTES, InvalidMessage, fetch_gh_pages,
@@ -46,6 +49,14 @@ def pages(*groups):
 
 
 class ReadOnlyInboxTests(unittest.TestCase):
+    def test_recipient_set_uses_codec_owner(self):
+        sentinel = object()
+        with patch.object(kaep_mailbox_codec, "RECIPIENTS", sentinel):
+            reloaded = importlib.reload(kaep_inbox_reader)
+            self.assertIs(reloaded.RECIPIENTS, sentinel)
+        importlib.reload(kaep_inbox_reader)
+
+
     def assert_blocked(self, text, code):
         with self.assertRaisesRegex(InvalidMessage, code):
             inspect_pages(text, repository=REPO, issue=503,
@@ -92,14 +103,34 @@ class ReadOnlyInboxTests(unittest.TestCase):
                                      in_reply_to="msg_missing"))
         self.assert_blocked(pages([comment(11, ack)]), "UNKNOWN_PARENT")
 
-    def test_cross_exchange_fails_closed(self):
+    def test_cross_exchange_quarantined_and_reported(self):
         ping = encode_comment(envelope())
         ack = encode_comment(envelope(kind="ACK", recipient="chatgpt",
                                      message_id="msg_ack002",
                                      in_reply_to="msg_msg001",
                                      exchange_id="ex_another"))
-        self.assert_blocked(pages([comment(11, ping), comment(12, ack)]),
-                            "CROSS_EXCHANGE_REPLY")
+        independent = encode_comment(envelope(
+            message_id="msg_independent003", exchange_id="ex_independent",
+            recipient="chatgpt"))
+        result = inspect_pages(
+            pages([comment(11, ping), comment(12, ack),
+                   comment(13, independent)]),
+            repository=REPO, issue=503, recipient="chatgpt", after_id=11,
+        )
+        self.assertEqual(
+            [m["message_id"] for m in result["messages"]],
+            ["msg_independent003"],
+        )
+        self.assertEqual(result["quarantined_exchanges"], [
+            {"exchange_id": "ex_another", "reason": "CROSS_EXCHANGE_REPLY"}
+        ])
+        # The formerly valid root remains available to its intended recipient.
+        roots = inspect_pages(
+            pages([comment(11, ping), comment(12, ack),
+                   comment(13, independent)]),
+            repository=REPO, issue=503, recipient="claude-code")
+        self.assertEqual([m["message_id"] for m in roots["messages"]],
+                         ["msg_msg001"])
 
     def test_cursor_does_not_hide_conflicting_history(self):
         first = encode_comment(envelope())

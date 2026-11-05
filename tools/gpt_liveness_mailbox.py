@@ -7,7 +7,6 @@ A GitHub actor login remains transport evidence, not cryptographic model ID.
 from __future__ import annotations
 
 import argparse
-import re
 from datetime import datetime, timezone
 import json
 import sys
@@ -16,7 +15,7 @@ from tools.kaep_inbox_reader import fetch_gh_pages, parse_pages
 from tools.kaep_reply_sender import send_reply
 from tools.kaep_mailbox_codec import InvalidMessage
 from tools.gpt_liveness_pilot import (
-    SCHEMA, answer, challenge, enrollment, extract, fetch_issue, iso, strict_json, utc,
+    NONCE, SCHEMA, answer, challenge, enrollment, extract, fetch_issue, iso, strict_json, utc,
 )
 
 
@@ -123,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         if (type(args.reply_to_comment_id) is not int
                 or args.reply_to_comment_id <= 0
                 or type(args.reply_to_nonce) is not str
-                or re.fullmatch(r"[0-9a-f]{32}", args.reply_to_nonce) is None):
+                or NONCE.fullmatch(args.reply_to_nonce) is None):
             raise InvalidMessage("EXPLICIT_PING_SELECTION_REQUIRED")
         if not pings:
             raise InvalidMessage("NO_VALID_PENDING_PING")

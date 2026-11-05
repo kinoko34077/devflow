@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
+from tools.github_issue_trust import is_trusted_principal
 from tools.maintenance_catalog import ResolvedSlot
 from tools.maintenance_ledger import RunRecord
 
@@ -22,11 +23,12 @@ FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 @dataclass(frozen=True)
 class LedgerEvidence:
-    """Provenance envelope; association must come from trusted GitHub API data."""
+    """Provenance envelope with the canonical GitHub principal identity."""
 
     record: RunRecord
     source_url: str
     author_association: str
+    author_user: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +50,7 @@ class CoverageRow:
 
 def _trusted(value: LedgerEvidence, repository: str) -> bool:
     prefix = "https://github.com/" + repository + "/issues/"
-    if value.author_association not in TRUSTED_ASSOCIATIONS:
+    if not is_trusted_principal({"user": value.author_user}):
         return False
     if not value.source_url.startswith(prefix):
         return False

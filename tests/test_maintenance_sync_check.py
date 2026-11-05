@@ -446,6 +446,7 @@ def _p4d_live_snapshots(
                         + control_body
                     ),
                     "author_association": "OWNER",
+                    "user": {"id": 79015263, "login": "kinoko34077"},
                 }
             )
         if url.endswith("/repos/o/r/issues/7"):
@@ -459,6 +460,7 @@ def _p4d_live_snapshots(
                         f"`{owner_work_status}`\n"
                     ),
                     "author_association": "OWNER",
+                    "user": {"id": 79015263, "login": "kinoko34077"},
                 }
             )
         raise AssertionError(f"unexpected read: {url}")
@@ -608,6 +610,7 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
                 "devflow/issues/1"
             ),
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": body,
         }
 
@@ -652,6 +655,7 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
                 "devflow/issues/1"
             ),
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": live_body,
             "updated_at": "2026-10-16T00:00:00Z",
         }

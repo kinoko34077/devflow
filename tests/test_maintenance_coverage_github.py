@@ -36,11 +36,17 @@ def record(result="CLEAN", **changes):
 
 
 def comment(result="CLEAN", author="OWNER", **record_changes):
+    user = (
+        {"id": 79015263, "login": "kinoko34077"}
+        if author in {"OWNER", "MEMBER", "COLLABORATOR"}
+        else {"id": 123456789, "login": "untrusted"}
+    )
     return {
         "id": 123,
         "html_url": LEDGER_URL + "#issuecomment-123",
         "issue_url": API_ISSUE,
         "author_association": author,
+        "user": user,
         "body": render_run_comment(record(result, **record_changes)),
     }
 
@@ -146,6 +152,16 @@ class NativeCoverageCollectorTests(unittest.TestCase):
         item = comment()
         item["body"] = "<!-- devflow-maintenance-run:v1 -->\ninvalid-json"
         with self.assertRaisesRegex(CoverageCollectionError, "malformed"):
+            observe(FakeGET([item]))
+
+    def test_duplicate_favorable_v1_result_fails_entire_ledger_projection(self):
+        item = comment(result="CLEAN")
+        item["body"] = item["body"].replace(
+            '"result":"CLEAN"',
+            '"result":"BLOCKED","result":"CLEAN"',
+            1,
+        )
+        with self.assertRaisesRegex(CoverageCollectionError, "malformed machine"):
             observe(FakeGET([item]))
 
     def test_nonmachine_comment_is_ignored_not_counted(self):

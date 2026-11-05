@@ -8,38 +8,35 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from functools import partial
 import json
 from pathlib import Path
-import re
 import sys
 import urllib.error
 import urllib.request
 from typing import Any, Callable
 
-from tools.kaep_inbox_reader import InvalidMessage, RECIPIENTS, fetch_gh_pages
-from tools.kaep_issue_list_html import _safe_link
+from tools.kaep_inbox_reader import (
+    InvalidMessage, REPOSITORY, fetch_gh_pages,
+)
+from tools.kaep_link_validation import safe_comment_link, safe_issue_link
 from tools.kaep_issue_search_view import build_search_list, fetch_issue
+from tools.kaep_mailbox_codec import MESSAGE_ID as MESSAGE_ID_PATTERN, RECIPIENTS, unique_pairs
 
 PUBLIC_INDEX_URL = "https://kinoko34077.github.io/devflow/kaep/index.json"
 MAX_INDEX_BYTES = 1_000_000
 MAX_CANDIDATE_ISSUES = 40
 MAX_ROWS = 4000
 SCHEMA = "kaep.public-source-index.v1"
-MESSAGE = re.compile(r"msg_[A-Za-z0-9_-]{1,72}\Z")
-REPOSITORY = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+\Z")
+MESSAGE = MESSAGE_ID_PATTERN
+
 
 
 def _block(code: str) -> None:
     raise InvalidMessage(code)
 
 
-def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out = {}
-    for k, value in pairs:
-        if k in out:
-            _block("DUPLICATE_INDEX_FIELD")
-        out[k] = value
-    return out
+_unique_pairs = partial(unique_pairs, duplicate_code="DUPLICATE_INDEX_FIELD")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -119,8 +116,8 @@ def validate_index(index: dict[str, Any], *, now: datetime | None = None) -> dic
         url = f"https://github.com/{repo}/issues/{issue}"
         comment = f"{url}#issuecomment-{cid}"
         if (row.get("issue_url") != url or row.get("source_url") != comment
-                or not _safe_link(url, source=False)
-                or not _safe_link(comment, source=True)):
+                or not safe_issue_link(url)
+                or not safe_comment_link(comment)):
             _block("INVALID_PUBLIC_INDEX_LOCATOR")
     return {"snapshot_age_seconds": round(max(age, 0)),
             "snapshot_stale": age > 300, "candidate_row_count": len(rows)}

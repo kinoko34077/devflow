@@ -116,6 +116,21 @@ def _closed(value: object, field: str, keys: set[str]) -> dict[str, Any]:
     return dict(value)
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous v1 Ledger JSON recursively, including nested values.
+
+    The stock decoder silently keeps the last duplicate key; allowing a
+    second 'result' or source identity could convert an invalid audit into
+    a favorable one before the closed-schema checks have any visibility.
+    """
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise MaintenanceLedgerError(f"duplicate Ledger JSON key: {key}")
+        value[key] = item
+    return value
+
+
 def _canonical(value: object) -> str:
     return json.dumps(
         value,
@@ -264,7 +279,7 @@ def _extract_active_without_status(body: str) -> ActiveRun | None:
         raise MaintenanceLedgerError("active run marker order is invalid")
     raw = body[start:end].strip()
     try:
-        payload = json.loads(raw)
+        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
     except json.JSONDecodeError as exc:
         raise MaintenanceLedgerError("active run payload is not canonical JSON") from exc
     return _parse_active_payload(payload)
@@ -422,7 +437,7 @@ def parse_run_comment(body: str) -> RunRecord | None:
     if match is None:
         raise MaintenanceLedgerError("run comment format is malformed")
     try:
-        payload = json.loads(match.group(1))
+        payload = json.loads(match.group(1), object_pairs_hook=_reject_duplicate_json_keys)
     except json.JSONDecodeError as exc:
         raise MaintenanceLedgerError("run comment payload is not JSON") from exc
     return _parse_record_payload(payload)

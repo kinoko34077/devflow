@@ -8,6 +8,7 @@ to GitHub, credentials, source text or assignment.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import os
 import stat
 import tempfile
@@ -17,8 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import kaep_public_locator_cli as locator
-from tools.kaep_inbox_reader import InvalidMessage, MARKER
-from tools.kaep_live_delta_view import API_ISSUE
+from tools.kaep_mailbox_codec import InvalidMessage, fail, unique_pairs
 
 CURSOR_SCHEMA = "kaep.public-marker-head-cursor.v0.1"
 RESULT_SCHEMA = "kaep.public-marker-incremental.v0.1"
@@ -26,9 +26,6 @@ MAX_OWNER_REPOS = 300
 MAX_CURSOR_BYTES = 131_072
 _NOT_FOUND = object()
 
-
-def _deny(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def validate_cursor(cursor: dict[str, Any]) -> dict[str, int]:
@@ -40,11 +37,11 @@ def validate_cursor(cursor: dict[str, Any]) -> dict[str, int]:
             or cursor.get("public_only") is not True
             or type(cursor.get("heads")) is not dict
             or len(cursor["heads"]) > MAX_OWNER_REPOS):
-        _deny("INVALID_PUBLIC_CURSOR")
+        fail("INVALID_PUBLIC_CURSOR")
     for name, head in cursor["heads"].items():
         if (type(name) is not str or not locator.REPO_NAME.fullmatch(name)
                 or type(head) is not int or head < 0):
-            _deny("INVALID_PUBLIC_CURSOR")
+            fail("INVALID_PUBLIC_CURSOR")
     return dict(cursor["heads"])
 
 
@@ -95,7 +92,7 @@ def discover_incremental(
             or not 1 <= max_comment_pages <= locator.MAX_COMMENT_PAGES
             or type(max_api_calls) is not int
             or not max_repo_pages <= max_api_calls <= locator.MAX_API_CALLS):
-        _deny("INVALID_SCAN_BOUNDS")
+        fail("INVALID_SCAN_BOUNDS")
     previous = None if prior is None else validate_cursor(prior)
     if previous is None:
         heads: dict[str, int] = {}
@@ -137,17 +134,7 @@ def discover_incremental(
                 f"&per_page={locator.PAGE_SIZE}&page={page}")
         try:
             result = fetch(path)
-            if type(result) is not list or len(result) > locator.PAGE_SIZE:
-                _deny("INVALID_PUBLIC_REPOSITORY_PAGE")
-            for item in result:
-                if (type(item) is not dict
-                        or type(item.get("full_name")) is not str
-                        or not locator.REPO_NAME.fullmatch(item["full_name"])
-                        or type(item.get("owner")) is not dict
-                        or item["owner"].get("login") != locator.OWNER
-                        or item.get("private") is not False):
-                    _deny("INVALID_PUBLIC_REPOSITORY_PAGE")
-                name = item["full_name"]
+            for name in locator._validated_public_repository_page(result):
                 if name not in seen:
                     seen.add(name)
                     repositories.append(name)
@@ -186,40 +173,26 @@ def discover_incremental(
             try:
                 comments = fetch(path)
                 if type(comments) is not list or len(comments) > locator.PAGE_SIZE:
-                    _deny("INVALID_PUBLIC_COMMENT_PAGE")
+                    fail("INVALID_PUBLIC_COMMENT_PAGE")
                 if current_head is _NOT_FOUND:
                     current_head = comments[0].get("id") if comments else 0
                 if type(current_head) is not int or current_head < 0:
-                    _deny("INVALID_PUBLIC_COMMENT")
+                    fail("INVALID_PUBLIC_COMMENT")
                 anchor_seen = False
                 for item in comments:
-                    if type(item) is not dict:
-                        _deny("INVALID_PUBLIC_COMMENT")
-                    body, cid, src = item.get("body"), item.get("id"), item.get("issue_url")
-                    matched = API_ISSUE.fullmatch(src) if type(src) is str else None
-                    if (type(body) is not str or type(cid) is not int or cid < 1
-                            or matched is None or matched.group(1) != repo):
-                        _deny("INVALID_PUBLIC_COMMENT")
+                    cid, candidate = locator._validated_locator_candidate(repo, item)
                     if old is not _NOT_FOUND and old > 0 and cid == old:
                         anchor_seen = True
                         break
-                    if not body.startswith(MARKER):
+                    if candidate is None:
                         continue
-                    issue = int(matched.group(2))
-                    key = (repo, issue, cid)
+                    key = (repo, candidate["issue_number"], cid)
                     if key in found:
                         continue
                     found.add(key)
                     if len(found) > locator.MAX_LOCATORS:
-                        _deny("PUBLIC_LOCATOR_LIMIT")
-                    url = f"https://github.com/{repo}/issues/{issue}"
-                    links.append({
-                        "locator": f"{repo.split('/', 1)[1]}#{issue}@{cid}",
-                        "repository": repo, "issue_number": issue, "comment_id": cid,
-                        "source_url": f"{url}#issuecomment-{cid}",
-                        "strict_source_validated": False,
-                        "is_authoritative_assignment": False,
-                    })
+                        fail("PUBLIC_LOCATOR_LIMIT")
+                    links.append(candidate)
                 if anchor_seen or (
                     len(comments) < locator.PAGE_SIZE
                     and (old is _NOT_FOUND or old == 0)):
@@ -252,18 +225,16 @@ def discover_incremental(
 def _read_cursor_file(path: Path) -> tuple[dict[str, Any], bytes]:
     """Read only a regular local cursor, never follow the final symlink."""
     if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode):
-        _deny("INVALID_PUBLIC_CURSOR_FILE")
+        fail("INVALID_PUBLIC_CURSOR_FILE")
     raw = path.read_bytes()
     if not 0 < len(raw) <= MAX_CURSOR_BYTES:
-        _deny("INVALID_PUBLIC_CURSOR_FILE")
-    def pairs_unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for key, val in pairs:
-            if key in out:
-                _deny("DUPLICATE_PUBLIC_CURSOR_FIELD")
-            out[key] = val
-        return out
-    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs_unique)
+        fail("INVALID_PUBLIC_CURSOR_FILE")
+    obj = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=partial(
+            unique_pairs, duplicate_code="DUPLICATE_PUBLIC_CURSOR_FIELD"
+        ),
+    )
     validate_cursor(obj)
     return obj, raw
 
@@ -275,7 +246,7 @@ def _persist_cursor_file(path: Path, cursor: dict[str, Any],
     payload = (json.dumps(cursor, ensure_ascii=True, sort_keys=True,
                           separators=(",", ":")) + "\n").encode("ascii")
     if len(payload) > MAX_CURSOR_BYTES:
-        _deny("INVALID_PUBLIC_CURSOR")
+        fail("INVALID_PUBLIC_CURSOR")
     temp_name: str | None = None
     try:
         fd, temp_name = tempfile.mkstemp(
@@ -295,12 +266,12 @@ def _persist_cursor_file(path: Path, cursor: dict[str, Any],
             raise
         # Detect another writer or substitution before replacing a read cursor.
         if path.is_symlink():
-            _deny("CURSOR_CHANGED_ON_DISK")
+            fail("CURSOR_CHANGED_ON_DISK")
         if path.exists():
             if old is None or path.read_bytes() != old:
-                _deny("CURSOR_CHANGED_ON_DISK")
+                fail("CURSOR_CHANGED_ON_DISK")
         elif old is not None:
-            _deny("CURSOR_CHANGED_ON_DISK")
+            fail("CURSOR_CHANGED_ON_DISK")
         os.replace(temp_name, path)
         temp_name = None
     finally:
@@ -331,15 +302,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.cursor_in is not None:
             data = args.cursor_in.read_bytes()
             if len(data) > MAX_CURSOR_BYTES:
-                _deny("INVALID_PUBLIC_CURSOR")
-            def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-                out: dict[str, Any] = {}
-                for key, val in pairs:
-                    if key in out:
-                        _deny("DUPLICATE_PUBLIC_CURSOR_FIELD")
-                    out[key] = val
-                return out
-            previous = json.loads(data.decode("utf-8"), object_pairs_hook=unique_pairs)
+                fail("INVALID_PUBLIC_CURSOR")
+            previous = json.loads(
+                data.decode("utf-8"),
+                object_pairs_hook=partial(
+                    unique_pairs, duplicate_code="DUPLICATE_PUBLIC_CURSOR_FIELD"
+                ),
+            )
         result = discover_incremental(
             prior=previous, max_repo_pages=args.max_repo_pages,
             max_comment_pages=args.max_comment_pages,

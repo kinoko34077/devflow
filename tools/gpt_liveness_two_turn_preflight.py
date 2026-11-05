@@ -18,16 +18,12 @@ from tools.gpt_liveness_fleet_plan import MAILBOX, fetch_owning_issue
 from tools.gpt_liveness_dispatch_preview import compose as f7_compose
 from tools.gpt_liveness_turn_router import format_manifest, plan as turn_plan
 from tools.kaep_inbox_reader import fetch_gh_pages
-from tools.kaep_mailbox_codec import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail
 
 SCHEMA = "gpt.liveness.two-turn-preflight.v0.1"
 ALLOWED_REPO = "kinoko34077/devflow"
 EXPECTED_ACTOR = "kinoko34077"
 MAX_FIXTURE_CHARS = 5_000_000
-
-
-def fail(reason: str) -> None:
-    raise InvalidMessage(reason)
 
 
 def _targets(raw: str) -> list[str]:

@@ -10,28 +10,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
-import secrets
 from typing import Any
 
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
+from tools.gpt_liveness_ids import new_session_id, new_turn_id
 from tools.gpt_liveness_pilot import enrollment, challenge, answer, utc
-from tools.kaep_mailbox_codec import InvalidMessage, validate, verify_reply_chain
+from tools.kaep_mailbox_codec import (
+    InvalidMessage,
+    fail as _fail,
+    validate,
+    verify_reply_chain,
+)
 
 SCHEMA = "gpt.liveness.turn-routing.v0.1"
-
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
-
-
-def new_turn_id() -> str:
-    """Opaque, collision-resistant ID for ONE active GPT turn only."""
-    return "turn_" + secrets.token_hex(16)
-
-
-def new_session_id() -> str:
-    """Opaque, independent bounded enrollment ID; no ChatGPT native ID claim."""
-    return "session_" + secrets.token_hex(16)
 
 
 def _admit(*, manifest: str, snapshots: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
@@ -162,3 +153,4 @@ def format_manifest(targets: list[str]) -> str:
     raw = json.dumps({"schema": "gpt-liveness-fleet-plan.v0.1", "targets": targets})
     parse_manifest(raw)
     return raw
+

@@ -3,11 +3,23 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
-from tools.kaep_mailbox_codec import MARKER, encode_comment
+from tools.kaep_mailbox_codec import (
+    MARKER,
+    RECIPIENTS,
+    RECIPIENT_ORDER,
+    encode_comment,
+)
 from tools import agent_inbox
 from tools.kaep_request_sender import make_request
-from tools.kaep_issue_search_view import build_search_list, to_markdown, machine_json, console_text
+from tools.kaep_issue_search_view import (
+    RECIPIENTS as SEARCH_RECIPIENTS,
+    build_search_list,
+    to_markdown,
+    machine_json,
+    console_text,
+)
 
 OWNER = "kinoko34077"
 DEV = "kinoko34077/devflow"
@@ -24,7 +36,7 @@ def issue(repo=DEV, n=576, title="[SPEC] Fixture", *, state="open"):
         "created_at": "2026-10-16T00:00:00Z",
         "updated_at": "2026-10-16T00:00:00Z",
         "author_association": "OWNER",
-        "user": {"login": OWNER},
+        "user": {"id": 79015263, "login": OWNER},
     }
 
 
@@ -53,10 +65,16 @@ def root(repo=DEV, n=576, number=1):
 
 
 def comment(cid, msg, actor=OWNER):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg),
+            "user": {"id": 79015263 if actor == OWNER else 123456789,
+                     "login": actor}}
 
 
 class SearchListTests(unittest.TestCase):
+    def test_recipient_display_order_has_one_codec_owner(self):
+        self.assertEqual(set(RECIPIENT_ORDER), RECIPIENTS)
+        self.assertEqual(SEARCH_RECIPIENTS, RECIPIENT_ORDER)
+
     def run_view(self, repositories, source_issues, source_comments, search=None,
                  *, max_candidates=40, recipient="claude-code"):
         queries = search if search is not None else {
@@ -103,6 +121,52 @@ class SearchListTests(unittest.TestCase):
         self.assertFalse(out["can_authorize_execution"])
         self.assertFalse(out["fallback_retirement_authorized"])
         self.assertIn("No verified rows", to_markdown(out))
+
+    def test_all_recipients_share_one_strict_inbox_projection(self):
+        one = root(number=191)
+        two = root(number=192)
+        two["recipient"] = "codex"
+        three = root(number=193)
+        three["recipient"] = "chatgpt"
+        reply = dict(two)
+        reply.update({
+            "message_id": "msg_search_multirole_answer",
+            "idempotency_key": "search.multirole.answer.001",
+            "in_reply_to": two["message_id"],
+            "recipient": "chatgpt",
+            "kind": "ANSWER",
+            "payload": {"text": "correlated read-only response"},
+        })
+        comments = [comment(201, one), comment(202, two),
+                    comment(203, three), comment(204, reply)]
+        counts = []
+        strict_reader = agent_inbox.read_mailbox
+
+        def counted(*args, **kwargs):
+            counts.append(1)
+            return strict_reader(*args, **kwargs)
+
+        with patch.object(agent_inbox, "read_mailbox", side_effect=counted):
+            out, seen = self.run_view(
+                [DEV], {(DEV, 576): issue()},
+                {(DEV, 576): comments}, recipient="all",
+            )
+        # The canonical source preflight remains independent. Only the
+        # Inbox projection is now shared across all four recipient views.
+        self.assertEqual(len(counts), 1)
+        self.assertEqual(out["validated_source_issues"], 1)
+        self.assertEqual(len(out["rows"]), 3)
+        self.assertEqual([r["recipient"] for r in out["rows"]],
+                         ["claude-code", "codex", "chatgpt"])
+        self.assertEqual(
+            [(r["recipient"], r["reply_observation"]) for r in out["rows"]],
+            [("claude-code", "PENDING_REPLY"),
+             ("codex", "ANSWER_OBSERVED"),
+             ("chatgpt", "PENDING_REPLY")],
+        )
+        self.assertEqual(len(seen), 2)
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertNotIn("correlated read-only response", json.dumps(out))
 
     def test_real_576_unindexed_original_shape_is_found_from_search(self):
         r = root()
@@ -272,6 +336,21 @@ class SearchListTests(unittest.TestCase):
         self.assertEqual(out["status"], "BOUNDED_SEARCH_READ")
         self.assertEqual(out["rows"], [])
         self.assertEqual(out["unmatched_candidates"], 1)
+
+    def test_same_login_wrong_numeric_identity_cannot_collide_with_owner_root(self):
+        owner = root(n=555, number=71)
+        spoof = json.loads(json.dumps(owner))
+        spoof["payload"]["text"] = "wrong numeric identity must stay untrusted"
+        spoof_comment = comment(71, spoof)
+        spoof_comment["user"]["id"] = 123456789
+        out, _ = self.run_view(
+            [DEV], {(DEV, 555): issue(n=555)},
+            {(DEV, 555): [comment(70, owner), spoof_comment]},
+        )
+        self.assertEqual(out["status"], "BOUNDED_SEARCH_READ")
+        self.assertEqual(out["validated_source_issues"], 1)
+        self.assertEqual(len(out["rows"]), 1)
+        self.assertEqual(out["rows"][0]["source_comment_id"], 70)
 
     def test_cross_repo_bounded_positive_and_spare_negative(self):
         msg = root()

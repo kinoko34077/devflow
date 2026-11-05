@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Mapping
 
 from tools.maintenance_catalog import ResolvedSlot
 
+
+_CANONICAL_SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 RISK_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
@@ -188,7 +191,7 @@ def score_slot(
 
     item_key = _slot_key(slot)
     fingerprint = context.current_fingerprints.get(item_key)
-    if not isinstance(fingerprint, str) or not fingerprint.startswith("sha256:"):
+    if type(fingerprint) is not str or _CANONICAL_SHA256.fullmatch(fingerprint) is None:
         return None
 
     depth = _target_depth(slot, context)

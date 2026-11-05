@@ -93,6 +93,15 @@ def _request_path(branch: str) -> str:
     return urllib.parse.quote(branch, safe="/")
 
 
+def _post_blob(api: GitHubWriteApi, path: str, data: bytes) -> Mapping[str, Any]:
+    """Preserve a path-aware safety boundary when the adapter provides one."""
+    payload = {"content": base64.b64encode(data).decode("ascii"), "encoding": "base64"}
+    bound_post = getattr(api, "post_blob_for_path", None)
+    if callable(bound_post):
+        return bound_post(path, payload)
+    return api.post("/git/blobs", payload)
+
+
 def _read_target(api: GitHubWriteApi, policy: Mapping[str, Any], admission: Mapping[str, Any]) -> dict:
     """Read trustworthy metadata rather than trusting manifests or the caller."""
     repo = api.get("")
@@ -279,10 +288,7 @@ def verified_writeback(
     blobs = {}
     for change in archive_plan["changes"]:
         path = change["path"]
-        blob = api.post("/git/blobs", {
-            "content": base64.b64encode(verified[path]).decode("ascii"),
-            "encoding": "base64",
-        })
+        blob = _post_blob(api, path, verified[path])
         blobs[path] = _sha(_mapping(blob, "created blob").get("sha"), "created blob SHA")
     tree = api.post("/git/trees", {
         "base_tree": target["tree_sha"],

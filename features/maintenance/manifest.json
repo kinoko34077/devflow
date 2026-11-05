@@ -1,0 +1,84 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "maintenance",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/maintenance/README.md",
+  "routes": {
+    "catalog-selection": {
+      "when": "standing-maintenance eligibility, scope, or selection order needs review",
+      "documents": [
+        "docs/operations/MAINTENANCE_AUDIT.md",
+        "docs/spec/DEVELOPMENT_RECONCILIATION.md"
+      ],
+      "code": [
+        "tools/maintenance_catalog.py",
+        "tools/maintenance_selector.py",
+        "tools/maintenance_triage.py"
+      ],
+      "tests": [
+        "tests/test_maintenance_catalog.py",
+        "tests/test_maintenance_selector.py",
+        "tests/test_maintenance_triage.py",
+        "tests/test_maintenance_chat_fallback_contract.py",
+        "tests/test_maintenance_incomplete_evidence.py"
+      ]
+    },
+    "audit-ledger": {
+      "when": "maintenance audit, supply, Ledger, sync-check, or completion evidence changes",
+      "documents": [
+        "docs/operations/MAINTENANCE_AUDIT.md"
+      ],
+      "code": [
+        "scripts/maintenance_audit.py",
+        "tools/maintenance_audit.py",
+        "tools/maintenance_ledger.py",
+        "tools/maintenance_supply.py",
+        "tools/maintenance_sync_check.py",
+        "tools/maintenance_completion_v2.py",
+        "tools/maintenance_run_attestation.py"
+      ],
+      "tests": [
+        "tests/test_maintenance_audit.py",
+        "tests/test_maintenance_audit_workflow.py",
+        "tests/test_maintenance_ledger.py",
+        "tests/test_maintenance_supply.py",
+        "tests/test_maintenance_sync_check.py",
+        "tests/test_maintenance_completion_v2.py",
+        "tests/test_maintenance_run_attestation.py",
+        "tests/test_maintenance_run_lifecycle.py"
+      ]
+    },
+    "manual-safety": {
+      "when": "manual workflow, actor admission, writer queue, or rollback boundary needs review",
+      "documents": [
+        "docs/operations/MAINTENANCE_AUDIT.md",
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md"
+      ],
+      "code": [
+        ".github/workflows/maintenance-audit.yml"
+      ],
+      "tests": [
+        "tests/test_maintenance_dispatch_actor.py",
+        "tests/test_maintenance_control_writer_queue.py",
+        "tests/test_m3_maintenance_shadow.py",
+        "tests/test_fixed_maintenance_select_comment_workflow.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#209",
+    "kinoko34077/devflow#215",
+    "kinoko34077/devflow#232",
+    "kinoko34077/devflow#249",
+    "kinoko34077/devflow#363",
+    "kinoko34077/devflow#428",
+    "kinoko34077/devflow#463"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; selection is not execution and does not replace the owning Ledger or Control.",
+    "Current catalog, workflow, credentials, and runtime state must be checked live."
+  ]
+}

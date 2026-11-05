@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import json
 from pathlib import Path
 import re
@@ -16,7 +17,7 @@ import sys
 from typing import Any
 
 from tools.gpt_liveness_pilot import enrollment, utc
-from tools.kaep_mailbox_codec import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail as _fail, unique_pairs
 
 SCHEMA = "gpt-liveness-fleet-plan.v0.1"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
@@ -27,23 +28,17 @@ TICKS_PER_DAY = 24 * 60 // 5
 THIRTY_DAY_TICKS = 30 * TICKS_PER_DAY
 
 
-def _fail(reason: str) -> None:
-    raise InvalidMessage(reason)
-
-
 def parse_manifest(raw: str) -> list[str]:
     """Return exact allowlisted targets. No implicit fleet membership."""
     if type(raw) is not str or len(raw) > 3_000:
         _fail("MANIFEST_TOO_LARGE")
-    def strict_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        output: dict[str, Any] = {}
-        for key, value in items:
-            if key in output:
-                _fail("DUPLICATE_MANIFEST_FIELD")
-            output[key] = value
-        return output
     try:
-        data = json.loads(raw, object_pairs_hook=strict_pairs)
+        data = json.loads(
+            raw,
+            object_pairs_hook=partial(
+                unique_pairs, duplicate_code="DUPLICATE_MANIFEST_FIELD"
+            ),
+        )
     except InvalidMessage:
         raise
     except (ValueError, TypeError):

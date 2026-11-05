@@ -7,7 +7,9 @@ import unittest
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import POINTER_VERSION
-from tools.kaep_source_roster_shadow import source_root_shadow, MAX_SOURCE_ISSUES
+from tools.kaep_source_roster_shadow import (
+    source_root_shadow, MAX_SOURCE_ISSUES, MAX_OPT_IN_SOURCE_ISSUES,
+)
 
 ACTOR = "kinoko34077"
 REPO = "kinoko34077/devflow"
@@ -19,7 +21,9 @@ def pages(*groups):
 
 
 def comment(cid, msg, actor=ACTOR):
-    return {"id": cid, "body": encode_comment(msg), "user": {"login": actor}}
+    return {"id": cid, "body": encode_comment(msg),
+            "user": {"id": 79015263 if actor == ACTOR else 123456789,
+                     "login": actor}}
 
 
 def root(number, *, issue=ISSUE, recipient="claude-code"):
@@ -230,6 +234,7 @@ class SourceRootShadowTests(unittest.TestCase):
             {(REPO, ISSUE): pages([comment(101, msg)])},
         )
         self.assertEqual(res["status"], "BOUNDED_CANDIDATE_SOURCE_READ")
+        self.assertEqual(res["index_blockers"], [])
         self.assertEqual(res["issues"][0]["original_only_count"], 0)
         self.assertTrue(res["has_unknown_work"])
         self.assertFalse(res["fallback_retirement_authorized"])
@@ -263,27 +268,85 @@ class SourceRootShadowTests(unittest.TestCase):
         self.assertEqual(out["status"], "BLOCKED")
         self.assertEqual(out["issues"], [])
         self.assertEqual(out["blocked_index_count"], 1)
+        self.assertEqual(out["index_blockers"], [
+            {"index_comment_id": 402, "reason_code": "CANDIDATE_LIMIT"}])
         self.assertEqual(len(fetched), 1)
         self.assertTrue(out["has_unknown_work"])
+
+    def test_default_twenty_vs_explicit_twenty_one_pointer_sources(self):
+        # Only 21 fully valid owner-pointer original Issue sources, no broad
+        # enumeration. Old/default callers remain capped at exactly 20.
+        msgs = {600 + n: root(100 + n, issue=600 + n) for n in range(21)}
+        notes = [comment(
+            30000 + n,
+            pointer_notice(msgs[600 + n], issue=600 + n,
+                           cid=20000 + n, notice_id=200 + n))
+            for n in range(21)]
+        source_pages = {
+            (REPO, 600 + n): pages([comment(20000 + n, msgs[600 + n])])
+            for n in range(21)
+        }
+        old, old_gets = compare(pages(notes), source_pages)
+        self.assertEqual(MAX_SOURCE_ISSUES, 20)
+        self.assertEqual(MAX_OPT_IN_SOURCE_ISSUES, 40)
+        self.assertEqual(old["status"], "BLOCKED")
+        self.assertEqual(len(old_gets), 20)
+        self.assertEqual(old["issues"], [])
+        self.assertTrue(old["has_unknown_work"])
+        self.assertEqual(old["index_blockers"][-1]["reason_code"], "CANDIDATE_LIMIT")
+
+        expanded, source_gets = compare(pages(notes), source_pages,
+                                        max_sources=21)
+        self.assertEqual(expanded["status"], "BOUNDED_CANDIDATE_SOURCE_READ")
+        self.assertEqual(expanded["index_blockers"], [])
+        self.assertEqual(expanded["candidate_issue_count"], 21)
+        self.assertEqual(len(expanded["issues"]), 21)
+        self.assertEqual(len(set(source_gets)), 21)
+        self.assertEqual(sum(x["root_count"] for x in expanded["issues"]), 21)
+        self.assertTrue(expanded["has_unknown_work"])
+        self.assertFalse(expanded["complete_source_universe"])
+        self.assertFalse(expanded["can_authorize_execution"])
+        self.assertFalse(expanded["fallback_retirement_authorized"])
+
+    def test_opt_in_forty_still_rejects_malformed_source_original(self):
+        msg = root(45)
+        note = pointer_notice(msg, cid=20001, notice_id=45)
+        malformed = {"id": 20002,
+                     "body": "<!-- kaep:message:v0.2 -->\n```json\n{}\n```\nUntrusted prose",
+                     "user": {"id": 79015263, "login": ACTOR}}
+        res, _ = compare(
+            pages([comment(30001, note)]),
+            {(REPO, ISSUE): pages([comment(20001, msg), malformed])},
+            max_sources=40,
+        )
+        self.assertEqual(res["status"], "BLOCKED")
+        self.assertEqual(res["issues"], [])
+        self.assertFalse(res["can_authorize_execution"])
 
     def test_bad_limit_type_and_boolean_rejected(self):
         with self.assertRaisesRegex(ValueError, "INVALID_SOURCE_LIMIT"):
             compare(pages([]), {}, max_sources=True)
         with self.assertRaisesRegex(ValueError, "INVALID_SOURCE_LIMIT"):
-            compare(pages([]), {}, max_sources=21)
+            compare(pages([]), {}, max_sources=41)
 
     def test_malformed_trusted_source_blocks_not_empty_success(self):
         msg = root(8)
         notice = pointer_notice(msg, cid=501, notice_id=8)
         corrupt = {"id": 502,
                    "body": "<!-- kaep:message:v0.2 -->\nmalformed",
-                   "user": {"login": ACTOR}}
+                   "user": {"id": 79015263, "login": ACTOR}}
         out, _ = compare(
             pages([comment(601, notice)]),
             {(REPO, ISSUE): pages([comment(501, msg), corrupt])},
         )
         self.assertEqual(out["status"], "BLOCKED")
         self.assertEqual(out["issues"], [])
+        self.assertEqual(out["errors"][0]["reason_code"], "INDEX_SOURCE_INCOMPLETE")
+        self.assertEqual(out["index_blockers"], [
+            {"index_comment_id": 601, "reason_code": "INVALID_WRAPPER"}])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["fallback_retirement_authorized"])
+        self.assertNotIn("malformed", json.dumps(out))
         self.assertTrue(out["has_unknown_work"])
 
     def test_untrusted_index_actor_cannot_admit_candidate(self):

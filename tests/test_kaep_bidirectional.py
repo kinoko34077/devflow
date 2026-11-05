@@ -16,7 +16,7 @@ ISSUE = 503
 def pages(messages):
     return json.dumps([[
         {"id": i + 10, "body": encode_comment(m),
-         "user": {"login": "kinoko34077"}}
+         "user": {"login": "kinoko34077", "id": 79015263}}
         for i, m in enumerate(messages)
     ]], ensure_ascii=False)
 

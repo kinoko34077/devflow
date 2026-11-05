@@ -24,8 +24,10 @@ from tools.kaep_inbox_reader import (
 from tools.kaep_mailbox_codec import (
     MARKER, read_mailbox, verify_reply_chain,
 )
+from tools.kaep_mailbox_support import matching_actor
 
-MAX_SOURCE_ISSUES = 20
+MAX_SOURCE_ISSUES = 20  # unchanged default for old callers
+MAX_OPT_IN_SOURCE_ISSUES = 40  # bounded explicit expansion only
 RECIPIENT = "claude-code"
 MAX_TASK_REPOSITORIES = 2
 
@@ -85,7 +87,7 @@ def source_root_shadow(
     task_views: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compare only verified #503 original-Issue locators, never work supply."""
-    if type(max_sources) is not int or not 1 <= max_sources <= MAX_SOURCE_ISSUES:
+    if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
 
     source_cache: dict[tuple[str, int], str] = {}
@@ -116,6 +118,23 @@ def source_root_shadow(
         "errors": [],
         "rejected_index_count": len(index["rejected"]),
         "blocked_index_count": len(index["blocked"]),
+        # Preserve public, bounded blocker IDs/reason codes so a failed shadow
+        # is diagnosable without repeating broad authenticated source reads.
+        # This NEVER releases unverified roots or changes the cursor.
+        "index_blockers": [
+            {
+                "index_comment_id": b["index_comment_id"],
+                "reason_code": b["reason_code"]
+                if (type(b.get("reason_code")) is str
+                    and 1 <= len(b["reason_code"]) <= 80
+                    and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+                            for c in b["reason_code"]))
+                else "SOURCE_VALIDATION_ERROR",
+            }
+            for b in index["blocked"]
+            if type(b) is dict and type(b.get("index_comment_id")) is int
+            and b["index_comment_id"] > 0
+        ],
         "index_truncated": index["truncated"],
         "has_unknown_work": True,
         "complete_source_universe": False,
@@ -173,13 +192,14 @@ def source_root_shadow(
             trusted = [
                 c for c in all_comments
                 if not c["body"].startswith(MARKER)
-                or c["actor_login"].casefold() == expected_source_actor.casefold()
+                or matching_actor(c, expected_source_actor)
             ]
             decoded = read_mailbox(trusted, task_ref=f"{repo}#{issue}")
             verify_reply_chain([msg for _, msg in decoded])
             github_comments = [
                 {"id": c["id"], "body": c["body"],
-                 "user": {"login": c["actor_login"]}}
+                 "user": {"id": c.get("actor_id"),
+                          "login": c["actor_login"]}}
                 for c in all_comments
             ]
             roots, warnings = agent_inbox._issue_messages(
@@ -239,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expect-notice-actor", required=True)
     parser.add_argument("--expect-source-actor", required=True)
-    parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES)
+    parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES,
+                        help="Verified #503/M3 original Issue cap; default 20, explicit maximum 40")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)

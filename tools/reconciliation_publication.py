@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Iterable
 
 from tools import marker_json
+from tools.repository_identity import is_repository_name
 
 
 SCHEMA_VERSION = "development-reconciliation-work.v1"
@@ -14,7 +15,6 @@ SOURCE_CONTRACT_VERSION = "development-reconciliation.v1"
 PROJECTION_MARKER_BEGIN = "<!-- DEVFLOW_RECONCILIATION_WORK_V1_BEGIN -->"
 PROJECTION_MARKER_END = "<!-- DEVFLOW_RECONCILIATION_WORK_V1_END -->"
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TASK_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
 _ENTRY_REF = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$"
@@ -35,7 +35,7 @@ def _require_nonempty_string(value: object, field: str) -> str:
 
 def _require_repository(value: object, field: str = "repository") -> str:
     repository = _require_nonempty_string(value, field)
-    if _REPOSITORY.fullmatch(repository) is None:
+    if not is_repository_name(repository):
         raise ValueError(f"{field} must be owner/repository")
     return repository
 

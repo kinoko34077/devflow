@@ -1,0 +1,67 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "project-sync",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/project-sync/README.md",
+  "routes": {
+    "contract": {
+      "when": "the canonical-to-display direction, field mapping, or freshness semantics need review",
+      "documents": [
+        "docs/project/PROJECT_SYNC.md",
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md"
+      ],
+      "code": [
+        "scripts/project_sync.py"
+      ],
+      "tests": [
+        "tests/test_project_sync.py",
+        "tests/test_project_sync_text_projection.py"
+      ]
+    },
+    "admission": {
+      "when": "workflow admission, serialization, target selection, or failure fencing changes",
+      "documents": [
+        "docs/project/PROJECT_SYNC.md"
+      ],
+      "code": [
+        ".github/workflows/project-sync.yml",
+        "tools/project_sync_event_admission.py"
+      ],
+      "tests": [
+        "tests/test_project_sync_event_admission.py",
+        "tests/test_project_sync_failure_fencing.py",
+        "tests/test_project_sync_target_selection.py",
+        "tests/test_project_sync_ambiguity.py"
+      ]
+    },
+    "verification": {
+      "when": "health checks, native command behavior, or resilience evidence needs review",
+      "documents": [
+        "docs/project/PROJECT_SYNC.md"
+      ],
+      "code": [
+        "scripts/project_sync.py",
+        ".github/workflows/project-sync-tests.yml"
+      ],
+      "tests": [
+        "tests/test_project_sync_health_preflight.py",
+        "tests/test_project_sync_health_workflow.py",
+        "tests/test_project_sync_native_command.py",
+        "tests/test_project_sync_resilience.py",
+        "tests/test_project_sync_tests_workflow.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#39",
+    "kinoko34077/devflow#46",
+    "kinoko34077/devflow#395"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; canonical Issue and Control state remain upstream of the Project.",
+    "Current state, workflow checks, and synchronization evidence must be checked live."
+  ]
+}

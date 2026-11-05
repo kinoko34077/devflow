@@ -1,11 +1,15 @@
 """B6-D actual published candidate locator -> canonical live original GET checks."""
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone, timedelta
+import importlib
 import json
+from pathlib import Path
 import unittest
 from unittest import mock
 
+from tools import kaep_inbox_reader, kaep_live_candidate_cli
 from tools.kaep_live_candidate_cli import (
     read_live_candidate_cohort, validate_index, fetch_public_json, _unique_pairs,
 )
@@ -33,13 +37,15 @@ def issue_object(n=576, state="open"):
         "html_url": f"https://github.com/{REPO}/issues/{n}",
         "title": "[SPEC] Non-TASK historical root", "body": "No metadata",
         "created_at": "2026-10-16T00:00:00Z", "updated_at": "2026-10-16T00:00:00Z",
-        "author_association": "OWNER", "user": {"login": "kinoko34077"},
+        "author_association": "OWNER",
+        "user": {"id": 79015263, "login": "kinoko34077"},
     }
 
 
 def source_page(*elements):
     return json.dumps([[{"id": n, "body": encode_comment(msg),
-                         "user": {"login": actor}}
+                         "user": {"id": 79015263 if actor == "kinoko34077" else 123456789,
+                                  "login": actor}}
                         for n, msg, actor in elements]])
 
 
@@ -65,6 +71,26 @@ def index_with(*elements, age_seconds=120, status="BOUNDED_SEARCH_READ"):
 
 
 class LiveCandidateTests(unittest.TestCase):
+    def test_candidate_reads_recipient_set_from_codec(self):
+        source = Path(kaep_live_candidate_cli.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(kaep_live_candidate_cli.__file__))
+        codec_imports = {
+            alias.name
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module == "tools.kaep_mailbox_codec")
+            for alias in node.names
+        }
+        self.assertIn("RECIPIENTS", codec_imports)
+
+    def test_repository_pattern_uses_inbox_reader_owner(self):
+        sentinel = object()
+        with mock.patch.object(kaep_inbox_reader, "REPOSITORY", sentinel):
+            reloaded = importlib.reload(kaep_live_candidate_cli)
+            self.assertIs(reloaded.REPOSITORY, sentinel)
+        importlib.reload(kaep_live_candidate_cli)
+
+
     def audit(self, snapshot, sources, *, recipient="claude-code"):
         calls = []
         def get_issue(repo, number):

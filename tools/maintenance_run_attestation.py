@@ -69,9 +69,17 @@ def _validate(value: AttestedRun) -> AttestedRun:
         raise RunAttestationError("attestation must be AttestedRun")
     if not isinstance(value.scope, Scope):
         raise RunAttestationError("attestation scope missing")
-    if value.scope.kind not in SCOPE_KINDS or not value.scope.selector.strip():
+    # Scope is a plain dataclass; JSON decoding does not enforce its hints.
+    # Check exact scalar types before set membership or .strip(), otherwise
+    # untrusted list/dict/int/bool/null values escape as TypeError/AttributeError.
+    if (
+        type(value.scope.kind) is not str
+        or type(value.scope.selector) is not str
+        or value.scope.kind not in SCOPE_KINDS
+        or not value.scope.selector.strip()
+    ):
         raise RunAttestationError("attestation scope is invalid")
-    if not isinstance(value.coverage_key, str) or not value.coverage_key.strip():
+    if type(value.coverage_key) is not str or not value.coverage_key.strip():
         raise RunAttestationError("attestation coverage_key missing")
     _hash(value.catalog_digest, "catalog_digest")
     # Accepted v1 authoritative parser provides closed result/depth/run-id,

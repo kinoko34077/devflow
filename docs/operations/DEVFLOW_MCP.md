@@ -8,6 +8,11 @@ This MCP is an access layer, not a second source of truth. Canonical authority r
 - the owning repository for detailed technical truth;
 - GitHub Project as display-only.
 
+The MCP runtime dependencies in `requirements-mcp.txt` pin the accepted
+`kinotch-execution-coordinator` reader package to an immutable commit. The
+default Workspace reader uses that package's `get_state_result` and
+`GitHubStateStore` for a GET-only read of execution-coordinator Issue #3.
+
 ## Read-only boundary
 
 The server exposes only read operations:
@@ -18,14 +23,18 @@ The server exposes only read operations:
 - `get_repository_projection(repository)`
 - `get_repository_work_view(repository)`
 - `get_agent_inbox(repository, recipient="claude-code", limit=20, offset=0, work_status=None)`
+- `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None, include_recent_kaep=False, include_published_supply=False)`
 - `get_portfolio_projection()`
 - `get_human_portfolio(repository)`
 - `get_issue(repository, issue_number)`
+- `get_issue_goal_context(repository, issue_number)`
+- `assess_issue_plan(repository, issue_number, plan)`
+- `assess_outcome_observation(repository, issue_number, evidence)`
 - `get_sync_health()`
 
-This list reflects the **currently exported** ten functions in `tools/devflow_mcp.py`, not only the original bootstrap-only toolset. All remain read-only. `get_repository_work_view` projects trusted all-state TASKs and incomplete-source diagnostics; `get_agent_inbox` additionally inspects validated KAEP READ_ONLY roots on bounded machine TASKs for an **explicit recipient**. Neither conveys task assignment, claim/lease, permission to execute, source completeness or successful agent delivery. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
+This list follows the **currently exported** functions in `tools/devflow_mcp.py`. All remain read-only. `get_agent_workspace` reuses `get_repository_work_view`, the bounded `get_agent_inbox` reader and one coordinator snapshot read. Opt in to `include_recent_kaep=True` for B6 latest-comment original-source candidates and `include_published_supply=True` for the validated Control publication snapshot. Both default to `False` and the extra reads are conditional. `known_tasks`, recipient messages, published candidates and coordinator Claims are distinct observations; none grants assignment, Claim/Lease, permission to execute, historical source completeness or successful agent delivery. The default Workspace reader projects only requested-repository coordinator Claims, across all workers because no mapping connects the `recipient` parameter to coordinator `worker_id`: unexpired `CLAIMED`/`RUNNING` claims appear in `ongoing`; `WAITING` or expired-lease claims appear in a partial `waiting_recovery` section. Recovery eligibility remains `NOT_EVALUATED`. `offers` remains `NOT_INTEGRATED`: the Controller's current Offer is held in per-run runner context, while Issue #3 stores Claims only. Published candidates are not current Offers. Missing or invalid coordinator evidence affects only the dependent sections and returns `UNKNOWN/entries=null`. Existing focused readers and manual Control/#503 fallback remain supported. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
-The underlying GitHub client implements GET-only REST access. It has no Issue update, PR mutation, merge, branch, credential, release or deployment tool.
+The Devflow MCP reader exposes only GET operations. The Workspace coordinator adapter invokes the packaged `get_state_result` read path only; no MCP/CLI operation calls `GitHubStateStore.save_body` or exposes coordinator mutation, Claim, Provider, credential, release or deployment capability.
 
 ## Codex Cloud fallback when MCP tools are not registered
 
@@ -40,15 +49,222 @@ exactly the same `tools.devflow_mcp_core.default_service()` as the stdio MCP:
 
 ```sh
 python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
-python -m tools.devflow_read_cli work-view --repository kinoko34077/devflow
-python -m tools.devflow_read_cli inbox --repository kinoko34077/devflow --recipient codex --work-status AWAITING_REVIEW
+python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
 
-`inbox` also accepts `--limit` and `--offset`; honor its `next_offset`,
-`truncated` and source/coverage fields. For an existing scheduled Claude
+The Workspace command combines repository TASK observations, bounded recipient KAEP discovery and published Control candidate evidence. It does not prove there are no historical requests when `has_unknown_work=true`; a published candidate is not a currently claimable Task. The additional flags are optional; for smaller checks or old clients, `work-view` and `inbox` remain valid, and the manual Control/#503 fallback remains in force. Existing operating Codex processes are not silently migrated by updating this document; the new tool must be visible to that client's own MCP registry after its normal refresh. Portfolio-wide discovery starts with existing `get_portfolio_projection()`, which does not authorize widening repository-scoped work or selecting a runnable Task.
+
+For one Issue's source-linked effective Goal Context, both client paths call the
+same `DevflowService.get_issue_goal_context` method and return the same structured
+projection:
+
+```sh
+python -m tools.devflow_read_cli issue-goal-context --repository kinoko34077/<repo> --issue-number <N>
+```
+
+The MCP equivalent is `get_issue_goal_context(repository, issue_number)`. It
+preserves source contexts, citations, proposals, effective specifications and
+unknowns. It does not prove citation truth. If neither shared entry is available,
+read the exact Issue and explicit parents directly from GitHub; inaccessible or
+malformed sources remain unknown, not empty.
+
+For a candidate plan that explicitly lists typed effects, use the shared
+read-only comparison. Only an exact `key` + `scope` match against a complete,
+adopted Goal Context claim can produce `CONFLICTS_DETECTED`; inferred, proposed,
+removed, inaccessible, or unrepresented conditions remain unknown or unchecked.
+The result covers declared effects only, never claims the plan is complete,
+does not authenticate Issue authorship or authority labels, evaluate prose
+meaning or citation truth, or authorize work.
+Source authority in this contract is a declared Issue assertion; the checker
+does not authenticate its author.
+
+```sh
+python -m tools.devflow_read_cli assess-issue-plan \
+  --repository kinoko34077/<repo> --issue-number <N> --plan-file plan.json
+```
+
+The MCP equivalent is `assess_issue_plan(repository, issue_number, plan)`. The
+optional `Declared goal plan assessment pilot` workflow runs the comparator
+from the event-pinned base commit, not PR-supplied code, for a single
+machine-readable plan packet embedded between
+`DEVFLOW_GOAL_PLAN_V1_BEGIN` / `_END` markers in a PR description. It reads
+public Issues anonymously and has no repository token scope; inaccessible or
+private source ancestry returns `NEEDS_EVIDENCE`. The workflow fails for a
+direct deterministic conflict in the declared packet, but is not a required
+branch-protection check. No packet is reported as skipped; neither this pilot
+nor an omitted packet proves that all PR plans were assessed.
+
+If the event-pinned base does not yet contain the comparator (as on its
+introduction PR), the pilot reports `SKIPPED_EVALUATOR_NOT_ON_BASE` and exits
+successfully without evaluating the packet. This is an explicit non-evaluation;
+the workflow never runs PR-supplied evaluator code. A later PR based on the
+merged comparator is required for hosted comparison evidence.
+
+The packet is deliberately limited to intended typed effects; it is not a
+second Issue/specification record. A set effect must include `value` (including
+`false`, `0`, or `null`); a removal omits it. For example:
+
+```json
+{
+  "schema_version": 1,
+  "task_ref": "kinoko34077/<repo>#<issue>",
+  "steps": [{
+    "id": "change-runtime-path",
+    "intent": "Use the existing realtime settings path",
+    "declared_effects": [{
+      "key": "runtime.path",
+      "scope": "playback",
+      "state": "set",
+      "value": "existing-realtime"
+    }]
+  }]
+}
+```
+
+To compare a claimed user-facing outcome with the required surface and target
+artifact, use the read-only outcome observation adapter. It binds the packet's
+Issue body hash to a fresh read of that exact Issue, then compares declared
+surface and target strings. It does **not** parse the Issue to establish that
+the declarations are requirements, fetch or authenticate evidence links,
+verify authorship, or prove the runtime result. Its `DECLARED_ALIGNED` status
+means only that the packet's declarations agree; source verification remains
+`NOT_PERFORMED`, and task acceptance stays false.
+
+```sh
+python -m tools.devflow_read_cli assess-outcome-observation \
+  --repository kinoko34077/<repo> --issue-number <N> --outcome-file outcome.json
+```
+
+The packet schema is deliberately explicit. `issue_body_sha256` must be the
+current owning Issue body hash; `required_surface` and `required_target` are
+declarations supplied by the caller, not values inferred by this comparator.
+
+```json
+{
+  "task_ref": "kinoko34077/<repo>#<issue>",
+  "issue_body_sha256": "<64 lowercase hex characters>",
+  "required_surface": "PUBLIC_BROWSER",
+  "required_target": "git:<full-commit-sha>",
+  "observed_surface": "PUBLIC_BROWSER",
+  "observed_target": "git:<full-commit-sha>",
+  "observed_result": "SUCCESS",
+  "evidence_refs": [
+    "https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<id>"
+  ]
+}
+```
+
+The MCP equivalent is
+`assess_outcome_observation(repository, issue_number, evidence)`. Outcome values
+preserve `SUCCESS`, `FAILURE`, `VALID_NEGATIVE`, `UNKNOWN`, and `NOT_RUN`.
+Surface or target mismatches are reported separately; absent target identity
+remains `UNKNOWN`; missing or malformed references remain `NEEDS_EVIDENCE`.
+The result never authorizes work, merge, release, deployment, permission
+changes, or task-wide acceptance.
+
+The existing unprivileged trusted-base pilot also reads one optional JSON
+packet from a PR body between `DEVFLOW_OUTCOME_OBSERVATION_V1_BEGIN` /
+`DEVFLOW_OUTCOME_OBSERVATION_V1_END`. A detected surface/target mismatch,
+missing evidence, or declared runtime failure fails this optional check. A
+valid negative, `UNKNOWN`, or `NOT_RUN` remains distinct. No packet or an
+evaluator absent from the event-pinned base produces an explicit skip. The
+workflow has `permissions: {}`: it validates declarations within the packet,
+does not read the cited source, and does not verify whether the claimed Issue
+hash is current. This GitHub result is contract-consistency evidence only, not
+proof of public-browser, physical-runtime, or end-user success.
+
+### Historical example: japanese-orthography #310 S310-A
+
+Use this only as a narrowly accepted, historical public-browser case. The owner
+receipt records the deployed source target and a bounded set of browser checks:
+[#310 comment #6106750343](https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106750343).
+The packet below binds the comparison to the #839 Issue-body revision observed
+on 2026-10-31. Any later edit to that body requires a new hash.
+
+```json
+{
+  "task_ref": "kinoko34077/devflow#839",
+  "issue_body_sha256": "d08d84941f2db9de48b0cac19d2a709ff12d85034bd9bbd20f19c13166479f74",
+  "required_surface": "PUBLIC_BROWSER",
+  "required_target": "git:f38d562edfda0bbaefaa3e1b6d71ccb078c26364",
+  "observed_surface": "PUBLIC_BROWSER",
+  "observed_target": "git:f38d562edfda0bbaefaa3e1b6d71ccb078c26364",
+  "observed_result": "SUCCESS",
+  "evidence_refs": [
+    "https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106750343"
+  ]
+}
+```
+
+That receipt is a past limited observation, not a fresh check of today's Pages
+content or proof that every #310 scenario works. The separate tokenWindow
+fixture witness in [#310 comment #6106079188](https://github.com/kinoko34077/japanese-orthography/issues/310#issuecomment-6106079188)
+is `FIXTURE_PARITY`, so treating it as `PUBLIC_BROWSER` must produce a surface
+mismatch; it is a false-positive control, not a second browser success.
+Gesture IME [#203 comment #6116020441](https://github.com/kinoko34077/gesture-ime/issues/203#issuecomment-6116020441)
+preserves the reported physical failure while installed IPA identity remains
+unknown. These examples test declaration handling; the comparator does not
+fetch or authenticate the linked comments.
+
+A follow-up PR based on a commit that already contains this evaluator can carry
+the #310 packet between the pilot markers. Its hosted Actions output should be
+recorded as declaration-consistency evidence only. The introduction [PR #840](https://github.com/kinoko34077/devflow/pull/840)
+explicitly reported `OUTCOME_PILOT=SKIPPED_EVALUATOR_NOT_ON_BASE` in its
+[hosted run #41236135413](https://github.com/kinoko34077/devflow/actions/runs/41236135413),
+because the event-pinned base did not yet include this evaluator.
+
+A zero-result Codex/AWAITING_REVIEW query with `coverage_status=INCOMPLETE`
+or `has_unknown_work=true` is *not* the end of a recipient message check:
+non-TASK original Issues can contain authentic KAEP roots. For an
+**already-running, authorized** Codex Cloud task that needs those messages,
+reuse the existing B6 read-only bounded original-Issue union, not another
+classifier or MCP server:
+
+```sh
+python -m tools.kaep_live_union_cli --recipient codex --response-format agent-api
+```
+
+This is a separate B6 candidate-discovery path (#680), not an MCP call or an
+Agent Inbox authority upgrade. It combines the current public candidate
+index and a bounded updated-comment window, then re-fetches original Issues
+with the canonical actor/KAEP/recipient validator (up to 40 source Issues).
+The public index and updated-comment window cannot prove that every new,
+old, or private root was found. `BOUNDED_UNION_READ` does not authorize
+execution or prove pickup; `PARTIAL_UNKNOWN`, `BLOCKED`, an empty response,
+or an unverified current HEAD require direct source/Control and #503 fallback.
+No timer, credentials, network settings or MCP registration are installed by
+this workflow. Existing B5 (#531) remains incomplete until genuinely trusted
+full-source coverage and recipient/Consumer parity are proved.
+
+`inbox` also accepts `--limit` (1–20, with the same canonical limit
+as the MCP Agent Inbox), `--offset` (nonnegative), `--recipient` and
+`--work-status`; honor its `next_offset`, `truncated` and source/coverage
+fields. Invalid Inbox parameters fail locally with exit code 2 and a
+non-secret, fixed `reason_code` **before GitHub Control or Issue GETs**;
+`--limit 21` and higher cannot be used to bypass the MCP's bounded read
+contract. Agent Inbox's per-Issue source mailbox is bounded to 500 stored
+comments: the GitHub reader stops after observing the 501st comment, returns
+an overflow sentinel to the unchanged strict parser, and retains
+`ISSUE_COMMENTS_LIMIT` / `has_unknown_work=true` rather than presenting an
+empty or complete source. This bound is **only** used by the MCP Inbox
+consumer; other callers such as bootstrap provenance verification continue
+to read their full required histories. For an existing scheduled Claude
 check-in, keep using the established `tools.kaep_agent_inbox_cli` and its
 `--pending-only` behavior; this CLI does not start a check-in or manage timers.
 
+### Approved #789 public pointer discovery (already-running Claude only)
+
+Physical successor [devflow #789](https://github.com/kinoko34077/devflow/issues/789) is an approved, publicly readable KAEP pointer index; old #503 remains read-only fallback. The machine-TASK `get_agent_inbox`/native Inbox and default `kaep_live_union_cli` do **not** by themselves consume new #789 index comments. If an **already-active Claude recipient** sees `INCOMPLETE`/unknown machine coverage or needs new public Claude pointers, use the accepted read-only, canonical A3 two-index CLI:
+
+```sh
+python -m tools.kaep_discovery_reader --dual-shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077
+```
+
+This reuses the strict original source verifier against bounded #503 + #789 inputs, not a second Inbox. The malformed old #503 may produce `PARTIAL_UNKNOWN` with **exit code 2** even when verified `source_verified_roots` are present; parse and inspect the returned JSON instead of discarding those candidates based solely on the exit status. `index_diagnostics`/`index_status` preserve rejected/blocked/unknown information. An empty, filtered, or recipient-mismatched #789 read does not prove no work; a pointer alone proves neither model pickup nor current HEAD. Re-read candidate original Issue/actor/recipient/current HEAD and owning Control before any work.
+
+One specifically authorized READ_ONLY transaction is recorded on [#771](https://github.com/kinoko34077/devflow/issues/771): original #771@6337489614 → pointer [#789@6337496561](https://github.com/kinoko34077/devflow/issues/789#issuecomment-6337496561) → correlated ACK [6338334466](https://github.com/kinoko34077/devflow/issues/771#issuecomment-6338334466) and ANSWER [6338343220](https://github.com/kinoko34077/devflow/issues/771#issuecomment-6338343220). The ANSWER self-reports that a running Claude Code session strictly read the original and pointer. It marks the result PARTIAL because expected HEAD `25dde358cd4514aab914d589855d94ef3662ecf2` was stale at the time. The shared GitHub author/model footer is not independently authenticated session provenance. **No live Claude runtime invocation of #789 has been independently verified**, and this evidence does not prove current-HEAD acceptance or unattended wake; do not replay the answered request.
+
+This is **not** a scheduled check-in, CLI/agent launch, token setup, permission grant or automatic ACK/ANSWER. Protocol owner #503, producer #771, recipient/B6 #680.
 Exit code 0 means the read method returned structured data; it does **not**
 mean that every Issue was classified or that any agent was assigned work.
 `INCOMPLETE`, `has_unknown_work=true`, `UNAVAILABLE` and empty filtered
@@ -58,9 +274,50 @@ Exit code 2 with `{"status":"BLOCKED",...}` means a failed read, not an
 empty work inventory. This CLI cannot authorize a Claim, write an Issue or
 prove the Codex MCP registry / GitHub token identity is functional.
 
+### Three-read troubleshooting (bootstrap / work-view / inbox)
+
+Do the comparison **inside the failing client runtime** and for the **same
+repository**. Distinguish missing registration from a tool invocation failure:
+first inspect the MCP tool catalog / stdio `initialize` + `tools/list` for
+`bootstrap_repository`, `get_repository_work_view` and `get_agent_inbox`.
+If tools are not registered, GitHub code/CLI success does not repair client
+discovery. Machine-local historical startup grace fix [#113](https://github.com/kinoko34077/devflow/issues/113)
+must not be presumed current without a fresh handshake failure measurement.
+
+When a current checkout and GitHub GET access exist, run the three CLI commands
+above for the **same target** and compare their return codes. All three route
+to the same core service; Inbox depends on Work View, and Work View depends on
+bootstrap's verified Control read. A shared failure may cascade from an
+earlier GitHub read or Control validation; it does not establish three
+independent defects.
+
+For a blocked CLI read, `reason_code` is a fixed, redacted diagnostic:
+
+| Code | Meaning / next check |
+| --- | --- |
+| `GITHUB_HTTP_401` | GitHub rejected authentication; inspect that runtime's read-capable credentials without printing them. |
+| `GITHUB_HTTP_403` | Access policy, authentication scope **or** rate limits remain ambiguous when no explicit exhaustion header is present; inspect safe response metadata. Do not assume a missing token. |
+| `GITHUB_HTTP_403_RATE_LIMIT` | HTTP 403 explicitly reported `X-RateLimit-Remaining: 0`; the reported GitHub API bucket was exhausted. Use an already-authorized authenticated read path or wait for reset; do not silently change tokens or permissions. This code does not imply a particular token identity. |
+| `GITHUB_HTTP_404` | Resource absent **or** inaccessible (including hidden Private repositories); confirm exact repo identity and access independently. |
+| `GITHUB_HTTP_429` / `GITHUB_HTTP_OTHER` | API throttling or another HTTP failure; check GitHub availability and retry only after the cause is understood. |
+| `GITHUB_NETWORK_UNAVAILABLE` / `GITHUB_INVALID_JSON` / `GITHUB_REDIRECTED_READ` | Network, invalid API body or changed observed identity; keep reads fail-closed. |
+| `CONTROL_NOT_FOUND_OR_UNTRUSTED` / `CONTROL_AMBIGUOUS` | No single accepted open Control; inspect its author/provenance and exact title through canonical GitHub reads. |
+| `CONTROL_SCHEMA_INVALID` / `CONTROL_REPOSITORY_MISMATCH` | The Control failed required sections or repository identity checks; do not bypass validation. |
+| `INVALID_ISSUE_NUMBER` | An Issue-scoped operation needs one positive Issue number; check the command arguments. |
+| `ISSUE_NUMBER_ON_NON_ISSUE_OPERATION` | `--issue-number` is valid only for Issue-scoped operations (`issue-goal-context`, `assess-issue-plan`, `assess-outcome-observation`); remove it for other operations. |
+| `PLAN_ON_NON_ASSESSMENT_OPERATION` | `--plan-file` is valid only for `assess-issue-plan`. |
+| `OUTCOME_ON_NON_ASSESSMENT_OPERATION` | `--outcome-file` is valid only for `assess-outcome-observation`. |
+| `DEVFLOW_READ_UNAVAILABLE` | Unclassified core failure; preserve manual Control and exact original Issue reads rather than infer no work. |
+
+Codes are not proof of the underlying cause (for example, 403 and 404 remain
+ambiguous). The CLI never emits the original exception text, secrets, raw URLs
+or response headers. Successful output remains unchanged; partial/unknown
+coverage still requires manual Control and KAEP #503 fallback. Do not change
+tokens, client registration or system timers as an implicit read workaround.
+
 Cloud evidence on #531 separately establishes existing Agent Inbox CLI and
 public GitHub GET execution. It does not independently prove a fresh Cloud task
-has run the **new** three-operation adapter; real-task execution remains a
+has run each read-only adapter operation; real-task execution remains a
 separate acceptance check. Authentication verification and Cloud tool
 registration are independent of this read-only fallback.
 
@@ -78,11 +335,19 @@ The same policy applies to `get_sync_health`: only trusted-author `[SYSTEM] GitH
 
 `get_issue` validates the observed GitHub object, not the caller's request. The response `number` and `repository_url` must match the requested Issue (repository compared case-insensitively), pull requests are rejected, and any HTTP redirect (transfer, rename, misrouting) fails closed with a non-secret diagnostic. The caller-supplied identity is never used to fill in or relabel a response. A renamed repository must be requested by its current name.
 
+`get_issue_goal_context` keeps the raw `get_issue` response contract unchanged.
+It uses that same identity-checking reader for the requested Issue and every
+explicit parent reference, with the R1 bounded resolver. Incomplete ancestry
+returns explicit unknown values and bounded diagnostics; it does not expose a
+failed reader's response body or treat absence of data as an adopted value. The
+CLI uses the same service and emits only its fixed, redacted reason codes when
+the top-level Issue read is blocked.
+
 ## Runtime
 
 Requirements:
 
-- Python 3.10+
+- Python 3.11+
 - `pip install -r requirements-mcp.txt`
 
 Start directly:
@@ -104,6 +369,34 @@ Token lookup order:
 3. unauthenticated GitHub REST
 
 Use a read-capable token only. Do not commit tokens to this repository, `.mcp.json`, `AGENTS.md`, `CLAUDE.md`, or other shared files.
+
+## Agent Workspace U1 opt-in unified read (devflow #869 / #870)
+
+The additive `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None, include_recent_kaep=False, include_published_supply=False)` MCP tool and `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex` reuse **one current repository work-view read** plus the existing bounded original-comment TASK Inbox read and one immutable-source coordinator snapshot read. Existing `get_repository_work_view`, `get_agent_inbox` and CLI operations are unchanged.
+
+This is a **read-only observation / U1 opt-in consumer**, not an authoritative task queue or all-work index. `known_tasks` means classified TASK records **without Claim eligibility assessment**. Without the U2 opt-in flag, `messages` covers only TASK-scoped Inbox roots; with it, verified indexed and recent non-TASK original roots can also appear. Historical originals outside both sources remain unknown (#531/#680/#771). **At U1 acceptance**, `ongoing`, `offers` and `waiting_recovery` were `NOT_INTEGRATED` with `entries=null`; the later R2 Claim observation is described below. Workspace `has_unknown_work=true` while the global KAEP source universe remains unproven; it retains the source `source_error` / `coverage_status`, Inbox page `next_offset`, error codes and `manual_control` fallback. `can_authorize_execution=false` and `can_replace_manual_active_work=false`.
+
+Deployment/rollback: Clients must explicitly opt in; old MCP/CLI consumers are not migrated. If this view is unsuitable, call existing `get_repository_work_view` + `get_agent_inbox`. No new local MCP settings, permissions, credentials, automatic triggers, coordinator mutations or new stored state are involved. Do not switch the controller or retire #503/manual fallback on U1 evidence alone.
+
+### U2 opt-in bounded indexed + recent KAEP discovery (devflow #869 / #872 / #881)
+
+Add `include_recent_kaep=true` to `get_agent_workspace`, or use `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep`. The **same existing flag** now reuses B6 `kaep_live_union_cli.read_union`: the pinned **uncredentialed** public Pages candidate index and the latest authenticated GitHub updated-comment window are combined, then each deduplicated original Issue is checked by the existing canonical B6 verifier once. The entire public index is validated, but only the explicitly selected Workspace repository is queried or returned; no GitHub bearer token goes to Pages. Original Issue TASK classification is **not** required for KAEP discovery. Indexed old non-TASK requests and live unindexed recent requests may be visible together, without converting messages into task assignments.
+
+The updated-comment window is bounded to 100 entries per requested repository. A full window, stale/partial index, missing originals or other source uncertainty stays `PARTIAL_UNKNOWN`, **not** complete Inbox. If **only** the recent-comment GET fails, already-indexed sources are still strictly revalidated and displayed with `RECENT_WINDOW_SOURCE_UNAVAILABLE` warning and `PARTIAL_UNKNOWN`; the missing recent hint cohort is not proof of an empty window. Older original roots that appear in neither the public index nor recent window remain unknown. When Pages index GET/validation fails, the same flag falls back to the previous strict recent-only B6 path, marks `index_status=UNAVAILABLE`, and retains an explicit partial warning; if the live GET also fails, existing TASK-cohort roots remain observable with failure recorded. Results include source provenance (`INDEXED_SOURCE`, `LATEST_COMMENT_SOURCE`, `BOTH`), not Claim eligibility or current HEAD verification. Neither a verified pointer nor an indexed root permits Agent wake, task Claim, #503/#789 fallback retirement, or full B5 acceptance. The `limit`, `offset` and `work_status` arguments page/filter only the TASK-scoped Inbox comment reads; they do **not** page/filter the optional indexed+recent B6 source roots or the `known_tasks` list, which have separate bounds/coverage. Default `include_recent_kaep=false` remains unchanged; old `get_agent_inbox` and manual Control continue working.
+
+### U3 opt-in published Control supply observation (devflow #869 / #874)
+
+Use MCP `get_agent_workspace(..., include_published_supply=true)` or CLI `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-published-supply`. The Workspace reads the already-accepted Control identity again and delegates candidate projection parsing to the existing `tools.maintenance_supply.observe_published_admissions` owner. This is **not** an alternative candidate parser, ranking engine, second task database or Claim authority.
+
+`known_tasks` is the observed Issue TASK list; it is **not execution supply**. The optional `published_supply` reports a validated empty Control publication as `NO_PUBLISHED_CANDIDATES` with `entries=[]`, a nonempty publication as `PUBLISHED_SNAPSHOT_ONLY`, missing block as `NOT_PUBLISHED/entries=null`, and invalid/unavailable identity as `SOURCE_UNKNOWN/entries=null`. Neither observed candidate presence nor absence proves a Claim or availability; original Task freshness, current capabilities, owner/publisher 3C and execution-coordinator runtime eligibility remain authoritative in their existing flows. The source is read-only and opt-in; it never publishes, withdraws, claims, runs a provider or changes User/Agent settings. Rollback: omit the flag; all older CLI and MCP calls remain compatible. #209 currently states ordinary supply is absent; this observation cannot manufacture it.
+
+## R2 coordinator Claim observations (devflow #869 / #952)
+
+The default `get_agent_workspace` / `workspace` path reads execution-coordinator Issue #3 through the immutable `kinotch-execution-coordinator` dependency pinned in `requirements-mcp.txt`. It reuses `GitHubStateStore` plus `query.get_state_result`; it does not duplicate the parser or call a mutation method. `ongoing` and `waiting_recovery` are scoped to the requested repository and cover all coordinator `worker_id` values because there is no trusted mapping from the Inbox `recipient` to a coordinator worker identity.
+
+`ongoing` contains validated Claims with a live lease and state `CLAIMED` or `RUNNING`. `waiting_recovery` is deliberately `PARTIAL`: it contains only exact `WAITING` Claims or Claims whose lease is expired at the observation time. It returns the source Issue ref, source `updated_at`, observation time, role, worker, state, wait reason and lease. `recovery_candidates_status` remains `NOT_INTEGRATED`, and each row's `recovery_eligibility` is `NOT_EVALUATED`; no row authorizes a new Claim. A current empty snapshot yields `entries=[]`. A missing package, unavailable source, invalid snapshot, malformed Claim or missing/inconsistent timestamp yields `UNKNOWN/entries=null` for only the coordinator-dependent sections, preserving independent Workspace sections. Workspace-wide `has_unknown_work`, `can_authorize_execution=false` and the #503/#531 fallback remain unchanged.
+
+`offers` remains `NOT_INTEGRATED/entries=null`. The current Controller flow selects an Offer during its auto-launch run and writes it to that run's local `offer.json`; Issue #3 stores Claims, not Offers. The bounded Control candidate publication (`published_supply`) is not a current Controller Offer. A later source-owned reader is required before R2's Offer/recovery-candidate acceptance can be completed or #869 U5 can be considered complete.
 
 ## KAEP Agent Inbox operational status
 

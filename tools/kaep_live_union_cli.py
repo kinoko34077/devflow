@@ -9,14 +9,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import re
 import sys
 from typing import Any, Callable
 
 from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
 from tools import kaep_issue_search_view as strict
-from tools.kaep_inbox_reader import InvalidMessage, MARKER, REPOSITORY
+from tools.kaep_agent_api_projection import project_agent_view
+from tools.kaep_mailbox_codec import (
+    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, fail,
+)
+from tools.kaep_repository_validation import REPOSITORY
 
 MAX_SOURCES = 40
 MAX_PUBLIC_MARKER_BYTES = 2_000_000
@@ -49,11 +52,11 @@ def _validated_previous_report(
             or not len(data["source_candidates"]) <= MAX_SOURCES
             or type(data.get("live_rows")) is not list
             or len(data["live_rows"]) > MAX_PREVIOUS_ROWS):
-        _deny("INVALID_PREVIOUS_UNION_REPORT")
+        fail("INVALID_PREVIOUS_UNION_REPORT")
     sources: set[tuple[str, int]] = set()
     for row in data["source_candidates"]:
         if type(row) is not dict:
-            _deny("INVALID_PREVIOUS_SOURCE")
+            fail("INVALID_PREVIOUS_SOURCE")
         repo, number = row.get("repository"), row.get("issue_number")
         if (type(repo) is not str or not REPOSITORY.fullmatch(repo)
                 or repo not in repositories or type(number) is not int
@@ -61,12 +64,12 @@ def _validated_previous_report(
                 != f"https://github.com/{repo}/issues/{number}"
                 or row.get("grants_work_authority") is not False
                 or (repo, number) in sources):
-            _deny("INVALID_PREVIOUS_SOURCE")
+            fail("INVALID_PREVIOUS_SOURCE")
         sources.add((repo, number))
     old: dict[tuple[str, int, int, str], dict[str, str]] = {}
     for row in data["live_rows"]:
         if type(row) is not dict:
-            _deny("INVALID_PREVIOUS_ROOT")
+            fail("INVALID_PREVIOUS_ROOT")
         repo, issue, cid, mid = (
             row.get("repository"), row.get("issue_number"),
             row.get("source_comment_id"), row.get("message_id"),
@@ -75,8 +78,7 @@ def _validated_previous_report(
         if (type(repo) is not str or type(issue) is not int
                 or (repo, issue) not in sources
                 or type(cid) is not int or cid <= 0
-                or type(mid) is not str
-                or re.fullmatch(r"msg_[A-Za-z0-9_-]{1,72}", mid) is None
+                or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                 or row.get("recipient") != recipient
                 or row.get("issue_url") != f"https://github.com/{repo}/issues/{issue}"
                 or row.get("source_url") !=
@@ -84,7 +86,7 @@ def _validated_previous_report(
                 or row.get("issue_state") not in ("open", "closed")
                 or type(row.get("reply_observation")) is not str
                 or key in old):
-            _deny("INVALID_PREVIOUS_ROOT")
+            fail("INVALID_PREVIOUS_ROOT")
         old[key] = {
             "issue_state": row["issue_state"],
             "reply_observation": row["reply_observation"],
@@ -109,11 +111,11 @@ def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str,
             or data.get("complete_source_universe") is not False
             or type(data.get("locators")) is not list
             or len(data["locators"]) > MAX_PUBLIC_MARKERS):
-        _deny("INVALID_MARKER_SOURCE")
+        fail("INVALID_MARKER_SOURCE")
     found: set[tuple[str, int]] = set()
     for row in data["locators"]:
         if type(row) is not dict:
-            _deny("INVALID_MARKER_LOCATOR")
+            fail("INVALID_MARKER_LOCATOR")
         repo, number, cid = (
             row.get("repository"), row.get("issue_number"), row.get("comment_id"))
         if (type(repo) is not str or not REPOSITORY.fullmatch(repo)
@@ -124,16 +126,9 @@ def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str,
                   f"https://github.com/{repo}/issues/{number}#issuecomment-{cid}"
                 or row.get("strict_source_validated") is not False
                 or row.get("is_authoritative_assignment") is not False):
-            _deny("INVALID_MARKER_LOCATOR")
+            fail("INVALID_MARKER_LOCATOR")
         found.add((repo, number))
     return found, data["status"] == "PARTIAL_UNKNOWN"
-
-
-RECIPIENTS = cached.RECIPIENTS
-
-
-def _deny(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def _recent_issue_keys(
@@ -141,11 +136,11 @@ def _recent_issue_keys(
 ) -> set[tuple[str, int]]:
     """Untrusted markers supply locators ONLY. Strict codec runs afterwards."""
     if type(comments) is not list or len(comments) > delta.MAX_WINDOW * delta.MAX_UPDATED_PAGES:
-        _deny("INVALID_LIVE_WINDOW")
+        fail("INVALID_LIVE_WINDOW")
     sources: set[tuple[str, int]] = set()
     for comment in comments:
         if type(comment) is not dict:
-            _deny("INVALID_LIVE_COMMENT")
+            fail("INVALID_LIVE_COMMENT")
         author = comment.get("user")
         body, cid, url = (
             comment.get("body"), comment.get("id"), comment.get("issue_url"),
@@ -153,71 +148,31 @@ def _recent_issue_keys(
         if (type(body) is not str or type(cid) is not int or cid <= 0
                 or type(author) is not dict
                 or type(author.get("login")) is not str):
-            _deny("INVALID_LIVE_COMMENT")
+            fail("INVALID_LIVE_COMMENT")
         matched = delta.API_ISSUE.fullmatch(url) if type(url) is str else None
         if not matched or matched.group(1) != repo:
-            _deny("INVALID_LIVE_ISSUE_LOCATOR")
+            fail("INVALID_LIVE_ISSUE_LOCATOR")
         if body.startswith(MARKER):
             sources.add((repo, int(matched.group(2))))
     return sources
 
 
-def read_union(
-    snapshot: dict[str, Any], *, recipient: str,
-    recent_read: Callable[..., list[dict[str, Any]]] = delta.read_repository_recent,
-    issue_read: Callable[[str, int], dict[str, Any]] = strict.fetch_issue,
-    comments_read: Callable[[str, int], str] = strict.fetch_gh_pages,
-    since: str | None = None,
-    additional_repositories: tuple[str, ...] = (),
-    public_marker_discovery: dict[str, Any] | None = None,
-    previous_report: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Recheck one deduplicated cohort in canonical original sources.
+def _collect_recent_source_hints(
+    repositories: list[str], *,
+    recent_read: Callable[..., list[dict[str, Any]]], since: str | None,
+) -> tuple[
+    set[tuple[str, int]], dict[str, int], dict[str, int], list[dict[str, str]]
+]:
+    """Interpret bounded updated-comment windows as untrusted source *hints*.
 
-    No latest-comment window can establish a complete history: old, entirely
-    unindexed roots and Issue-only changes remain unknown.
+    Keep pagination uncertainty and warning ordering at this boundary.
+    This function never validates original sources or grants a work assignment.
     """
-    if recipient not in RECIPIENTS:
-        _deny("INVALID_RECIPIENT")
-    info = cached.validate_index(snapshot)
-    # Extra repositories are an explicit caller-selected scope, never
-    # discovered or authorized by untrusted public index rows.
-    if (type(additional_repositories) is not tuple
-            or any(type(r) is not str or not REPOSITORY.fullmatch(r)
-                   for r in additional_repositories)
-            or len(additional_repositories) != len(set(additional_repositories))
-            or any(r in snapshot["repositories"] for r in additional_repositories)
-            or len(snapshot["repositories"]) + len(additional_repositories)
-               > delta.MAX_REPOSITORIES):
-        _deny("INVALID_ADDITIONAL_REPOSITORY_SET")
-    repos = list(snapshot["repositories"]) + list(additional_repositories)
-    if public_marker_discovery is None:
-        public_marker_keys: set[tuple[str, int]] = set()
-        marker_partial = False
-    else:
-        public_marker_keys, marker_partial = _validated_public_marker_hints(
-            public_marker_discovery)
-    marker_in_scope = public_marker_keys.intersection(
-        {(repo, issue) for repo, issue in public_marker_keys if repo in repos})
-    marker_out_of_scope = public_marker_keys - marker_in_scope
-    if previous_report is None:
-        prior_source_keys: set[tuple[str, int]] = set()
-        prior_rows: dict[tuple[str, int, int, str], dict[str, str]] = {}
-        previous_partial = False
-    else:
-        prior_source_keys, prior_rows, previous_partial = _validated_previous_report(
-            previous_report, recipient=recipient, repositories=repos)
-    indexed_rows = [r for r in snapshot["rows"] if r["recipient"] == recipient]
-    indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
-    indexed_by_key = {
-        (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
-        for r in indexed_rows
-    }
     recent_sources: set[tuple[str, int]] = set()
     counts: dict[str, int] = {}
     updated_pages_read: dict[str, int] = {}
     warnings: list[dict[str, str]] = []
-    for repo in repos:
+    for repo in repositories:
         raw = recent_read(repo, since=since)
         if type(raw) is dict:
             comments = raw.get("comments")
@@ -232,13 +187,13 @@ def read_union(
                     or page_limit > delta.MAX_UPDATED_PAGES
                     or type(overlap) is not int or overlap < 0
                     or len(comments) > page_count * delta.MAX_WINDOW):
-                _deny("INVALID_UPDATED_PAGE_RESULT")
+                fail("INVALID_UPDATED_PAGE_RESULT")
             if overlap:
                 warnings.append({"repository": repo, "reason_code": "UPDATED_PAGE_BOUNDARY_OVERLAP"})
         else:
             comments = raw
             if type(comments) is not list or len(comments) > delta.MAX_WINDOW:
-                _deny("INVALID_LIVE_WINDOW")
+                fail("INVALID_LIVE_WINDOW")
             truncated = len(comments) == delta.MAX_WINDOW
             page_count = 1
         counts[repo] = len(comments)
@@ -246,30 +201,95 @@ def read_union(
         recent_sources.update(_recent_issue_keys(repo, comments))
         if truncated:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
+    return recent_sources, counts, updated_pages_read, warnings
 
-    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope | prior_source_keys)
-    # A cap cannot silently drop a known source. Fail closed and retain fallback.
-    if len(all_sources) > MAX_SOURCES:
-        _deny("UNION_SOURCE_LIMIT")
-    locators: dict[str, dict[str, Any]] = {}
-    for repo in repos:
-        subset = [
-            {"html_url": f"https://github.com/{r}/issues/{issue}"}
-            for r, issue in all_sources if r == repo
-        ]
-        locators[repo] = {
-            "items": subset, "total_count": len(subset),
-            "incomplete_results": False,
-        }
-    verified = strict.build_search_list(
-        repos, locators, fetch_original_issue=issue_read,
-        fetch_comments=comments_read, expected_actor="kinoko34077",
-        recipient=recipient, max_candidates=MAX_SOURCES,
-    )
-    current_by_key = {
-        (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
-        for r in verified["rows"]
+
+def _source_origin(
+    repo: str, number: int, *,
+    indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> str:
+    """Choose the same precedence for verified roots and locator candidates.
+
+    A provenance label is descriptive only: no trust, coverage or authority.
+    """
+    key = (repo, number)
+    if key in indexed_sources and key in recent_sources:
+        return "BOTH"
+    if key in indexed_sources:
+        return "INDEXED_SOURCE"
+    if key in recent_sources:
+        return "LATEST_COMMENT_SOURCE"
+    if key in marker_in_scope:
+        return "INCREMENTAL_MARKER_SOURCE"
+    return "PREVIOUS_REPORT_SOURCE"
+
+
+def _build_source_candidate_ledger(
+    sources: list[tuple[str, int]], *, verified_rows: list[dict[str, Any]],
+    source_errors: list[Any], indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> list[dict[str, Any]]:
+    """Show every bounded locator, without claiming a delivered assignment.
+
+    Candidate visibility and uncertainty are a display contract separate from
+    recipient root verification: a source with no matching roots still appears.
+    Global source uncertainty dominates issue-specific observations.
+    """
+    roots_by_issue: dict[tuple[str, int], int] = {}
+    for row in verified_rows:
+        key = (row["repository"], row["issue_number"])
+        roots_by_issue[key] = roots_by_issue.get(key, 0) + 1
+    failed_issues = {
+        err.get("owning_issue") for err in source_errors
+        if type(err) is dict and type(err.get("owning_issue")) is str
     }
+    global_unknown = any(
+        type(err) is not dict or not err.get("owning_issue")
+        for err in source_errors
+    )
+    candidates = []
+    for repo, number in sources:
+        source_url = f"https://github.com/{repo}/issues/{number}"
+        count = roots_by_issue.get((repo, number), 0)
+        suspect = global_unknown or source_url in failed_issues
+        candidates.append({
+            "repository": repo,
+            "issue_number": number,
+            "issue_url": source_url,
+            "incremental_marker_observed": (repo, number) in marker_in_scope,
+            "origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
+            ),
+            "matching_recipient_roots": count,
+            "source_observation": (
+                "SOURCE_VALIDATION_UNKNOWN" if suspect else
+                "ACCEPTED_RECIPIENT_ROOTS" if count else
+                "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED"
+            ),
+            "grants_work_authority": False,
+        })
+    return candidates
+
+
+def _project_verified_union_rows(
+    current_by_key: dict[tuple[str, int, int, str], dict[str, Any]], *,
+    indexed_by_key: dict[tuple[str, int, int, str], dict[str, Any]],
+    prior_rows: dict[tuple[str, int, int, str], dict[str, str]],
+    recipient: str,
+    indexed_sources: set[tuple[str, int]],
+    recent_sources: set[tuple[str, int]],
+    marker_in_scope: set[tuple[str, int]],
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Project strict verified roots and compare two different baselines.
+
+    A search-index snapshot may omit earlier state/observation fields, while
+    a validated previous report supplies both. Do not unify their semantics.
+    No Issue read, mailbox decode, authority decision or report status here.
+    """
     out_rows: list[dict[str, Any]] = []
     state_changes = 0
     previous_changes = 0
@@ -298,57 +318,132 @@ def read_union(
             "source_validation": row["source_validation"],
             "head_freshness": "NOT_REVALIDATED",
             "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "source_origin": (
-                "BOTH" if (repo, number) in indexed_sources and
-                          (repo, number) in recent_sources else
-                "INDEXED_SOURCE" if (repo, number) in indexed_sources else
-                "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources else
-                "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope else
-                "PREVIOUS_REPORT_SOURCE"
+            "source_origin": _source_origin(
+                repo, number, indexed_sources=indexed_sources,
+                recent_sources=recent_sources, marker_in_scope=marker_in_scope,
             ),
             "changed_from_snapshot": changed,
             "index_presence": "INDEXED_AND_LIVE" if old else "LIVE_ORIGINAL_ONLY",
         })
-    # Candidate locators must be visible even when this recipient has zero
-    # accepted roots. A locator is a read hint, never a delivered assignment.
-    roots_by_issue: dict[tuple[str, int], int] = {}
-    for row in out_rows:
-        key = (row["repository"], row["issue_number"])
-        roots_by_issue[key] = roots_by_issue.get(key, 0) + 1
-    failed_issues = {
-        err.get("owning_issue") for err in verified["errors"]
-        if type(err) is dict and type(err.get("owning_issue")) is str
+    return out_rows, state_changes, previous_changes
+
+
+def read_union(
+    snapshot: dict[str, Any], *, recipient: str,
+    recent_read: Callable[..., list[dict[str, Any]]] = delta.read_repository_recent,
+    issue_read: Callable[[str, int], dict[str, Any]] = strict.fetch_issue,
+    comments_read: Callable[[str, int], str] = strict.fetch_gh_pages,
+    since: str | None = None,
+    additional_repositories: tuple[str, ...] = (),
+    public_marker_discovery: dict[str, Any] | None = None,
+    previous_report: dict[str, Any] | None = None,
+    scoped_repository: str | None = None,
+) -> dict[str, Any]:
+    """Recheck one deduplicated cohort in canonical original sources.
+
+    No latest-comment window can establish a complete history: old, entirely
+    unindexed roots and Issue-only changes remain unknown.
+    """
+    if recipient not in RECIPIENTS:
+        fail("INVALID_RECIPIENT")
+    info = cached.validate_index(snapshot)
+    # Optional Workspace consumer scope is a strict subset of a fully validated
+    # public snapshot (or one explicitly requested extra repo). No other
+    # repository's original Issue is read or returned.
+    if scoped_repository is not None and (
+        type(scoped_repository) is not str
+        or not REPOSITORY.fullmatch(scoped_repository)
+        or additional_repositories
+        or public_marker_discovery is not None
+        or previous_report is not None
+    ):
+        fail("INVALID_SCOPED_REPOSITORY")
+    # Extra repositories are an explicit caller-selected scope, never
+    # discovered or authorized by untrusted public index rows.
+    if (type(additional_repositories) is not tuple
+            or any(type(r) is not str or not REPOSITORY.fullmatch(r)
+                   for r in additional_repositories)
+            or len(additional_repositories) != len(set(additional_repositories))
+            or any(r in snapshot["repositories"] for r in additional_repositories)
+            or len(snapshot["repositories"]) + len(additional_repositories)
+               > delta.MAX_REPOSITORIES):
+        fail("INVALID_ADDITIONAL_REPOSITORY_SET")
+    if scoped_repository is None:
+        repos = list(snapshot["repositories"]) + list(additional_repositories)
+        effective_additional = list(additional_repositories)
+    else:
+        repos = [scoped_repository]
+        effective_additional = (
+            [scoped_repository] if scoped_repository not in snapshot["repositories"]
+            else []
+        )
+    if public_marker_discovery is None:
+        public_marker_keys: set[tuple[str, int]] = set()
+        marker_partial = False
+    else:
+        public_marker_keys, marker_partial = _validated_public_marker_hints(
+            public_marker_discovery)
+    marker_in_scope = public_marker_keys.intersection(
+        {(repo, issue) for repo, issue in public_marker_keys if repo in repos})
+    marker_out_of_scope = public_marker_keys - marker_in_scope
+    if previous_report is None:
+        prior_source_keys: set[tuple[str, int]] = set()
+        prior_rows: dict[tuple[str, int, int, str], dict[str, str]] = {}
+        previous_partial = False
+    else:
+        prior_source_keys, prior_rows, previous_partial = _validated_previous_report(
+            previous_report, recipient=recipient, repositories=repos)
+    indexed_rows = [
+        r for r in snapshot["rows"]
+        if r["recipient"] == recipient and r["repository"] in repos
+    ]
+    indexed_sources = {(r["repository"], r["issue_number"]) for r in indexed_rows}
+    indexed_by_key = {
+        (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
+        for r in indexed_rows
     }
-    global_unknown = any(
-        type(err) is not dict or not err.get("owning_issue")
-        for err in verified["errors"]
+    recent_sources, counts, updated_pages_read, warnings = (
+        _collect_recent_source_hints(
+            repos, recent_read=recent_read, since=since,
+        )
     )
-    candidates = []
-    for repo, number in all_sources:
-        source_url = f"https://github.com/{repo}/issues/{number}"
-        count = roots_by_issue.get((repo, number), 0)
-        suspect = global_unknown or source_url in failed_issues
-        candidates.append({
-            "repository": repo,
-            "issue_number": number,
-            "issue_url": source_url,
-            "incremental_marker_observed": (repo, number) in marker_in_scope,
-            "origin": (
-                "BOTH" if (repo, number) in indexed_sources
-                          and (repo, number) in recent_sources else
-                "INDEXED_SOURCE" if (repo, number) in indexed_sources
-                else "LATEST_COMMENT_SOURCE" if (repo, number) in recent_sources
-                else "INCREMENTAL_MARKER_SOURCE" if (repo, number) in marker_in_scope
-                else "PREVIOUS_REPORT_SOURCE"
-            ),
-            "matching_recipient_roots": count,
-            "source_observation": (
-                "SOURCE_VALIDATION_UNKNOWN" if suspect else
-                "ACCEPTED_RECIPIENT_ROOTS" if count else
-                "NO_ACCEPTED_RECIPIENT_ROOT_OBSERVED"
-            ),
-            "grants_work_authority": False,
-        })
+
+    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope | prior_source_keys)
+    # A cap cannot silently drop a known source. Fail closed and retain fallback.
+    if len(all_sources) > MAX_SOURCES:
+        fail("UNION_SOURCE_LIMIT")
+    locators: dict[str, dict[str, Any]] = {}
+    for repo in repos:
+        subset = [
+            {"html_url": f"https://github.com/{r}/issues/{issue}"}
+            for r, issue in all_sources if r == repo
+        ]
+        locators[repo] = {
+            "items": subset, "total_count": len(subset),
+            "incomplete_results": False,
+        }
+    verified = strict.build_search_list(
+        repos, locators, fetch_original_issue=issue_read,
+        fetch_comments=comments_read, expected_actor="kinoko34077",
+        recipient=recipient, max_candidates=MAX_SOURCES,
+        source_workers=2,
+    )
+    current_by_key = {
+        (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
+        for r in verified["rows"]
+    }
+    out_rows, state_changes, previous_changes = _project_verified_union_rows(
+        current_by_key,
+        indexed_by_key=indexed_by_key, prior_rows=prior_rows,
+        recipient=recipient, indexed_sources=indexed_sources,
+        recent_sources=recent_sources, marker_in_scope=marker_in_scope,
+    )
+    candidates = _build_source_candidate_ledger(
+        all_sources, verified_rows=out_rows,
+        source_errors=verified["errors"],
+        indexed_sources=indexed_sources, recent_sources=recent_sources,
+        marker_in_scope=marker_in_scope,
+    )
 
     removed = set(indexed_by_key) - set(current_by_key)
     missing_previous = set(prior_rows) - set(current_by_key)
@@ -366,7 +461,7 @@ def read_union(
         "recipient": recipient, "observed_at": verified["observed_at"],
         "snapshot_observed_at": snapshot["observed_at"],
         "repositories_checked": list(repos),
-        "explicit_additional_repositories": list(additional_repositories),
+        "explicit_additional_repositories": effective_additional,
         "repository_scope_proven_complete": False,
         **info,
         "recent_comments_observed": counts,
@@ -437,20 +532,20 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raw = args.offline_index.read_bytes()
             if len(raw) > cached.MAX_INDEX_BYTES:
-                _deny("PUBLIC_INDEX_TOO_LARGE")
+                fail("PUBLIC_INDEX_TOO_LARGE")
             index = json.loads(raw.decode("utf-8"), object_pairs_hook=cached._unique_pairs)
         public_markers = None
         if args.public_marker_discovery is not None:
             raw = args.public_marker_discovery.read_bytes()
             if len(raw) > MAX_PUBLIC_MARKER_BYTES:
-                _deny("PUBLIC_MARKER_FILE_TOO_LARGE")
+                fail("PUBLIC_MARKER_FILE_TOO_LARGE")
             public_markers = json.loads(raw.decode("utf-8"),
                                         object_pairs_hook=cached._unique_pairs)
         prior = None
         if args.previous_report is not None:
             raw = args.previous_report.read_bytes()
             if len(raw) > MAX_PREVIOUS_REPORT_BYTES:
-                _deny("PREVIOUS_REPORT_FILE_TOO_LARGE")
+                fail("PREVIOUS_REPORT_FILE_TOO_LARGE")
             prior = json.loads(raw.decode("utf-8"),
                                object_pairs_hook=cached._unique_pairs)
         if args.updated_pages == 1:
@@ -466,7 +561,6 @@ def main(argv: list[str] | None = None) -> int:
             public_marker_discovery=public_markers,
             previous_report=prior)
         if args.response_format == "agent-api":
-            from tools.kaep_agent_api_projection import project_agent_view
             result = project_agent_view(result)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
         result = {

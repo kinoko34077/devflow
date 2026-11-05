@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from tools.kaep_mailbox_codec import InvalidMessage
+from tools.kaep_mailbox_codec import InvalidMessage, fail as _fail
 from tools.gpt_liveness_fleet_plan import (
     MAILBOX, fetch_owning_issue, parse_manifest, plan as admission_plan,
 )
@@ -22,10 +22,6 @@ from tools.gpt_liveness_pilot import plan as pilot_plan
 from tools.kaep_inbox_reader import fetch_gh_pages
 
 DUMMY_NONCE = "0" * 32
-
-
-def _fail(code: str) -> None:
-    raise InvalidMessage(code)
 
 
 def compose(*, manifest: str, snapshots: dict[str, Any],

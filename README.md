@@ -6,6 +6,9 @@ KiNoTch.の複数Repositoryを横断して、監査・Current State・Work Order
 >
 > Managed repositoryで作業を始める場合、まず`AGENTS.md`を読み、対象の`[REPO] <repository>` Control Issueから対象repo自身の正本へ入る。
 
+Feature-specific work can use the bounded [feature route catalog](features/README.md);
+the category fallback for uncatalogued documents is [docs/README.md](docs/README.md).
+
 現在のGitHub repository identityは`kinoko34077/devflow`。旧名`kinoko34077/devflow-test`は2026-09-25のrename以前の履歴参照としてのみ扱う。
 
 実装主体は固定しない。ChatGPT、Codex、Claude Code、その他のAgent/実装者が同じGitHub上の正本・Issue・PR・検証証拠から再開できることを要件とする。

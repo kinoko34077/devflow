@@ -14,7 +14,10 @@ class RecordingGitHubApi(rb.GitHubApi):
     def _request(self, method, path, payload=None, *, allow_404=False):
         self.calls.append((method, path, payload))
         if method == "GET" and path == "/user":
-            return {"login": self.login}
+            return {
+                "id": 79015263 if self.login == "kinoko34077" else 123456789,
+                "login": self.login,
+            }
         if method == "POST" and path == "/user/repos":
             return {
                 "full_name": self.created_full_name,

@@ -131,6 +131,20 @@ def _write_result(value: dict[str, object], path: str) -> None:
     )
 
 
+def _fleet_exit_code(result: dict[str, object]) -> int:
+    """Report fleet-wide completeness without rolling back successful targets."""
+    total = result.get("repository_count")
+    succeeded = result.get("success_count")
+    failed = result.get("failure_count")
+    if (
+        not all(type(value) is int and value >= 0 for value in (total, succeeded, failed))
+        or succeeded + failed != total
+        or failed != 0
+    ):
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a bounded Repository Projection cache for one managed repository."
@@ -200,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
 
         _write_result(result, args.output)
         print(json.dumps(result, sort_keys=True))
-        return 0
+        return _fleet_exit_code(result) if args.fleet else 0
     except (
         producer.RepositoryProjectionCacheProducerError,
         devflow_mcp_core.DevflowMCPError,

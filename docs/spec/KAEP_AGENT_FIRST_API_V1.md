@@ -210,3 +210,39 @@ python -m tools.kaep_live_union_cli --recipient chatgpt --response-format agent-
 **重要な境界:** これは既存認証済みCLIからの**同一回読取投影**であり、公開HTTPサーバ、Pages上の動的URL、任意利用者向けの認証済みGateway、常駐ポーリング、Webhook、クラウド配置ではない。 `http_endpoint_deployed=false` を返す。古いJSONファイルを読み込む独立Projectionでは元の原典検証を再現できないため、その利用で「最新の認証済み依頼」を証明してはならない。将来のHTTPホストは同じ契約を再利用してよいが、Host・Source読取資格情報・呼出し制限・機密情報と公開範囲・レート制限・タイムアウト/ETag/失効条件・無償枠・リクエスト起動主体に独立した安全上の承認・実実証が必要。
 
 直接の実装根拠は[devflow #680](https://github.com/kinoko34077/devflow/issues/680)。#531 B5不完全な元依頼Universe・#503手動fallback・#681 F10無人GPT起床を置換しない。
+
+
+## B5：既存2 Consumer間の同一原典限定パリティ比較（2026年10月19日）
+
+既存B5 `tools.kaep_source_roster_shadow` は厳格な #503 POINTER / 明示M3 TASK 由来の元Issueを読込むが、同じGitHub Issueに対してB6 `tools.kaep_live_union_cli` の宛先別結果と**同じ根のコメントID＋Message ID**が一致するかを直接比較する機能はなかった。これを新たな探索エンジンにせず、既存2つの**既に生成された報告JSON**をローカルで突き合わせる。
+
+```sh
+# それぞれ既存の認証済み読取器から取得したJSONを事前に用意
+python -m tools.kaep_b5_b6_parity_cli \
+  --shadow-report ./roster-shadow.json \
+  --union-report ./strict-recipient-union.json
+```
+
+入力上限は各2 MiB、B5最大20 Issue、B6最大40 Issue、原典コメント行・Message ID・原典Issue URL・宛先（`claude-code`）・権限なしをチェックする。共通で**原典検証に成功したIssueだけ**を比較し、相違のある共通Issue・片側しか候補がないIssue・原典が不正で比較不能なIssueを分離する。出力は原典URL・各種件数・固定された不完全性フラグのみで、生の本文・キー・元メッセージID自体は出さない。宛先／URL／スキーマの不正や重複はBLOCKED。比較Issueが0件、共通外候補や部分取得がある場合は `PARTIAL_UNKNOWN` とし、データが不足した状態を「パリティ成立」と表示しない。
+
+**重要な限界:** 2報告は互いに異なる時刻の独立した観測であり、差分があっても「ソースが途中で編集された」「索引とConsumerの実装が異なる」のどちらかを単独では断定できない。同期スナップショット、全公開リポ原典一覧、実際のモデル受信、原典HEAD、Issue書込権限、#531 B5 Consumer完全受入は証明できない。原典を手動で再GETし因果を確定する必要がある。#503/manual Control fallbackと `has_unknown_work=true`・`can_authorize_execution=false` は維持する。CLIはGitHub/CloudflareにアクセスせずローカルJSONだけを読む。
+
+
+## B5索引失敗時の最小診断情報（2026-10-20）
+
+従来の `tools.kaep_source_roster_shadow` が `INDEX_SOURCE_INCOMPLETE` とした際、下位の正規 `discover_index_shadow` に存在した停止コメント番号・検証理由が上位出力では失われていた。今回、`index_blockers` に `index_comment_id`（公開原典の数値ID）と固定コード形式の `reason_code` のみを含める。対象は原典検証中の停止情報であり、コメント本文・認証情報・任意URLは一切再出力しない。インデックスが完全な場合は空配列。
+
+これは古い `kinotch-repo-monitor#81` のKAEPマーカー付きコメントに任意の後置文章があり、正規の `INVALID_WRAPPER` で停止する事例を、安全な停止状態のまま機械可視化する対策である。**未知の原典を「無い」と判断せず、部分取得結果を受入れず、Source網羅性とB5 Cursor rev17も更新しない。** 原典本文を編集したり、KAEP v0.2の厳格なコメント終端規則を緩めたりしない。
+
+
+## B5 verified-pointer原典の明示的な上限拡張（2026-10-20）
+
+B5 #531の実原典 #503走査で、既定の20原典Issue取得上限に到達し、`CANDIDATE_LIMIT` が2件返った。既定のソース範囲は変更せず、実行主体が明示した場合に限り最大40件までの既存正規原典参照を許可する。
+
+```sh
+python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077 --max-sources 40
+```
+
+対象は従来通り、実際に署名やactorを検証した #503の正規pointerと、明示的に取得したM3の信頼済みTASK原典候補に限定。**任意Issueの全件探索ではない。** 指定値を超える候補は黙って捨てず `BLOCKED` とし、根拠のない「原典が全部取得できた」「依頼なし」を決して返さない。デフォルト20件はAPI・CLIの両方で維持、40件超も拒否する。既知の `INVALID_WRAPPER` や actor/recipient・reply-chain の検査、`has_unknown_work=true`、`can_authorize_execution=false`、B5 cursor rev17および #503/manual Control fallbackは維持。
+
+この変更は「前回20件の上限で止まった候補が、明示した範囲で同一原典検証を受けられる」という有限受入だけを目的とする。履歴に埋もれた未知Issue、モデル本人性、異時点パリティ、全Sourceの網羅性、動的HTTP/APIやGPT無人起動の完了を意味しない。有料Provider・Cloudflare D1/Authは使用しない。

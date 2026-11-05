@@ -31,8 +31,19 @@ class ReproducibilityPolicyTests(unittest.TestCase):
         self.assertEqual([], mutable, "mutable external Action refs: " + ", ".join(mutable))
 
     def test_mcp_direct_dependency_is_exact_pinned(self):
-        requirement = (ROOT / "requirements-mcp.txt").read_text(encoding="utf-8").strip()
-        self.assertEqual("mcp[cli]==2.2.0", requirement)
+        requirements = [
+            line.strip()
+            for line in (ROOT / "requirements-mcp.txt").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual("mcp[cli]==2.2.0", requirements[0])
+        self.assertEqual(
+            "kinotch-execution-coordinator @ "
+            "git+https://github.com/kinoko34077/execution-coordinator.git@"
+            "00fb0a76268b45d13c0d6fe5598fa961f3298d7d",
+            requirements[1],
+        )
+        self.assertEqual(2, len(requirements))
 
 
 if __name__ == "__main__":

@@ -40,6 +40,9 @@ def _issue(
         "html_url": f"https://github.com/owner/repo/issues/{number}",
         "body": f"{BEGIN}\n{json.dumps(metadata)}\n{END}",
         "author_association": author_association,
+        "user": ({"id": 79015263, "login": "kinoko34077"}
+                 if author_association in {"OWNER", "MEMBER", "COLLABORATOR"}
+                 else {"id": 123456789, "login": "untrusted"}),
     }
 
 

@@ -32,6 +32,7 @@ class LazyIssueMetadataNormalizerTests(unittest.TestCase):
             "created_at": "2026-10-12T00:00:00Z",
             "updated_at": "2026-10-12T01:00:00Z",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         })
         self.assertEqual(record.source_kind, "MACHINE")
         self.assertEqual(record.record_role, "TASK")
@@ -75,6 +76,7 @@ class LazyIssueMetadataNormalizerTests(unittest.TestCase):
         issue = {
             "number": 2, "title": "[TRACKER] roadmap", "body": out,
             "state": "open", "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "created_at": "2026-10-12T00:00:00Z",
             "updated_at": "2026-10-12T00:00:00Z",
         }

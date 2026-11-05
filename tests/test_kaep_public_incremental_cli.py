@@ -154,6 +154,92 @@ class PublicIncrementalTests(TestCase):
             self.assertEqual(rc, 2)
             self.assertEqual(json.loads(out.getvalue())["status"], "BLOCKED")
 
+    def test_full_and_incremental_reuse_identical_public_comment_contract(self):
+        from tools import kaep_public_locator_cli as scanner
+        repo_name = f"{OWNER}/devflow"
+        current = [ptr("devflow", 20, 103), ptr("devflow", 21, 102, marker=False),
+                   ptr("devflow", 19, 101)]
+        fetch, _ = stream(["devflow"], {"devflow": {1: current}})
+        with mock.patch.object(scanner, "_validated_locator_candidate",
+                               wraps=scanner._validated_locator_candidate) as validator:
+            full = scanner.discover(fetch=fetch)
+            delta = inc.discover_incremental(
+                prior=inc._checkpoint({repo_name: 100}), fetch=fetch)
+        self.assertEqual(validator.call_count, 2 * len(current))
+        self.assertEqual(full["locators"], delta["locators"])
+        self.assertEqual(full["locator_count"], delta["locator_count"])
+        self.assertFalse(full["can_authorize_execution"])
+        self.assertFalse(delta["can_authorize_execution"])
+
+    def test_full_and_incremental_share_public_owner_repository_contract(self):
+        from tools import kaep_public_locator_cli as scanner
+
+        paths = []
+        def fetch(path):
+            paths.append(path)
+            if path.startswith("/users/"):
+                # The two consumers must deduplicate this already-validated
+                # owner list before fetching Issue comments.
+                return [repo("devflow"), repo("devflow")]
+            if path.startswith(f"/repos/{OWNER}/devflow/"):
+                return [ptr("devflow", 20, 104),
+                        ptr("devflow", 21, 103, marker=False)]
+            self.fail("unexpected GET")
+
+        with mock.patch.object(
+                scanner, "_validated_public_repository_page",
+                wraps=scanner._validated_public_repository_page) as checker:
+            full = scanner.discover(fetch=fetch)
+            full_paths = list(paths)
+            paths.clear()
+            delta = inc.discover_incremental(
+                prior=inc._checkpoint({f"{OWNER}/devflow": 0}), fetch=fetch)
+            incremental_paths = list(paths)
+        self.assertEqual(checker.call_count, 2)
+        self.assertEqual(full_paths, incremental_paths)
+        self.assertEqual(full["api_requests_used"], 2)
+        self.assertEqual(delta["api_requests_used"], 2)
+        self.assertEqual(full["repository_count_observed"], 1)
+        self.assertEqual(delta["repository_count_observed"], 1)
+        self.assertEqual(full["locators"], delta["locators"])
+        self.assertEqual(delta["status"], "BOUNDED_INCREMENTAL_READ")
+        self.assertEqual(delta["next_cursor"]["heads"],
+                         {f"{OWNER}/devflow": 104})
+        self.assertFalse(delta["can_authorize_execution"])
+
+    def test_shared_owner_contract_rejects_private_or_foreign_repo_in_both_modes(self):
+        from tools import kaep_public_locator_cli as scanner
+
+        bad_cases = [
+            repo("hidden", private=True),
+            {"full_name": "foreign/repo",
+             "owner": {"id": 42, "login": "foreign"}, "private": False},
+            {"full_name": f"{OWNER}/oops", "owner": {
+                "id": 42, "login": OWNER}, "private": False},
+        ]
+        for bad in bad_cases:
+            with self.subTest(bad=bad):
+                paths = []
+                def fetch(path):
+                    paths.append(path)
+                    if path.startswith("/users/"):
+                        return [bad]
+                    self.fail("private or foreign source must never be fetched")
+                full = scanner.discover(fetch=fetch)
+                incremental = inc.discover_incremental(
+                    prior=inc._checkpoint({}), fetch=fetch)
+                self.assertEqual(len(paths), 2)
+                self.assertEqual(full["status"], "PARTIAL_UNKNOWN")
+                self.assertEqual(incremental["status"], "PARTIAL_UNKNOWN")
+                self.assertEqual(full["locators"], [])
+                self.assertEqual(incremental["locators"], [])
+                self.assertEqual(full["incomplete_scopes"][0]["reason_code"],
+                                 "REPOSITORY_READ_UNKNOWN")
+                self.assertEqual(incremental["incomplete_scopes"][0]["reason_code"],
+                                 "REPOSITORY_READ_UNKNOWN")
+                self.assertIsNone(incremental["next_cursor"])
+                self.assertFalse(incremental["can_authorize_execution"])
+
     def test_not_a_raw_issue_body_or_trusted_root(self):
         get, _ = stream(["devflow"], {"devflow": {
             1: [ptr("devflow", 500, 5000)]}})

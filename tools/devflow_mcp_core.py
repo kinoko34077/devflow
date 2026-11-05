@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 try:
+    from .markdown_scalar import strip_scalar as _strip_scalar
+    from .markdown_sections import iter_h2_sections
     from .repository_bootstrap import (
         BootstrapError,
         normalize_request,
@@ -21,9 +24,16 @@ try:
     )
     from . import (
         github_issue_trust,
+        acceptance_evidence_preflight,
         human_portfolio,
         agent_inbox,
+        kaep_live_delta_view,
+        kaep_live_candidate_cli,
+        kaep_live_union_cli,
+        issue_goal_context,
+        goal_plan_assessment,
         maintenance_sync_check,
+        maintenance_supply,
         reconciliation_publication,
         repository_projection,
         workflow_contract,
@@ -42,10 +52,19 @@ except ImportError:  # direct script execution
         parse_provenance_document,
         parse_request_body,
     )
+    from markdown_scalar import strip_scalar as _strip_scalar
+    from markdown_sections import iter_h2_sections
     import github_issue_trust
+    import acceptance_evidence_preflight
     import human_portfolio
     import agent_inbox
+    import kaep_live_delta_view
+    import kaep_live_candidate_cli
+    import kaep_live_union_cli
+    import issue_goal_context
+    import goal_plan_assessment
     import maintenance_sync_check
+    import maintenance_supply
     import reconciliation_publication
     import repository_projection
     import workflow_contract
@@ -58,38 +77,28 @@ HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 API_BASE = "https://api.github.com"
 USER_AGENT = "kinotch-devflow-mcp"
 HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
+COORDINATOR_STATE_REPOSITORY = "kinoko34077/execution-coordinator"
+COORDINATOR_STATE_ISSUE = 3
+_COORDINATOR_TASK_REF = re.compile(
+    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+)
 
 
 class DevflowMCPError(RuntimeError):
-    pass
+    """Read failure with a finite, non-secret machine-readable diagnostic code."""
 
-
-def _strip_scalar(value: str) -> str:
-    value = value.strip()
-    if value.startswith("```") and value.endswith("```"):
-        lines = value.splitlines()
-        if len(lines) >= 3:
-            value = "\n".join(lines[1:-1]).strip()
-    if len(value) >= 2 and value[0] == value[-1] == "`":
-        value = value[1:-1].strip()
-    return value
+    def __init__(self, message: str, *, reason_code: str = "DEVFLOW_READ_UNAVAILABLE") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
-    body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in body.split("\n"):
-        match = re.match(r"^## ([^#].*?)\s*$", line)
-        if match:
-            current = match.group(1).strip()
-            if reject_duplicates and current in sections:
-                raise DevflowMCPError(f"Duplicate section in canonical Issue body: {current!r}.")
-            sections[current] = []
-            continue
-        if current is not None:
-            sections[current].append(line)
-    return {name: _strip_scalar("\n".join(lines)) for name, lines in sections.items()}
+    sections: dict[str, str] = {}
+    for name, value in iter_h2_sections(body):
+        if reject_duplicates and name in sections:
+            raise DevflowMCPError(f"Duplicate section in canonical Issue body: {name!r}.")
+        sections[name] = _strip_scalar(value)
+    return sections
 
 
 def normalize_repository(repository: str) -> str:
@@ -115,7 +124,8 @@ def _default_transport(url: str, headers: dict[str, str]) -> Any:
             # one (transfer, rename, misrouting). Fail closed; never relabel.
             raise DevflowMCPError(
                 "GitHub read was redirected; refusing to use a response whose "
-                f"identity differs from the request ({_redact_url(url)} -> {_redact_url(final_url)})."
+                f"identity differs from the request ({_redact_url(url)} -> {_redact_url(final_url)}).",
+                reason_code="GITHUB_REDIRECTED_READ",
             )
         payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else None
@@ -128,17 +138,43 @@ def _redact_url(value: str) -> str:
 
 def _translate_read_error(exc: Exception) -> DevflowMCPError:
     if isinstance(exc, urllib.error.HTTPError):
+        # The response header is safe to classify, but do not echo headers,
+        # caller URLs, response bodies or credential details into diagnostics.
+        # Without explicit remaining=0 evidence, 403 stays ambiguous
+        # (scope/permission, policy, secondary limits, or another cause).
+        if exc.code == 403 and exc.headers is not None:
+            remaining = exc.headers.get("X-RateLimit-Remaining")
+            if isinstance(remaining, str) and remaining.strip() == "0":
+                return DevflowMCPError(
+                    "GitHub read failed with HTTP 403; API rate-limit remaining is zero.",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
         if exc.code in {401, 403, 404}:
             return DevflowMCPError(
                 f"GitHub read failed with HTTP {exc.code}. "
                 "If the repository is private or access-controlled, configure a read-capable "
-                "DEVFLOW_GITHUB_TOKEN or GITHUB_TOKEN."
+                "DEVFLOW_GITHUB_TOKEN or GITHUB_TOKEN.",
+                reason_code=f"GITHUB_HTTP_{exc.code}",
             )
-        return DevflowMCPError(f"GitHub read failed with HTTP {exc.code}.")
+        if exc.code == 429:
+            return DevflowMCPError(
+                "GitHub read failed with HTTP 429.",
+                reason_code="GITHUB_HTTP_429",
+            )
+        return DevflowMCPError(
+            f"GitHub read failed with HTTP {exc.code}.",
+            reason_code="GITHUB_HTTP_OTHER",
+        )
     if isinstance(exc, urllib.error.URLError):
-        return DevflowMCPError(f"GitHub network read failed: {exc.reason}")
+        return DevflowMCPError(
+            f"GitHub network read failed: {exc.reason}",
+            reason_code="GITHUB_NETWORK_UNAVAILABLE",
+        )
     if isinstance(exc, json.JSONDecodeError):
-        return DevflowMCPError("GitHub returned invalid JSON.")
+        return DevflowMCPError(
+            "GitHub returned invalid JSON.",
+            reason_code="GITHUB_INVALID_JSON",
+        )
     return DevflowMCPError(f"GitHub read failed: {type(exc).__name__}.")
 
 
@@ -220,10 +256,13 @@ class GitHubReader:
         return issue
 
     def list_issue_comments(
-        self, repository: str, issue_number: int, per_page: int = 100
+        self, repository: str, issue_number: int, per_page: int = 100,
+        *, max_comments: int | None = None,
     ) -> list[dict[str, Any]]:
         if issue_number < 1:
             raise DevflowMCPError("Issue number must be >= 1.")
+        if max_comments is not None and (type(max_comments) is not int or max_comments < 1):
+            raise DevflowMCPError("Invalid comment read bound.")
         comments: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -233,9 +272,28 @@ class GitHubReader:
             if not isinstance(batch, list):
                 raise DevflowMCPError("GitHub Issue comments response was not a list.")
             comments.extend(item for item in batch if isinstance(item, dict))
+            if max_comments is not None and len(comments) > max_comments:
+                # A single extra stored comment proves Inbox's parser limit.
+                # Never fetch the remainder or present this as complete history.
+                return comments[:max_comments + 1]
             if len(batch) < per_page:
                 return comments
             page += 1
+
+    def list_recent_repository_comments(self, repository: str) -> list[dict[str, Any]]:
+        """One B6-compatible updated-desc repository comment page, GET only.
+
+        A full page is a potentially truncated window; the B6 reader marks
+        it as partial. No GitHub Search or extra gh authentication path.
+        """
+        query = urllib.parse.urlencode({
+            "sort": "updated", "direction": "desc",
+            "per_page": kaep_live_delta_view.MAX_WINDOW, "page": 1,
+        })
+        result = self._read(self._repository_url(repository, f"issues/comments?{query}"))
+        if not isinstance(result, list) or len(result) > kaep_live_delta_view.MAX_WINDOW:
+            raise DevflowMCPError("GitHub recent Issue comments response is invalid.")
+        return result
 
     def get_file(self, repository: str, path: str) -> dict[str, Any] | None:
         if not isinstance(path, str) or not path.strip():
@@ -446,9 +504,11 @@ class DevflowService:
         *,
         devflow_repository: str = DEVFLOW_REPOSITORY,
         observed_at_factory: Callable[[], str] | None = None,
+        coordinator_state_loader: Callable[[], Any] | None = None,
     ) -> None:
         self.reader = reader
         self.devflow_repository = normalize_repository(devflow_repository)
+        self._coordinator_state_loader = coordinator_state_loader
         self._observed_at_factory = observed_at_factory or (
             lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         )
@@ -591,20 +651,27 @@ class DevflowService:
         if not matches:
             raise DevflowMCPError(
                 f"No open Repository Control Issue titled {title!r}. "
-                "Do not infer managed state; onboarding or control reconciliation is required."
+                "Do not infer managed state; onboarding or control reconciliation is required.",
+                reason_code="CONTROL_NOT_FOUND_OR_UNTRUSTED",
             )
         if len(matches) != 1:
-            raise DevflowMCPError(f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.")
+            raise DevflowMCPError(
+                f"Expected one open Repository Control Issue titled {title!r}; found {len(matches)}.",
+                reason_code="CONTROL_AMBIGUOUS",
+            )
         issue = matches[0]
         sections = parse_sections(str(issue.get("body") or ""), reject_duplicates=True)
         try:
             WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
         except workflow_contract.WorkflowContractError as exc:
-            raise DevflowMCPError(str(exc)) from exc
+            raise DevflowMCPError(
+                str(exc), reason_code="CONTROL_SCHEMA_INVALID",
+            ) from exc
         recorded_repository = sections.get("Repository", "").strip()
         if recorded_repository and normalize_repository(recorded_repository) != normalized:
             raise DevflowMCPError(
-                f"Repository Control title resolved to {recorded_repository!r}, not {normalized!r}."
+                f"Repository Control title resolved to {recorded_repository!r}, not {normalized!r}.",
+                reason_code="CONTROL_REPOSITORY_MISMATCH",
             )
         return {
             "repository": normalized,
@@ -911,7 +978,20 @@ class DevflowService:
         No extra Issue role classification, Project read, task assignment,
         provider launch or execution authority. Partial/unknown remain visible.
         """
+        # Reject bad recipient, pagination and filter options before performing
+        # any live GitHub Control or Issue GET (including private repositories).
+        agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         view = self.get_repository_work_view(repository)
+        return self._agent_inbox_from_work_view(
+            view, recipient=recipient, limit=limit, offset=offset,
+            work_status=work_status,
+        )
+
+    def _agent_inbox_from_work_view(
+        self, view: dict[str, Any], *, recipient: str,
+        limit: int, offset: int, work_status: str | None,
+    ) -> dict[str, Any]:
+        """Use a caller's already-observed live work view; no second Issue scan."""
         selected = agent_inbox.select_task_records(
             view, recipient=recipient, limit=limit,
             offset=offset, work_status=work_status)
@@ -923,13 +1003,496 @@ class DevflowService:
                 number = record["issue_number"]
                 try:
                     comments_by_issue[number] = self.reader.list_issue_comments(
-                        selected["repository"], number)
+                        selected["repository"], number,
+                        max_comments=agent_inbox.MAX_ISSUE_COMMENTS)
                 except DevflowMCPError:
                     errors_by_issue[number] = "GITHUB_COMMENT_READ_FAILED"
         return agent_inbox.build_agent_inbox(
             view, recipient=recipient, comments_by_issue=comments_by_issue,
             errors_by_issue=errors_by_issue, limit=limit, offset=offset,
             work_status=work_status)
+
+    def _workspace_recent_kaep(
+        self, repository: str, recipient: str,
+    ) -> dict[str, Any]:
+        """One selected-repository B6 union of untrusted index + fresh hints.
+
+        The existing pinned public index GET never receives a GitHub token.
+        Existing B6 strict original-source validation remains authoritative.
+        If that index is absent, preserve the existing live-only route but
+        report partial/unknown coverage instead of silently dropping requests.
+        """
+        def original_comments(repo: str, number: int) -> str:
+            try:
+                rows = self.reader.list_issue_comments(
+                    repo, number, max_comments=agent_inbox.MAX_ISSUE_COMMENTS,
+                )
+            except DevflowMCPError as exc:
+                # B6 isolates original-source failure through InvalidMessage;
+                # do not discard unrelated verified recipient requests.
+                raise kaep_live_delta_view.InvalidMessage(
+                    "SOURCE_READ_UNAVAILABLE"
+                ) from exc
+            pages = [
+                rows[i:i + 100] for i in range(0, len(rows), 100)
+            ] or [[]]
+            return json.dumps(pages, ensure_ascii=True, separators=(",", ":"))
+
+        def original_issue(repo: str, number: int) -> dict[str, Any]:
+            try:
+                return self.reader.get_issue(repo, number)
+            except DevflowMCPError as exc:
+                raise kaep_live_delta_view.InvalidMessage(
+                    "SOURCE_READ_UNAVAILABLE"
+                ) from exc
+
+        recent_window_unavailable = False
+
+        def recent_reader(repo: str, since: str | None = None) -> list[dict[str, Any]]:
+            nonlocal recent_window_unavailable
+            try:
+                return self.reader.list_recent_repository_comments(repo)
+            except DevflowMCPError:
+                # The recent source is independent of the public index.
+                # Missing hints are NOT proof of an empty recent window.
+                recent_window_unavailable = True
+                return []
+
+        def recent_warning() -> list[dict[str, str]]:
+            return (
+                [{"repository": repository, "reason_code": "RECENT_WINDOW_SOURCE_UNAVAILABLE"}]
+                if recent_window_unavailable else []
+            )
+
+        try:
+            public_index = kaep_live_candidate_cli.fetch_public_json()
+            union = kaep_live_union_cli.read_union(
+                public_index, recipient=recipient,
+                scoped_repository=repository,
+                recent_read=recent_reader, issue_read=original_issue,
+                comments_read=original_comments,
+            )
+        except kaep_live_delta_view.InvalidMessage:
+            # The public index is an optional untrusted locator, not a source
+            # of truth. Preserve actual recent original-source observation.
+            recent = kaep_live_delta_view.read_live_candidates(
+                [repository], recipient=recipient, expected_actor=DEFAULT_OWNER,
+                recent_read=recent_reader, issue_read=original_issue,
+                comments_read=original_comments,
+            )
+            recent["status"] = "PARTIAL_UNKNOWN"
+            recent["index_status"] = "UNAVAILABLE"
+            recent["indexed_source_issues"] = None
+            recent["warnings"] = list(recent["warnings"]) + [
+                {"repository": repository, "reason_code": "PUBLIC_INDEX_UNAVAILABLE"}
+            ] + recent_warning()
+            for row in recent["rows"]:
+                row["source_origin"] = "LATEST_COMMENT_SOURCE"
+            return recent
+        rows = union["live_rows"]
+        index_stale = union["snapshot_stale"]
+        return {
+            "status": (
+                "PARTIAL_UNKNOWN"
+                if index_stale or recent_window_unavailable
+                else union["status"]
+            ),
+            "rows": rows,
+            "source_coverage": union["source_coverage"],
+            "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
+            "searched_candidates": union["source_issue_count"],
+            "validated_source_issues": sum(
+                item["source_observation"] != "SOURCE_VALIDATION_UNKNOWN"
+                for item in union["source_candidates"]
+            ),
+            "errors": union["source_errors"],
+            "warnings": list(union["warnings"]) + (
+                [{"repository": repository, "reason_code": "PUBLIC_INDEX_STALE"}]
+                if index_stale else []
+            ) + recent_warning(),
+            "index_status": "AVAILABLE",
+            "index_snapshot_stale": index_stale,
+            "index_snapshot_age_seconds": union["snapshot_age_seconds"],
+            "indexed_source_issues": union["indexed_issue_count"],
+        }
+
+    def _workspace_published_supply(
+        self, view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Observe accepted Control candidate publication without granting pickup."""
+        try:
+            repository = view["repository"]
+            control_ref = view["control_ref"]
+            number = int(control_ref.rsplit("/", 1)[1])
+            control_issue = self.reader.get_issue(self.devflow_repository, number)
+            verify_observed_issue_identity(
+                control_issue, self.devflow_repository, number,
+            )
+            if (control_issue.get("html_url") != control_ref
+                    or str(control_issue.get("title") or "").strip()
+                       != f"[REPO] {repository.split('/', 1)[1]}"
+                    or not self._is_accepted_control(control_issue, repository)):
+                raise DevflowMCPError("Current Control identity is not trusted.")
+            observed = maintenance_supply.observe_published_admissions(
+                str(control_issue.get("body") or ""),
+                repository=repository,
+                control_ref=f"{self.devflow_repository}#{number}",
+            )
+        except (DevflowMCPError, maintenance_supply.MaintenanceSupplyError,
+                TypeError, KeyError, ValueError):
+            return {
+                "status": "SOURCE_UNKNOWN", "entries": None,
+                "reason_code": "PUBLISHED_CANDIDATE_SOURCE_UNAVAILABLE",
+                "claimability": "NOT_EVALUATED",
+                "can_authorize_execution": False,
+            }
+        if observed is None:
+            return {
+                "status": "NOT_PUBLISHED", "entries": None,
+                "claimability": "NOT_EVALUATED",
+                "can_authorize_execution": False,
+            }
+        entries = [
+            {
+                "source_kind": "CONTROL_PUBLISHED_CANDIDATE",
+                "source_ref": control_ref,
+                "task_ref": row["task"],
+                "entry_ref": row["entry_ref"],
+                "roles": [
+                    role["role"] for role in row["roles"]
+                ],
+                "publication_state": "PUBLISHED_SNAPSHOT_ONLY",
+                "claimability": "NOT_EVALUATED",
+            }
+            for row in observed
+        ]
+        return {
+            "status": (
+                "PUBLISHED_SNAPSHOT_ONLY" if entries
+                else "NO_PUBLISHED_CANDIDATES"
+            ),
+            "entries": entries,
+            "source_ref": control_ref,
+            "claimability": "NOT_EVALUATED",
+            "can_authorize_execution": False,
+        }
+
+    def _workspace_coordinator_claims(
+        self, view: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Project only validated Issue #3 claims; this is never a Claim check."""
+        source_ref = (
+            f"https://github.com/{COORDINATOR_STATE_REPOSITORY}/issues/"
+            f"{COORDINATOR_STATE_ISSUE}"
+        )
+        not_integrated = {
+            "status": "NOT_INTEGRATED", "entries": None,
+            "source_ref": source_ref,
+            "can_authorize_execution": False,
+        }
+        loader = self._coordinator_state_loader
+        if loader is None:
+            return dict(not_integrated), dict(not_integrated)
+
+        try:
+            from execution_coordinator.model import Claim, CoordinatorState, ExecutionState
+            from execution_coordinator.query import StateReadResult
+
+            result = loader()
+        except Exception:
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SOURCE_UNAVAILABLE",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        if (
+            not isinstance(result, StateReadResult)
+            or not isinstance(result.state, CoordinatorState)
+            or not isinstance(result.state.claims, dict)
+            or not isinstance(result.source_updated_at, str)
+            or not result.source_updated_at.strip()
+        ):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        observed_at = self._observed_at_factory()
+        try:
+            observed_time = datetime.fromisoformat(
+                str(observed_at).replace("Z", "+00:00")
+            )
+            source_updated_time = datetime.fromisoformat(
+                result.source_updated_at.replace("Z", "+00:00")
+            )
+            if (
+                observed_time.tzinfo is None
+                or observed_time.utcoffset() is None
+                or source_updated_time.tzinfo is None
+                or source_updated_time.utcoffset() is None
+                or source_updated_time > observed_time
+            ):
+                raise ValueError("Coordinator timestamp is missing or inconsistent.")
+        except (TypeError, ValueError, OverflowError):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        live_claims: list[dict[str, Any]] = []
+        waiting_or_expired: list[dict[str, Any]] = []
+        target_repository = normalize_repository(view["repository"])
+        try:
+            for claim_key, claim in sorted(result.state.claims.items()):
+                if (
+                    not isinstance(claim, Claim)
+                    or claim_key != claim.claim_id
+                    or not isinstance(claim.task, str)
+                    or _COORDINATOR_TASK_REF.fullmatch(claim.task) is None
+                    or not isinstance(claim.lease_until, datetime)
+                    or claim.lease_until.tzinfo is None
+                    or claim.lease_until.utcoffset() is None
+                ):
+                    raise ValueError("Coordinator claim record is invalid.")
+                task_repository = claim.task.rsplit("#", 1)[0]
+                if task_repository.casefold() != target_repository.casefold():
+                    continue
+                lease_expired = claim.lease_until <= observed_time
+                row = {
+                    "source_kind": "COORDINATOR_CLAIM",
+                    "source_ref": source_ref,
+                    "task_ref": claim.task,
+                    "claim_id": claim.claim_id,
+                    "generation": claim.generation,
+                    "role": claim.role.value,
+                    "worker_id": claim.worker_id,
+                    "observed_state": claim.state.value,
+                    "wait_reason": (
+                        claim.wait_reason.value if claim.wait_reason is not None else None
+                    ),
+                    "lease_until": claim.lease_until.astimezone(timezone.utc)
+                    .isoformat().replace("+00:00", "Z"),
+                    "lease_status": "EXPIRED" if lease_expired else "LIVE",
+                    "claimability": "NOT_EVALUATED",
+                    "recovery_eligibility": "NOT_EVALUATED",
+                    "can_authorize_execution": False,
+                }
+                if claim.state is ExecutionState.WAITING or lease_expired:
+                    waiting_or_expired.append(row)
+                else:
+                    live_claims.append(row)
+        except (AttributeError, TypeError, ValueError):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        common = {
+            "freshness": "CURRENT",
+            "repository_scope": target_repository,
+            "worker_scope": "ALL_COORDINATOR_WORKERS_FOR_REQUESTED_REPOSITORY",
+            "source_ref": source_ref,
+            "source_updated_at": result.source_updated_at,
+            "observed_at": observed_at,
+            "can_authorize_execution": False,
+        }
+        ongoing = {
+            **common,
+            "status": "AVAILABLE",
+            "observation_scope": "UNEXPIRED_CLAIMED_OR_RUNNING",
+            "entries": live_claims,
+        }
+        waiting = {
+            **common,
+            "status": "PARTIAL",
+            "entries": waiting_or_expired,
+            "observation_scope": "WAITING_OR_EXPIRED_CLAIMS_ONLY",
+            "recovery_candidates_status": "NOT_INTEGRATED",
+            "has_unknown_work": True,
+        }
+        return ongoing, waiting
+
+    def get_agent_workspace(
+        self, repository: str, recipient: str = "codex",
+        *, limit: int = 20, offset: int = 0,
+        work_status: str | None = None,
+        include_recent_kaep: bool = False,
+        include_published_supply: bool = False,
+    ) -> dict[str, Any]:
+        """Opt-in observation over existing Work View and bounded KAEP Inbox.
+
+        It deliberately does not claim that machine TASKs are claimable,
+        or that TASK-only KAEP discovery covers non-TASK original messages.
+        Validated coordinator Claims are projected into ongoing/waiting sections.
+        Current Offers and recovery candidates remain unintegrated; this view
+        does not establish claimability or grant execution authority.
+        """
+        agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
+        if type(include_recent_kaep) is not bool:
+            raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
+        if type(include_published_supply) is not bool:
+            raise ValueError("INVALID_SUPPLY_OBSERVATION_OPTION")
+        view = self.get_repository_work_view(repository)
+        inbox = self._agent_inbox_from_work_view(
+            view, recipient=recipient, limit=limit, offset=offset,
+            work_status=work_status,
+        )
+        current = (
+            view["source_status"] == "AVAILABLE"
+            and view["source_freshness"] == "CURRENT"
+        )
+        messages = [
+            {
+                "source_kind": "KAEP_REQUEST",
+                "source_ref": request["source_url"],
+                "subject_ref": issue["url"],
+                "recipient": recipient,
+                "source_message_id": request["source_message_id"],
+                "observed_state": request["status"],
+                "expected_head": request["expected_head"],
+            }
+            for issue in inbox["issues"]
+            for request in (issue["requests"] or [])
+        ] if current else None
+        recent_discovery: dict[str, Any] | None = None
+        if include_recent_kaep:
+            try:
+                recent = self._workspace_recent_kaep(view["repository"], recipient)
+                recent_discovery = {
+                    "status": recent["status"],
+                    "source_coverage": recent["source_coverage"],
+                    "observation_basis": recent["observation_basis"],
+                    "source_candidates": recent["searched_candidates"],
+                    "index_status": recent.get("index_status", "NOT_USED"),
+                    "index_snapshot_stale": recent.get("index_snapshot_stale"),
+                    "index_snapshot_age_seconds": recent.get("index_snapshot_age_seconds"),
+                    "indexed_source_issues": recent.get("indexed_source_issues"),
+                    "validated_source_issues": recent["validated_source_issues"],
+                    "errors": recent["errors"],
+                    "warnings": recent["warnings"],
+                    "complete_source_universe": False,
+                }
+                extra_rows = [
+                    {
+                        "source_kind": "KAEP_REQUEST",
+                        "source_ref": row["source_url"],
+                        "subject_ref": row["issue_url"],
+                        "recipient": row["recipient"],
+                        "source_message_id": row["message_id"],
+                        "observed_state": row["reply_observation"],
+                        "source_validation": row["source_validation"],
+                        "issue_role": row.get("issue_role"),
+                        "discovery_basis": (
+                            row.get("source_origin") or "B6_RECENT_COMMENT_ORIGINAL"
+                        ),
+                    }
+                    for row in recent["rows"]
+                ]
+                known = {
+                    (item["source_ref"], item["source_message_id"])
+                    for item in (messages or [])
+                }
+                if messages is None:
+                    messages = []
+                for row in extra_rows:
+                    key = (row["source_ref"], row["source_message_id"])
+                    if key not in known:
+                        messages.append(row)
+                        known.add(key)
+            except (DevflowMCPError, kaep_live_delta_view.InvalidMessage,
+                    TypeError, ValueError, KeyError):
+                # Source errors are local to B6. Never erase valid TASK roots,
+                # echo arbitrary error text or claim missing work is empty.
+                recent_discovery = {
+                    "status": "SOURCE_UNAVAILABLE",
+                    "reason_code": "RECENT_DISCOVERY_UNAVAILABLE",
+                    "source_coverage": "UNKNOWN",
+                    "complete_source_universe": False,
+                }
+        known_tasks = [
+            {
+                "source_kind": "MACHINE_TASK",
+                "source_ref": task["url"],
+                "observed_state": task["work_status"],
+                "record_role": task["record_role"],
+                "claimability": "NOT_EVALUATED",
+            }
+            for task in view["task_records"]
+        ] if current else None
+        ongoing, waiting_recovery = self._workspace_coordinator_claims(view)
+        not_integrated = {
+            "status": "NOT_INTEGRATED", "entries": None,
+            "can_authorize_execution": False,
+        }
+        result = {
+            "schema_version": "devflow.agent-workspace.read.v0.1",
+            "repository": view["repository"],
+            "recipient": recipient,
+            "observed_at": view["observed_at"],
+            "source_status": view["source_status"],
+            "source_freshness": view["source_freshness"],
+            "source_error": view["source_error"],
+            "coverage_status": view["coverage_status"],
+            "has_unknown_work": True,  # B5/non-TASK source universe unproven
+            "sections": {
+                "ongoing": ongoing,
+                "messages": {
+                    "status": "TASK_SOURCE_COHORT_ONLY" if current else "SOURCE_UNAVAILABLE",
+                    "entries": messages,
+                    "errors": inbox["errors"],
+                    "offset": offset,
+                    "next_offset": inbox["next_offset"],
+                    "has_unknown_work": True,
+                    "task_inbox_has_unknown_work": inbox["has_unknown_work"],
+                },
+                "known_tasks": {
+                    "status": view["observed_task_view"]["status"],
+                    "entries": known_tasks,
+                    "unresolved_open_issue_count": (
+                        view["observed_task_view"]["unresolved_open_issue_count"]
+                    ),
+                    "claimability": "NOT_EVALUATED",
+                },
+                "offers": {
+                    **not_integrated,
+                    "reason_code": "CONTROLLER_OFFER_SOURCE_NOT_EXPOSED",
+                },
+                "waiting_recovery": waiting_recovery,
+            },
+            "manual_control": view["manual_control"],
+            "can_authorize_execution": False,
+            "can_replace_manual_active_work": False,
+            "is_authoritative_assignment": False,
+            "is_live_agent_delivery": False,
+        }
+        if include_published_supply:
+            result["sections"]["published_supply"] = self._workspace_published_supply(view)
+        if recent_discovery is not None:
+            result["sections"]["messages"]["entries"] = messages
+            result["sections"]["messages"]["status"] = (
+                "TASK_AND_RECENT_ORIGINALS"
+                if recent_discovery["status"] in (
+                    "LIVE_WINDOW_READ", "BOUNDED_UNION_READ"
+                )
+                else "RECENT_DISCOVERY_PARTIAL"
+                if recent_discovery["status"] == "PARTIAL_UNKNOWN"
+                else "RECENT_DISCOVERY_UNAVAILABLE"
+            )
+            result["sections"]["messages"]["recent_discovery"] = recent_discovery
+            result["sections"]["messages"]["has_unknown_work"] = True
+        return result
 
     @staticmethod
     def _human_portfolio_entry_dict(
@@ -1172,7 +1735,66 @@ class DevflowService:
             "state": str(issue.get("state") or ""),
             "url": _issue_url(issue),
             "body": body,
+            "updated_at": str(issue.get("updated_at") or ""),
             "sections": parse_sections(body),
+        }
+
+    def get_issue_goal_context(self, repository: str, issue_number: int) -> dict[str, Any]:
+        """Resolve source-linked effective Goal Context via the shared GET-only reader."""
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        normalized = normalize_repository(repository)
+        issue = self.get_issue(normalized, issue_number)
+        context = issue_goal_context.resolve_goal_context(issue, self.get_issue)
+        return {"observed_at": self._observed_at_factory(), **context}
+
+    def assess_issue_plan(
+        self, repository: str, issue_number: int, plan: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Compare declared plan effects with source-resolved claims; never authorize work."""
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        try:
+            plan = goal_plan_assessment.normalize_plan_packet(plan)
+        except goal_plan_assessment.PlanAssessmentError:
+            return goal_plan_assessment.assess_plan({}, plan)
+        normalized = normalize_repository(repository)
+        context = self.get_issue_goal_context(normalized, issue_number)
+        return goal_plan_assessment.assess_plan(context, plan)
+
+    def assess_outcome_observation(
+        self, repository: str, issue_number: int, evidence: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Compare a declared outcome packet to the exact current Issue revision.
+
+        The result checks packet consistency only. The linked evidence and the
+        requirement declaration are not independently authenticated here.
+        """
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        normalized = normalize_repository(repository)
+        issue = self.get_issue(normalized, issue_number)
+        body_sha256 = hashlib.sha256(issue["body"].encode("utf-8")).hexdigest()
+        result = acceptance_evidence_preflight.outcome_observation_preflight(
+            evidence,
+            task_ref=f"{normalized}#{issue_number}",
+            observed_issue_body_sha256=body_sha256,
+        )
+        return {
+            **result,
+            "task_ref": f"{normalized}#{issue_number}",
+            "owning_issue_url": issue["url"],
+            "issue_body_sha256": body_sha256,
+            "observed_at": self._observed_at_factory(),
         }
 
     def get_sync_health(self) -> dict[str, Any]:
@@ -1208,4 +1830,25 @@ class DevflowService:
 
 def default_service() -> DevflowService:
     repository = os.environ.get("DEVFLOW_REPOSITORY", DEVFLOW_REPOSITORY).strip() or DEVFLOW_REPOSITORY
-    return DevflowService(GitHubReader.from_env(), devflow_repository=repository)
+    reader = GitHubReader.from_env()
+
+    def load_coordinator_state() -> Any:
+        # Reuse the accepted package's identity-bound GET path. Import lazily so
+        # unrelated Devflow readers remain usable if the optional MCP runtime
+        # dependencies have not been installed in a local checkout.
+        from execution_coordinator.github_state import GitHubStateStore
+        from execution_coordinator.query import get_state_result
+
+        store = GitHubStateStore(
+            token=reader._token,
+            repository=COORDINATOR_STATE_REPOSITORY,
+            issue_number=COORDINATOR_STATE_ISSUE,
+            api_base_url=reader._api_base,
+        )
+        return get_state_result(store)
+
+    return DevflowService(
+        reader,
+        devflow_repository=repository,
+        coordinator_state_loader=load_coordinator_state,
+    )

@@ -1,6 +1,6 @@
 # Development Reconciliation Contract
 
-Status: proposed for acceptance under devflow#156  
+Status: canonical specification accepted under devflow#156 via PR #165 (merged to main as `4e28312ce94e31bd3017810b506980dd29280414`).\
 Authority: devflow cross-repository workflow specification  
 Scope: deterministic assessment of durable GitHub evidence
 
