@@ -1335,7 +1335,9 @@ class DevflowService:
 
         It deliberately does not claim that machine TASKs are claimable,
         or that TASK-only KAEP discovery covers non-TASK original messages.
-        Coordinator claims/offers/recovery are not integrated yet (U4).
+        Validated coordinator Claims are projected into ongoing/waiting sections.
+        Current Offers and recovery candidates remain unintegrated; this view
+        does not establish claimability or grant execution authority.
         """
         agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         if type(include_recent_kaep) is not bool:
