@@ -15,9 +15,8 @@ from typing import Any
 
 from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_mailbox_codec import MESSAGE_ID, fail
-from tools.kaep_mailbox_support import ACTOR, mailbox
+from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
 from tools.kaep_request_sender import send_request
-from tools.github_issue_trust import is_trusted_principal
 
 DISCOVERY_REPOSITORY = "kinoko34077/devflow"
 DISCOVERY_ISSUE = 503
@@ -84,13 +83,7 @@ def verify_source_request_from_snapshot(
     cid, root = matches_found[0]
     actors = {comment["id"]: comment for comment in comments}
     actor = actors[cid]
-    if expected_actor.casefold() == "kinoko34077":
-        trusted = is_trusted_principal({
-            "user": {"id": actor.get("actor_id"), "login": actor.get("actor_login")}
-        })
-    else:
-        trusted = actor["actor_login"].casefold() == expected_actor.casefold()
-    if not trusted:
+    if not matching_actor(actor, expected_actor):
         fail("SOURCE_ACTOR_MISMATCH")
     if (root["kind"] != "REQUEST" or root["in_reply_to"] is not None
             or root["recipient"] != "claude-code"
