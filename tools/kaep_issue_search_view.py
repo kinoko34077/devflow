@@ -18,7 +18,10 @@ from typing import Any, Callable
 
 from tools import agent_inbox, repository_projection
 from tools.kaep_issue_list_html import to_html
-from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
+from tools.kaep_link_validation import (
+    ISSUE_URL as ISSUE_URL_PATTERN,
+    owner_issue_url,
+)
 from tools.kaep_public_index import to_public_index
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages, parse_pages,
@@ -128,7 +131,7 @@ def _read_candidate_original(
     This runs per-source; the canonical full-mailbox codec, actor and reply
     checks remain in the ordered projection caller, never in worker threads.
     """
-    url = f"https://github.com/{repo}/issues/{number}"
+    url = owner_issue_url(repo, number)
     issue = fetch_original_issue(repo, number)
     if (type(issue) is not dict or issue.get("html_url") != url
             or issue.get("number") != number
@@ -227,7 +230,7 @@ def _project_candidate_roots(
     Presentation schema changes belong here; this function never fetches,
     authenticates, decodes, authorizes, or mutates the aggregate report.
     """
-    url = f"https://github.com/{repo}/issues/{number}"
+    url = owner_issue_url(repo, number)
     verified_roots: list[dict[str, Any]] = []
     for target in recipients:
         for root in by_recipient[target]:
@@ -329,7 +332,7 @@ def build_search_list(
             if pool is not None else None
         )
         for index, (repo, number) in enumerate(candidates):
-            url = f"https://github.com/{repo}/issues/{number}"
+            url = owner_issue_url(repo, number)
             try:
                 if futures is None:
                     issue, classified, raw = _read_candidate_original(
@@ -503,3 +506,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
