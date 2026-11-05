@@ -13,7 +13,11 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
+from tools.kaep_link_validation import (
+    ISSUE_URL as ISSUE_URL_PATTERN,
+    owner_comment_url,
+    owner_issue_url,
+)
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MESSAGE_ID as MESSAGE_ID_PATTERN,
     REASON_CODE as REASON_CODE_PATTERN, fail, unique_pairs,
@@ -138,7 +142,7 @@ def _validate_union(doc: Any) -> tuple[dict[tuple[str, int], set[tuple[int, str]
         if (key not in covered or row.get("repository") != key[0]
                 or type(row.get("issue_number")) is not int or row["issue_number"] != key[1]
                 or type(cid) is not int or cid <= 0
-                or row.get("source_url") != f"https://github.com/{key[0]}/issues/{key[1]}#issuecomment-{cid}"
+                or row.get("source_url") != owner_comment_url(key[0], key[1], cid)
                 or type(mid) is not str or MESSAGE_ID.fullmatch(mid) is None
                 or row.get("recipient") != "claude-code"
                 or row.get("source_validation") != "STRICT_COMPLETE_FOR_CANDIDATE"):
@@ -183,7 +187,7 @@ def compare_reports(shadow: dict[str, Any], union: dict[str, Any]) -> dict[str, 
     for repo, number in matched:
         a, b = svalid[(repo, number)], uvalid[(repo, number)]
         item = {
-            "issue_url": f"https://github.com/{repo}/issues/{number}",
+            "issue_url": owner_issue_url(repo, number),
             "shadow_root_count": len(a),
             "union_root_count": len(b),
             "shadow_only_root_count": len(a - b),
