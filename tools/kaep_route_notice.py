@@ -17,6 +17,7 @@ from tools.kaep_inbox_reader import InvalidMessage, REPOSITORY, fetch_gh_pages
 from tools.kaep_mailbox_codec import MESSAGE_ID, fail
 from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
 from tools.kaep_request_sender import send_request
+from tools.kaep_link_validation import owner_issue_url
 
 DISCOVERY_REPOSITORY = "kinoko34077/devflow"
 DISCOVERY_ISSUE = 503
@@ -92,7 +93,7 @@ def verify_source_request_from_snapshot(
         fail("SOURCE_NOT_SUPPORTED_REQUEST")
     return {
         "type": POINTER_VERSION,
-        "owning_issue": f"https://github.com/{repository}/issues/{issue}",
+        "owning_issue": owner_issue_url(repository, issue),
         "message_id": message_id,
         "comment_id": cid,
     }
@@ -208,4 +209,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
