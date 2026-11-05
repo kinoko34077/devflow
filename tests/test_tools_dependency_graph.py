@@ -181,6 +181,14 @@ if registry.MAILBOX is not task_ref:
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_kaep_source_and_route_actor_checks_reuse_shared_boundary(self) -> None:
+        from tools import kaep_mailbox_support as support
+        from tools import kaep_route_notice as route
+        from tools import kaep_source_route_audit as audit
+
+        self.assertIs(route.matching_actor, support.matching_actor)
+        self.assertIs(audit.matching_actor, support.matching_actor)
+
     def test_kaep_message_id_aliases_reuse_mailbox_codec(self) -> None:
         from tools import kaep_agent_api_projection as projection
         from tools import kaep_b5_b6_parity_cli as parity
