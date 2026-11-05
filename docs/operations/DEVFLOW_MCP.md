@@ -347,7 +347,7 @@ the top-level Issue read is blocked.
 
 Requirements:
 
-- Python 3.10+
+- Python 3.11+
 - `pip install -r requirements-mcp.txt`
 
 Start directly:
