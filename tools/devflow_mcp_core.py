@@ -77,6 +77,11 @@ HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 API_BASE = "https://api.github.com"
 USER_AGENT = "kinotch-devflow-mcp"
 HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
+COORDINATOR_STATE_REPOSITORY = "kinoko34077/execution-coordinator"
+COORDINATOR_STATE_ISSUE = 3
+_COORDINATOR_TASK_REF = re.compile(
+    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
+)
 
 
 class DevflowMCPError(RuntimeError):
@@ -499,9 +504,11 @@ class DevflowService:
         *,
         devflow_repository: str = DEVFLOW_REPOSITORY,
         observed_at_factory: Callable[[], str] | None = None,
+        coordinator_state_loader: Callable[[], Any] | None = None,
     ) -> None:
         self.reader = reader
         self.devflow_repository = normalize_repository(devflow_repository)
+        self._coordinator_state_loader = coordinator_state_loader
         self._observed_at_factory = observed_at_factory or (
             lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         )
@@ -1170,6 +1177,153 @@ class DevflowService:
             "can_authorize_execution": False,
         }
 
+    def _workspace_coordinator_claims(
+        self, view: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Project only validated Issue #3 claims; this is never a Claim check."""
+        source_ref = (
+            f"https://github.com/{COORDINATOR_STATE_REPOSITORY}/issues/"
+            f"{COORDINATOR_STATE_ISSUE}"
+        )
+        not_integrated = {
+            "status": "NOT_INTEGRATED", "entries": None,
+            "source_ref": source_ref,
+            "can_authorize_execution": False,
+        }
+        loader = self._coordinator_state_loader
+        if loader is None:
+            return dict(not_integrated), dict(not_integrated)
+
+        try:
+            from execution_coordinator.model import Claim, CoordinatorState, ExecutionState
+            from execution_coordinator.query import StateReadResult
+
+            result = loader()
+        except Exception:
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SOURCE_UNAVAILABLE",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        if (
+            not isinstance(result, StateReadResult)
+            or not isinstance(result.state, CoordinatorState)
+            or not isinstance(result.state.claims, dict)
+            or not isinstance(result.source_updated_at, str)
+            or not result.source_updated_at.strip()
+        ):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        observed_at = self._observed_at_factory()
+        try:
+            observed_time = datetime.fromisoformat(
+                str(observed_at).replace("Z", "+00:00")
+            )
+            source_updated_time = datetime.fromisoformat(
+                result.source_updated_at.replace("Z", "+00:00")
+            )
+            if (
+                observed_time.tzinfo is None
+                or observed_time.utcoffset() is None
+                or source_updated_time.tzinfo is None
+                or source_updated_time.utcoffset() is None
+                or source_updated_time > observed_time
+            ):
+                raise ValueError("Coordinator timestamp is missing or inconsistent.")
+        except (TypeError, ValueError, OverflowError):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        live_claims: list[dict[str, Any]] = []
+        waiting_or_expired: list[dict[str, Any]] = []
+        target_repository = normalize_repository(view["repository"])
+        try:
+            for claim_key, claim in sorted(result.state.claims.items()):
+                if (
+                    not isinstance(claim, Claim)
+                    or claim_key != claim.claim_id
+                    or not isinstance(claim.task, str)
+                    or _COORDINATOR_TASK_REF.fullmatch(claim.task) is None
+                    or not isinstance(claim.lease_until, datetime)
+                    or claim.lease_until.tzinfo is None
+                    or claim.lease_until.utcoffset() is None
+                ):
+                    raise ValueError("Coordinator claim record is invalid.")
+                task_repository = claim.task.rsplit("#", 1)[0]
+                if task_repository.casefold() != target_repository.casefold():
+                    continue
+                lease_expired = claim.lease_until <= observed_time
+                row = {
+                    "source_kind": "COORDINATOR_CLAIM",
+                    "source_ref": source_ref,
+                    "task_ref": claim.task,
+                    "claim_id": claim.claim_id,
+                    "generation": claim.generation,
+                    "role": claim.role.value,
+                    "worker_id": claim.worker_id,
+                    "observed_state": claim.state.value,
+                    "wait_reason": (
+                        claim.wait_reason.value if claim.wait_reason is not None else None
+                    ),
+                    "lease_until": claim.lease_until.astimezone(timezone.utc)
+                    .isoformat().replace("+00:00", "Z"),
+                    "lease_status": "EXPIRED" if lease_expired else "LIVE",
+                    "claimability": "NOT_EVALUATED",
+                    "recovery_eligibility": "NOT_EVALUATED",
+                    "can_authorize_execution": False,
+                }
+                if claim.state is ExecutionState.WAITING or lease_expired:
+                    waiting_or_expired.append(row)
+                else:
+                    live_claims.append(row)
+        except (AttributeError, TypeError, ValueError):
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SNAPSHOT_INVALID",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
+
+        common = {
+            "freshness": "CURRENT",
+            "repository_scope": target_repository,
+            "worker_scope": "ALL_COORDINATOR_WORKERS_FOR_REQUESTED_REPOSITORY",
+            "source_ref": source_ref,
+            "source_updated_at": result.source_updated_at,
+            "observed_at": observed_at,
+            "can_authorize_execution": False,
+        }
+        ongoing = {
+            **common,
+            "status": "AVAILABLE",
+            "observation_scope": "UNEXPIRED_CLAIMED_OR_RUNNING",
+            "entries": live_claims,
+        }
+        waiting = {
+            **common,
+            "status": "PARTIAL",
+            "entries": waiting_or_expired,
+            "observation_scope": "WAITING_OR_EXPIRED_CLAIMS_ONLY",
+            "recovery_candidates_status": "NOT_INTEGRATED",
+            "has_unknown_work": True,
+        }
+        return ongoing, waiting
+
     def get_agent_workspace(
         self, repository: str, recipient: str = "codex",
         *, limit: int = 20, offset: int = 0,
@@ -1181,7 +1335,9 @@ class DevflowService:
 
         It deliberately does not claim that machine TASKs are claimable,
         or that TASK-only KAEP discovery covers non-TASK original messages.
-        Coordinator claims/offers/recovery are not integrated yet (U4).
+        Validated coordinator Claims are projected into ongoing/waiting sections.
+        Current Offers and recovery candidates remain unintegrated; this view
+        does not establish claimability or grant execution authority.
         """
         agent_inbox.validate_inbox_options(recipient, limit, offset, work_status)
         if type(include_recent_kaep) is not bool:
@@ -1275,7 +1431,11 @@ class DevflowService:
             }
             for task in view["task_records"]
         ] if current else None
-        not_integrated = {"status": "NOT_INTEGRATED", "entries": None}
+        ongoing, waiting_recovery = self._workspace_coordinator_claims(view)
+        not_integrated = {
+            "status": "NOT_INTEGRATED", "entries": None,
+            "can_authorize_execution": False,
+        }
         result = {
             "schema_version": "devflow.agent-workspace.read.v0.1",
             "repository": view["repository"],
@@ -1287,7 +1447,7 @@ class DevflowService:
             "coverage_status": view["coverage_status"],
             "has_unknown_work": True,  # B5/non-TASK source universe unproven
             "sections": {
-                "ongoing": dict(not_integrated),
+                "ongoing": ongoing,
                 "messages": {
                     "status": "TASK_SOURCE_COHORT_ONLY" if current else "SOURCE_UNAVAILABLE",
                     "entries": messages,
@@ -1305,8 +1465,11 @@ class DevflowService:
                     ),
                     "claimability": "NOT_EVALUATED",
                 },
-                "offers": dict(not_integrated),
-                "waiting_recovery": dict(not_integrated),
+                "offers": {
+                    **not_integrated,
+                    "reason_code": "CONTROLLER_OFFER_SOURCE_NOT_EXPOSED",
+                },
+                "waiting_recovery": waiting_recovery,
             },
             "manual_control": view["manual_control"],
             "can_authorize_execution": False,
@@ -1667,4 +1830,25 @@ class DevflowService:
 
 def default_service() -> DevflowService:
     repository = os.environ.get("DEVFLOW_REPOSITORY", DEVFLOW_REPOSITORY).strip() or DEVFLOW_REPOSITORY
-    return DevflowService(GitHubReader.from_env(), devflow_repository=repository)
+    reader = GitHubReader.from_env()
+
+    def load_coordinator_state() -> Any:
+        # Reuse the accepted package's identity-bound GET path. Import lazily so
+        # unrelated Devflow readers remain usable if the optional MCP runtime
+        # dependencies have not been installed in a local checkout.
+        from execution_coordinator.github_state import GitHubStateStore
+        from execution_coordinator.query import get_state_result
+
+        store = GitHubStateStore(
+            token=reader._token,
+            repository=COORDINATOR_STATE_REPOSITORY,
+            issue_number=COORDINATOR_STATE_ISSUE,
+            api_base_url=reader._api_base,
+        )
+        return get_state_result(store)
+
+    return DevflowService(
+        reader,
+        devflow_repository=repository,
+        coordinator_state_loader=load_coordinator_state,
+    )
