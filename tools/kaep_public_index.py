@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.kaep_link_validation import safe_comment_link, safe_issue_link
+from tools.kaep_link_validation import (
+    owner_issue_url,
+    safe_comment_link,
+    safe_issue_link,
+)
 from tools.kaep_mailbox_codec import REASON_CODE as REASON_CODE_PATTERN
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -44,7 +48,9 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
                 or row["issue_number"] < 1
                 or type(row["source_comment_id"]) is not int
                 or row["source_comment_id"] < 1
-                or row["issue_url"] != f'https://github.com/{row["repository"]}/issues/{row["issue_number"]}'
+                or row["issue_url"] != owner_issue_url(
+                    row["repository"], row["issue_number"]
+                )
                 or not safe_issue_link(row["issue_url"])
                 or not safe_comment_link(row["source_url"])
                 or not str(row["source_url"]).startswith(row["issue_url"] + "#issuecomment-")):
@@ -91,3 +97,4 @@ def to_public_index(result: dict[str, Any]) -> dict[str, Any]:
     if type(out["observed_at"]) is not str or len(out["observed_at"]) > 64:
         raise ValueError("PUBLIC_INDEX_INVALID_TIMESTAMP")
     return out
+
