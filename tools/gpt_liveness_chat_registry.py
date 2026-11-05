@@ -28,7 +28,7 @@ BINDING_SCHEMA = "gpt.liveness.chat-binding.v0.1"
 MARKER = "<!-- gpt-liveness:chat-binding:v0.1 "
 END = " -->"
 CHAT_ID = re.compile(r"chat_[0-9a-f]{32}\Z")
-MAILBOX = re.compile(r"kinoko34077/[A-Za-z0-9_.-]+#[1-9][0-9]*\Z")
+MAILBOX = TASK_REF
 MAX_BODY_BYTES = 200_000
 
 
