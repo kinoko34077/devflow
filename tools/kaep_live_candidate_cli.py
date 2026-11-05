@@ -19,7 +19,12 @@ from typing import Any, Callable
 from tools.kaep_inbox_reader import (
     InvalidMessage, REPOSITORY, fetch_gh_pages,
 )
-from tools.kaep_link_validation import safe_comment_link, safe_issue_link
+from tools.kaep_link_validation import (
+    owner_comment_url,
+    owner_issue_url,
+    safe_comment_link,
+    safe_issue_link,
+)
 from tools.kaep_issue_search_view import build_search_list, fetch_issue
 from tools.kaep_mailbox_codec import MESSAGE_ID as MESSAGE_ID_PATTERN, RECIPIENTS, unique_pairs
 
@@ -113,8 +118,8 @@ def validate_index(index: dict[str, Any], *, now: datetime | None = None) -> dic
                 or type(row.get("message_id")) is not str
                 or not MESSAGE.fullmatch(row["message_id"])):
             _block("INVALID_PUBLIC_INDEX_ROW")
-        url = f"https://github.com/{repo}/issues/{issue}"
-        comment = f"{url}#issuecomment-{cid}"
+        url = owner_issue_url(repo, issue)
+        comment = owner_comment_url(repo, issue, cid)
         if (row.get("issue_url") != url or row.get("source_url") != comment
                 or not safe_issue_link(url)
                 or not safe_comment_link(comment)):
@@ -138,7 +143,7 @@ def read_live_candidate_cohort(
         _block("CANDIDATE_LIMIT")
     grouped: dict[str, dict[str, Any]] = {}
     for repo in index["repositories"]:
-        these = [{"html_url": f"https://github.com/{r}/issues/{i}"}
+        these = [{"html_url": owner_issue_url(r, i)}
                  for r, i in candidates if r == repo]
         grouped[repo] = {
             "items": these, "total_count": len(these),
@@ -245,3 +250,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
