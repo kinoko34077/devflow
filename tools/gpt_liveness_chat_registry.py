@@ -15,6 +15,7 @@ from typing import Any
 from tools.gpt_liveness_fleet_plan import parse_manifest, validate_snapshot
 from tools.gpt_liveness_ids import new_chat_id, new_session_id, new_turn_id
 from tools.gpt_liveness_pilot import answer, challenge, enrollment, utc
+from tools.kaep_repository_validation import TASK_REF
 from tools.kaep_mailbox_codec import (
     InvalidMessage,
     fail,

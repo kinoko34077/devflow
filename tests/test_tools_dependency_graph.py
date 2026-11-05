@@ -149,6 +149,13 @@ class ToolsDependencyGraphTests(unittest.TestCase):
         self.assertIs(codec.REPOSITORY, repository.REPOSITORY)
         self.assertIs(codec.TASK_REF, repository.TASK_REF)
 
+    def test_gpt_chat_mailbox_reuses_kaep_task_validation(self) -> None:
+        from tools import gpt_liveness_chat_registry as registry
+        from tools import kaep_repository_validation as repository
+
+        self.assertIn("kaep_repository_validation", self.graph["gpt_liveness_chat_registry"])
+        self.assertIs(registry.MAILBOX, repository.TASK_REF)
+
     def test_kaep_message_id_aliases_reuse_mailbox_codec(self) -> None:
         from tools import kaep_agent_api_projection as projection
         from tools import kaep_b5_b6_parity_cli as parity
