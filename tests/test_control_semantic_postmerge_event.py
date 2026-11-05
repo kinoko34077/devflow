@@ -245,6 +245,9 @@ class PostMergeEventTests(unittest.TestCase):
         self.assertIsNone(target._parse_closing_issue(
             "#726 and #727", target.REPOSITORY
         ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#726 and kinoko34077/devflow#727", target.REPOSITORY
+        ))
 
     def test_owner_outcome_ambiguity_and_absent_scope_fail_closed(self):
         e = event()

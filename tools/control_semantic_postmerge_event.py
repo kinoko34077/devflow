@@ -106,7 +106,8 @@ CLOSING_QUALIFIED = re.compile(
     r"(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})"
 )
 CLOSING_REFERENCE_IN_TAIL = re.compile(
-    r"(?<![A-Za-z0-9])(?:#[1-9][0-9]{0,8}(?![0-9])|"
+    r"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?#|#)"
+    r"[1-9][0-9]{0,8}(?![0-9])|"
     r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
     r"[1-9][0-9]{0,8})",
     re.IGNORECASE,
