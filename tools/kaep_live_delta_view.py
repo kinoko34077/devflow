@@ -15,7 +15,7 @@ import sys
 from typing import Any, Callable
 
 from tools import kaep_issue_search_view as search
-from tools.kaep_link_validation import API_ISSUE_URL
+from tools.kaep_link_validation import API_ISSUE_URL, owner_issue_url
 from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -161,7 +161,7 @@ def read_live_candidates(
             # Issue; canonical full-mailbox verification still gates trust.
             num = int(match.group(2))
             issues[num] = {
-                "html_url": f"https://github.com/{repo}/issues/{num}",
+                "html_url": owner_issue_url(repo, num),
             }
         source_results[repo] = {
             "items": list(issues.values()),
@@ -224,3 +224,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
