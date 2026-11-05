@@ -145,6 +145,12 @@ This standard applies **when authoring new Issues now**. The separate fleet-wide
 
 ### 4.0 Goal lineage at Issue authoring (devflow #761 / M1)
 
+**Standalone plan/roadmap Issues (M1 clarification for [devflow #761](https://github.com/kinoko34077/devflow/issues/761)):** When the primary deliverable is a multi-stage development plan or roadmap, include a concise purpose that:
+- links the durable originating request or parent specification where available, using a privacy-safe summary and distinguishing explicit source facts from inference;
+- states the concrete user-visible outcome or higher goal and how the proposed stages advance it; and
+- does not invent a motivation when the source does not establish one.
+A standalone plan that omits these elements is not ready to publish. Ordinary implementation Work Orders follow the remaining goal-lineage rules in this section and do not need a second purpose block. The existing item 3 exception for a genuinely trivial, low-risk one-PR change remains unchanged. This documentation rule does not alter machine TASK authority, execution readiness, or Human gates.
+
 **Why this exists:** an Issue that says only *what to implement* can lose the higher-order user outcome that justified the request. At Issue creation, for nontrivial changes, the **trusted authoring agent** reconstructs enough *why / user success / fixed conditions* from the current user request and live owning specifications to distinguish the intended result from a convenient substitute. **Do not invent the user's intent.**
 
 1. Preserve the originating request (brief, privacy-screened paraphrase and source reference), the closest **actionable** higher goal, the user-observable success condition, and any explicit/accepted fixed constraints. If one level of "why" does not change design, prioritization or acceptance, stop abstracting rather than produce broad mission statements.
