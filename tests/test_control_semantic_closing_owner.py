@@ -112,6 +112,57 @@ class ClosingIssueTests(TestCase):
             ("RECONCILIATION_REVIEW_REQUIRED", "CLOSING_ISSUE_WITHOUT_PR_LINK"),
         )
 
+    def test_fenced_code_examples_are_not_owner_or_closing_declarations(self):
+        fenced_only = (
+            "```markdown\n"
+            "- Owning-Issue: #726\n"
+            "- Closes #726\n"
+            "```\n"
+        )
+        result, paths = self.check(
+            pr_data=pr(fenced_only), issue_data=issue("open"),
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
+        )
+        self.assertEqual(paths, [
+            "repos/kinoko34077/devflow/issues/16",
+            "repos/kinoko34077/devflow/pulls/900",
+        ])
+
+        actual_owner_with_conflicting_example = (
+            "- Owning-Issue: #726\n\n"
+            "~~~~text\n"
+            "- Owning-Issue: #725\n"
+            "- Closes #725\n"
+            "~~~~\n"
+        )
+        result, _ = self.check(
+            pr_data=pr(actual_owner_with_conflicting_example),
+            issue_data=issue("open"),
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        )
+
+    def test_list_contained_fence_does_not_hide_following_owner(self):
+        body = (
+            "- ```text\n"
+            "  example command\n"
+            "  ```\n\n"
+            "- Owning-Issue: #726\n"
+        )
+        result, paths = self.check(
+            pr_data=pr(body), issue_data=issue("open"),
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        )
+        self.assertEqual(paths[-1], "repos/kinoko34077/devflow/issues/726")
+
     def test_fixes_and_resolves_github_keyword_forms(self):
         for declaration in (
             "Fixes #726",
