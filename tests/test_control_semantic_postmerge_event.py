@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -166,6 +167,105 @@ class PostMergeEventTests(unittest.TestCase):
             "repos/kinoko34077/devflow/issues/726",
         ])
         self.assertNotIn("body", result)
+
+    def test_github_closing_keyword_forms_resolve_the_closed_owner(self):
+        """GitHub's documented keyword forms retain the referenced Issue."""
+        merged_at = "2026-10-22T01:00:00Z"
+        owner = {
+            "number": 726, "state": "closed",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/726",
+        }
+        declarations = [
+            f"- {keyword} #726 after the merge"
+            for keyword in (
+                "close", "closes", "closed",
+                "fix", "fixes", "fixed",
+                "resolve", "resolves", "resolved",
+            )
+        ]
+        # This is the exact line shape whose post-merge close was observed
+        # after PR #965; the issue reference has a possessive suffix.
+        declarations.append("Fix #726's post-merge reader")
+        declarations.extend((
+            "- Resolves kinoko34077/devflow#726 for this change",
+            "- Closed https://github.com/kinoko34077/devflow/issues/726 after merge",
+            "- CLOSES: #726 after merge",
+            "FIXED: #726 after merge",
+        ))
+
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                pr = {
+                    "number": 777,
+                    "html_url": "https://github.com/kinoko34077/devflow/pull/777",
+                    "state": "closed", "merged": True,
+                    "merged_at": merged_at,
+                    "base": {
+                        "repo": {
+                            "full_name": target.REPOSITORY,
+                            "default_branch": "main",
+                        },
+                        "ref": "main",
+                    },
+                    "body": declaration,
+                }
+
+                def lookup(path):
+                    if path == "repos/kinoko34077/devflow/pulls/777":
+                        return pr, NOW
+                    if path == "repos/kinoko34077/devflow/issues/726":
+                        return owner, NOW
+                    raise AssertionError("unexpected native GET path: " + path)
+
+                with patch.object(target.pilot, "_read_json", side_effect=lookup):
+                    result = target._owner_reconciliation_candidate(
+                        "#726 is the current owner and has no PR link.",
+                        777,
+                        merged_at,
+                    )
+
+                self.assertEqual(
+                    result["status"], "RECONCILIATION_REVIEW_REQUIRED"
+                )
+                self.assertEqual(
+                    result["reason"], "CLOSING_ISSUE_WITHOUT_PR_LINK"
+                )
+                self.assertEqual(
+                    result["owner_issue_url"],
+                    "https://github.com/kinoko34077/devflow/issues/726",
+                )
+
+    def test_closing_reference_remains_bounded_and_ambiguous_fails_closed(self):
+        self.assertIsNone(target.CLOSING_LINE.search("Fixes#726 after merge"))
+        self.assertIsNone(target.CLOSING_LINE.search("Closes:#726 after merge"))
+        self.assertIsNone(target.CLOSING_LINE.search(
+            "The fix #726 is described below."
+        ))
+        self.assertIsNone(target.CLOSING_LINE.search(
+            "- Fixes the post-merge handler"
+        ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#7260suffix", target.REPOSITORY
+        ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#726 and #727", target.REPOSITORY
+        ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#726 and kinoko34077/devflow#727", target.REPOSITORY
+        ))
+        self.assertIsNone(target._parse_closing_issue(
+            "#726 and https://github.com/kinoko34077/devflow/issues/727",
+            target.REPOSITORY,
+        ))
+
+    def test_closing_reference_tail_scan_is_bounded_for_long_description(self):
+        value = "#726 " + "a-" * 8_000
+        started = time.perf_counter()
+        parsed = target._parse_closing_issue(value, target.REPOSITORY)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(parsed, (target.REPOSITORY, 726))
+        self.assertLess(elapsed, 1.0, f"tail scan took {elapsed:.3f}s")
 
     def test_owner_outcome_ambiguity_and_absent_scope_fail_closed(self):
         e = event()

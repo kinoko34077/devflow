@@ -122,21 +122,33 @@ the post-merge workflow runs.
 
 The already accepted `control_semantic_postmerge_event.py` reuses the
 existing `_parse_owner_issue` resolver and authenticated Issue GET
-for a *single populated* template Closes/Fixes/Resolves declaration
-when `Owning-Issue` is empty. This addresses a source-level false
-negative where a normally closing PR had previously returned
-`NOT_APPLICABLE`. A verified related Issue, whether OPEN or already
-CLOSED due to the merge, and an exact current corresponding Control
-owner mention yield **only** `RECONCILIATION_REVIEW_REQUIRED` (exit 4),
-not an asserted factual mismatch, automatic Issue Close or Control edit.
+for a *single populated* closing declaration when `Owning-Issue` is
+empty. It recognizes all nine documented GitHub keyword forms:
+`close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, and
+`resolve`/`resolves`/`resolved`. The keyword must begin its line (an
+optional `- ` is accepted), followed by whitespace and one supported
+Issue reference; the documented optional colon form is `Closes: #10`.
+Keyword case is ignored. This reader deliberately does not parse
+mid-sentence declarations, `*` or numbered list items, or commit-message
+references, even where native GitHub may recognize them.
+Trailing description text after that reference is allowed, including a
+possessive suffix such as `Fix #726's post-merge reader`; a second Issue
+reference remains ambiguous. This addresses source-level false negatives
+where native GitHub closes an Issue but the bounded reader returned
+`NOT_APPLICABLE` or `UNKNOWN`. See [GitHub's closing-keyword syntax](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue).
+A verified related Issue, whether OPEN or already CLOSED due to the
+merge, and an exact current corresponding Control owner mention yield
+**only** `RECONCILIATION_REVIEW_REQUIRED` (exit 4), not an asserted
+factual mismatch, automatic Issue Close or Control edit.
 
 The blank `- Closes #` placeholder remains no evidence. Invalid,
 ambiguous, contradictory, foreign-repo or non-default-branch closing
 declarations return `UNKNOWN`. One populated owner field continues
 to be honored; if both populated owner and closing references disagree,
 treat that ambiguity as UNKNOWN rather than silently choosing one.
-This is not generic natural-language Issue inference and does not
-infer product acceptance, fix 57 repository workflow coverage, or
+This remains a line-anchored, single-reference parser, not generic
+natural-language Issue inference. It does not infer product acceptance,
+fix 57 repository workflow coverage, or
 automatically update a Control. Unit regressions prove the limited
 parser contract. **Native merged PR event live proof remains a separate
 acceptance gate**; never close a real owner Issue merely for a test.

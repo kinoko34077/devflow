@@ -92,17 +92,28 @@ OWNER_VALUE = re.compile(
 
 
 # GitHub's template has a separate optional closing-keyword relation.
-# Parse anchored declaration lines only, never arbitrary narrative mentions.
+# A closing keyword may start a line whose issue reference has trailing
+# description text; never infer an owner from an unanchored prose mention.
 CLOSING_LINE = re.compile(
     # An ordinary bullet such as "- Fixes the post-merge handler" is NOT
     # an Issue closing declaration. Require an Issue-reference-shaped value;
     # the subsequent owner parser validates its exact repository and number.
-    r"^(?:- )?(?:closes|fixes|resolves)[ \t]*:?[ \t]*"
+    r"^(?:- )?(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)"
+    r"(?:[ \t]+|:[ \t]+)"
     r"((?:#|https?://|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#)[^\r\n]*)\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
 CLOSING_QUALIFIED = re.compile(
-    r"^(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})$"
+    r"(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})"
+)
+CLOSING_REFERENCE_IN_TAIL = re.compile(
+    # Qualified owner/repo#N references contain the same #N token; matching
+    # from that fixed marker avoids retrying an unbounded repo-name prefix at
+    # every character in long descriptions.
+    r"#[1-9][0-9]{0,8}(?![0-9])|"
+    r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
+    r"[1-9][0-9]{0,8}",
+    re.IGNORECASE,
 )
 FENCED_CODE_START = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 FENCED_CODE_LIST_START = re.compile(
@@ -182,11 +193,34 @@ def _without_fenced_code_blocks(text: str) -> str:
 
 def _parse_closing_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
     """Interpret GitHub closing syntax through the *existing* owner parser."""
-    qualified = CLOSING_QUALIFIED.fullmatch(value)
-    if qualified is not None:
-        owner, number = qualified.groups()
-        value = f"https://github.com/{owner}/issues/{number}"
-    return _parse_owner_issue(value, caller_repository)
+    value = value.strip()
+
+    def resolve(reference: str) -> tuple[str, int] | None:
+        qualified = CLOSING_QUALIFIED.fullmatch(reference)
+        if qualified is not None:
+            owner, number = qualified.groups()
+            reference = f"https://github.com/{owner}/issues/{number}"
+        return _parse_owner_issue(reference, caller_repository)
+
+    exact = resolve(value)
+    if exact is not None:
+        return exact
+
+    # GitHub accepts a closing keyword followed by an Issue reference even
+    # when a description immediately follows it (for example, "Fix #726's
+    # post-merge reader"). Parse only that leading reference. A second Issue
+    # reference keeps the declaration ambiguous and therefore UNKNOWN.
+    reference = OWNER_VALUE.match(value)
+    if reference is None:
+        reference = CLOSING_QUALIFIED.match(value)
+    if reference is None:
+        return None
+    suffix = value[reference.end():]
+    if suffix and suffix[0] not in " \t'’.,;:!)]":
+        return None
+    if CLOSING_REFERENCE_IN_TAIL.search(suffix):
+        return None
+    return resolve(value[:reference.end()])
 
 
 
