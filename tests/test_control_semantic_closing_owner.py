@@ -147,6 +147,22 @@ class ClosingIssueTests(TestCase):
             ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
         )
 
+    def test_list_contained_fence_does_not_hide_following_owner(self):
+        body = (
+            "- ```text\n"
+            "  example command\n"
+            "  ```\n\n"
+            "- Owning-Issue: #726\n"
+        )
+        result, paths = self.check(
+            pr_data=pr(body), issue_data=issue("open"),
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        )
+        self.assertEqual(paths[-1], "repos/kinoko34077/devflow/issues/726")
+
     def test_fixes_and_resolves_github_keyword_forms(self):
         for declaration in (
             "Fixes #726",

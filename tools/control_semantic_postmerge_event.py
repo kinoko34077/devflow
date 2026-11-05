@@ -105,6 +105,10 @@ CLOSING_QUALIFIED = re.compile(
     r"^(kinoko34077/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})$"
 )
 FENCED_CODE_START = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+FENCED_CODE_LIST_START = re.compile(
+    r"^(?P<indent> {0,3})(?P<marker>[-+*]|[0-9]{1,9}[.)])"
+    r"(?P<gap> {1,4})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
+)
 
 
 def _without_fenced_code_blocks(text: str) -> str:
@@ -117,6 +121,7 @@ def _without_fenced_code_blocks(text: str) -> str:
     result: list[str] = []
     fence_char: str | None = None
     fence_length = 0
+    fence_indent = 0
 
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
@@ -127,23 +132,42 @@ def _without_fenced_code_blocks(text: str) -> str:
             else ""
         )
         if fence_char is not None:
-            closing = re.fullmatch(
-                rf" {{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
-                content,
-            )
+            leading_spaces = len(content) - len(content.lstrip(" "))
+            closing = None
+            if fence_indent <= leading_spaces <= fence_indent + 3:
+                closing = re.fullmatch(
+                    rf"{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
+                    content[leading_spaces:],
+                )
             if closing is not None:
                 fence_char = None
                 fence_length = 0
+                fence_indent = 0
             result.append(ending)
             continue
 
+        list_opening = FENCED_CODE_LIST_START.fullmatch(content)
         opening = FENCED_CODE_START.fullmatch(content)
-        if opening is not None:
-            fence, info = opening.groups()
+        if list_opening is not None or opening is not None:
+            if list_opening is not None:
+                indent, marker, gap, fence, info = list_opening.group(
+                    "indent", "marker", "gap", "fence", "info"
+                )
+                # A list item contributes its marker and following spaces to
+                # the indentation required by continuation lines, including
+                # the closing fence.
+                fence_indent = len(indent) + len(marker) + len(gap)
+            else:
+                assert opening is not None
+                fence, info = opening.groups()
+                # Outside a list container, CommonMark permits the closing
+                # fence to use any indentation from zero through three.
+                fence_indent = 0
             # CommonMark does not permit backticks in a backtick fence's
             # info string; treat that line as prose rather than opening a
             # block that could hide later declarations.
             if fence[0] == "`" and "`" in info:
+                fence_indent = 0
                 result.append(line)
                 continue
             fence_char = fence[0]
