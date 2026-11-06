@@ -120,14 +120,15 @@ FENCED_CODE_LIST_START = re.compile(
     r"^(?P<indent> {0,3})(?P<marker>[-+*]|[0-9]{1,9}[.)])"
     r"(?P<gap> {1,4})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
 )
+HTML_COMMENT = re.compile(r"<!--.*?(?:-->|$)", re.DOTALL)
 
 
 def _without_fenced_code_blocks(text: str) -> str:
-    """Keep prose while blanking Markdown fenced code blocks.
+    """Keep rendered prose while blanking code blocks and HTML comments.
 
     Owner and closing-keyword declarations are metadata only when they are
-    actual PR-body fields. Examples inside fenced code must not create an
-    ownership or GitHub closing-issue relation.
+    actual PR-body fields. Examples inside fenced code or HTML comments must
+    not create an ownership or GitHub closing-issue relation.
     """
     result: list[str] = []
     fence_char: str | None = None
@@ -188,7 +189,7 @@ def _without_fenced_code_blocks(text: str) -> str:
 
         result.append(line)
 
-    return "".join(result)
+    return HTML_COMMENT.sub("", "".join(result))
 
 
 def _parse_closing_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
@@ -236,6 +237,72 @@ def _parse_owner_issue(value: str, caller_repository: str) -> tuple[str, int] | 
     if absolute not in (caller_repository, REPOSITORY):
         return None
     return (absolute, int(marker.group("absolute_number")))
+
+
+def validate_pr_owner_metadata_event(
+    event: Any, repository_env: str,
+) -> dict[str, str]:
+    """Require one canonical PR-to-Issue relation using the shared parser."""
+    if type(event) is not dict or type(repository_env) is not str:
+        return _result("INVALID", "PR_EVENT_IDENTITY_NOT_PROVEN")
+    repository = event.get("repository")
+    pr = event.get("pull_request")
+    if (
+        type(repository) is not dict
+        or repository.get("full_name") != repository_env
+        or type(pr) is not dict
+    ):
+        return _result("INVALID", "PULL_REQUEST_REPOSITORY_MISMATCH")
+    base = pr.get("base")
+    if type(base) is not dict:
+        return _result("INVALID", "PULL_REQUEST_BASE_NOT_PROVEN")
+
+    body = pr.get("body")
+    if body is None:
+        body = ""
+    if type(body) is not str:
+        return _result("INVALID", "INVALID_PR_OWNER_METADATA")
+    declaration_text = _without_fenced_code_blocks(body)
+    declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
+    filled = [part for part in declarations if part]
+    if len(filled) > 1:
+        return _result("INVALID", "AMBIGUOUS_OWNER_MARKER")
+
+    closings = [part.strip() for part in CLOSING_LINE.findall(declaration_text)]
+    valid_closings = [part for part in closings if part not in ("", "#")]
+    if len(valid_closings) > 1:
+        return _result("INVALID", "AMBIGUOUS_CLOSING_MARKER")
+
+    closing_owner = None
+    if valid_closings:
+        default_branch = repository.get("default_branch")
+        if (
+            type(default_branch) is not str or not default_branch
+            or type(base.get("ref")) is not str
+            or base["ref"] != default_branch
+        ):
+            return _result("INVALID", "CLOSING_RELATION_BASE_NOT_PROVEN")
+        closing_owner = _parse_closing_issue(valid_closings[0], repository_env)
+        if closing_owner is None:
+            return _result("INVALID", "UNCANONICAL_CLOSING_MARKER")
+
+    owner = None
+    if filled:
+        owner = _parse_owner_issue(filled[0], repository_env)
+        if owner is None:
+            return _result("INVALID", "UNCANONICAL_OWNER_MARKER")
+
+    if owner is None and closing_owner is None:
+        return _result("INVALID", "OWNER_RELATION_REQUIRED")
+    if owner is not None and closing_owner is not None:
+        if owner != closing_owner:
+            return _result(
+                "INVALID", "CONTRADICTORY_OWNER_AND_CLOSING_MARKER",
+            )
+        return _result("VALID", "OWNER_AND_CLOSING_DECLARATION_AGREE")
+    if owner is not None:
+        return _result("VALID", "OWNER_DECLARATION_PRESENT")
+    return _result("VALID", "CLOSING_DECLARATION_PRESENT")
 
 
 def _owner_reconciliation_candidate(
@@ -479,15 +546,32 @@ def check_owner_transition_once(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Devflow read-only merged-PR Control check")
+    parser = argparse.ArgumentParser(
+        description="Devflow PR owner metadata gate and read-only merged-PR Control check"
+    )
     parser.add_argument("--event-path")
+    parser.add_argument("--validate-pr-owner-metadata", action="store_true")
     parser.add_argument("--owner-issue", type=int)
     parser.add_argument("--owner-repository", default="kinoko34077/dev_agent")
     parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("--control", type=int, default=CONTROL_NUMBER)
     args = parser.parse_args(argv)
+    if args.owner_issue is not None and args.validate_pr_owner_metadata:
+        parser.error("--owner-issue and --validate-pr-owner-metadata are exclusive")
     if args.owner_issue is not None:
         result = check_owner_transition_once(args.owner_repository, args.owner_issue, args.control)
+    elif args.validate_pr_owner_metadata:
+        if not args.event_path:
+            result = _result("INVALID", "EVENT_PATH_REQUIRED")
+        else:
+            try:
+                if Path(args.event_path).stat().st_size > EVENT_MAX_BYTES:
+                    raise ValueError("event too large")
+                event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
+            except (OSError, ValueError, UnicodeError):
+                result = _result("INVALID", "EVENT_UNAVAILABLE_OR_INVALID")
+            else:
+                result = validate_pr_owner_metadata_event(event, args.repository)
     elif not args.event_path:
         result = _result("UNKNOWN", "EVENT_PATH_REQUIRED")
     else:
@@ -500,6 +584,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = check_native_postmerge_once(event, args.repository, args.control)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if args.validate_pr_owner_metadata:
+        return 0 if result["status"] == "VALID" else 1
+    if result["status"] == "VALID":
+        return 0
+    if result["status"] == "INVALID":
+        return 1
     if result["status"] in ("ALIGNED", "NOT_APPLICABLE"):
         return 0
     if result["status"] == "POTENTIAL_MISMATCH":
