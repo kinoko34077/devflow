@@ -36,6 +36,7 @@ def env(**overrides):
         "SOURCE_HEAD": HEAD,
         "GITHUB_REPOSITORY": pilot.REPO,
         "GITHUB_ACTOR": "kinoko34077",
+        "GITHUB_ACTOR_ID": "79015263",
         "GITHUB_TRIGGERING_ACTOR": "kinoko34077",
         "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_REF": "refs/heads/main",
@@ -59,7 +60,8 @@ class FakeApi:
         self.run = {
             "id": RUN_ID, "run_attempt": 1, "event": "workflow_dispatch",
             "status": "in_progress", "head_sha": WORKFLOW_SHA, "head_branch": "main",
-            "path": pilot.CALLER_PATH, "actor": {"login": "kinoko34077"},
+            "path": pilot.CALLER_PATH,
+            "actor": {"login": "kinoko34077", "id": 79015263},
             "repository": {"full_name": pilot.REPO}, "workflow_id": 77,
         }
         self.run.update(run_overrides or {})

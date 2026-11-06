@@ -21,7 +21,12 @@ from tools.maintenance_audit import (  # noqa: E402
     AuditContractError,
     classify_repository,
 )
+from tools.github_issue_trust import is_trusted_issue_author  # noqa: E402
 from tools.maintenance_triage import triage  # noqa: E402
+from tools.operation_issue_metadata_preflight import (  # noqa: E402
+    MetadataPreflightRejected,
+    snapshot_issue,
+)
 from tools.maintenance_sync_check import (  # noqa: E402
     SyncCheckContractError,
     build_sync_check_plan,
@@ -48,6 +53,7 @@ from tools.maintenance_github import (  # noqa: E402
     collect_repository,
     discover_controls,
 )
+from tools.maintenance_completion_v2 import prepare_v2_completion  # noqa: E402
 from tools.maintenance_ledger import (  # noqa: E402
     ActiveRun,
     complete_run,
@@ -336,14 +342,10 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         control_repo, number = _split_issue_ref(control_ref)
         issue = self.get_issue(control_repo, number)
         expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
-        association = str(
-            issue.get("author_association") or ""
-        ).upper()
         if (
             str(issue.get("state") or "").lower() != "open"
             or issue.get("title") != expected_title
-            or association
-            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+            or not is_trusted_issue_author(issue)
         ):
             raise SyncCheckContractError(
                 "Control is not the trusted open canonical Repository Control"
@@ -389,10 +391,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
                 "owner repository does not match audit repository"
             )
         issue = self.get_issue(owner_repo, number)
-        association = str(
-            issue.get("author_association") or ""
-        ).upper()
-        if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        if not is_trusted_issue_author(issue):
             raise SyncCheckContractError(
                 "owning Issue is not trusted"
             )
@@ -426,11 +425,50 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
         number: int,
         expected_body_sha256: str,
         body: str,
+        *,
+        expected_control_repository: str | None = None,
     ) -> bool:
+        # Existing authenticated native GET is the last observation before PATCH.
+        # A #487 snapshot is a freshness/target *check*, never writer permission,
+        # a lock, or an atomic expected-old-body condition on GitHub Issue PATCH.
         live = self.get_issue(repository, number)
-        live_body = str(live.get("body") or "")
+        live_body = live.get("body")
+        if not isinstance(live_body, str):
+            return False
+        if expected_control_repository is not None:
+            if repository != DEVFLOW_REPOSITORY:
+                return False
+            try:
+                observation = snapshot_issue(
+                    {
+                        "repository": repository,
+                        "number": live.get("number"),
+                        "updated_at": live.get("updated_at"),
+                        "state": live.get("state"),
+                        "body": live_body,
+                    },
+                    repository=repository,
+                    number=number,
+                )
+            except MetadataPreflightRejected:
+                return False
+            expected_title = (
+                "[REPO] " + expected_control_repository.rsplit("/", 1)[-1]
+            )
+            if (
+                live.get("title") != expected_title
+                or not is_trusted_issue_author(live)
+                or _scalar_section(_sections(observation.body), "Repository")
+                != expected_control_repository
+                or not isinstance(body, str)
+                or _scalar_section(_sections(body), "Repository")
+                != expected_control_repository
+            ):
+                return False
         if canonical_body_sha256(live_body) != expected_body_sha256:
             return False
+        if body == live_body:
+            return True  # Explicit read-only NO_OP; never emit a redundant PATCH.
 
         payload = json.dumps({"body": body}).encode("utf-8")
         request = urllib.request.Request(
@@ -476,6 +514,7 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             number,
             expected_body_sha256,
             body,
+            expected_control_repository=repository,
         )
 
     def post_issue_comment(
@@ -660,14 +699,7 @@ def _owner_supply_snapshot(
         raise MaintenanceSupplyError(
             "owning Issue body must be non-empty"
         )
-    association = str(
-        issue.get("author_association") or ""
-    ).upper()
-    trusted = association in {
-        "OWNER",
-        "MEMBER",
-        "COLLABORATOR",
-    }
+    trusted = is_trusted_issue_author(issue)
 
     work_order_ref = admission.get("work_order_ref")
     if work_order_ref is not None:
@@ -682,14 +714,10 @@ def _owner_supply_snapshot(
             work_order_repo,
             work_order_number,
         )
-        work_order_association = str(
-            work_order.get("author_association") or ""
-        ).upper()
         if (
             str(work_order.get("state") or "").lower() != "open"
             or "pull_request" in work_order
-            or work_order_association
-            not in {"OWNER", "MEMBER", "COLLABORATOR"}
+            or not is_trusted_issue_author(work_order)
             or not str(work_order.get("title") or "")
             .strip()
             .startswith("[WORK ORDER]")
@@ -742,15 +770,11 @@ def _control_supply_snapshot(
     body = str(issue.get("body") or "")
     sections = _sections(body)
     managed = _scalar_section(sections, "Repository")
-    association = str(
-        issue.get("author_association") or ""
-    ).upper()
     if (
         managed != repository
         or str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != expected_title
-        or association
-        not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
     ):
         raise MaintenanceSupplyError(
             "Control is not the trusted open canonical Repository Control"
@@ -775,8 +799,7 @@ def _control_supply_snapshot(
             _scalar_section(sections, "Repository State")
             or ""
         ),
-        "trusted": association
-        in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "trusted": is_trusted_issue_author(issue),
         "human_gate": (
             "[USER_DECISION]" in next_action
             or "[HUMAN_GATE]" in next_action
@@ -1008,14 +1031,13 @@ def _catalog_ledger_snapshot(
     body: str,
     active: ActiveRun,
 ) -> dict[str, object]:
-    association = str(issue.get("author_association") or "").upper()
     return {
         "task_ref": ledger_ref,
         "repository": repository,
         "body_sha256": canonical_body_sha256(body),
         "state": str(issue.get("state") or "UNKNOWN").upper(),
         "work_status": ledger_work_status(body),
-        "trusted": association in {"OWNER", "MEMBER", "COLLABORATOR"},
+        "trusted": is_trusted_issue_author(issue),
         "is_pull_request": "pull_request" in issue,
         "entry_ref": (
             "https://github.com/"
@@ -1052,11 +1074,10 @@ def execute_catalog_maintenance_publication(
         )
 
     issue = transport.get_issue(ledger_repo, ledger_number)
-    association = str(issue.get("author_association") or "").upper()
     if (
         str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != "[MAINTENANCE] Audit Ledger"
-        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
         or "pull_request" in issue
     ):
         raise MaintenanceSupplyError(
@@ -1381,7 +1402,10 @@ def execute_maintenance_completion(
     result: dict[str, object],
     attempt_id: str,
     apply: bool,
+    record_format: str = "v1",
 ) -> dict[str, object]:
+    if record_format not in ("v1", "v2"):
+        raise MaintenanceSupplyError("unknown maintenance record format")
     ledger_repo, ledger_number = _split_issue_ref(ledger_ref)
     if ledger_repo != repository:
         raise MaintenanceSupplyError(
@@ -1389,11 +1413,10 @@ def execute_maintenance_completion(
         )
 
     issue = transport.get_issue(ledger_repo, ledger_number)
-    association = str(issue.get("author_association") or "").upper()
     if (
         str(issue.get("state") or "").lower() != "open"
         or issue.get("title") != "[MAINTENANCE] Audit Ledger"
-        or association not in {"OWNER", "MEMBER", "COLLABORATOR"}
+        or not is_trusted_issue_author(issue)
         or "pull_request" in issue
     ):
         raise MaintenanceSupplyError(
@@ -1438,6 +1461,16 @@ def execute_maintenance_completion(
         active,
         result,
     )
+    # v2 is opt-in only. It requires a fresh GitHub source read and exact
+    # code/catalog fingerprint, never inferred from the active-run prose.
+    # Once an immutable comment is durable, retries MUST only reconcile
+    # the Ledger/Control, not create or mutate a new completion record.
+    completion_comment = None
+    if existing is None and record_format == "v2":
+        completion_comment = prepare_v2_completion(
+            transport, active, record, completion_attempt_id=attempt_id
+        )
+
     if record.run_id != active.run_id:
         raise MaintenanceSupplyError(
             "completion record does not match active run_id"
@@ -1485,12 +1518,24 @@ def execute_maintenance_completion(
         if not transport.post_issue_comment(
             ledger_repo,
             ledger_number,
-            render_run_comment(record),
+            completion_comment if completion_comment is not None else render_run_comment(record),
         ):
             raise MaintenanceSupplyError(
                 "maintenance completion comment was not confirmed"
             )
         payload["applied"] = True
+        if record_format == "v2":
+            # A verified REST comment acknowledgement must be backed by the
+            # real Ledger readback before clearing the active run.
+            confirmed = [
+                row for row in collect_maintenance_history(
+                    transport, ledger_repo, ledger_number
+                ) if row.run_id == run_id
+            ]
+            if len(confirmed) != 1 or confirmed[0] != record:
+                payload["reconciliation_required"] = True
+                payload["reason_code"] = "V2_COMMENT_READBACK_UNCONFIRMED"
+                return payload
     else:
         payload["applied"] = True
 
@@ -1621,6 +1666,7 @@ def _complete_maintenance(args: argparse.Namespace) -> int:
     }
     payload = execute_maintenance_completion(
         transport,
+        record_format=args.record_format,
         repository=args.repository,
         control_ref=control_ref,
         ledger_ref=f"{args.repository}#{ledger['number']}",
@@ -1824,6 +1870,10 @@ def _parser() -> argparse.ArgumentParser:
     complete_maintenance = sub.add_parser("complete-maintenance")
     complete_maintenance.add_argument("--repository", required=True)
     complete_maintenance.add_argument("--control", required=True, type=int)
+    complete_maintenance.add_argument(
+        "--record-format", choices=("v1", "v2"), default="v1",
+        help="v2 requires exact current source/catalog identity; workflow default remains v1",
+    )
     complete_maintenance.add_argument("--run-id", required=True)
     complete_maintenance.add_argument("--lens", required=True)
     complete_maintenance.add_argument(

@@ -23,7 +23,8 @@ def args():
     policy["branch_prefix"] = "artifact/devflow384/"
     runner = {
         "repository": REPO,
-        "actor": "kinoko34077", "triggering_actor": "kinoko34077",
+        "actor": "kinoko34077", "actor_id": "79015263",
+        "triggering_actor": "kinoko34077",
         "event": "workflow_dispatch",
         "ref": "refs/heads/main",
         "workflow_ref": f"{REPO}/{PATH}@refs/heads/main",
@@ -39,7 +40,7 @@ def args():
         "head_sha": SHA,
         "head_branch": "main",
         "path": PATH,
-        "actor": {"login": "kinoko34077"},
+        "actor": {"id": 79015263, "login": "kinoko34077"},
         "repository": {"full_name": REPO},
         "workflow_id": 998,
     }

@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
+    from .github_issue_trust import is_trusted_issue_author
+except ImportError:  # direct module execution
+    from github_issue_trust import is_trusted_issue_author
+
+try:
     from .github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
 except ImportError:  # direct script execution
     from github_api_http_diagnostics import MAX_ERROR_BODY_BYTES, summarize_github_http_error
@@ -114,6 +119,7 @@ class BootstrapContext:
     request_issue_number: int
     request_title: str
     author_association: str
+    author: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -308,6 +314,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
 
 
 def is_trusted_association(value: str) -> bool:
+    """Legacy metadata helper; association is not an authorization grant."""
     return value in TRUSTED_ASSOCIATIONS
 
 
@@ -518,7 +525,7 @@ class BootstrapExecutor:
 
     def execute(self, request: BootstrapRequest, context: BootstrapContext) -> BootstrapResult:
         resources: list[str] = []
-        if not is_trusted_association(context.author_association):
+        if not is_trusted_issue_author({"user": context.author}):
             self._raise_failure(
                 context,
                 "VALIDATION",
@@ -788,7 +795,11 @@ class BootstrapExecutor:
                     f"Accepted initial head is `{head_sha}`. No implementation beyond the requested bootstrap seed is implied by this Control.\n\n"
                     f"{render_control_provenance(context, full_name)}\n\n"
                     f"Cross-repository routing summary only. Bootstrap request: {context.request_url}. "
-                    f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`."
+                    f"Repository kind recorded by the request: `{request.kind}`. Detailed technical truth belongs in `{full_name}`. "
+                    "M3 P0/P1 dual-read: retain Active Work and Next Action as manual fallback for local-work and Human/policy/cross-repository decisions; owning repository Issues/PRs remain canonical. "
+                    "Machine-derived TASK records are centrally projected, not a second task ledger or execution authority. Do not manually edit machine-owned projection markers. "
+                    "Missing, stale, untrusted, incomplete or truncated machine source is unknown, not an empty task queue. "
+                    "M3.1/M3.3 manual-authority retirement requires separate per-repository/per-consumer admission."
                 )
                 control = self._call(
                     context,
@@ -912,8 +923,8 @@ class GitHubApi:
         if owner != ALLOWED_OWNER:
             raise BootstrapError(f"unsupported repository owner: {owner}")
         identity = self._request("GET", "/user")
-        login = identity.get("login") if isinstance(identity, dict) else None
-        if not isinstance(login, str) or login.lower() != owner.lower():
+        principal_id = identity.get("id") if isinstance(identity, dict) else None
+        if principal_id != 79015263:
             raise BootstrapError("repository bootstrap credential owner does not match requested owner")
         result = self._request(
             "POST",

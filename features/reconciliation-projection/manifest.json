@@ -1,0 +1,72 @@
+{
+  "schema": "feature-document-route.v1",
+  "id": "reconciliation-projection",
+  "authority": "index_only",
+  "source_repository": "kinoko34077/devflow",
+  "source_ref": "b18606558e5292b93f9efb115b3d776fce9b0a4a",
+  "entry": "features/reconciliation-projection/README.md",
+  "routes": {
+    "assessment": {
+      "when": "a durable Issue, PR, review, session, or external dependency needs deterministic reconciliation",
+      "documents": [
+        "docs/spec/DEVELOPMENT_RECONCILIATION.md"
+      ],
+      "code": [
+        "tools/development_reconciler.py"
+      ],
+      "tests": [
+        "tests/test_development_reconciler.py"
+      ]
+    },
+    "publication": {
+      "when": "a validated reconciliation result needs a bounded work-demand projection",
+      "documents": [
+        "docs/spec/DEVELOPMENT_RECONCILIATION_PUBLICATION.md",
+        "docs/spec/DEVELOPMENT_RECONCILIATION.md"
+      ],
+      "code": [
+        "tools/reconciliation_publication.py"
+      ],
+      "tests": [
+        "tests/test_reconciliation_publication.py",
+        "tests/test_reconciliation_publication_validation.py",
+        "tests/test_reconciliation_publication_projection.py"
+      ]
+    },
+    "projection": {
+      "when": "repository-local work visibility or cross-repository projection state needs inspection",
+      "documents": [
+        "docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md",
+        "docs/operations/REPOSITORY_PROJECTION_M3_MIGRATION.md"
+      ],
+      "code": [
+        "tools/repository_projection.py",
+        "tools/repository_projection_cache.py",
+        "tools/repository_projection_cache_producer.py",
+        "tools/projection_fleet_health.py",
+        "tools/projection_schedule_probe.py"
+      ],
+      "tests": [
+        "tests/test_repository_projection.py",
+        "tests/test_repository_projection_cache.py",
+        "tests/test_repository_projection_cache_producer.py",
+        "tests/test_repository_projection_shadow.py",
+        "tests/test_projection_fleet_health.py",
+        "tests/test_projection_schedule_probe.py"
+      ]
+    }
+  },
+  "live_authority": [
+    "kinoko34077/devflow#156",
+    "kinoko34077/devflow#159",
+    "kinoko34077/devflow#325",
+    "kinoko34077/devflow#326",
+    "kinoko34077/devflow#452",
+    "kinoko34077/devflow#477"
+  ],
+  "notes": [
+    "Resolve every path relative to this source repository at the current revision.",
+    "This route is navigation metadata only; durable task and runtime state remain at the existing owners.",
+    "Current Issue, Control, PR, review, CI, and runtime state must be checked live."
+  ]
+}

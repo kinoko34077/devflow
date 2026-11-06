@@ -130,6 +130,225 @@ class RepositoryProjectionCacheSchemaTests(unittest.TestCase):
         )
         self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
 
+    def test_all_state_preview_preserves_review_blocked_and_zero_authority(self):
+        live = live_projection(machine_task_count=2, coverage_complete=True)
+        live["task_records"] = [
+            {
+                "issue_number": number, "title": f"Task {number}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "FEATURE", "work_status": status,
+                "attention_disposition": None,
+            }
+            for number, status in ((1, "AWAITING_REVIEW"), (2, "BLOCKED"))
+        ]
+        payload = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(payload["all_state_tasks"]["status"], "COMPLETE")
+        self.assertEqual(payload["all_state_tasks"]["total"], 2)
+        self.assertEqual(
+            [item["work_status"] for item in payload["all_state_tasks"]["records"]],
+            ["AWAITING_REVIEW", "BLOCKED"],
+        )
+        self.assertEqual(payload["tasks"]["ready"], [])
+        self.assertEqual(payload["tasks"]["implementing"], [])
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
+        cache._validate_cached_payload(payload, REPOSITORY)
+
+    def test_isolated_m3_authority_switch_and_rollback(self):
+        live = live_projection(machine_task_count=2, coverage_complete=True)
+        live["task_records"] = [
+            {
+                "issue_number": number, "title": f"Task {number}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "FEATURE", "work_status": status,
+                "attention_disposition": None,
+            }
+            for number, status in ((1, "AWAITING_REVIEW"), (2, "BLOCKED"))
+        ]
+        payload = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        manual = ("manual issue #99",)
+        params = dict(now=GENERATED_AT, manual_active_work=manual,
+                      manual_next_action="Human approval required")
+        exercise = cache.simulate_m3_authority_transition
+        self.assertEqual(exercise(payload, **params)["authority"], "MANUAL")
+        active = exercise(payload, test_admission=True, consumers_agree=True, **params)
+        self.assertEqual(active["authority"], "MACHINE_TEST_ONLY")
+        self.assertEqual(active["active_work"], [
+            "https://github.com/kinoko34077/demo/issues/1",
+            "https://github.com/kinoko34077/demo/issues/2",
+        ])
+        self.assertEqual(active["next_action"], "Human approval required")
+        canonical_urls = tuple(active["active_work"])
+        parity = exercise(payload, test_admission=True, consumers_agree=True,
+                          consumer_task_urls=canonical_urls, **params)
+        self.assertEqual(parity["authority"], "MACHINE_TEST_ONLY")
+        for consumer_urls in (
+            canonical_urls[:1],
+            canonical_urls + ("https://github.com/kinoko34077/demo/issues/999",),
+            canonical_urls + canonical_urls[:1],
+        ):
+            mismatch = exercise(payload, test_admission=True, consumers_agree=True,
+                                consumer_task_urls=consumer_urls, **params)
+            self.assertEqual(mismatch["authority"], "MANUAL")
+            self.assertEqual(mismatch["reason"], "CONSUMER_ISSUE_REFS_DISAGREE")
+            self.assertEqual(mismatch["active_work"], list(manual))
+        self.assertFalse(payload["coverage"]["can_replace_manual_active_work"])
+        self.assertEqual(exercise(payload, test_admission=True, **params)["authority"], "MANUAL")
+        for unavailable in (None, {}, {"repository": REPOSITORY}):
+            self.assertEqual(exercise(unavailable, test_admission=True,
+                                      consumers_agree=True, **params)["authority"], "MANUAL")
+        incomplete = cache.build_cached_projection(
+            REPOSITORY, live_projection(machine_task_count=0, coverage_complete=False),
+            generated_at=GENERATED_AT, control_trust=verified_control_trust(),
+        )
+        self.assertEqual(exercise(incomplete, test_admission=True,
+                                 consumers_agree=True, **params)["authority"], "MANUAL")
+        stale = dict(params, now="2026-10-06T05:50:00Z")
+        self.assertEqual(exercise(payload, test_admission=True,
+                                 consumers_agree=True, **stale)["authority"], "MANUAL")
+        self.assertEqual(exercise(payload, test_admission=True,
+                                 consumers_agree=False, **params)["active_work"], list(manual))
+        recovered = exercise(payload, test_admission=True, consumers_agree=True, **params)
+        self.assertEqual(recovered["authority"], "MACHINE_TEST_ONLY")
+        self.assertEqual(manual, ("manual issue #99",))
+
+    def test_isolated_m3_authority_fails_closed_on_truncated_untrusted_unknown(self):
+        live = live_projection(machine_task_count=21, coverage_complete=True)
+        live["open_issue_count"] = 21
+        live["task_records"] = [
+            {
+                "issue_number": number, "title": f"Task {number}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{number}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "FEATURE", "work_status": "IMPLEMENTING",
+                "attention_disposition": None,
+            }
+            for number in range(1, 22)
+        ]
+        truncated = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(truncated["coverage"]["status"], "COMPLETE")
+        self.assertEqual(truncated["all_state_tasks"]["status"], "TRUNCATED")
+        self.assertEqual(truncated["all_state_tasks"]["total"], 21)
+
+        base = live_projection(machine_task_count=2, coverage_complete=True)
+        base["task_records"] = live["task_records"][:2]
+        scenarios = [("TRUNCATED", truncated)]
+        for freshness, trust_status in (
+            ("CURRENT", "UNVERIFIED"),
+            ("UNKNOWN", "VERIFIED"),
+        ):
+            trust = verified_control_trust(freshness=freshness)
+            trust["status"] = trust_status
+            value = cache.build_cached_projection(
+                REPOSITORY, base, generated_at=GENERATED_AT,
+                control_trust=trust,
+            )
+            scenarios.append((f"{trust_status}/{freshness}", value))
+
+        missing_source = cache.build_cached_projection(
+            REPOSITORY,
+            live_projection(source_status="UNAVAILABLE", source_freshness="UNKNOWN"),
+            generated_at=GENERATED_AT, control_trust=verified_control_trust(),
+        )
+        scenarios.append(("UNAVAILABLE", missing_source))
+
+        for label, value in scenarios:
+            with self.subTest(source=label):
+                result = cache.simulate_m3_authority_transition(
+                    value, now=GENERATED_AT,
+                    manual_active_work=("Manual #99",),
+                    manual_next_action="Human approval required",
+                    test_admission=True, consumers_agree=True,
+                )
+                self.assertEqual(result["authority"], "MANUAL")
+                self.assertEqual(result["active_work"], ["Manual #99"])
+                self.assertEqual(result["next_action"], "Human approval required")
+                self.assertFalse(value["coverage"]["can_replace_manual_active_work"])
+
+    def test_all_state_preview_never_silently_truncates_or_forges_completeness(self):
+        live = live_projection(machine_task_count=21, coverage_complete=True)
+        live["open_issue_count"] = 21
+        live["task_records"] = [
+            {
+                "issue_number": index, "title": f"Task {index}",
+                "url": f"https://github.com/kinoko34077/demo/issues/{index}",
+                "source_kind": "MACHINE", "record_role": "TASK",
+                "type": "BUG", "work_status": "IMPLEMENTING",
+                "attention_disposition": None,
+            }
+            for index in range(1, 22)
+        ]
+        payload = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(payload["all_state_tasks"]["status"], "TRUNCATED")
+        self.assertEqual(payload["all_state_tasks"]["total"], 21)
+        self.assertEqual(
+            len(payload["all_state_tasks"]["records"]),
+            cache.MAX_ALL_STATE_TASK_RECORDS,
+        )
+        cache._validate_cached_payload(payload, REPOSITORY)
+        malicious = copy.deepcopy(payload)
+        malicious["all_state_tasks"]["status"] = "COMPLETE"
+        malicious = cache.recompute_generation_id(malicious)
+        with self.assertRaises(cache.RepositoryProjectionCacheError):
+            cache._validate_cached_payload(malicious, REPOSITORY)
+
+    def test_all_state_preview_unknown_on_source_mismatch_and_old_cache_valid(self):
+        live = live_projection(machine_task_count=1, coverage_complete=True)
+        payload = cache.build_cached_projection(
+            REPOSITORY, live, generated_at=GENERATED_AT,
+            control_trust=verified_control_trust(),
+        )
+        self.assertEqual(payload["all_state_tasks"]["status"], "INCOMPLETE")
+        self.assertEqual(payload["all_state_tasks"]["total"], 1)
+        cache._validate_cached_payload(payload, REPOSITORY)
+        historical = copy.deepcopy(payload)
+        del historical["all_state_tasks"]
+        historical = cache.recompute_generation_id(historical)
+        cache._validate_cached_payload(historical, REPOSITORY)
+
+        unavailable = cache.build_cached_projection(
+            REPOSITORY,
+            live_projection(source_status="UNAVAILABLE", source_freshness="UNKNOWN"),
+            generated_at=GENERATED_AT, control_trust=verified_control_trust(),
+        )
+        self.assertEqual(unavailable["all_state_tasks"]["status"], "UNAVAILABLE")
+        self.assertEqual(unavailable["all_state_tasks"]["records"], [])
+        cache._validate_cached_payload(unavailable, REPOSITORY)
+
+    def test_all_state_preview_rejects_non_task_and_duplicate(self):
+        live = live_projection(machine_task_count=1, coverage_complete=True)
+        good = {
+            "issue_number": 1, "title": "Real task",
+            "url": "https://github.com/kinoko34077/demo/issues/1",
+            "source_kind": "MACHINE", "record_role": "TASK",
+            "type": "FEATURE", "work_status": "AWAITING_REVIEW",
+            "attention_disposition": None,
+        }
+        for bad_records in (
+            [{**good, "record_role": "REFERENCE"}],
+            [good, good],
+        ):
+            with self.subTest(records=bad_records):
+                live["task_records"] = bad_records
+                with self.assertRaises(cache.RepositoryProjectionCacheError):
+                    cache.build_cached_projection(
+                        REPOSITORY, live, generated_at=GENERATED_AT,
+                        control_trust=verified_control_trust(),
+                    )
+
     def test_complete_coverage_can_distinguish_zero_machine_tasks(self):
         payload = cache.build_cached_projection(
             REPOSITORY,
@@ -353,6 +572,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
             "## Active Work\n\nHuman-owned prose.\n"
         )
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy = cache.recompute_generation_id(legacy)
         legacy_block = (
@@ -379,6 +600,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
 
     def test_replacement_rejects_corrupt_legacy_v1_generation(self):
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy = cache.recompute_generation_id(legacy)
         legacy["generation_id"] = "sha256:" + ("0" * 64)
@@ -404,6 +627,8 @@ class RepositoryProjectionCacheMarkerTests(unittest.TestCase):
 
     def test_replacement_rejects_legacy_v1_with_additional_missing_field(self):
         legacy = copy.deepcopy(self._payload())
+        # Genuine pre-valid_until legacy had no later optional all-state field.
+        legacy.pop("all_state_tasks", None)
         legacy.pop("valid_until")
         legacy.pop("coverage")
         legacy = cache.recompute_generation_id(legacy)

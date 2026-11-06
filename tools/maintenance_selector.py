@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Mapping
 
 from tools.maintenance_catalog import ResolvedSlot
 
+
+_CANONICAL_SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 RISK_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
@@ -106,7 +109,7 @@ def _slot_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> list[
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.slot_id == slot.slot_id
+        if item.evidence_complete and item.repository == slot.repository and item.slot_id == slot.slot_id
     ]
 
 
@@ -114,7 +117,7 @@ def _lens_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> list[
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.lens == slot.lens
+        if item.evidence_complete and item.repository == slot.repository and item.lens == slot.lens
     ]
 
 
@@ -122,7 +125,7 @@ def _similar_history(slot: ResolvedSlot, history: tuple[RunEvidence, ...]) -> li
     return [
         item
         for item in history
-        if item.repository == slot.repository and item.coverage_key == slot.coverage_key
+        if item.evidence_complete and item.repository == slot.repository and item.coverage_key == slot.coverage_key
     ]
 
 
@@ -133,7 +136,8 @@ def _exact_equivalent(
     item: RunEvidence,
 ) -> bool:
     return (
-        item.repository == slot.repository
+        item.evidence_complete
+        and item.repository == slot.repository
         and item.scope_kind == slot.scope.kind
         and item.scope_selector == slot.scope.selector
         and item.lens == slot.lens
@@ -187,7 +191,7 @@ def score_slot(
 
     item_key = _slot_key(slot)
     fingerprint = context.current_fingerprints.get(item_key)
-    if not isinstance(fingerprint, str) or not fingerprint.startswith("sha256:"):
+    if type(fingerprint) is not str or _CANONICAL_SHA256.fullmatch(fingerprint) is None:
         return None
 
     depth = _target_depth(slot, context)
@@ -287,7 +291,8 @@ def _equivalent_age_seconds(
 def _never_depth(slot: ResolvedSlot, depth: str, history: tuple[RunEvidence, ...]) -> int:
     return int(
         not any(
-            item.repository == slot.repository
+            item.evidence_complete
+            and item.repository == slot.repository
             and item.slot_id == slot.slot_id
             and item.depth == depth
             for item in history

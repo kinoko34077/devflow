@@ -49,8 +49,15 @@ class ProjectSyncTransportBoundaryTests(unittest.TestCase):
             def __init__(self):
                 self.body = None
 
+            def get_issue(self, number):
+                return {
+                    "number": 41, "title": project_sync.HEALTH_TITLE,
+                    "state": "closed", "updated_at": "2026-10-16T00:00:00Z",
+                    "body": "" if self.body is None else self.body,
+                }
+
             def find_issue_by_title(self, title):
-                return {"number": 41, "title": title, "state": "closed"}
+                return self.get_issue(41)
 
             def update_issue(self, number, body=None, state=None):
                 if body is not None:

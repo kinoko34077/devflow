@@ -629,6 +629,125 @@ Do not convert the repository to Base merely because it is managed.
 
 ## 11. Tool/access limitations
 
+### Actionable blocker-to-recovery reports (2026-10-15; devflow #567)
+
+An operational report must never end at a bare `BLOCKED`, `HOLD`, `WAIT`,
+"the check failed", or "a Review could not be submitted". Each report to
+the owning Issue/Work Order, and its brief user-facing projection, must
+contain a **minimum viable recovery packet**:
+
+1. **Observed state and exact boundary:** cite the most recent trusted
+   commit/PR HEAD, attempt/run/check or error. State precisely what is accepted
+   and what single operation did not complete; separate pre-step runner
+   admission, repository CI, GitHub API permissions, platform safety denial,
+   transport failure, review gate, and Human/real-device evidence.
+2. **Immediate authorized action:** name the smallest concrete UI step,
+   GitHub-native API/workflow, existing owner Issue/PR, or documented command.
+   Include exact target, required prerequisites and scope; do not say only
+   "resolve blocker", "rerun", "contact support" or "wait".
+3. **Actor / ownership:** specify whether the current agent can perform the
+   action with its existing tools, another legitimately authorized reviewer/
+   producer must do it, or a Human must change an account-side setting.
+   Do not make the Human responsible for a reversible authorized action the
+   current agent can safely complete.
+4. **Fallback and safety:** choose the supported native/direct route first,
+   then only an evidence-backed retry after changed arguments, prerequisites
+   or observable conditions; otherwise record a genuinely authorized distinct
+   route or split independently safe work. Never repeat an unchanged rejected
+   operation, disguise a previously denied safety-sensitive request, change
+   actor/credentials solely to evade controls, weaken CI/review, or claim an
+   Issue/PR Conversation comment is a GitHub native Formal Review.
+5. **Verification / exit:** define what independent positive evidence will
+   confirm recovery (exact-head CI with real steps, native Review object,
+   authenticated workflow run ID, device result, etc.); say which owning
+   Issue resumes and which tasks remain HOLD. If no authorized path is
+   available, explain the exact external decision/support escalation or
+   accepted HOLD condition, not a fictitious workaround.
+
+A task's rejected **operation** is not the same as a rejected **goal**.
+Apply the global replanning choices `CONTINUE / CHANGE_PATH / SPLIT / HOLD /
+STOP` to the narrowest affected scope and preserve independent admitted
+work. Report the exact denial separately from verified earlier outcomes.
+
+**Concrete native-Review example (execution-coordinator #136 / PR #137):**
+GitHub `APPROVE` by the PR author returns 422 because self-approval is
+natively disallowed. A platform denial of a `COMMENT` Formal Review is a
+*different* gate; neither failure is a code-test failure, and an Issue comment
+does not satisfy the formal review object. Recovery is a legitimate second
+reviewer (or Human PR **Files changed → Review changes → Comment**) on
+the exact reviewed head, then verify that native Review exists and the
+required checks remain green before integration. Do not bypass the
+platform denial via disguised payload or swapped tools.
+
+This contract adds **reporting and triage specificity**, not permission to
+release, deploy, expose private data, mutate secrets/settings, bypass native
+checks, or perform otherwise prohibited effects. See the durable standing
+reporting authority [devflow #49](https://github.com/kinoko34077/devflow/issues/49)
+and owning policy [#567](https://github.com/kinoko34077/devflow/issues/567).
+
+### Failure-scope triage and bounded normal-path retry (user clarified 2026-10-13)
+
+A rejected tool invocation, failing CI, missing permission, and an actual unsafe change
+are **different observations**. One refusal is evidence about **that operation in
+that context**, not proof that the approved task or every subsequent action is
+unsafe, permanently disallowed or blocked by GitHub/devflow. Never misattribute
+an OpenAI platform safety error to a GitHub permission, repository policy or
+code defect without an independently supported diagnostic.
+
+Before deciding to HOLD an entire work stream:
+
+1. **Classify the observed failure precisely**: syntax/arguments/precondition,
+   runtime/CI defect, API transport, GitHub authorization/branch rule,
+   platform safety denial, or unknown. Record the exact action and reliable
+   evidence without exposing credentials.
+2. **Separate authorizations and outcomes**: user approval, actual changed-surface
+   safety, GitHub review/CI, one write attempt, merge and publication are
+   independent facts. A failed merge does not cancel previously verified CI,
+   User approval, or safely independent work; a successful retry does not waive
+   missing native checks.
+3. **Reassess risk and recovery** under §4.1/#439: what is the concrete
+   privileged/real-data effect, plausible harm and safe revert? If a normal,
+   user-authorized reversible action remains appropriate, a **bounded,
+   evidence-based retry** is permissible after correcting an input, observing
+   a meaningful context/precondition change or fresh authorization. Use the
+   normal supported tool path; do not blindly loop or repeatedly submit
+   identical denied calls.
+4. **Respect enforced boundaries**: do not hide the requested operation,
+   deliberately reframe payloads/tools/network routes, switch credentials or
+   bypass a platform safeguard. If the action itself has credible
+   secret-exposure, exploit, unauthorized privilege, irreversible/destructive
+   impact or a genuine security gate, HOLD that specific effect and apply
+   existing Human/review requirements regardless of retry history.
+5. **Continue what is independent**: after a few unproductive attempts or
+   repeated denials without new evidence, stop that operation and document
+   the blocker; choose `CHANGE_PATH`, `SPLIT` or `HOLD` for the smallest
+   affected scope while preserving safe independent implementation/review.
+   Do not present manual user intervention as mandatory merely because one
+   agent tool call failed. Also do not invent a numeric attempt quota or
+   continue tens of blind attempts.
+
+Concrete distinctions: Repo Monitor #65 and devflow #483 had earlier denied
+merges but later succeeded by a guarded, **normal native retry** after renewed
+user instruction and unchanged reviewed-head verification. Repo Monitor #66
+had an ordinary Windows browser *test failure* caused by a test fixture's
+wrong repository selection; the fixture was corrected and exact-head reruns
+passed. Neither case authorizes circumventing a future safety denial or
+skipping CI/review/release approval.
+
+### Deferred safety-check refusal re-audit before task-end (user clarified 2026-10-16; devflow #590)
+
+A platform/tool safety-check refusal is **not a determination that the underlying requested action is substantively unsafe**. Treat it as a refusal of the exact attempt in the observed context; classify it separately from source-code risk, actual permissions, CI/Review gates, and any explicit prohibition. Do not infer permanent task-level HOLD, but do not assume a self-audit overrides the provider's enforced control either.
+
+For ordinary ongoing development, use this order without an unnecessary user-confirmation stop:
+
+1. **Record and isolate now.** Preserve the exact refused operation, trusted source/target/HEAD, error class, input/preconditions and any attempt identifiers on the owning Issue/Session Record. Mark **only that action** pending re-audit; do not describe a rejected call as completed.
+2. **Continue independent safe work.** Execute other permitted design, implementation, review and checks. Keep the deferred action in the unfinished inventory and do not quietly drop it when the rest succeeds.
+3. **Near completion, double-check the deferred items two or three times** using materially distinct checks, such as (a) independently verify the actual requested side effect, authorization, exposed resources and reversibility; (b) compare current permissions, reviewed HEAD, CI/review, inputs and already-committed effects against the original denial; and (c) inspect an existing normal supported tool route and independently confirm stale/duplicate/uncertain-result risks. These are **2–3 assessments**, not a blanket rule to submit two or three tool calls against the same refusal.
+4. **Retry when justified by evidence.** Where the review identifies a real input mistake, missing-but-now-satisfied prerequisite, changed observable conditions, or newly authorized normal route, and the operation remains permissible under the actual change-surface/Human/security gates, make a **bounded normal-path retry** without making the user stop solely to reconfirm already granted authority. Independently verify the result by the appropriate GitHub/API/CI/readback evidence. If denied again, record the new observation and reassess; no identical blind loop.
+5. **Preserve genuinely enforced boundaries.** Repeating a rejected unsafe operation, disguising its meaning, splitting a prohibited request into superficially benign calls, switching credentials/tools solely to defeat controls, overriding a security/permission/Human gate or presuming that review itself confers authorization are **not** acceptable recovery. If the platform continues to refuse the particular operation, keep that effect HOLD and report the next genuinely authorized recovery route, actor and exit condition; independent work and previously accepted checks remain valid.
+
+A double-checked **safe** operation can still be unavailable to the current tool/identity. Report that precise limitation, rather than asserting the user's objective was proven unsafe or attempting to force acceptance. At the final handoff, list each refused item as `COMPLETED / SAFELY_RETRIED / HOLD_WITH_NEXT_ACTION` (or equivalent actual state), citing independent evidence. This policy does not replace Section 11's actionable blocker packet or allow skipping exact-head CI, formal review, actual approval and deployment gates.
+
 When an agent cannot perform a required operation:
 - continue every independent read/write/verification step it can perform;
 - record the exact remaining operation and required authority in the active durable Issue;

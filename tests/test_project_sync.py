@@ -260,8 +260,8 @@ class ClientAndSyncTests(unittest.TestCase):
 
     def test_select_canonical_issues_includes_open_plus_project_tracked_closed(self):
         issues = [
-            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": "", "author_association": "OWNER"},
-            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": "", "author_association": "MEMBER"},
+            {"number": 1, "node_id": "A", "title": "[REPO] a", "state": "open", "body": "", "author_association": "OWNER", "user": {"id": 79015263, "login": "kinoko34077"}},
+            {"number": 2, "node_id": "B", "title": "old", "state": "closed", "body": "", "author_association": "MEMBER", "user": {"id": 79015263, "login": "kinoko34077"}},
             {"number": 3, "node_id": "C", "title": "not tracked", "state": "closed", "body": "", "author_association": "OWNER"},
             {"number": 4, "node_id": "D", "title": project_sync.HEALTH_TITLE, "state": "open", "body": "", "author_association": "OWNER"},
             {"number": 5, "node_id": "E", "title": "[REPO] spoof", "state": "open", "body": "", "author_association": "NONE"},
@@ -330,6 +330,7 @@ class ClientAndSyncTests(unittest.TestCase):
             "title": "[WORK ORDER] accepted",
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
         }
         self.assertTrue(
             project_sync.is_trusted_sync_issue(
@@ -416,10 +417,21 @@ class ClientAndSyncTests(unittest.TestCase):
 
     def test_upsert_health_issue_creates_and_closes_system_issue(self):
         class FakeREST:
-            def __init__(self): self.created = []; self.updated = []
+            def __init__(self): self.created = []; self.updated = []; self.body = ""; self.state = "open"
             def find_issue_by_title(self, title): return None
-            def create_issue(self, title, body): self.created.append((title, body)); return {"number": 50, "title": title, "state": "open"}
-            def update_issue(self, number, body=None, state=None): self.updated.append((number, body, state)); return {"number": number, "title": project_sync.HEALTH_TITLE, "state": state or "open"}
+            def create_issue(self, title, body):
+                self.created.append((title, body))
+                self.body = body
+                return {"number": 50, "title": title, "state": "open"}
+            def get_issue(self, number):
+                return {"number": 50, "title": project_sync.HEALTH_TITLE,
+                        "state": self.state, "updated_at": "2026-10-16T00:00:00Z",
+                        "body": self.body}
+            def update_issue(self, number, body=None, state=None):
+                self.updated.append((number, body, state))
+                if state is not None: self.state = state
+                if body is not None: self.body = body
+                return self.get_issue(number)
         rest = FakeREST()
         project_sync.upsert_health_issue(rest, "health body")
         self.assertEqual(rest.created[0][0], project_sync.HEALTH_TITLE)
@@ -437,9 +449,15 @@ class RuntimeFlowTests(unittest.TestCase):
 
     def test_missing_project_token_writes_not_configured_health(self):
         class FakeREST:
-            def __init__(self): self.body = None
-            def find_issue_by_title(self, title): return {"number": 50, "title": title, "state": "closed"}
-            def update_issue(self, number, body=None, state=None): self.body = body; return {"number": number}
+            def __init__(self): self.body = ""
+            def get_issue(self, number):
+                return {"number": 50, "title": project_sync.HEALTH_TITLE,
+                        "state": "closed", "updated_at": "2026-10-16T00:00:00Z",
+                        "body": self.body}
+            def find_issue_by_title(self, title): return self.get_issue(50)
+            def update_issue(self, number, body=None, state=None):
+                if body is not None: self.body = body
+                return self.get_issue(number)
         cfg = project_sync.RuntimeConfig("kinoko34077/devflow", "", "repo-token")
         rest = FakeREST()
         code = project_sync.run_sync("verify", cfg, rest=rest, gql=None, issue_number=None, event_issue=None, run_url="run")
@@ -833,6 +851,7 @@ class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
             "number": 59,
             "title": "[REPO] demo",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "labels": [{"name": "devflow:audit-freshness:unknown"}],
         }
         class FakeREST:
@@ -846,6 +865,7 @@ class AuditFreshnessPostWriteVerificationTests(unittest.TestCase):
             "number": 59,
             "title": "[REPO] demo",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "labels": [{"name": "devflow:audit-freshness:current"}],
         }
         observed = project_sync.reread_event_issue(rest, event_issue)

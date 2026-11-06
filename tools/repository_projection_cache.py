@@ -9,17 +9,32 @@ import re
 from typing import Any
 
 from tools import maintenance_sync_check, marker_json
-
-
+from tools.cache_generation import (
+    canonical_digest as _canonical_digest,
+    generation_material as _generation_material,
+    recompute_generation_id,
+)
+from tools.cache_validation import (
+    format_timestamp as _shared_format_timestamp,
+    require_bool as _shared_require_bool,
+    require_exact_fields as _shared_require_exact_fields,
+    require_mapping as _shared_require_mapping,
+    require_optional_string as _shared_require_optional_string,
+    require_repository as _shared_require_repository,
+    require_timestamp as _shared_require_timestamp,
+    timestamp_value as _shared_timestamp_value,
+)
 CACHE_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_BEGIN -->"
 CACHE_MARKER_END = "<!-- DEVFLOW_REPOSITORY_PROJECTION_V1_END -->"
 CACHE_SCHEMA_VERSION = "repository-projection-cache.v1"
 CONTROL_TRUST_SOURCE = "DEVFLOW_SHARED_CONTROL_VERIFIER"
 CACHE_VALIDITY_SECONDS = 24 * 60 * 60
 MAX_TASK_SUMMARIES = 20
+MAX_ALL_STATE_TASK_RECORDS = 20
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_OPTIONAL_TOP_LEVEL_FIELDS = frozenset({"all_state_tasks"})
+_ALL_STATE_FIELDS = frozenset({"status", "total", "records"})
 _TOP_LEVEL_FIELDS = frozenset(
     {
         "schema_version",
@@ -75,20 +90,8 @@ class CachedRepositoryProjection:
     payload: dict[str, Any]
 
 
-def _canonical_digest(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
 def _require_mapping(value: object, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise RepositoryProjectionCacheError(f"{field} must be an object")
-    return dict(value)
+    return _shared_require_mapping(value, field, RepositoryProjectionCacheError)
 
 
 def _require_exact_fields(
@@ -96,49 +99,29 @@ def _require_exact_fields(
     allowed: frozenset[str],
     field: str,
 ) -> None:
-    keys = set(value)
-    missing = sorted(allowed - keys)
-    unknown = sorted(keys - allowed)
-    if missing:
-        raise RepositoryProjectionCacheError(
-            f"{field} missing fields: " + ", ".join(missing)
-        )
-    if unknown:
-        raise RepositoryProjectionCacheError(
-            f"{field} has unknown fields: " + ", ".join(unknown)
-        )
+    _shared_require_exact_fields(
+        value, allowed, field, RepositoryProjectionCacheError
+    )
 
 
 def _require_repository(value: object, field: str = "repository") -> str:
-    if not isinstance(value, str) or _REPOSITORY.fullmatch(value.strip()) is None:
-        raise RepositoryProjectionCacheError(f"{field} must be owner/repository")
-    return value.strip()
+    return _shared_require_repository(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _require_timestamp(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise RepositoryProjectionCacheError(f"{field} must be an RFC-3339 timestamp")
-    text = value.strip()
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise RepositoryProjectionCacheError(
-            f"{field} must be an RFC-3339 timestamp"
-        ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise RepositoryProjectionCacheError(
-            f"{field} must include an RFC-3339 timezone offset"
-        )
-    return text
+    return _shared_require_timestamp(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _timestamp_value(value: object, field: str) -> datetime:
-    text = _require_timestamp(value, field)
-    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return _shared_timestamp_value(value, field, RepositoryProjectionCacheError)
 
 
 def _format_timestamp(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return _shared_format_timestamp(value)
 
 
 def _require_nonnegative_int(value: object, field: str) -> int:
@@ -148,9 +131,7 @@ def _require_nonnegative_int(value: object, field: str) -> int:
 
 
 def _require_bool(value: object, field: str) -> bool:
-    if not isinstance(value, bool):
-        raise RepositoryProjectionCacheError(f"{field} must be boolean")
-    return value
+    return _shared_require_bool(value, field, RepositoryProjectionCacheError)
 
 
 def _require_sha256(value: object, field: str) -> str:
@@ -162,13 +143,9 @@ def _require_sha256(value: object, field: str) -> str:
 
 
 def _require_optional_string(value: object, field: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise RepositoryProjectionCacheError(
-            f"{field} must be a non-empty string or null"
-        )
-    return value.strip()
+    return _shared_require_optional_string(
+        value, field, RepositoryProjectionCacheError
+    )
 
 
 def _compact_issue_ref(value: object) -> dict[str, Any] | None:
@@ -218,6 +195,81 @@ def _compact_task_list(value: object, field: str) -> list[dict[str, Any]]:
             raise RepositoryProjectionCacheError(f"{field} entries must be issue objects")
         compact.append(ref)
     return compact
+
+
+def _all_state_task_records(
+    live: dict[str, Any], coverage: dict[str, Any], count: int
+) -> dict[str, Any]:
+    """Bounded all-work-state M1 read projection, never an authority grant."""
+    if live.get("source_status") != "AVAILABLE":
+        return {"status": "UNAVAILABLE", "total": count, "records": []}
+    source_records = live.get("task_records")
+    if not isinstance(source_records, list):
+        raise RepositoryProjectionCacheError("live task_records must be an array")
+    seen: set[int] = set()
+    records: list[dict[str, Any]] = []
+    for item in source_records[:MAX_ALL_STATE_TASK_RECORDS]:
+        record = _compact_issue_ref(item)
+        if record is None or (
+            record["source_kind"] != "MACHINE"
+            or record["record_role"] != "TASK"
+            or record["work_status"] is None
+            or record["url"] is None
+        ):
+            raise RepositoryProjectionCacheError("all-state records must be verified TASKs")
+        number = record["issue_number"]
+        if number in seen:
+            raise RepositoryProjectionCacheError("duplicate all-state TASK")
+        seen.add(number)
+        records.append(record)
+    status = (
+        "TRUNCATED" if len(source_records) > MAX_ALL_STATE_TASK_RECORDS
+        else "COMPLETE" if len(source_records) == count and coverage["status"] == "COMPLETE"
+        else "INCOMPLETE"
+    )
+    return {"status": status, "total": count, "records": records}
+
+
+def _validate_all_state_tasks(
+    payload: object, counts: dict[str, int], coverage: dict[str, Any], source: dict[str, Any]
+) -> None:
+    state = _require_mapping(payload, "all_state_tasks")
+    _require_exact_fields(state, _ALL_STATE_FIELDS, "all_state_tasks")
+    status = state["status"]
+    if status not in {"COMPLETE", "TRUNCATED", "INCOMPLETE", "UNAVAILABLE"}:
+        raise RepositoryProjectionCacheError("invalid all_state_tasks.status")
+    total = _require_nonnegative_int(state["total"], "all_state_tasks.total")
+    if total != counts["machine_tasks"]:
+        raise RepositoryProjectionCacheError("all_state_tasks.total must match machine task count")
+    entries = state["records"]
+    if not isinstance(entries, list) or len(entries) > MAX_ALL_STATE_TASK_RECORDS:
+        raise RepositoryProjectionCacheError("all_state_tasks.records exceed bounded array")
+    seen: set[int] = set()
+    for item in entries:
+        ref = _compact_issue_ref(item)
+        if ref is None or (
+            ref["source_kind"] != "MACHINE"
+            or ref["record_role"] != "TASK"
+            or ref["work_status"] is None
+            or ref["url"] is None
+        ):
+            raise RepositoryProjectionCacheError("all_state_tasks record is not verified TASK")
+        if ref["issue_number"] in seen:
+            raise RepositoryProjectionCacheError("duplicate cached all-state TASK")
+        seen.add(ref["issue_number"])
+    if status == "COMPLETE" and (
+        len(entries) != total
+        or coverage["status"] != "COMPLETE"
+        or source["status"] != "AVAILABLE"
+        or source["freshness"] != "CURRENT"
+    ):
+        raise RepositoryProjectionCacheError("all_state_tasks cannot claim unverified completeness")
+    if status == "TRUNCATED" and (
+        total <= MAX_ALL_STATE_TASK_RECORDS or len(entries) != MAX_ALL_STATE_TASK_RECORDS
+    ):
+        raise RepositoryProjectionCacheError("all_state_tasks TRUNCATED count mismatch")
+    if status == "UNAVAILABLE" and (source["status"] != "UNAVAILABLE" or entries):
+        raise RepositoryProjectionCacheError("all_state_tasks unavailable source mismatch")
 
 
 def _validate_type_counts(value: object, field: str) -> dict[str, int]:
@@ -360,18 +412,6 @@ def _source_identity_material(live_projection: dict[str, Any]) -> dict[str, Any]
     return value
 
 
-def _generation_material(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value.pop("generation_id", None)
-    return value
-
-
-def recompute_generation_id(payload: dict[str, Any]) -> dict[str, Any]:
-    value = copy.deepcopy(payload)
-    value["generation_id"] = _canonical_digest(_generation_material(value))
-    return value
-
-
 def build_cached_projection(
     repository: str,
     live_projection: dict[str, Any],
@@ -455,6 +495,7 @@ def build_cached_projection(
                 "implementing_tasks",
             ),
         },
+        "all_state_tasks": _all_state_task_records(live, coverage, counts["machine_tasks"]),
         "references": {
             "newest_open_issue": _compact_issue_ref(
                 live.get("newest_open_issue")
@@ -472,7 +513,11 @@ def _validate_cached_payload(
     payload: dict[str, Any],
     repository: str,
 ) -> dict[str, Any]:
-    _require_exact_fields(payload, _TOP_LEVEL_FIELDS, "repository projection cache")
+    _require_exact_fields(
+        {key: value for key, value in payload.items() if key not in _OPTIONAL_TOP_LEVEL_FIELDS},
+        _TOP_LEVEL_FIELDS,
+        "repository projection cache",
+    )
     if payload.get("schema_version") != CACHE_SCHEMA_VERSION:
         raise RepositoryProjectionCacheError(
             f"unsupported schema_version: {payload.get('schema_version')!r}"
@@ -582,6 +627,8 @@ def _validate_cached_payload(
     _compact_issue_ref(references["recently_active_issue"])
 
     _validate_control_trust(payload.get("control_trust"))
+    if "all_state_tasks" in payload:
+        _validate_all_state_tasks(payload["all_state_tasks"], normalized_counts, coverage, source)
 
     expected_generation_id = _canonical_digest(_generation_material(payload))
     if generation_id != expected_generation_id:
@@ -623,6 +670,77 @@ def effective_cache_freshness(
     if now_dt > valid_until_dt:
         return "STALE"
     return "CURRENT"
+
+
+
+def simulate_m3_authority_transition(
+    payload: dict[str, Any] | None,
+    *,
+    now: str,
+    manual_active_work: tuple[str, ...],
+    manual_next_action: str,
+    test_admission: bool = False,
+    consumers_agree: bool = False,
+    consumer_task_urls: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Isolated, non-effectful M3 authority exercise; never grants production admission.
+
+    The existing manual fields remain intact, including Human/policy Next Action.
+    An absent or invalid machine source always selects manual authority.
+    """
+    result: dict[str, Any] = {
+        "authority": "MANUAL",
+        "active_work": list(manual_active_work),
+        "next_action": manual_next_action,
+        "reason": "TEST_ADMISSION_NOT_GRANTED",
+    }
+    if not test_admission or not consumers_agree:
+        if test_admission:
+            result["reason"] = "CONSUMER_PARITY_UNPROVEN"
+        return result
+    if payload is None:
+        result["reason"] = "MACHINE_SOURCE_MISSING"
+        return result
+    try:
+        validated = _validate_cached_payload(
+            copy.deepcopy(payload), _require_repository(payload.get("repository"))
+        )
+        if effective_cache_freshness(validated, now=now) != "CURRENT":
+            result["reason"] = "MACHINE_SOURCE_NOT_CURRENT"
+            return result
+        all_state = validated.get("all_state_tasks")
+        if (
+            validated["coverage"]["status"] != "COMPLETE"
+            or not isinstance(all_state, dict)
+            or all_state["status"] != "COMPLETE"
+            or len(all_state["records"]) != all_state["total"]
+            or all_state["total"] == 0
+        ):
+            result["reason"] = "MACHINE_COVERAGE_NOT_ADMISSIBLE"
+            return result
+        records = all_state["records"]
+        if any(
+            item.get("record_role") != "TASK"
+            or item.get("source_kind") != "MACHINE"
+            or item.get("work_status") is None
+            for item in records
+        ):
+            result["reason"] = "MACHINE_TASK_INVALID"
+            return result
+    except (RepositoryProjectionCacheError, AttributeError, TypeError, ValueError):
+        result["reason"] = "MACHINE_SOURCE_INVALID"
+        return result
+    expected_urls = [item["url"] for item in records]
+    if consumer_task_urls is not None and (
+        len(set(consumer_task_urls)) != len(consumer_task_urls)
+        or set(consumer_task_urls) != set(expected_urls)
+    ):
+        result["reason"] = "CONSUMER_ISSUE_REFS_DISAGREE"
+        return result
+    result["authority"] = "MACHINE_TEST_ONLY"
+    result["active_work"] = [item["url"] for item in records]
+    result["reason"] = "ISOLATED_ADMISSION"
+    return result
 
 
 def render_cached_projection(payload: dict[str, Any]) -> str:
@@ -770,3 +888,4 @@ def replace_cached_projection(
     prefix = body[:begin]
     suffix = body[end + len(CACHE_MARKER_END):]
     return prefix + block + suffix
+

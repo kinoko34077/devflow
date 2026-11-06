@@ -137,6 +137,94 @@ Use the repository's own template when present. Otherwise include, at minimum:
 
 Repository-local naming does not have to be exactly `Work Order:`. Information ownership matters more than identical labels.
 
+### Issue authoring language standard (2026-11-04 user direction)
+
+Write every newly created Issue (including Work Orders, audits, specifications, minutes and handoffs) **簡潔・平易・明瞭に。冗長な表現を避け、意味や情報量を保ちつつ圧縮的に記述する。** Remove redundant phrasing, repeated explanations and unnecessary preambles; link the authoritative specification/evidence instead of reproducing it wholesale. Preserve the actual user request, higher goal, constraints, definitions, numeric values, causal relationships, exception cases, permissions/Human Gates, acceptance criteria, verification references and actionable next step. Never substitute a shorter but less precise summary for an operative condition or machine-readable marker. Length reduction is **not** an independent acceptance criterion; if faithful compression is not possible, keep the necessary text.
+
+This standard applies **when authoring new Issues now**. The separate fleet-wide cleanup of already existing Open/Closed Issues is [devflow #914](https://github.com/kinoko34077/devflow/issues/914), deliberately **HOLD** until the presently prioritized major Issues are compressed; its appearance here is not a task trigger. Original user direction is recorded under [devflow #49](https://github.com/kinoko34077/devflow/issues/49#issuecomment-6623682424).
+
+### 4.0 Goal lineage at Issue authoring (devflow #761 / M1)
+
+**Standalone plan/roadmap Issues (M1 clarification for [devflow #761](https://github.com/kinoko34077/devflow/issues/761)):** When the primary deliverable is a multi-stage development plan or roadmap, include a concise purpose that:
+- links the durable originating request or parent specification where available, using a privacy-safe summary and distinguishing explicit source facts from inference;
+- states the concrete user-visible outcome or higher goal and how the proposed stages advance it; and
+- does not invent a motivation when the source does not establish one.
+A standalone plan that omits these elements is not ready to publish. Ordinary implementation Work Orders follow the remaining goal-lineage rules in this section and do not need a second purpose block. The existing item 3 exception for a genuinely trivial, low-risk one-PR change remains unchanged. This documentation rule does not alter machine TASK authority, execution readiness, or Human gates.
+
+**Why this exists:** an Issue that says only *what to implement* can lose the higher-order user outcome that justified the request. At Issue creation, for nontrivial changes, the **trusted authoring agent** reconstructs enough *why / user success / fixed conditions* from the current user request and live owning specifications to distinguish the intended result from a convenient substitute. **Do not invent the user's intent.**
+
+1. Preserve the originating request (brief, privacy-screened paraphrase and source reference), the closest **actionable** higher goal, the user-observable success condition, and any explicit/accepted fixed constraints. If one level of "why" does not change design, prioritization or acceptance, stop abstracting rather than produce broad mission statements.
+2. Distinguish `explicit` (stated by user), `source_derived` (derivable from inspected accepted spec) and `inferred_hypothesis` (AI interpretation, **never** a confirmed requirement). Include the source reference for explicit/source-derived claims and rationale for inferred hypotheses. Fixed constraints can only come from explicit instructions or accepted specifications. Recheck the **actual** source if a downstream decision depends on it: the referenced URL/marker alone is not proof of meaning or currentness.
+3. **Parent inheritance:** if a small child Issue merely implements an accepted slice, link the parent Goal Issue instead of rewriting the same purpose. A truly trivial, low-risk one-PR change may use the existing parent/PR rationale without a goal block or extra Issue; absence of this optional projection must **not** silently change executable task readiness, gate state, review authority or existing Issue metadata.
+4. **Keep one owner:** the owning Issue/spec retains the authoritative requirements. The goal context is an **advisory, source-linked projection** for later M2/M3 evaluation, not a new task database, capability registry, scheduler, execution authorizer, merger or acceptance certificate. Store references and short statements, **not** private Drive/chat contents, credentials, personal data or copied full specifications in public Issues.
+5. Before publishing an Issue or reusing a generated goal context, ask: "Does this explain a distinct end-user result? Does it reveal a material alternative design or requirement violation? What observable outcome would disprove our solution? Is any condition falsely promoted from a hypothesis? Would this extra structure impose more work than it prevents?" A negative answer triggers simplification or design re-evaluation, not additional checklists.
+6. For new-repository bootstrap, the authoring agent fills the existing human-readable **`issues[].body`** and/or request context **before** invoking `repository-bootstrap.v1`; do **not** add new keys to its strict machine JSON, change its provisioner, or let the executor infer semantics from prose.
+
+**Optional bounded authoring helper:** `tools.issue_goal_context.normalize_goal_context(context)` and `upsert_goal_context(issue_body, context)` accept structured intent supplied by the trusted author. Goal blocks use a versioned `DEVFLOW_ISSUE_GOAL_CONTEXT_V1` or `DEVFLOW_ISSUE_GOAL_CONTEXT_V2` marker, separate from `DEVFLOW_REPOSITORY_ISSUE_METADATA_V1/V2`. V1 remains readable and unchanged; the upsert helper rejects a V2→V1 downgrade so typed claims are not silently discarded. V2 may add a bounded `specifications` list whose records carry a stable local `id`, exact `key` and `scope`, `state` (`adopted`, `proposed`, `unknown`, or `removed`), `authority`, `evidence_ref`, and a JSON `value` when applicable. Missing entries inherit; `0`, `false`, and `null` remain values; explicit removal is a separate state. A proposal cannot replace an adopted value. A correction of an inherited value must cite the exact prior claim with `supersedes: "owner/repo#N:claim-id"`; ambiguous or conflicting overlays resolve to unknown. These values are author-supplied projections, not source verification.
+
+`tools.issue_goal_context.resolve_goal_context(issue, fetch_issue)` follows only the explicit bounded parent chain through a read-only, identity-checking Issue reader. It preserves accessible source contexts and citations, returns typed values and proposals separately, and reports missing, malformed, unavailable, cyclic, or conflicting ancestry as bounded unknowns. If any parent context is unavailable or incomplete, every visible value whose effective status could depend on that unseen ancestry remains unknown; the source claims and provenance are still returned for review. `parent_chain_status` describes only parent retrieval/marker parsing; `coverage.structured_specifications` is `RECORDED_CLAIMS_ONLY`, `PARTIAL_UNKNOWN`, or `NOT_REPRESENTED`, never a completeness or task-wide PASS. It does not interpret prose into values, decide which citation is true/current, or grant execution/merge authority. For V1 narrative-only blocks it reports the source context without pretending that free text is a machine-merged configuration. A 403/404 or other inaccessible parent becomes a generic unavailable result; the resolver omits that unresolved parent pointer and does not return the failed response body. A caller must still inspect original sources when making a substantive decision. `parse_goal_context(body)` reads either version. Existing Issues without a block remain valid.
+
+Minimal example (source refs are the *actual* canonical owner; this is not a fabricated user quotation):
+
+```python
+from tools.issue_goal_context import upsert_goal_context
+
+updated = upsert_goal_context(issue_body, {
+    "schema_version": 1,
+    "request": "Extend the existing realtime model selector",
+    "request_ref": "kinoko34077/frequency-warp-vst#273",
+    "higher_goals": [{
+        "statement": "Select and hear the implemented DSP model in the existing real-time playback path",
+        "kind": "explicit",
+        "evidence_ref": "kinoko34077/frequency-warp-vst#273",
+    }],
+    "fixed_constraints": [{
+        "statement": "Do not replace the real-time path with a separate 1.5-second preview",
+        "kind": "explicit",
+        "evidence_ref": "kinoko34077/frequency-warp-vst#273",
+    }],
+    "success_conditions": ["The existing Settings selection changes the running DSP output"],
+})
+# Compare diff and original source; then use an authorized GitHub Issue API.
+```
+
+**Limits:** no automatic LLM extraction, cross-source semantic entailment proof or runtime/UX completion proof at M1. M2 will evaluate design contradictions and M3 will attach measured user-outcome evidence; do not claim those stages passed because a structured block was accepted.
+
+### 4.0a Adopted M3 A–E lazy role normalization (R1)
+
+As of 2026-10-12 the adopted [A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md) requires **new** and **meaningfully edited** active repository-local Issues to receive machine-role metadata when the genuine role/status/gates are known. This does not require mass backfill, comment-only churn, Issue-close rewrites or turning title hints into runnable tasks. Do not edit another worker's active Issue merely to improve coverage.
+
+During current V1 adoption, produce the complete accepted `DEVFLOW_REPOSITORY_ISSUE_METADATA_V1` object, preserving existing Issue prose. devflow supplies the **pure, no-GitHub-write** `tools.repository_projection.upsert_issue_metadata_v1(body, payload)` helper, which:
+- validates every required field/type/status/bool against the shared workflow contract;
+- appends exactly one metadata block or replaces the existing valid block without modifying surrounding text;
+- refuses malformed/duplicate existing markers, missing fields and future-version markers rather than overwriting evidence;
+- does **not** verify Issue ownership, author trust, actual status truth or authorize any work. Those checks remain with the caller and the canonical Issue.
+
+Example for a **real** TASK, only when the actual Issue evidence supports it (do not copy readiness blindly):
+
+```python
+from tools.repository_projection import upsert_issue_metadata_v1
+
+payload = {
+    "schema_version": 1, "record_role": "TASK", "type": "BUG",
+    "work_status": "IMPLEMENTING", "scope_ready": True,
+    "requires_user_confirmation": False, "external_wait": False,
+}
+new_body = upsert_issue_metadata_v1(current_issue_body, payload)
+# Review exact diff, author/owner and gates BEFORE a separate authorized GitHub Issue update.
+```
+
+For TRACKER/REFERENCE/SYSTEM, V1 still requires complete type/status/gate fields. **R3/V2 lightweight non-TASK classification is already accepted** ([devflow #477](https://github.com/kinoko34077/devflow/issues/477), [PR #483](https://github.com/kinoko34077/devflow/pull/483)); it is not a future proposal and is **not** produced by the V1-only `upsert_issue_metadata_v1` helper. Only after verifying the owning Issue's real role, current attention and trusted author, append the distinct V2 marker with exactly these three fields:
+
+```text
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->
+{"schema_version":2,"record_role":"REFERENCE","attention":"NONE"}
+<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->
+```
+
+This is an **example only** for a genuinely non-actionable reference. Allowed V2 roles are `TRACKER`, `REFERENCE`, `SYSTEM`; allowed explicit attention values are `NONE`, `NEEDS_HUMAN`, `WAIT_EXTERNAL`, `NEEDS_EVIDENCE`. V2 cannot represent a TASK, imply readiness, clear a gate, retire manual work or authorize execution. Preserve the original Issue prose; mixed V1/V2, duplicate, invalid or untrusted metadata fail closed. If the current role or attention cannot be substantiated, leave the Issue legacy/unclassified and retain manual fallback. Do not mass-backfill or change another worker's Issue only to increase coverage.
+
+
 ### 4.1 Manual Execution Session Record
 
 For non-trivial agent work likely to span multiple tool calls, commits, sessions, PR/review/CI waits, or parallel workers, keep one worker-owned Execution Session Record on the owning Issue / Work Order, normally as one top-level Issue comment that the same session updates in place.

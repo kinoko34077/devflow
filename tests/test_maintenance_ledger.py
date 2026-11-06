@@ -118,6 +118,28 @@ class ActiveRunTests(unittest.TestCase):
                 REPO,
             )
 
+    def test_active_run_json_duplicate_keys_are_rejected_at_all_depths(self):
+        original = ml.render_active_run(active())
+        # A favorable final duplicate would otherwise silently win.
+        changed = original.replace(
+            '"generation":1',
+            '"generation":2,"generation":1',
+            1,
+        )
+        with self.assertRaisesRegex(ml.MaintenanceLedgerError, "duplicate Ledger JSON key"):
+            ml.extract_active_run(
+                ledger_body("READY_FOR_IMPLEMENTATION", changed), REPO
+            )
+        nested = original.replace(
+            '"name":"never_run"',
+            '"name":"stale","name":"never_run"',
+            1,
+        )
+        with self.assertRaisesRegex(ml.MaintenanceLedgerError, "duplicate Ledger JSON key"):
+            ml.extract_active_run(
+                ledger_body("READY_FOR_IMPLEMENTATION", nested), REPO
+            )
+
     def test_active_run_requires_ready_for_implementation(self):
         rendered = ml.render_active_run(active())
         with self.assertRaisesRegex(ml.MaintenanceLedgerError, "Work Status"):
@@ -147,6 +169,26 @@ class RunCommentTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ml.MaintenanceLedgerError, "unknown"):
             ml.parse_run_comment(tampered)
+
+    def test_legacy_completion_duplicate_keys_cannot_promote_blocked_to_clean(self):
+        original = ml.render_run_comment(record())
+        forged = original.replace(
+            '"result":"CLEAN"',
+            '"result":"BLOCKED","result":"CLEAN"',
+            1,
+        )
+        with self.assertRaisesRegex(ml.MaintenanceLedgerError, "duplicate Ledger JSON key"):
+            ml.parse_run_comment(forged)
+        # Nested metadata is also rejected, not just the top-level result.
+        duplicate = original.replace(
+            '"evidence_refs":[',
+            '"evidence_refs":[],"evidence_refs":[',
+            1,
+        )
+        with self.assertRaisesRegex(ml.MaintenanceLedgerError, "duplicate Ledger JSON key"):
+            ml.parse_run_comment(duplicate)
+        # Existing valid v1 machine comments remain round-trippable.
+        self.assertEqual(record(), ml.parse_run_comment(original))
 
     def test_generation_increments_only_for_same_repository_and_slot(self):
         history = (

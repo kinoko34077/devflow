@@ -3,7 +3,8 @@ name: Maintenance audit
 on:
   schedule:
     - cron: '30 13 * * *'
-    - cron: '0 14 * * *'
+    # Renew every 12 hours off the top of hour (14:10 and 02:10 JST); retain 24-hour signed trust validity.
+    - cron: '10 5,17 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -87,7 +88,7 @@ permissions:
 
 jobs:
   audit:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 13 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 13 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077') }}
     runs-on: ubuntu-latest
     concurrency:
       group: maintenance-audit-${{ github.repository }}
@@ -153,7 +154,7 @@ jobs:
 
 
   projection-shadow:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-shadow' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-shadow' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     runs-on: ubuntu-latest
     concurrency:
       group: repository-projection-shadow-${{ github.repository }}
@@ -213,7 +214,7 @@ jobs:
           path: repository-projection-shadow.json
 
   maintenance-select:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-select' || inputs.mode == 'maintenance-select-portfolio') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-select' || inputs.mode == 'maintenance-select-portfolio') && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     runs-on: ubuntu-latest
     concurrency:
       group: maintenance-select-${{ github.repository }}
@@ -268,7 +269,7 @@ jobs:
 
 
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'publish' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -277,6 +278,14 @@ jobs:
     permissions:
       contents: read
       issues: read
+    # Shares one native Actions job queue with every devflow Control writer.
+    # Fleet projection-cache can touch any managed Control; a per-target
+    # concurrency key cannot fence that writer. Direct API PATCH remains
+    # outside this scheduler's guarantee.
+    concurrency:
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -323,7 +332,7 @@ jobs:
           path: maintenance-supply-result.json
 
   catalog-maintenance-publish:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'maintenance-publish' || inputs.mode == 'maintenance-withdraw') && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -333,7 +342,8 @@ jobs:
       contents: read
       issues: read
     concurrency:
-      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -373,7 +383,7 @@ jobs:
           path: maintenance-catalog-publication-result.json
 
   catalog-maintenance-complete:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'maintenance-complete' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     # Pre-created GitHub Environment permits only refs/heads/main.
     environment:
       name: maintenance-supply
@@ -383,7 +393,8 @@ jobs:
       contents: read
       issues: read
     concurrency:
-      group: catalog-maintenance-publish-${{ github.repository }}-${{ inputs.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -447,13 +458,14 @@ jobs:
           path: maintenance-completion-result.json
 
   projection-cache:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '10 5,17 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'projection-cache' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
     concurrency:
-      group: repository-projection-cache-${{ github.repository }}
+      group: devflow-control-writes-${{ github.repository }}
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -478,24 +490,33 @@ jobs:
             fi
           done
 
-          if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
-            python scripts/repository_projection_cache.py \
-              --fleet \
-              --read-token-env MAINTENANCE_AUDIT_TOKEN \
-              --write-token-env GITHUB_TOKEN \
-              --apply \
-              --output repository-projection-cache-result.json
-          elif [[ -n "$CACHE_REPOSITORY" && -n "$CACHE_CONTROL" ]]; then
-            python scripts/repository_projection_cache.py \
-              --repository "$CACHE_REPOSITORY" \
-              --control "$CACHE_CONTROL" \
-              --read-token-env MAINTENANCE_AUDIT_TOKEN \
-              --write-token-env GITHUB_TOKEN \
-              --apply \
-              --output repository-projection-cache-result.json
-          else
-            echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
-            exit 2
+          # Retry only through the same verified producer and fenced write path.
+          # Fail closed if the second attempt also fails; never trust stale data.
+          run_projection_cache() {
+            if [[ "$CACHE_EVENT_NAME" == "schedule" || ( -z "$CACHE_REPOSITORY" && -z "$CACHE_CONTROL" ) ]]; then
+              python scripts/repository_projection_cache.py \
+                --fleet \
+                --read-token-env MAINTENANCE_AUDIT_TOKEN \
+                --write-token-env GITHUB_TOKEN \
+                --apply \
+                --output repository-projection-cache-result.json
+            elif [[ -n "$CACHE_REPOSITORY" && -n "$CACHE_CONTROL" ]]; then
+              python scripts/repository_projection_cache.py \
+                --repository "$CACHE_REPOSITORY" \
+                --control "$CACHE_CONTROL" \
+                --read-token-env MAINTENANCE_AUDIT_TOKEN \
+                --write-token-env GITHUB_TOKEN \
+                --apply \
+                --output repository-projection-cache-result.json
+            else
+              echo "manual projection-cache mode requires both repository and control, or neither for fleet mode" >&2
+              return 2
+            fi
+          }
+          if ! run_projection_cache; then
+            echo "projection-cache failed; retrying the same fenced producer once" >&2
+            sleep 10
+            run_projection_cache
           fi
       - name: Upload projection cache result
         if: always() && hashFiles('repository-projection-cache-result.json') != ''
@@ -506,7 +527,7 @@ jobs:
 
   supply-credential-check:
     # Non-mutating PAT authentication probe. Never publish supply or print credentials.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'supply-credential-check' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'supply-credential-check' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == 'kinoko34077' }}
     environment:
       name: maintenance-supply
       deployment: false
@@ -557,7 +578,7 @@ jobs:
               print("supply-credential-check: NETWORK_FAILURE", file=sys.stderr)
               sys.exit(1)
 
-          if identity.get("login") != "kinoko34077":
+          if identity.get("id") != 79015263:
               print("supply-credential-check: UNEXPECTED_IDENTITY", file=sys.stderr)
               sys.exit(1)
           print("supply-credential-check: VALID_AUTHENTICATED_IDENTITY")

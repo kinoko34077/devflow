@@ -382,6 +382,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-10-01T00:00:00Z",
                     }
                 raise AssertionError(
@@ -453,6 +454,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": control_body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-09-30T02:06:31Z",
                     }
                 if path.endswith("/issues/35"):
@@ -465,6 +467,7 @@ class MaintenanceGitHubTests(unittest.TestCase):
                         ),
                         "body": owner_body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-09-30T00:00:00Z",
                     }
                 raise AssertionError(path)
@@ -515,6 +518,7 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
             "html_url": self.request_url,
             "state": "open",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": issue_body(payload),
         }
 
@@ -617,6 +621,96 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
 
         return Transport()
 
+    def test_maintenance_selector_accepts_canonical_bootstrap_trust(self):
+        result = mg.collect_maintenance_control(
+            self._transport(),
+            self.repository,
+            "kinoko34077/devflow#314",
+        )
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(result["reason_code"], "CONTROL_ACTIVE")
+
+    def test_maintenance_selector_rejects_missing_or_invalid_bootstrap_proof(self):
+        for mode in ("no_done", "wrong_provenance"):
+            with self.subTest(mode=mode):
+                transport = (
+                    self._transport(comments=[])
+                    if mode == "no_done"
+                    else self._transport()
+                )
+                if mode == "wrong_provenance":
+                    transport.get_file = lambda repository, path: {
+                        "content": '{"schema":"untrusted"}'
+                    }
+                result = mg.collect_maintenance_control(
+                    transport, self.repository, "kinoko34077/devflow#314"
+                )
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["reason_code"], "CONTROL_INVALID")
+
+    def test_maintenance_selector_preserves_exact_control_identity_checks(self):
+        for mode in ("closed", "wrong_title", "wrong_repository", "pull_request"):
+            with self.subTest(mode=mode):
+                transport = self._transport()
+                original_get_issue = transport.get_issue
+
+                def changed_issue(repository, number):
+                    issue = original_get_issue(repository, number)
+                    if number == 314:
+                        # Isolate identity checks from the derived trust path.
+                        issue["author_association"] = "OWNER"
+                        if mode == "closed":
+                            issue["state"] = "closed"
+                        elif mode == "wrong_title":
+                            issue["title"] = "[REPO] unexpected"
+                        elif mode == "wrong_repository":
+                            issue["body"] = issue["body"].replace(
+                                f"## Repository\n\n`{self.repository}`",
+                                "## Repository\n\n`kinoko34077/unexpected`",
+                                1,
+                            )
+                        elif mode == "pull_request":
+                            issue["pull_request"] = {"url": "not-a-control"}
+                    return issue
+
+                transport.get_issue = changed_issue
+                result = mg.collect_maintenance_control(
+                    transport, self.repository, "kinoko34077/devflow#314"
+                )
+                self.assertEqual(result["status"], "NEEDS_EVIDENCE")
+                self.assertEqual(result["reason_code"], "CONTROL_INVALID")
+
+    def test_maintenance_selector_preserves_direct_trust_and_inactive_state(self):
+        transport = self._transport()
+        original_get_issue = transport.get_issue
+
+        def trusted_issue(repository, number):
+            issue = original_get_issue(repository, number)
+            if number == 314:
+                issue["author_association"] = "OWNER"
+            return issue
+
+        transport.get_issue = trusted_issue
+        accepted = mg.collect_maintenance_control(
+            transport, self.repository, "kinoko34077/devflow#314"
+        )
+        self.assertEqual(accepted["reason_code"], "CONTROL_ACTIVE")
+
+        def inactive_issue(repository, number):
+            issue = trusted_issue(repository, number)
+            if number == 314:
+                issue["body"] = issue["body"].replace(
+                    "`ACTIVE`", "`INACTIVE`", 1
+                )
+            return issue
+
+        transport.get_issue = inactive_issue
+        inactive = mg.collect_maintenance_control(
+            transport, self.repository, "kinoko34077/devflow#314"
+        )
+        self.assertEqual(inactive["status"], "NO_ELIGIBLE_WORK")
+        self.assertEqual(inactive["reason_code"], "REPOSITORY_NOT_ACTIVE")
+
     def test_bootstrap_derived_idle_control_is_trusted_by_maintenance_observation(self):
         observation = mg.collect_repository(
             self._transport(),
@@ -636,6 +730,7 @@ class MaintenanceBootstrapDerivedTrustTests(unittest.TestCase):
             "repository_url": f"https://api.github.com/repos/{self.repository}",
             "html_url": f"https://github.com/{self.repository}/issues/7",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "updated_at": "2026-10-03T00:01:00Z",
             "body": "## Work Status\n\n`READY_FOR_IMPLEMENTATION`\n",
         }
@@ -693,6 +788,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
             "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "updated_at": "2026-10-04T00:00:00Z",
             "body": (
                 "## Repository\n\n`kinoko34077/example`\n\n"
@@ -732,6 +828,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
             "state": "open",
             "html_url": "https://github.com/kinoko34077/devflow/issues/16",
             "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
             "body": (
                 "## Repository\n\n"
                 "`kinoko34077/example`\n\n"
@@ -775,6 +872,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -791,6 +889,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/8"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Work Status\n\n"
                             "`READY_FOR_IMPLEMENTATION`\n"
@@ -825,6 +924,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -908,6 +1008,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -954,6 +1055,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "devflow/issues/16"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": (
                             "## Repository\n\n"
                             "`kinoko34077/example`\n\n"
@@ -972,6 +1074,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                             "example/issues/7"
                         ),
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                         "body": "## Work Status\n\n`DONE`\n",
                     }
                 raise AssertionError(path)
@@ -1018,6 +1121,7 @@ class MaintenanceGitHubPreReviewHardeningTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError(path)
 
@@ -1065,6 +1169,7 @@ class MaintenanceGitHubP6PilotRegressionTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 self.owner_reads += 1
                 raise AssertionError(
@@ -1111,6 +1216,7 @@ class MaintenanceGitHubP6PilotRegressionTests(unittest.TestCase):
                         ),
                         "body": body,
                         "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
                     }
                 raise AssertionError(path)
 

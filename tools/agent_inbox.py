@@ -1,0 +1,272 @@
+"""Read-only KAEP Agent Inbox projection; not a task queue or runtime authority.
+
+Uses existing trusted M3 Repository Work View for task discovery and the
+unchanged KAEP v0.2 codec for source-Issue message correlation. This is only a
+GET-side read model; it cannot schedule, claim, dispatch or approve work.
+"""
+from __future__ import annotations
+
+from typing import Any, Mapping, Sequence
+import re
+
+try:
+    from .kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from .github_issue_trust import is_trusted_principal
+except ImportError:  # direct stdio script from the tools directory
+    from kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from github_issue_trust import is_trusted_principal
+
+MAX_INBOX_TASKS = 20
+MAX_ISSUE_COMMENTS = 500
+KNOWN_REPLY_KINDS = frozenset({"ACK", "ANSWER", "BLOCKED", "ERROR", "RESULT", "REVIEW_FEEDBACK"})
+MAX_TITLE_CHARS = 120
+
+
+def _safe_untrusted_title(value: object) -> str:
+    """Human display hint only. Never carry multiline Issue prose as commands."""
+    if type(value) is not str:
+        return ""
+    # Replace all controls/line separators and collapse layout whitespace.
+    flattened = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", value)
+    return " ".join(flattened.split())[:MAX_TITLE_CHARS]
+
+
+
+def validate_inbox_options(recipient: str, limit: int, offset: int, work_status: str | None) -> None:
+    if type(recipient) is not str or recipient not in RECIPIENTS:
+        raise ValueError("INVALID_RECIPIENT")
+    if type(limit) is not int or not 1 <= limit <= MAX_INBOX_TASKS:
+        raise ValueError("INVALID_LIMIT")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("INVALID_OFFSET")
+    if work_status is not None and (type(work_status) is not str or not work_status):
+        raise ValueError("INVALID_WORK_STATUS")
+
+
+def select_task_records(
+    work_view: Mapping[str, Any], *, recipient: str,
+    limit: int = MAX_INBOX_TASKS, offset: int = 0,
+    work_status: str | None = None,
+) -> dict[str, Any]:
+    """Select verified machine TASKs only; no automatic agent ownership."""
+    validate_inbox_options(recipient, limit, offset, work_status)
+    is_current = (
+        work_view.get("source_status") == "AVAILABLE"
+        and work_view.get("source_freshness") == "CURRENT"
+    )
+    observed = work_view.get("observed_task_view") or {}
+    rows: list[dict[str, Any]] = []
+    if is_current:
+        for record in work_view.get("task_records") or []:
+            if record.get("record_role") != "TASK":
+                continue
+            if work_status is not None and record.get("work_status") != work_status:
+                continue
+            rows.append(record)
+    rows.sort(key=lambda row: row.get("issue_number", 0))
+    selected = rows[offset:offset + limit] if is_current else []
+    return {
+        "repository": work_view.get("repository"),
+        "recipient": recipient,
+        "source_status": work_view.get("source_status"),
+        "source_freshness": work_view.get("source_freshness"),
+        "observed_task_status": observed.get("status"),
+        "source_error": work_view.get("source_error"),
+        "coverage_status": work_view.get("coverage_status"),
+        "unresolved_open_issue_count": observed.get("unresolved_open_issue_count"),
+        # Preserve the already-classified M3 source-gap categories for consumers.
+        # An unavailable source is UNKNOWN, never zero. These counts are
+        # observations only: no legacy/unclassified Issue becomes a TASK.
+        "unresolved_issue_breakdown": {
+            category: work_view.get(field) if is_current else None
+            for category, field in (
+                ("legacy_hint", "legacy_hint_count"),
+                ("unclassified", "unclassified_count"),
+                ("invalid_metadata", "invalid_metadata_count"),
+                ("untrusted_metadata", "untrusted_metadata_count"),
+            )
+        },
+        "known_task_count": observed.get("known_task_count"),
+        "manual_control": work_view.get("manual_control"),
+        "can_authorize_execution": False,
+        "can_replace_manual_active_work": False,
+        "is_full_work_inventory": bool(
+            is_current and observed.get("is_complete_read")
+            and offset == 0 and work_status is None and len(selected) == len(rows)
+        ),
+        "task_count_filtered": len(rows) if is_current else None,
+        "next_offset": (offset + len(selected)) if is_current and offset + len(selected) < len(rows) else None,
+        "truncated": bool(is_current and offset + len(selected) < len(rows)),
+        "selected": selected,
+    }
+
+
+def _issue_messages_for_recipients(
+    comments: Sequence[Mapping[str, Any]], *, repository: str,
+    issue_number: int, recipients: Sequence[str], expected_actor: str,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Validate one full Issue mailbox and project exact recipient views.
+
+    The trust filter, strict decoder and reply correlation run once regardless
+    of the number of requested recipients. This does not grant task authority.
+    """
+    if len(comments) > MAX_ISSUE_COMMENTS:
+        raise InvalidMessage("ISSUE_COMMENTS_LIMIT")
+    task_ref = f"{repository}#{issue_number}"
+    trusted_actor_ids: set[int] = set()
+    trusted_comments: list[Mapping[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for comment in comments:
+        cid, user = comment.get("id"), comment.get("user")
+        if type(cid) is not int or type(user) is not dict:
+            raise InvalidMessage("INVALID_GITHUB_COMMENT")
+        login = user.get("login")
+        if type(login) is not str or not login:
+            raise InvalidMessage("INVALID_GITHUB_ACTOR")
+        body = comment.get("body")
+        if type(body) is not str:
+            raise InvalidMessage("INVALID_GITHUB_COMMENT")
+        trusted_principal = (
+            login.casefold() == expected_actor.casefold()
+            and is_trusted_principal(comment)
+        )
+        if body.startswith(MARKER) and not trusted_principal:
+            # Never let outsider-authored data participate in the global
+            # mailbox collision/codec check, or hide legitimate owner roots.
+            warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_MARKER_COMMENT"})
+            continue
+        if trusted_principal:
+            trusted_actor_ids.add(cid)
+        trusted_comments.append(comment)
+    parsed = read_mailbox(trusted_comments, task_ref=task_ref)
+    roots_by_recipient: dict[str, dict[str, tuple[int, dict[str, Any]]]] = {
+        target: {} for target in recipients
+    }
+    # Build the correlation lookup during the same validated mailbox pass.
+    # A reply names a single parent, so repeated full-mailbox scans for each
+    # root are unnecessary. Trusted actor, kind and recipient gates remain.
+    replies_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for cid, msg in parsed:
+        parent_id = msg["in_reply_to"]
+        if (parent_id is not None and msg["kind"] in KNOWN_REPLY_KINDS
+                and msg["recipient"] == "chatgpt"
+                and cid in trusted_actor_ids):
+            replies_by_parent.setdefault(parent_id, []).append(msg)
+        if msg["in_reply_to"] is not None:
+            continue
+        is_consultation = (
+            msg["kind"] == "REQUEST"
+            and msg["scope"]["effect"] == "READ_ONLY"
+        )
+        is_review_request = (
+            msg["kind"] == "REVIEW_REQUEST"
+            and msg["intent"] == "REVIEW"
+            and msg["scope"]["effect"] == "WRITE_INTENT"
+            and msg["scope"]["expected_head"] is not None
+        )
+        if not (is_consultation or is_review_request):
+            continue
+        recipient_roots = roots_by_recipient.get(msg["recipient"])
+        if recipient_roots is None:
+            continue
+        if cid not in trusted_actor_ids:
+            warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_ROOT_ACTOR"})
+            continue
+        recipient_roots[msg["message_id"]] = (cid, msg)
+    out_by_recipient: dict[str, list[dict[str, Any]]] = {}
+    for target, roots in roots_by_recipient.items():
+        out: list[dict[str, Any]] = []
+        for message_id, (cid, root) in roots.items():
+            reply_kinds = sorted({
+                msg["kind"] for msg in replies_by_parent.get(message_id, ())
+                if msg["exchange_id"] == root["exchange_id"]
+                and msg["task_ref"] == root["task_ref"]
+                and msg["scope"] == root["scope"]
+                and msg["intent"] == root["intent"]
+                and (root["kind"] != "REVIEW_REQUEST"
+                     or msg["kind"] in ("ACK", "REVIEW_FEEDBACK", "BLOCKED"))
+            })
+            out.append({
+                "source_comment_id": cid,
+                "source_message_id": message_id,
+                "exchange_id": root["exchange_id"],
+                "kind": root["kind"],
+                "intent": root["intent"],
+                "expected_head": root["scope"]["expected_head"],
+                "reply_kinds_observed": reply_kinds,
+                "status": "REVIEW_FEEDBACK_OBSERVED" if (
+                    root["kind"] == "REVIEW_REQUEST"
+                    and "REVIEW_FEEDBACK" in reply_kinds
+                ) else "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
+                          "BLOCKED_OBSERVED" if "BLOCKED" in reply_kinds else
+                          "ACK_OBSERVED" if "ACK" in reply_kinds else "PENDING_REPLY",
+                "source_url": f"https://github.com/{repository}/issues/{issue_number}#issuecomment-{cid}",
+                "actor_login_verified_only": True,
+            })
+        out.sort(key=lambda row: row["source_comment_id"])
+        out_by_recipient[target] = out
+    return out_by_recipient, warnings
+
+
+def _issue_messages(
+    comments: Sequence[Mapping[str, Any]], *, repository: str,
+    issue_number: int, recipient: str, expected_actor: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compatibility single-recipient entrypoint for the Agent Inbox."""
+    grouped, warnings = _issue_messages_for_recipients(
+        comments, repository=repository, issue_number=issue_number,
+        recipients=(recipient,), expected_actor=expected_actor,
+    )
+    return grouped[recipient], warnings
+
+
+def build_agent_inbox(
+    work_view: Mapping[str, Any], *,
+    recipient: str, comments_by_issue: Mapping[int, Sequence[Mapping[str, Any]]],
+    errors_by_issue: Mapping[int, str] | None = None,
+    limit: int = MAX_INBOX_TASKS, offset: int = 0,
+    work_status: str | None = None, expected_actor: str = "kinoko34077",
+) -> dict[str, Any]:
+    """Produce a bounded read-only observation, not an assignment/Claim."""
+    if type(expected_actor) is not str or not expected_actor:
+        raise ValueError("INVALID_EXPECTED_ACTOR")
+    selection = select_task_records(
+        work_view, recipient=recipient, limit=limit, offset=offset,
+        work_status=work_status)
+    issues: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    if selection["source_status"] == "AVAILABLE" and selection["source_freshness"] == "CURRENT":
+        for record in selection["selected"]:
+            number = record["issue_number"]
+            item = {
+                "issue_number": number, "url": record["url"],
+                "title": _safe_untrusted_title(record.get("title")),
+                "title_is_untrusted": True,
+                "work_status": record["work_status"],
+                "record_role": "TASK", "recipient_assignment_inferred": False,
+                "requests": None, "source_state": "UNAVAILABLE",
+            }
+            if number in (errors_by_issue or {}):
+                errors.append({"issue_number": number, "reason_code": errors_by_issue[number]})
+            elif number not in comments_by_issue:
+                errors.append({"issue_number": number, "reason_code": "COMMENTS_NOT_READ"})
+            else:
+                try:
+                    item["requests"], warnings = _issue_messages(
+                        comments_by_issue[number],
+                        repository=selection["repository"], issue_number=number,
+                        recipient=recipient, expected_actor=expected_actor)
+                    item["source_state"] = "AVAILABLE"
+                    errors.extend({"issue_number": number, **warning} for warning in warnings)
+                except (InvalidMessage, ValueError) as exc:
+                    errors.append({"issue_number": number, "reason_code": str(exc)})
+            issues.append(item)
+    return {
+        **{key: value for key, value in selection.items() if key != "selected"},
+        "schema_version": "kaep.agent-inbox.read.v0.1",
+        "issues": issues,
+        "errors": errors,
+        "has_unknown_work": not selection["is_full_work_inventory"] or bool(errors),
+        "is_authoritative_assignment": False,
+        "is_live_agent_delivery": False,
+    }

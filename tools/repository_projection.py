@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 from typing import Any
 
@@ -15,6 +16,11 @@ except ImportError:  # direct script / top-level fallback
 
 ISSUE_METADATA_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V1_BEGIN -->"
 ISSUE_METADATA_MARKER_END = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V1_END -->"
+ISSUE_METADATA_V2_MARKER_BEGIN = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->"
+ISSUE_METADATA_V2_MARKER_END = "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->"
+_V2_NON_TASK_ATTENTIONS = frozenset(
+    {"NONE", "NEEDS_HUMAN", "WAIT_EXTERNAL", "NEEDS_EVIDENCE"}
+)
 
 _SCHEMA_VERSION = 1
 _RECORD_ROLES = frozenset({"TASK", "TRACKER", "REFERENCE", "SYSTEM"})
@@ -51,9 +57,9 @@ class ProjectionContractError(ValueError):
 class IssueMetadata:
     schema_version: int
     record_role: str
-    type: str
-    work_status: str
-    scope_ready: bool
+    type: str | None
+    work_status: str | None
+    scope_ready: bool | None
     requires_user_confirmation: bool
     external_wait: bool
     priority: str | None = None
@@ -62,6 +68,7 @@ class IssueMetadata:
     work_order_ref: str | None = None
     implementation_ref: str | None = None
     next_action_tag: str | None = None
+    declared_attention: str | None = None
 
     @property
     def is_task(self) -> bool:
@@ -93,6 +100,10 @@ _LEADING_TAGS = re.compile(r"^((?:\[[^\]\r\n]+\])+)")
 
 
 def _issue_only_attention(metadata: IssueMetadata) -> str | None:
+    if metadata.schema_version == 2:
+        # Non-TASK V2 explicitly attests its attention status. No omitted
+        # Human/external/evidence field is silently interpreted as false.
+        return None if metadata.declared_attention == "NONE" else metadata.declared_attention
     if metadata.requires_user_confirmation:
         disposition = "NEEDS_HUMAN"
     elif metadata.external_wait:
@@ -227,9 +238,109 @@ def _validate_payload(payload: dict[str, Any]) -> IssueMetadata:
     )
 
 
+def _validate_v2_non_task_payload(payload: dict[str, Any]) -> IssueMetadata:
+    """Accept a minimal NON-TASK role only with explicit attention attestation.
+
+    V2 is intentionally NOT a relaxed TASK/execution schema. The role must
+    be trusted by the existing Issue author check and cannot infer readiness.
+    """
+    required = {"schema_version", "record_role", "attention"}
+    missing = sorted(required - set(payload))
+    if missing:
+        raise ProjectionContractError(
+            "V2 non-TASK metadata missing required fields: " + ", ".join(missing)
+        )
+    unknown = sorted(set(payload) - required)
+    if unknown:
+        raise ProjectionContractError(
+            "V2 non-TASK metadata has unknown fields: " + ", ".join(unknown)
+        )
+    version = payload["schema_version"]
+    if type(version) is not int or version != 2:
+        raise ProjectionContractError(f"unsupported V2 schema_version: {version!r}")
+    role = payload["record_role"]
+    if not isinstance(role, str) or role not in {"TRACKER", "REFERENCE", "SYSTEM"}:
+        raise ProjectionContractError("V2 is restricted to non-TASK record_role")
+    attention = payload["attention"]
+    if not isinstance(attention, str) or attention not in _V2_NON_TASK_ATTENTIONS:
+        raise ProjectionContractError(f"invalid V2 attention: {attention!r}")
+    return IssueMetadata(
+        schema_version=2,
+        record_role=role,
+        type=None,
+        work_status=None,
+        scope_ready=None,
+        requires_user_confirmation=(attention == "NEEDS_HUMAN"),
+        external_wait=(attention == "WAIT_EXTERNAL"),
+        declared_attention=attention,
+    )
+
+
 def parse_issue_metadata(body: str) -> IssueMetadata | None:
+    has_v1 = (
+        ISSUE_METADATA_MARKER_BEGIN in body or ISSUE_METADATA_MARKER_END in body
+    )
+    has_v2 = (
+        ISSUE_METADATA_V2_MARKER_BEGIN in body
+        or ISSUE_METADATA_V2_MARKER_END in body
+    )
+    if has_v1 and has_v2:
+        raise ProjectionContractError("mixed Issue metadata versions are not supported")
+    begin, end = (
+        (ISSUE_METADATA_V2_MARKER_BEGIN, ISSUE_METADATA_V2_MARKER_END)
+        if has_v2 else (ISSUE_METADATA_MARKER_BEGIN, ISSUE_METADATA_MARKER_END)
+    )
     try:
         payload = marker_json.parse_json_object_block(
+            body,
+            begin,
+            end,
+            label="repository Issue metadata",
+        )
+    except marker_json.MarkerJSONError as exc:
+        raise ProjectionContractError(str(exc)) from exc
+    if payload is None:
+        return None
+    return (
+        _validate_v2_non_task_payload(payload) if has_v2
+        else _validate_payload(payload)
+    )
+
+
+
+def render_issue_metadata_v1(payload: dict[str, Any]) -> str:
+    """Render a *validated* V1 role declaration; never infer a TASK from title.
+
+    This pure helper creates no Issue and grants no action authority. The caller
+    is responsible for verifying author/owner and matching the real Issue facts.
+    """
+    if not isinstance(payload, dict):
+        raise ProjectionContractError("repository Issue metadata must be an object")
+    _validate_payload(payload)
+    return (
+        ISSUE_METADATA_MARKER_BEGIN + "\n"
+        + json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False)
+        + "\n" + ISSUE_METADATA_MARKER_END
+    )
+
+
+def upsert_issue_metadata_v1(body: str, payload: dict[str, Any]) -> str:
+    """Bounded creation/material-edit normalization; no GitHub write is issued.
+
+    Protect adjacent human prose and reject malformed, duplicate or mixed
+    machine markers rather than overwriting evidence with a guessed role.
+    """
+    if not isinstance(body, str):
+        raise ProjectionContractError("Issue body must be a string")
+    rendered = render_issue_metadata_v1(payload)
+    # Future metadata versions must never be silently overwritten by V1.
+    if (
+        "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_BEGIN -->" in body
+        or "<!-- DEVFLOW_REPOSITORY_ISSUE_METADATA_V2_END -->" in body
+    ):
+        raise ProjectionContractError("mixed Issue metadata versions are not supported")
+    try:
+        bounds = marker_json.marker_bounds(
             body,
             ISSUE_METADATA_MARKER_BEGIN,
             ISSUE_METADATA_MARKER_END,
@@ -237,9 +348,13 @@ def parse_issue_metadata(body: str) -> IssueMetadata | None:
         )
     except marker_json.MarkerJSONError as exc:
         raise ProjectionContractError(str(exc)) from exc
-    if payload is None:
-        return None
-    return _validate_payload(payload)
+    if bounds is None:
+        sep = "" if not body else ("\n" if body.endswith("\n") else "\n\n")
+        return body + sep + rendered + "\n"
+    # A malformed existing block may indicate a contested edit. Fail closed.
+    parse_issue_metadata(body)
+    begin, end = bounds
+    return body[:begin] + rendered + body[end + len(ISSUE_METADATA_MARKER_END):]
 
 
 def _issue_number(issue: dict[str, Any]) -> int:
@@ -283,6 +398,8 @@ def classify_issue(issue: dict[str, Any]) -> IssueRecord:
     has_metadata_marker = (
         ISSUE_METADATA_MARKER_BEGIN in body
         or ISSUE_METADATA_MARKER_END in body
+        or ISSUE_METADATA_V2_MARKER_BEGIN in body
+        or ISSUE_METADATA_V2_MARKER_END in body
     )
     if has_metadata_marker and not github_issue_trust.is_trusted_issue_author(issue):
         return IssueRecord(

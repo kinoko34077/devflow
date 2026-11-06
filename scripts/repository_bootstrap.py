@@ -18,7 +18,7 @@ from tools.repository_bootstrap import (  # noqa: E402
     BootstrapError,
     BootstrapExecutor,
     GitHubApi,
-    is_trusted_association,
+    is_trusted_issue_author,
     normalize_request,
     parse_request_body,
 )
@@ -117,8 +117,7 @@ def validate_event(event_path: Path, github_output: Path) -> int:
         )
         return 0
 
-    association = issue.get("author_association")
-    authorized = isinstance(association, str) and is_trusted_association(association)
+    authorized = is_trusted_issue_author(issue)
     if not authorized:
         _write_output(
             github_output,
@@ -185,10 +184,9 @@ def execute_event(event_path: Path) -> int:
     issue, repository, number, issue_url = _event_identity(event)
     title = issue.get("title")
     body = issue.get("body")
-    association = issue.get("author_association")
     if not isinstance(title, str) or not title.startswith(TITLE_PREFIX):
         raise EventError("execute-event requires a [REPO CREATE] Issue")
-    if not isinstance(association, str) or not is_trusted_association(association):
+    if not is_trusted_issue_author(issue):
         raise EventError("execute-event request author is not trusted")
     raw = parse_request_body(body if isinstance(body, str) else "")
     request = normalize_request(raw, title)
@@ -207,7 +205,8 @@ def execute_event(event_path: Path) -> int:
         devflow_repo=repository,
         request_issue_number=number,
         request_title=title,
-        author_association=association,
+        author_association=str(issue.get("author_association") or ""),
+        author=issue.get("user") if isinstance(issue.get("user"), dict) else {},
     )
     result = BootstrapExecutor(
         GitHubApi(bootstrap_token),

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 try:
-    from tools import devflow_mcp_core, workflow_contract
+    from tools import devflow_mcp_core, github_issue_trust, workflow_contract
     from tools.maintenance_catalog import (
         MaintenanceCatalogError,
         canonical_catalog_digest,
@@ -26,6 +26,9 @@ try:
         next_generation,
         parse_run_comment,
     )
+    from tools.maintenance_run_attestation import (
+        ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
+    )
     from tools.maintenance_selector import (
         RunEvidence,
         SelectionContext,
@@ -34,6 +37,7 @@ try:
     )
 except ImportError:  # direct module execution
     import devflow_mcp_core
+    import github_issue_trust
     import workflow_contract
     from maintenance_catalog import (
         MaintenanceCatalogError,
@@ -48,6 +52,9 @@ except ImportError:  # direct module execution
         next_generation,
         parse_run_comment,
     )
+    from maintenance_run_attestation import (
+        ATTESTATION_SENTINEL, RunAttestationError, parse_attested_run_comment,
+    )
     from maintenance_selector import (
         RunEvidence,
         SelectionContext,
@@ -61,12 +68,18 @@ WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 API_BASE = "https://api.github.com"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+SUBSTANTIVE_AUDIT_RESULTS = frozenset({"CLEAN", "FINDINGS", "RECONCILED"})
 CANDIDATE_BEGIN = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->"
 CANDIDATE_END = "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->"
 _REF_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:(?P<owner>[A-Za-z0-9_.-]+)/)?"
     r"(?P<repo>[A-Za-z0-9_.-]+)#(?P<number>[1-9][0-9]*)"
 )
+
+
+def _completed_audit_evidence(record: RunRecord) -> bool:
+    """Only substantive accepted audit results count toward coverage/score."""
+    return record.result in SUBSTANTIVE_AUDIT_RESULTS
 
 
 class GitHubReadError(RuntimeError):
@@ -578,6 +591,110 @@ def _active_owner_ref(
 
 
 
+def _m3_owner_shadow(
+    work_view: object,
+    *,
+    repository: str,
+    control_ref: str,
+    sections: Mapping[str, str],
+    trusted: bool,
+    source_status: str,
+    manual_owner_ref: str | None,
+) -> dict[str, object]:
+    """Compare a live all-state M1 read view to legacy single-owner evidence.
+
+    Strictly observational. Never use this result for Maintenance classification,
+    task supply, execution claims or authority removal.
+    """
+    def fallback(reason: str) -> dict[str, object]:
+        return {
+            "status": "MANUAL_CONTROL_FALLBACK",
+            "reason": reason,
+            "machine_task_refs": [],
+            "manual_owner_ref": manual_owner_ref,
+            "can_replace_manual_active_work": False,
+        }
+
+    if not trusted or source_status != "OK":
+        return fallback("CONTROL_OR_OWNER_NOT_VERIFIED")
+    if not isinstance(work_view, Mapping):
+        return fallback("INVALID_WORK_VIEW")
+    control_repo, control_number = _split_ref(control_ref)
+    if (
+        work_view.get("repository") != repository
+        or work_view.get("control_ref") != (
+            f"https://github.com/{control_repo}/issues/{control_number}"
+        )
+    ):
+        return fallback("CONTROL_IDENTITY_MISMATCH")
+    manual = work_view.get("manual_control")
+    if not isinstance(manual, Mapping) or (
+        manual.get("active_work") != sections.get("Active Work", "")
+        or manual.get("next_action") != sections.get("Next Action", "")
+    ):
+        return fallback("MANUAL_CONTROL_REVISION_MISMATCH")
+    if (
+        work_view.get("source_status") != "AVAILABLE"
+        or work_view.get("source_freshness") != "CURRENT"
+        or work_view.get("source_error") is not None
+        or work_view.get("coverage_status") != "COMPLETE"
+        or work_view.get("view_mode") != "MACHINE_COMPLETE_SHADOW"
+        or work_view.get("can_replace_manual_active_work") is not False
+        or any(
+            work_view.get(key) != 0
+            for key in (
+                "legacy_hint_count", "unclassified_count",
+                "invalid_metadata_count", "untrusted_metadata_count",
+            )
+        )
+    ):
+        return fallback("INCOMPLETE_OR_UNTRUSTED_SOURCE")
+
+    records = work_view.get("task_records")
+    count = work_view.get("machine_task_count")
+    if (
+        not isinstance(records, list)
+        or not isinstance(count, int) or isinstance(count, bool)
+        or count < 0 or len(records) != count
+    ):
+        return fallback("TRUNCATED_OR_INVALID_TASK_LIST")
+
+    refs: list[str] = []
+    for item in records:
+        if not isinstance(item, Mapping):
+            return fallback("INVALID_TASK_RECORD")
+        number = item.get("issue_number")
+        if (
+            not isinstance(number, int) or isinstance(number, bool)
+            or number < 1 or item.get("record_role") != "TASK"
+            or item.get("source_kind") != "MACHINE"
+            or item.get("url") != f"https://github.com/{repository}/issues/{number}"
+            or not isinstance(item.get("work_status"), str)
+            or not item["work_status"]
+        ):
+            return fallback("INVALID_TASK_RECORD")
+        refs.append(f"{repository}#{number}")
+    if len(refs) != len(set(refs)):
+        return fallback("DUPLICATE_TASK_RECORD")
+
+    # A complete multi-TASK view is not a unique Maintenance owner.
+    if len(refs) > 1:
+        status, reason = "MULTIPLE_TASKS_SHADOW", "ONE_OWNER_CONTRACT_INSUFFICIENT"
+    elif len(refs) == 1 and manual_owner_ref == refs[0]:
+        status, reason = "MATCHED_SHADOW", "SAME_SINGLE_OWNER"
+    elif not refs and manual_owner_ref is None:
+        status, reason = "MATCHED_EMPTY_SHADOW", "NO_OPEN_TASKS"
+    else:
+        status, reason = "DIVERGENT_SHADOW", "MANUAL_MACHINE_OWNER_DISAGREEMENT"
+    return {
+        "status": status,
+        "reason": reason,
+        "machine_task_refs": refs,
+        "manual_owner_ref": manual_owner_ref,
+        "can_replace_manual_active_work": False,
+    }
+
+
 def _expected_issue_url(repository: str, number: int) -> str:
     return f"https://github.com/{repository}/issues/{number}"
 
@@ -615,8 +732,7 @@ def _control_is_trusted(
     control: dict[str, Any],
     repository: str,
 ) -> bool:
-    association = str(control.get("author_association") or "").upper()
-    if association in TRUSTED_ASSOCIATIONS:
+    if github_issue_trust.is_trusted_issue_author(control):
         return True
     try:
         return devflow_mcp_core.DevflowService(
@@ -653,6 +769,8 @@ def collect_repository(
     repository: str,
     control_ref: str,
     observed_at: str,
+    *,
+    m3_work_view: object | None = None,
 ) -> dict[str, object]:
     try:
         control_repo, control_number = _split_ref(control_ref)
@@ -728,7 +846,7 @@ def collect_repository(
 
     if owner_ref is None:
         control_revision = _issue_revision(control)
-        return {
+        result: dict[str, object] = {
             "repository": repository,
             "observed_at": observed_at,
             "control_count": 1,
@@ -757,6 +875,13 @@ def collect_repository(
             "search_state": None,
             "evidence_refs": [control_ref],
         }
+        if m3_work_view is not None:
+            result["m3_shadow"] = _m3_owner_shadow(
+                m3_work_view, repository=repository, control_ref=control_ref,
+                sections=sections, trusted=trusted, source_status=source_status,
+                manual_owner_ref=None,
+            )
+        return result
 
     owner_repo, owner_number = _split_ref(owner_ref)
     try:
@@ -781,10 +906,7 @@ def collect_repository(
         }
         source_status = "UNAVAILABLE"
 
-    owner_association = str(
-        owner.get("author_association") or ""
-    ).upper()
-    if owner_association not in TRUSTED_ASSOCIATIONS:
+    if not github_issue_trust.is_trusted_issue_author(owner):
         source_status = "UNAVAILABLE"
 
     owner_sections = _sections(str(owner.get("body") or ""))
@@ -801,7 +923,7 @@ def collect_repository(
     producer_active = work_status == "IMPLEMENTING"
     reviewer_gate = work_status == "AWAITING_REVIEW"
 
-    return {
+    result: dict[str, object] = {
         "repository": repository,
         "observed_at": observed_at,
         "control_count": 1,
@@ -830,6 +952,13 @@ def collect_repository(
         "search_state": None,
         "evidence_refs": [control_ref, owner_ref],
     }
+    if m3_work_view is not None:
+        result["m3_shadow"] = _m3_owner_shadow(
+            m3_work_view, repository=repository, control_ref=control_ref,
+            sections=sections, trusted=trusted, source_status=source_status,
+            manual_owner_ref=owner_ref,
+        )
+    return result
 
 
 def collect_portfolio(
@@ -998,14 +1127,14 @@ def collect_maintenance_control(
             "detail": str(exc),
         }
 
-    association = str(issue.get("author_association") or "").upper()
+    trusted = _control_is_trusted(transport, issue, repository)
     expected_title = f"[REPO] {repository.rsplit('/', 1)[-1]}"
     body = str(issue.get("body") or "")
     sections = _sections(body)
     if (
         str(issue.get("state") or "").lower() != "open"
         or "pull_request" in issue
-        or association not in TRUSTED_ASSOCIATIONS
+        or not trusted
         or issue.get("title") != expected_title
         or _scalar_section(sections, "Repository") != repository
     ):
@@ -1081,7 +1210,7 @@ def collect_maintenance_catalog(
 
 
 def _trusted_issue(issue: Mapping[str, object]) -> bool:
-    return str(issue.get("author_association") or "").upper() in TRUSTED_ASSOCIATIONS
+    return github_issue_trust.is_trusted_issue_author(issue)
 
 
 def find_maintenance_ledger(
@@ -1119,20 +1248,35 @@ def collect_maintenance_history(
         body = comment.get("body")
         if not isinstance(body, str):
             continue
-        if str(comment.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
+        if not github_issue_trust.is_trusted_issue_author(comment):
             continue
-        try:
-            record = parse_run_comment(body)
-        except MaintenanceLedgerError as exc:
-            raise GitHubReadError(
-                f"trusted maintenance Ledger comment is malformed: {exc}"
-            ) from exc
+        # Every completion format is one authoritative generation: a trusted
+        # malformed or dual-sentinel record is not safely ignorable.
+        if ATTESTATION_SENTINEL in body:
+            if "<!-- devflow-maintenance-run:v1 -->" in body:
+                raise GitHubReadError("ambiguous v1/v2 Ledger completion comment")
+            try:
+                attested = parse_attested_run_comment(body)
+            except RunAttestationError as exc:
+                raise GitHubReadError("trusted v2 Ledger comment malformed") from exc
+            if attested is None:
+                raise GitHubReadError("v2 Ledger comment did not parse")
+            record = attested.record
+        else:
+            try:
+                record = parse_run_comment(body)
+            except MaintenanceLedgerError as exc:
+                raise GitHubReadError(
+                    f"trusted maintenance Ledger comment is malformed: {exc}"
+                ) from exc
         if record is None:
             continue
         if record.repository != repository:
             raise GitHubReadError(
                 "maintenance Ledger run repository identity mismatch"
             )
+        if any(previous.run_id == record.run_id for previous in records):
+            raise GitHubReadError("duplicate trusted Ledger run ID")
         records.append(record)
     records.sort(key=lambda item: (item.completed_at, item.run_id))
     return tuple(records)
@@ -1274,7 +1418,7 @@ def collect_maintenance_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=_completed_audit_evidence(record),
             )
         )
 
@@ -1507,7 +1651,7 @@ def collect_maintenance_portfolio_selection(
                 depth=record.depth,
                 fingerprint=record.fingerprint,
                 completed_at=_parse_observed_at(record.completed_at),
-                evidence_complete=record.result not in {"BLOCKED", "NEEDS_REAUDIT"},
+                evidence_complete=_completed_audit_evidence(record),
             )
             converted_history.append(item)
             if not item.evidence_complete:

@@ -1,0 +1,27 @@
+name: Visual editor public performance samples
+
+on:
+  pull_request:
+    paths:
+      - 'tools/visual_editor_public_performance.py'
+      - '.github/workflows/visual-editor-public-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install browser driver
+        run: |
+          python3 -m pip install --quiet playwright
+          command -v google-chrome
+      - name: Low-impact 3x sequential public Pages benchmark
+        env:
+          PYTHONUNBUFFERED: '1'
+          INCLUDE_GOMOKU: '1'
+        run: python3 tools/visual_editor_public_performance.py

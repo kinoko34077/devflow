@@ -1,0 +1,69 @@
+name: Reusable read-only Control semantic PR check
+
+# Public shared source, but runtime and GITHUB_TOKEN belong to the caller.
+# Caller must opt in separately after its live Repository Control is reviewed.
+on:
+  workflow_call:
+    inputs:
+      control_issue:
+        description: Exact owning devflow Repository Control Issue number
+        required: true
+        type: number
+      source_sha:
+        description: Immutable 40-character devflow source commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  check:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.repository, 'kinoko34077/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Validate fixed source revision
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CONTROL_ISSUE: ${{ inputs.control_issue }}
+        shell: bash
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 3
+          [[ "$CONTROL_ISSUE" =~ ^[1-9][0-9]{0,8}$ ]] || exit 3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: kinoko34077/devflow
+          ref: ${{ inputs.source_sha }}
+          path: devflow-check
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Verify exact caller PR and Control without writing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CONTROL_ISSUE: ${{ inputs.control_issue }}
+        shell: bash
+        working-directory: devflow-check
+        run: |
+          set +e
+          python -m tools.control_semantic_postmerge_event \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "$GITHUB_REPOSITORY" \
+            --control "$CONTROL_ISSUE" > semantic-result.json
+          status=$?
+          echo "## Scoped Control reconciliation — read-only" >> "$GITHUB_STEP_SUMMARY"
+          echo 'This is a candidate check, not general semantic acceptance.' >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
+          cat semantic-result.json >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

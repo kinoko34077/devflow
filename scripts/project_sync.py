@@ -17,6 +17,8 @@ from typing import Any, Callable, Iterable
 
 try:
     from tools import devflow_mcp_core, github_issue_trust, workflow_contract
+    from tools.markdown_scalar import strip_scalar as _strip_scalar
+    from tools.markdown_sections import iter_h2_sections
 except ImportError:  # direct script execution
     _TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
     if str(_TOOLS_DIR) not in sys.path:
@@ -24,6 +26,8 @@ except ImportError:  # direct script execution
     import devflow_mcp_core
     import github_issue_trust
     import workflow_contract
+    from markdown_scalar import strip_scalar as _strip_scalar
+    from markdown_sections import iter_h2_sections
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
@@ -138,39 +142,13 @@ class TransientAPIError(APIError):
     pass
 
 
-def _strip_scalar(value: str) -> str:
-    value = value.strip()
-    if value.startswith("```") and value.endswith("```"):
-        lines = value.splitlines()
-        if len(lines) >= 3:
-            value = "\n".join(lines[1:-1]).strip()
-    if len(value) >= 2 and value[0] == value[-1] == "`":
-        value = value[1:-1].strip()
-    return value
-
-
 def parse_sections(body: str, *, reject_duplicates: set[str] | None = None) -> dict[str, str]:
-    body = (body or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = body.split("\n")
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in lines:
-        # Machine-owned DEVFLOW blocks are transport/state surfaces, never
-        # continuation text for the preceding canonical Markdown section.
-        # Reset section capture at BEGIN; a later ## heading resumes normally.
-        if re.match(r"^<!--\s*DEVFLOW_[A-Z0-9_]+_BEGIN\s*-->\s*$", line):
-            current = None
-            continue
-        m = re.match(r"^## ([^#].*?)\s*$", line)
-        if m:
-            current = m.group(1).strip()
-            if reject_duplicates and current in reject_duplicates and current in sections:
-                raise ConfigError(f"duplicate canonical section in Project sync input: {current}")
-            sections[current] = []
-            continue
-        if current is not None:
-            sections[current].append(line)
-    return {name: _strip_scalar("\n".join(value)) for name, value in sections.items()}
+    sections: dict[str, str] = {}
+    for name, value in iter_h2_sections(body, reset_on_devflow_blocks=True):
+        if reject_duplicates and name in reject_duplicates and name in sections:
+            raise ConfigError(f"duplicate canonical section in Project sync input: {name}")
+        sections[name] = _strip_scalar(value)
+    return sections
 
 
 def _project_date(value: str, section: str) -> str:
@@ -1183,14 +1161,68 @@ def sync_one_issue(
     return {"issue_number": issue.get("number"), "membership": membership, "fields": statuses, "mutations": mutations}
 
 
+def _closed_health_revision(issue: Any, number: int) -> tuple[str, str]:
+    """Check the actual closed machine Health target, not a Control Issue.
+
+    This is an observation check, NOT GitHub Issue PATCH atomic CAS or a
+    permission grant. All returned errors are fixed strings without secrets.
+    """
+    if (
+        not isinstance(issue, dict)
+        or type(issue.get("number")) is not int
+        or issue["number"] != number
+        or issue.get("title") != HEALTH_TITLE
+        or issue.get("state") != "closed"
+        or not isinstance(issue.get("body"), str)
+        or not isinstance(issue.get("updated_at"), str)
+        or re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+            issue["updated_at"],
+        ) is None
+    ):
+        raise APIError("Project Sync Health target/revision is not trusted")
+    return issue["body"], issue["updated_at"]
+
+
 def upsert_health_issue(rest: Any, body: str) -> dict[str, Any]:
-    issue = rest.find_issue_by_title(HEALTH_TITLE)
-    if issue is None:
-        issue = rest.create_issue(HEALTH_TITLE, body)
-        number = int(issue["number"])
+    """Fresh-GET, bounded existing writer, independent result readback.
+
+    The established Actions project-sync queue is separate from native direct
+    API callers; a GET immediately before PATCH cannot make PATCH atomic.
+    """
+    if not isinstance(body, str):
+        raise APIError("Project Sync Health desired body is invalid")
+    discovered = rest.find_issue_by_title(HEALTH_TITLE)
+    created = discovered is None
+    if created:
+        opened = rest.create_issue(HEALTH_TITLE, body)
+        if type(opened.get("number")) is not int or opened.get("title") != HEALTH_TITLE:
+            raise APIError("Project Sync Health creation identity mismatch")
+        number = opened["number"]
         rest.update_issue(number, state="closed")
-        return rest.update_issue(number, body=body)
-    return rest.update_issue(int(issue["number"]), body=body)
+        # The close transition changes the revision; only the *newly*
+        # observed closed issue is a valid baseline for a later body write.
+        observed = rest.get_issue(number)
+        old_body, old_revision = _closed_health_revision(observed, number)
+    else:
+        if type(discovered.get("number")) is not int:
+            raise APIError("Project Sync Health discovery identity mismatch")
+        number = discovered["number"]
+        old_body, old_revision = _closed_health_revision(discovered, number)
+        observed = rest.get_issue(number)
+        fresh_body, fresh_revision = _closed_health_revision(observed, number)
+        if (fresh_body, fresh_revision) != (old_body, old_revision):
+            raise APIError("Project Sync Health changed after discovery")
+    if old_body == body:
+        return observed  # Confirmed current desired state: NO_OP.
+
+    # Existing normal authenticated native PATCH; no blind retry on error.
+    rest.update_issue(number, body=body)
+    readback = rest.get_issue(number)
+    verified_body, _ = _closed_health_revision(readback, number)
+    if verified_body != body:
+        raise APIError("Project Sync Health postwrite verification failed")
+    return readback
 
 
 def _validate_project_options(snapshot: ProjectSnapshot) -> None:
@@ -1603,6 +1635,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("mode", choices=["event-sync", "verify", "reconcile"])
     parser.add_argument("--issue-number", type=int)
     args = parser.parse_args(argv)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # Defense in depth: retain actor admission even if another Actions
+        # entrypoint calls this script without the workflow's first job.
+        from tools import project_sync_event_admission
+        if not project_sync_event_admission.admitted_from_env():
+            print("Project sync run: current=SKIPPED; actor=UNTRUSTED; no Project access")
+            return 0
     cfg = RuntimeConfig.from_env()
     event_issue = load_event_issue(os.environ.get("GITHUB_EVENT_PATH", "")) if args.mode == "event-sync" else None
     return run_sync(

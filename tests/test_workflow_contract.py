@@ -76,6 +76,27 @@ class WorkflowContractTests(unittest.TestCase):
             }
         )
 
+    def test_m3_optional_control_current_state_matches_machine_workflow_contract(self):
+        # M3.2 accepted in #454: local technical detail is not a required
+        # Control field, but old Controls may continue exposing the heading.
+        workflow = (ROOT / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
+        module = self._contract_module()
+        _, lists = module._parse_scalar_contract(workflow)
+        required = set(lists[("repository_control", "required_fields")])
+        legacy = set(lists[("repository_control", "optional_legacy_fields")])
+
+        self.assertNotIn("detailed_current_state", required)
+        self.assertIn("detailed_current_state", legacy)
+        self.assertTrue({"active_work", "next_action", "canonical_entry_points"} <= required)
+        # M3.1/M3.3 are not admitted: removing the redundant heading must
+        # not remove manually authoritative fields or fail legacy validation.
+        module.load_workflow_contract().validate_repository_control_sections(
+            {"Work Status": "AUDITED", "Detailed Current State": "legacy summary"}
+        )
+        module.load_workflow_contract().validate_repository_control_sections(
+            {"Work Status": "AUDITED"}
+        )
+
     def test_project_sync_and_bootstrap_do_not_own_duplicate_workflow_enum_sets(self):
         project_sync_source = (ROOT / "scripts" / "project_sync.py").read_text(encoding="utf-8")
         bootstrap_source = (ROOT / "tools" / "repository_bootstrap.py").read_text(encoding="utf-8")
@@ -133,6 +154,19 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("manual Control fallback", agents)
         self.assertIn("cannot replace Control authority or create runtime claims", mcp)
         self.assertIn("does **not** retire manual Active Work", manual)
+
+    def test_mcp_runtime_minimum_matches_pinned_coordinator_floor(self):
+        mcp = (ROOT / "docs" / "operations" / "DEVFLOW_MCP.md").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-mcp.txt").read_text(encoding="utf-8")
+
+        self.assertIn("- Python 3.11+", mcp)
+        self.assertNotIn("- Python 3.10+", mcp)
+        self.assertIn(
+            "kinotch-execution-coordinator @ "
+            "git+https://github.com/kinoko34077/execution-coordinator.git@"
+            "00fb0a76268b45d13c0d6fe5598fa961f3298d7d",
+            requirements,
+        )
 
     def test_canonical_spec_uses_accepted_audit_depth_vocabulary(self):
         spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(

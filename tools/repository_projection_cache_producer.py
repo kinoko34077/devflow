@@ -7,6 +7,7 @@ from typing import Any
 from tools import devflow_mcp_core
 from tools import human_portfolio_cache
 from tools import maintenance_sync_check
+from tools.operation_issue_metadata_preflight import snapshot_issue
 from tools import repository_projection_cache
 
 
@@ -19,6 +20,7 @@ class CacheWritePlan:
     repository: str
     control_issue_number: int
     expected_body_sha256: str
+    expected_updated_at: str
     desired_body: str
     generation_id: str
     human_portfolio_generation_id: str
@@ -124,6 +126,22 @@ def prepare_target(
         raise RepositoryProjectionCacheProducerError(
             "Repository Control body is unavailable"
         )
+    try:
+        original_snapshot = snapshot_issue(
+            {
+                "repository": devflow_repository,
+                "number": issue.get("number"),
+                "updated_at": issue.get("updated_at"),
+                "state": issue.get("state"),
+                "body": body,
+            },
+            repository=devflow_repository,
+            number=control_issue_number,
+        )
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "Repository Control initial snapshot is incomplete"
+        ) from exc
 
     try:
         live_projection = service.get_repository_projection(repository)
@@ -200,6 +218,7 @@ def prepare_target(
         repository=repository,
         control_issue_number=control_issue_number,
         expected_body_sha256=expected_body_sha256,
+        expected_updated_at=original_snapshot.updated_at,
         desired_body=desired_body,
         generation_id=str(payload["generation_id"]),
         human_portfolio_generation_id=str(human_payload["generation_id"]),
@@ -210,9 +229,26 @@ def prepare_target(
     )
 
 
-def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
+def apply_plan(writer: Any, plan: CacheWritePlan, *, service: Any) -> dict[str, Any]:
     repository = plan.repository
     devflow_repository = devflow_mcp_core.DEVFLOW_REPOSITORY
+
+    # The original plan was verified, but canonicality and trust must be
+    # checked again at effect time. This does not grant authorization.
+    try:
+        canonical_control = service.get_repository_control(repository)
+        canonical_number = canonical_control.get("issue_number")
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write canonical Control lookup unavailable"
+        ) from exc
+    if (
+        type(canonical_number) is not int
+        or canonical_number != plan.control_issue_number
+    ):
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write canonical Control number changed"
+        )
 
     try:
         current = writer.get_issue(
@@ -232,8 +268,34 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
         raise RepositoryProjectionCacheProducerError(
             "pre-write Control body is unavailable"
         )
+    try:
+        observation = snapshot_issue(
+            {
+                "repository": devflow_repository,
+                "number": current.get("number"),
+                "updated_at": current.get("updated_at"),
+                "state": current.get("state"),
+                "body": current_body,
+            },
+            repository=devflow_repository,
+            number=plan.control_issue_number,
+        )
+        expected_title = "[REPO] " + repository.rsplit("/", 1)[-1]
+        trusted = service.is_repository_control_trusted(current, repository)
+    except Exception as exc:
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write Control trust/observation unavailable"
+        ) from exc
     if (
-        maintenance_sync_check.canonical_body_sha256(current_body)
+        current.get("title") != expected_title
+        or trusted is not True
+        or observation.updated_at != plan.expected_updated_at
+    ):
+        raise RepositoryProjectionCacheProducerError(
+            "pre-write Control identity, revision or shared trust changed"
+        )
+    if (
+        maintenance_sync_check.canonical_body_sha256(observation.body)
         != plan.expected_body_sha256
     ):
         raise RepositoryProjectionCacheProducerError(
@@ -257,6 +319,10 @@ def apply_plan(writer: Any, plan: CacheWritePlan) -> dict[str, Any]:
             devflow_repository,
             plan.control_issue_number,
             plan.desired_body,
+            expected_body_sha256=plan.expected_body_sha256,
+            expected_updated_at=plan.expected_updated_at,
+            expected_control_repository=repository,
+            trust_checker=service.is_repository_control_trusted,
         )
     except Exception as exc:
         raise RepositoryProjectionCacheProducerError(
@@ -363,7 +429,7 @@ def run_fleet(
                 generated_at=generated_at,
             )
             if apply:
-                item = apply_plan(writer, plan)
+                item = apply_plan(writer, plan, service=service)
             else:
                 item = {
                     "status": "PREVIEW",

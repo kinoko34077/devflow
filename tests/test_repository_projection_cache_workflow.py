@@ -27,7 +27,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
             job,
         )
         self.assertIn("github.event_name == 'schedule'", job)
-        self.assertIn("github.event.schedule == '0 14 * * *'", job)
+        self.assertIn("github.event.schedule == '10 5,17 * * *'", job)
 
     def test_cache_job_has_bounded_issue_write_permission(self):
         job = self._cache_job()
@@ -53,7 +53,7 @@ class RepositoryProjectionCacheWorkflowTests(unittest.TestCase):
         job = self._cache_job()
         self.assertIn("concurrency:", job)
         self.assertIn(
-            "group: repository-projection-cache-${{ github.repository }}",
+            "group: devflow-control-writes-${{ github.repository }}",
             job,
         )
         self.assertIn("cancel-in-progress: false", job)
