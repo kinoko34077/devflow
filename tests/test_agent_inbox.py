@@ -662,10 +662,47 @@ class CoordinatorWorkspaceProjectionTests(unittest.TestCase):
             self.assertEqual(section["status"], "UNKNOWN")
             self.assertIsNone(section["entries"])
             self.assertEqual(section["reason_code"], "COORDINATOR_SOURCE_UNAVAILABLE")
+            self.assertEqual(section.get("diagnostic_stage"), "COORDINATOR_STATE_READ")
             self.assertEqual(section["source_ref"], self.COORDINATOR_SOURCE)
             self.assertNotIn("sensitive transport detail", json.dumps(section))
         self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
         self.assertEqual(result["sections"]["offers"]["status"], "NOT_INTEGRATED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_missing_coordinator_reader_reports_import_stage_without_details(self):
+        reader = fixture_reader([task()])
+        loader_calls = []
+
+        def loader():
+            loader_calls.append(True)
+            return StateReadResult(CoordinatorState.empty(), self.SOURCE_UPDATED_AT)
+
+        service = devflow_mcp_core.DevflowService(
+            reader,
+            observed_at_factory=lambda: self.OBSERVED_AT,
+            coordinator_state_loader=loader,
+        )
+        real_import = __import__
+
+        def without_coordinator_reader(
+            name, globals=None, locals=None, fromlist=(), level=0,
+        ):
+            if name == "execution_coordinator.model":
+                raise ModuleNotFoundError("private package path")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=without_coordinator_reader):
+            result = service.get_agent_workspace("demo", recipient="codex")
+
+        for name in ("ongoing", "waiting_recovery"):
+            section = result["sections"][name]
+            self.assertEqual(section["status"], "UNKNOWN")
+            self.assertIsNone(section["entries"])
+            self.assertEqual(section["reason_code"], "COORDINATOR_SOURCE_UNAVAILABLE")
+            self.assertEqual(section.get("diagnostic_stage"), "VALIDATED_READER_IMPORT")
+            self.assertNotIn("private package path", json.dumps(section))
+        self.assertEqual(loader_calls, [])
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
