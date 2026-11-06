@@ -7,6 +7,7 @@ persistence, scheduler, general multi-repo hook, or implicit readiness claim.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
 from pathlib import Path
 import re
@@ -120,7 +121,6 @@ FENCED_CODE_LIST_START = re.compile(
     r"^(?P<indent> {0,3})(?P<marker>[-+*]|[0-9]{1,9}[.)])"
     r"(?P<gap> {1,4})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
 )
-HTML_COMMENT = re.compile(r"<!--.*?(?:-->|$)", re.DOTALL)
 
 
 def _without_fenced_code_blocks(text: str) -> str:
@@ -189,7 +189,68 @@ def _without_fenced_code_blocks(text: str) -> str:
 
         result.append(line)
 
-    return HTML_COMMENT.sub("", "".join(result))
+    return _without_html_comments("".join(result))
+
+
+def _without_html_comments(text: str) -> str:
+    """Blank HTML comments while preserving comment markers in Markdown code spans."""
+    backtick_runs: dict[int, list[int]] = {}
+    position = 0
+    while position < len(text):
+        if text[position] != "`":
+            position += 1
+            continue
+        start = position
+        while position < len(text) and text[position] == "`":
+            position += 1
+        backtick_runs.setdefault(position - start, []).append(start)
+
+    def escaped(index: int) -> bool:
+        backslashes = 0
+        cursor = index - 1
+        while cursor >= 0 and text[cursor] == "\\":
+            backslashes += 1
+            cursor -= 1
+        return backslashes % 2 == 1
+
+    result: list[str] = []
+    in_comment = False
+    position = 0
+    while position < len(text):
+        if in_comment:
+            if text.startswith("-->", position):
+                in_comment = False
+                position += 3
+            else:
+                if text[position] in "\r\n":
+                    result.append(text[position])
+                position += 1
+            continue
+
+        if text.startswith("<!--", position) and not escaped(position):
+            in_comment = True
+            position += 4
+            continue
+
+        if text[position] == "`" and not escaped(position):
+            start = position
+            while position < len(text) and text[position] == "`":
+                position += 1
+            run_length = position - start
+            candidates = backtick_runs.get(run_length, [])
+            candidate_index = bisect_right(candidates, start)
+            if candidate_index < len(candidates):
+                closing = candidates[candidate_index]
+                end = closing + run_length
+                result.append(text[start:end])
+                position = end
+            else:
+                result.append(text[start:position])
+            continue
+
+        result.append(text[position])
+        position += 1
+    return "".join(result)
 
 
 def _parse_closing_issue(value: str, caller_repository: str) -> tuple[str, int] | None:
