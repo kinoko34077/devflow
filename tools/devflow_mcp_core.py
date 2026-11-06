@@ -1197,13 +1197,24 @@ class DevflowService:
         try:
             from execution_coordinator.model import Claim, CoordinatorState, ExecutionState
             from execution_coordinator.query import StateReadResult
+        except Exception:
+            unknown = {
+                "status": "UNKNOWN", "entries": None,
+                "source_ref": source_ref,
+                "reason_code": "COORDINATOR_SOURCE_UNAVAILABLE",
+                "diagnostic_stage": "VALIDATED_READER_IMPORT",
+                "can_authorize_execution": False,
+            }
+            return dict(unknown), dict(unknown)
 
+        try:
             result = loader()
         except Exception:
             unknown = {
                 "status": "UNKNOWN", "entries": None,
                 "source_ref": source_ref,
                 "reason_code": "COORDINATOR_SOURCE_UNAVAILABLE",
+                "diagnostic_stage": "COORDINATOR_STATE_READ",
                 "can_authorize_execution": False,
             }
             return dict(unknown), dict(unknown)

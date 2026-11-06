@@ -13,6 +13,19 @@ The MCP runtime dependencies in `requirements-mcp.txt` pin the accepted
 default Workspace reader uses that package's `get_state_result` and
 `GitHubStateStore` for a GET-only read of execution-coordinator Issue #3.
 
+## Workspace coordinator read diagnostics
+
+If the validated reader cannot be imported, the dependent `ongoing` and
+`waiting_recovery` sections remain `UNKNOWN` with `entries=null` and
+`reason_code=COORDINATOR_SOURCE_UNAVAILABLE`, and include
+`diagnostic_stage=VALIDATED_READER_IMPORT`. If the reader imports but the
+subsequent coordinator load/read path (including its lazy store imports) raises,
+they use the same status and reason with
+`diagnostic_stage=COORDINATOR_STATE_READ`. Exception messages and values are
+never returned. Malformed or inconsistent snapshots continue to use
+`COORDINATOR_SNAPSHOT_INVALID`. This field only helps diagnose the read path;
+it does not change Claimability or execution authority.
+
 ## Read-only boundary
 
 The server exposes only read operations:
