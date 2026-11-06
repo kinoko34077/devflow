@@ -163,10 +163,10 @@ the same Issue. Duplicate, malformed, fenced-only, inline-code, raw HTML
 code-block, HTML-commented, missing, or contradictory declarations fail the
 Required check. Literal HTML-comment markers in code spans are not interpreted
 as comments and cannot hide a following rendered declaration.
-Within raw HTML code regions, end-tag-like text in an HTML comment or an
-invalid end tag does not terminate the region; `<plaintext>` consumes the
-remainder of the PR body. An owner declaration remains ignored until a valid
-matching close tag or the end of the body.
+Within raw HTML code regions, end-tag-like text in an HTML comment or a quoted
+nested-tag attribute, and invalid end tags, do not terminate the region;
+`<plaintext>` consumes the remainder of the PR body. An owner declaration
+remains ignored until a valid matching close tag or the end of the body.
 A closing declaration is accepted only
 when the PR targets the repository's default branch, matching GitHub's
 closing behavior.

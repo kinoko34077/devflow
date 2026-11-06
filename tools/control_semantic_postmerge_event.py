@@ -268,15 +268,23 @@ def _without_html_comments_and_code_spans(text: str) -> str:
                     position = comment_end + 3
                     continue
                 if text[position] == "<":
-                    closing = raw_code_closer.match(text, position)
-                    if closing is not None:
-                        position = closing.end()
-                        result.append(
-                            _blank_preserving_newlines(text[raw_start:position])
-                        )
-                        raw_code_element = None
-                        raw_code_closer = None
-                        break
+                    tag_opening = HTML_TAG_START.match(text, position)
+                    if tag_opening is not None:
+                        tag_end = _html_tag_end(text, position, tag_opening)
+                        if tag_end is None:
+                            position = len(text)
+                            break
+                        closing = raw_code_closer.match(text, position)
+                        if closing is not None and closing.end() == tag_end:
+                            position = tag_end
+                            result.append(
+                                _blank_preserving_newlines(text[raw_start:position])
+                            )
+                            raw_code_element = None
+                            raw_code_closer = None
+                            break
+                        position = tag_end
+                        continue
                 position += 1
             if raw_code_element is not None:
                 result.append(_blank_preserving_newlines(text[raw_start:]))

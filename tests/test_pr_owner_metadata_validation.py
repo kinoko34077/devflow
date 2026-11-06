@@ -148,6 +148,27 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_raw_code_closer_inside_nested_quoted_attribute_is_ignored(self):
+        result = self.check(
+            "<pre>\n"
+            '<span title="</pre>">x</span>\n'
+            "- Owning-Issue: #726\n"
+            "</pre>\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
+    def test_comment_marker_inside_nested_quoted_attribute_does_not_hide_owner(self):
+        result = self.check(
+            "<pre>\n"
+            '<span title="<!--">x</span>\n'
+            "</pre>\n"
+            "- Owning-Issue: #726\n"
+        )
+        self.assertEqual(result["status"], "VALID")
+
     def test_unclosed_html_tag_suffix_is_scanned_once_and_fails_closed(self):
         body = "<a " * 128 + "\n- Owning-Issue: #726\n"
         with patch.object(
