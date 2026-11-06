@@ -113,6 +113,41 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_fake_raw_html_closer_inside_comment_does_not_expose_owner(self):
+        result = self.check(
+            "<pre>\n"
+            "<!-- fake </pre> close -->\n"
+            "- Owning-Issue: #726\n"
+            "</pre>\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
+    def test_whitespace_after_raw_html_closer_slash_is_not_a_closer(self):
+        result = self.check(
+            "<pre>\n"
+            "</ pre>\n"
+            "- Owning-Issue: #726\n"
+            "</pre>\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
+    def test_plaintext_html_element_consumes_the_remaining_body(self):
+        result = self.check(
+            "<plaintext>\n"
+            "</plaintext>\n"
+            "- Owning-Issue: #726\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
     def test_unclosed_html_tag_suffix_is_scanned_once_and_fails_closed(self):
         body = "<a " * 128 + "\n- Owning-Issue: #726\n"
         with patch.object(
@@ -254,6 +289,67 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
                 "ref": "main",
             },
             "body": "<pre>\n- Owning-Issue: #726\n</pre>\n",
+        }
+        with patch.object(
+            target.pilot, "_read_json", return_value=(pr, None)
+        ) as read:
+            result = target._owner_reconciliation_candidate(
+                "No owner relation in current state", 777, merged_at, OWNER
+            )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
+        )
+        read.assert_called_once_with(f"repos/{OWNER}/pulls/777")
+
+    def test_postmerge_reader_ignores_fake_raw_closer_inside_html_comment(self):
+        merged_at = "2026-11-07T05:00:00Z"
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{OWNER}/pull/777",
+            "state": "closed",
+            "merged": True,
+            "merged_at": merged_at,
+            "base": {
+                "repo": {"full_name": OWNER, "default_branch": "main"},
+                "ref": "main",
+            },
+            "body": (
+                "<pre>\n"
+                "<!-- fake </pre> close -->\n"
+                "- Owning-Issue: #726\n"
+                "</pre>\n"
+            ),
+        }
+        with patch.object(
+            target.pilot, "_read_json", return_value=(pr, None)
+        ) as read:
+            result = target._owner_reconciliation_candidate(
+                "No owner relation in current state", 777, merged_at, OWNER
+            )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
+        )
+        read.assert_called_once_with(f"repos/{OWNER}/pulls/777")
+
+    def test_postmerge_reader_treats_plaintext_as_consuming_the_body(self):
+        merged_at = "2026-11-07T06:00:00Z"
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{OWNER}/pull/777",
+            "state": "closed",
+            "merged": True,
+            "merged_at": merged_at,
+            "base": {
+                "repo": {"full_name": OWNER, "default_branch": "main"},
+                "ref": "main",
+            },
+            "body": (
+                "<plaintext>\n"
+                "</plaintext>\n"
+                "- Owning-Issue: #726\n"
+            ),
         }
         with patch.object(
             target.pilot, "_read_json", return_value=(pr, None)

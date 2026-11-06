@@ -249,21 +249,38 @@ def _without_html_comments_and_code_spans(text: str) -> str:
     result: list[str] = []
     in_comment = False
     raw_code_element: str | None = None
+    raw_code_closer: re.Pattern[str] | None = None
     position = 0
     while position < len(text):
         if raw_code_element is not None:
-            closing_pattern = re.compile(
-                rf"</[\t\n\f\r ]*{re.escape(raw_code_element)}"
-                rf"[\t\n\f\r ]*>", re.IGNORECASE,
-            )
-            closing = closing_pattern.search(text, position)
-            if closing is None:
+            if raw_code_closer is None:
+                # HTML plaintext has no recognized end tag; the tokenizer stays
+                # in plaintext state through the end of the document.
                 result.append(_blank_preserving_newlines(text[position:]))
                 break
-            end = closing.end()
-            result.append(_blank_preserving_newlines(text[position:end]))
-            position = end
-            raw_code_element = None
+            raw_start = position
+            while position < len(text):
+                if text.startswith("<!--", position):
+                    comment_end = text.find("-->", position + 4)
+                    if comment_end < 0:
+                        position = len(text)
+                        break
+                    position = comment_end + 3
+                    continue
+                if text[position] == "<":
+                    closing = raw_code_closer.match(text, position)
+                    if closing is not None:
+                        position = closing.end()
+                        result.append(
+                            _blank_preserving_newlines(text[raw_start:position])
+                        )
+                        raw_code_element = None
+                        raw_code_closer = None
+                        break
+                position += 1
+            if raw_code_element is not None:
+                result.append(_blank_preserving_newlines(text[raw_start:]))
+                break
             continue
 
         if in_comment:
@@ -302,6 +319,11 @@ def _without_html_comments_and_code_spans(text: str) -> str:
                 and not re.search(r"/[\t\n\f\r ]*>$", tag_text)
             ):
                 raw_code_element = tag_match.group(1)
+                if raw_code_element.casefold() != "plaintext":
+                    raw_code_closer = re.compile(
+                        rf"</{re.escape(raw_code_element)}[\t\n\f\r ]*>",
+                        re.IGNORECASE,
+                    )
             position = tag_end
             continue
 
