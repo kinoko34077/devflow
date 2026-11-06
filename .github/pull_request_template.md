@@ -1,7 +1,7 @@
 ## Owning Issue
 
-<!-- For ownership without auto-closing, use the existing single "- Owning-Issue:" field in Implementer Provenance. Fill #726 or the full devflow Issue URL. Do not add another declaration. -->
-<!-- Only use a Closes reference when the PR genuinely completes that Issue; leave blank otherwise. -->
+<!-- Every PR must declare exactly one owning relation: use the single "- Owning-Issue:" field in Implementer Provenance, or one GitHub closing reference only when the PR genuinely completes that Issue. If both are populated, they must name the same Issue. -->
+<!-- For ownership without auto-closing, fill the existing "- Owning-Issue:" field with #N or a canonical Issue URL. Do not add another declaration. -->
 - Closes #
 
 ## Objective / Changed Scope

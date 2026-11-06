@@ -112,7 +112,7 @@ PRをControl #16の現行Next Actionへ明示していなくても、既存Work 
 
 ## M2 owner omission coverage: existing GitHub PR closing keyword (bounded; pending actual live event)
 
-The existing devflow PR template has two **optional and distinct** fields:
+The existing devflow PR template has two **distinct** fields:
 `- Closes #` for an actually completed Issue and `- Owning-Issue:` for
 ownership without completing the Issue. GitHub's closing keywords are
 interpreted on default-branch PRs, with a relative `#N` resolving to
@@ -152,6 +152,38 @@ fix 57 repository workflow coverage, or
 automatically update a Control. Unit regressions prove the limited
 parser contract. **Native merged PR event live proof remains a separate
 acceptance gate**; never close a real owner Issue merely for a test.
+
+### Required PR owner metadata gate (devflow PRs)
+
+The Required `verify` job in `.github/workflows/project-sync-tests.yml`
+validates the PR body on `opened`, `synchronize`, `reopened`, and
+`edited`. A PR must declare one valid `Owning-Issue` reference or one
+valid GitHub closing reference; when both are populated they must identify
+the same Issue. Duplicate, malformed, fenced-only, inline-code, raw HTML
+code-block, HTML-commented, missing, or contradictory declarations fail the
+Required check. Literal HTML-comment markers in code spans are not interpreted
+as comments and cannot hide a following rendered declaration.
+Within comment-parsing raw code elements (`code`, `listing`, `pre`), fake
+closing text inside HTML comments or quoted nested-tag attributes, and invalid
+end tags, do not terminate the region. In raw-text/RCDATA elements (`script`,
+`style`, `textarea`, `xmp`), comment-like text is ordinary content and the
+matching end tag closes the region. A trailing slash does not self-close these
+non-void elements; `<plaintext>` consumes the rest of the PR body. An owner
+declaration remains ignored until the applicable end condition or body end.
+Fence-looking lines inside a block HTML comment are comment content and do not
+open or close Markdown fences; declarations after the comment closes remain
+eligible.
+A closing declaration is accepted only
+when the PR targets the repository's default branch, matching GitHub's
+closing behavior.
+
+This reuses the existing fenced-code and owner/closing parsers. It validates
+the declared relation's syntax and consistency only; it does not fetch the
+Issue or prove the reference exists. The post-merge reader keeps its separate
+authenticated identity/state GET and retains `NOT_APPLICABLE` for historical
+events with no declaration. That read result is not evidence that no owner
+relation exists. The new Required gate does not update Issues or Controls and
+does not change workflow permissions.
 
 ## Follow-on full M2 producer-owned prevention and M3–M4, not accomplished here
 

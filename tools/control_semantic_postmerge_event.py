@@ -7,6 +7,7 @@ persistence, scheduler, general multi-repo hook, or implicit readiness claim.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
 from pathlib import Path
 import re
@@ -120,19 +121,28 @@ FENCED_CODE_LIST_START = re.compile(
     r"^(?P<indent> {0,3})(?P<marker>[-+*]|[0-9]{1,9}[.)])"
     r"(?P<gap> {1,4})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
 )
+HTML_TAG_START = re.compile(
+    r"</?[A-Za-z][A-Za-z0-9:-]*(?=[\t\n\f\r >]|/>)|"
+    r"<![A-Za-z]|<\?[A-Za-z]"
+)
+RAW_CODE_ELEMENTS = frozenset({
+    "code", "listing", "plaintext", "pre", "script", "style", "textarea", "xmp",
+})
+HTML_COMMENT_CODE_ELEMENTS = frozenset({"code", "listing", "pre"})
 
 
-def _without_fenced_code_blocks(text: str) -> str:
-    """Keep prose while blanking Markdown fenced code blocks.
+def _without_markdown_examples(text: str) -> str:
+    """Keep rendered prose while blanking code blocks, spans, and comments.
 
     Owner and closing-keyword declarations are metadata only when they are
-    actual PR-body fields. Examples inside fenced code must not create an
-    ownership or GitHub closing-issue relation.
+    actual PR-body fields. Examples inside fenced/inline code or HTML comments
+    must not create an ownership or GitHub closing-issue relation.
     """
     result: list[str] = []
     fence_char: str | None = None
     fence_length = 0
     fence_indent = 0
+    in_html_comment_block = False
 
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
@@ -155,6 +165,12 @@ def _without_fenced_code_blocks(text: str) -> str:
                 fence_length = 0
                 fence_indent = 0
             result.append(ending)
+            continue
+
+        if in_html_comment_block:
+            result.append(line)
+            if "-->" in content:
+                in_html_comment_block = False
             continue
 
         list_opening = FENCED_CODE_LIST_START.fullmatch(content)
@@ -186,8 +202,184 @@ def _without_fenced_code_blocks(text: str) -> str:
             result.append(ending)
             continue
 
+        if re.match(r"^ {0,3}<!--", content):
+            result.append(line)
+            if "-->" not in content:
+                in_html_comment_block = True
+            continue
+
         result.append(line)
 
+    return _without_html_comments_and_code_spans("".join(result))
+
+
+def _blank_preserving_newlines(text: str) -> str:
+    return "".join(character if character in "\r\n" else " " for character in text)
+
+
+def _html_tag_end(
+    text: str, start: int, opening: re.Match[str] | None = None,
+) -> int | None:
+    if opening is None:
+        opening = HTML_TAG_START.match(text, start)
+    if opening is None:
+        return None
+    quote = None
+    position = opening.end()
+    while position < len(text):
+        character = text[position]
+        if quote is not None:
+            if character == quote:
+                quote = None
+        elif character in "\"'":
+            quote = character
+        elif character == ">":
+            return position + 1
+        position += 1
+    return None
+
+
+def _without_html_comments_and_code_spans(text: str) -> str:
+    """Blank HTML comments, tags, and code spans without crossing their scopes."""
+    backtick_runs: dict[int, list[int]] = {}
+    position = 0
+    while position < len(text):
+        if text[position] != "`":
+            position += 1
+            continue
+        start = position
+        while position < len(text) and text[position] == "`":
+            position += 1
+        backtick_runs.setdefault(position - start, []).append(start)
+
+    def escaped(index: int) -> bool:
+        backslashes = 0
+        cursor = index - 1
+        while cursor >= 0 and text[cursor] == "\\":
+            backslashes += 1
+            cursor -= 1
+        return backslashes % 2 == 1
+
+    result: list[str] = []
+    in_comment = False
+    raw_code_element: str | None = None
+    raw_code_closer: re.Pattern[str] | None = None
+    position = 0
+    while position < len(text):
+        if raw_code_element is not None:
+            if raw_code_closer is None:
+                # HTML plaintext has no recognized end tag; the tokenizer stays
+                # in plaintext state through the end of the document.
+                result.append(_blank_preserving_newlines(text[position:]))
+                break
+            raw_start = position
+            comments_are_markup = (
+                raw_code_element.casefold() in HTML_COMMENT_CODE_ELEMENTS
+            )
+            while position < len(text):
+                if comments_are_markup and text.startswith("<!--", position):
+                    comment_end = text.find("-->", position + 4)
+                    if comment_end < 0:
+                        position = len(text)
+                        break
+                    position = comment_end + 3
+                    continue
+                if text[position] == "<":
+                    if comments_are_markup:
+                        tag_opening = HTML_TAG_START.match(text, position)
+                        if tag_opening is not None:
+                            tag_end = _html_tag_end(text, position, tag_opening)
+                            if tag_end is None:
+                                position = len(text)
+                                break
+                            closing = raw_code_closer.match(text, position)
+                            if closing is not None and closing.end() == tag_end:
+                                position = tag_end
+                                raw_code_element = None
+                            else:
+                                position = tag_end
+                                continue
+                        else:
+                            position += 1
+                            continue
+                    else:
+                        closing = raw_code_closer.match(text, position)
+                        if closing is not None:
+                            position = closing.end()
+                            raw_code_element = None
+                    if raw_code_element is None:
+                        result.append(
+                            _blank_preserving_newlines(text[raw_start:position])
+                        )
+                        raw_code_closer = None
+                        break
+                position += 1
+            if raw_code_element is not None:
+                result.append(_blank_preserving_newlines(text[raw_start:]))
+                break
+            continue
+
+        if in_comment:
+            if text.startswith("-->", position):
+                in_comment = False
+                position += 3
+            else:
+                if text[position] in "\r\n":
+                    result.append(text[position])
+                position += 1
+            continue
+
+        if text.startswith("<!--", position) and not escaped(position):
+            in_comment = True
+            position += 4
+            continue
+
+        tag_opening = HTML_TAG_START.match(text, position)
+        if tag_opening is not None:
+            tag_end = _html_tag_end(text, position, tag_opening)
+            if tag_end is None:
+                # An unterminated tag makes the remaining markup ambiguous.
+                # Fail closed in one bounded scan rather than retrying each
+                # nested '<' against the same suffix of an untrusted body.
+                result.append(_blank_preserving_newlines(text[position:]))
+                break
+            tag_text = text[position:tag_end]
+            result.append(_blank_preserving_newlines(text[position:tag_end]))
+            tag_match = re.match(
+                r"</?([A-Za-z][A-Za-z0-9:-]*)", tag_text,
+            )
+            if (
+                tag_match is not None
+                and not tag_text.startswith("</")
+                and tag_match.group(1).casefold() in RAW_CODE_ELEMENTS
+            ):
+                raw_code_element = tag_match.group(1)
+                if raw_code_element.casefold() != "plaintext":
+                    raw_code_closer = re.compile(
+                        rf"</{re.escape(raw_code_element)}[\t\n\f\r ]*>",
+                        re.IGNORECASE,
+                    )
+            position = tag_end
+            continue
+
+        if text[position] == "`" and not escaped(position):
+            start = position
+            while position < len(text) and text[position] == "`":
+                position += 1
+            run_length = position - start
+            candidates = backtick_runs.get(run_length, [])
+            candidate_index = bisect_right(candidates, start)
+            if candidate_index < len(candidates):
+                closing = candidates[candidate_index]
+                end = closing + run_length
+                result.append(_blank_preserving_newlines(text[start:end]))
+                position = end
+            else:
+                result.append(text[start:position])
+            continue
+
+        result.append(text[position])
+        position += 1
     return "".join(result)
 
 
@@ -238,6 +430,72 @@ def _parse_owner_issue(value: str, caller_repository: str) -> tuple[str, int] | 
     return (absolute, int(marker.group("absolute_number")))
 
 
+def validate_pr_owner_metadata_event(
+    event: Any, repository_env: str,
+) -> dict[str, str]:
+    """Require one canonical PR-to-Issue relation using the shared parser."""
+    if type(event) is not dict or type(repository_env) is not str:
+        return _result("INVALID", "PR_EVENT_IDENTITY_NOT_PROVEN")
+    repository = event.get("repository")
+    pr = event.get("pull_request")
+    if (
+        type(repository) is not dict
+        or repository.get("full_name") != repository_env
+        or type(pr) is not dict
+    ):
+        return _result("INVALID", "PULL_REQUEST_REPOSITORY_MISMATCH")
+    base = pr.get("base")
+    if type(base) is not dict:
+        return _result("INVALID", "PULL_REQUEST_BASE_NOT_PROVEN")
+
+    body = pr.get("body")
+    if body is None:
+        body = ""
+    if type(body) is not str:
+        return _result("INVALID", "INVALID_PR_OWNER_METADATA")
+    declaration_text = _without_markdown_examples(body)
+    declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
+    filled = [part for part in declarations if part]
+    if len(filled) > 1:
+        return _result("INVALID", "AMBIGUOUS_OWNER_MARKER")
+
+    closings = [part.strip() for part in CLOSING_LINE.findall(declaration_text)]
+    valid_closings = [part for part in closings if part not in ("", "#")]
+    if len(valid_closings) > 1:
+        return _result("INVALID", "AMBIGUOUS_CLOSING_MARKER")
+
+    closing_owner = None
+    if valid_closings:
+        default_branch = repository.get("default_branch")
+        if (
+            type(default_branch) is not str or not default_branch
+            or type(base.get("ref")) is not str
+            or base["ref"] != default_branch
+        ):
+            return _result("INVALID", "CLOSING_RELATION_BASE_NOT_PROVEN")
+        closing_owner = _parse_closing_issue(valid_closings[0], repository_env)
+        if closing_owner is None:
+            return _result("INVALID", "UNCANONICAL_CLOSING_MARKER")
+
+    owner = None
+    if filled:
+        owner = _parse_owner_issue(filled[0], repository_env)
+        if owner is None:
+            return _result("INVALID", "UNCANONICAL_OWNER_MARKER")
+
+    if owner is None and closing_owner is None:
+        return _result("INVALID", "OWNER_RELATION_REQUIRED")
+    if owner is not None and closing_owner is not None:
+        if owner != closing_owner:
+            return _result(
+                "INVALID", "CONTRADICTORY_OWNER_AND_CLOSING_MARKER",
+            )
+        return _result("VALID", "OWNER_AND_CLOSING_DECLARATION_AGREE")
+    if owner is not None:
+        return _result("VALID", "OWNER_DECLARATION_PRESENT")
+    return _result("VALID", "CLOSING_DECLARATION_PRESENT")
+
+
 def _owner_reconciliation_candidate(
     current: str, number: int, merged_at: str, repository: str = REPOSITORY,
 ) -> dict[str, str]:
@@ -262,7 +520,7 @@ def _owner_reconciliation_candidate(
         body = ""
     if type(body) is not str:
         return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number, repository)
-    declaration_text = _without_fenced_code_blocks(body)
+    declaration_text = _without_markdown_examples(body)
     declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
     # Blank template fields are not evidence; do not guess from prose.
     filled = [part for part in declarations if part]
@@ -479,15 +737,32 @@ def check_owner_transition_once(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Devflow read-only merged-PR Control check")
+    parser = argparse.ArgumentParser(
+        description="Devflow PR owner metadata gate and read-only merged-PR Control check"
+    )
     parser.add_argument("--event-path")
+    parser.add_argument("--validate-pr-owner-metadata", action="store_true")
     parser.add_argument("--owner-issue", type=int)
     parser.add_argument("--owner-repository", default="kinoko34077/dev_agent")
     parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("--control", type=int, default=CONTROL_NUMBER)
     args = parser.parse_args(argv)
+    if args.owner_issue is not None and args.validate_pr_owner_metadata:
+        parser.error("--owner-issue and --validate-pr-owner-metadata are exclusive")
     if args.owner_issue is not None:
         result = check_owner_transition_once(args.owner_repository, args.owner_issue, args.control)
+    elif args.validate_pr_owner_metadata:
+        if not args.event_path:
+            result = _result("INVALID", "EVENT_PATH_REQUIRED")
+        else:
+            try:
+                if Path(args.event_path).stat().st_size > EVENT_MAX_BYTES:
+                    raise ValueError("event too large")
+                event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
+            except (OSError, ValueError, UnicodeError):
+                result = _result("INVALID", "EVENT_UNAVAILABLE_OR_INVALID")
+            else:
+                result = validate_pr_owner_metadata_event(event, args.repository)
     elif not args.event_path:
         result = _result("UNKNOWN", "EVENT_PATH_REQUIRED")
     else:
@@ -500,6 +775,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = check_native_postmerge_once(event, args.repository, args.control)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if args.validate_pr_owner_metadata:
+        return 0 if result["status"] == "VALID" else 1
+    if result["status"] == "VALID":
+        return 0
+    if result["status"] == "INVALID":
+        return 1
     if result["status"] in ("ALIGNED", "NOT_APPLICABLE"):
         return 0
     if result["status"] == "POTENTIAL_MISMATCH":
