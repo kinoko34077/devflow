@@ -25,6 +25,18 @@ class KaepLinkValidationTests(unittest.TestCase):
                 source = (root / route).read_text(encoding="utf-8")
                 self.assertNotIn("https://github.com/{", source)
 
+    def test_direct_public_routes_use_shared_owner_issue_formatter(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for relative in (
+            "tools/kaep_gh_read_profile.py",
+            "tools/kaep_live_delta_view.py",
+            "tools/kaep_route_notice.py",
+            "tools/kaep_transport_compare.py",
+        ):
+            with self.subTest(relative=relative):
+                source = (root / relative).read_text(encoding="utf-8")
+                self.assertNotIn("https://github.com/{", source)
+
     def test_owner_url_formatters_preserve_canonical_shape(self) -> None:
         issue = owner_issue_url("kinoko34077/devflow", 576)
         comment = owner_comment_url("kinoko34077/devflow", 576, 123)
