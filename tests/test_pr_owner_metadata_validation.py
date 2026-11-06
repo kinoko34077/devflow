@@ -148,6 +148,25 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_plaintext_self_closing_syntax_still_consumes_the_body(self):
+        result = self.check(
+            "<plaintext/>\n"
+            "- Owning-Issue: #726\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
+    def test_textarea_comment_like_text_does_not_hide_owner_after_end_tag(self):
+        result = self.check(
+            "<textarea>\n"
+            "<!--\n"
+            "</textarea>\n"
+            "- Owning-Issue: #726\n"
+        )
+        self.assertEqual(result["status"], "VALID")
+
     def test_raw_code_closer_inside_nested_quoted_attribute_is_ignored(self):
         result = self.check(
             "<pre>\n"

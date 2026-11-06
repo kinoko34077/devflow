@@ -128,6 +128,7 @@ HTML_TAG_START = re.compile(
 RAW_CODE_ELEMENTS = frozenset({
     "code", "listing", "plaintext", "pre", "script", "style", "textarea", "xmp",
 })
+HTML_COMMENT_CODE_ELEMENTS = frozenset({"code", "listing", "pre"})
 
 
 def _without_markdown_examples(text: str) -> str:
@@ -259,8 +260,11 @@ def _without_html_comments_and_code_spans(text: str) -> str:
                 result.append(_blank_preserving_newlines(text[position:]))
                 break
             raw_start = position
+            comments_are_markup = (
+                raw_code_element.casefold() in HTML_COMMENT_CODE_ELEMENTS
+            )
             while position < len(text):
-                if text.startswith("<!--", position):
+                if comments_are_markup and text.startswith("<!--", position):
                     comment_end = text.find("-->", position + 4)
                     if comment_end < 0:
                         position = len(text)
@@ -268,23 +272,34 @@ def _without_html_comments_and_code_spans(text: str) -> str:
                     position = comment_end + 3
                     continue
                 if text[position] == "<":
-                    tag_opening = HTML_TAG_START.match(text, position)
-                    if tag_opening is not None:
-                        tag_end = _html_tag_end(text, position, tag_opening)
-                        if tag_end is None:
-                            position = len(text)
-                            break
+                    if comments_are_markup:
+                        tag_opening = HTML_TAG_START.match(text, position)
+                        if tag_opening is not None:
+                            tag_end = _html_tag_end(text, position, tag_opening)
+                            if tag_end is None:
+                                position = len(text)
+                                break
+                            closing = raw_code_closer.match(text, position)
+                            if closing is not None and closing.end() == tag_end:
+                                position = tag_end
+                                raw_code_element = None
+                            else:
+                                position = tag_end
+                                continue
+                        else:
+                            position += 1
+                            continue
+                    else:
                         closing = raw_code_closer.match(text, position)
-                        if closing is not None and closing.end() == tag_end:
-                            position = tag_end
-                            result.append(
-                                _blank_preserving_newlines(text[raw_start:position])
-                            )
+                        if closing is not None:
+                            position = closing.end()
                             raw_code_element = None
-                            raw_code_closer = None
-                            break
-                        position = tag_end
-                        continue
+                    if raw_code_element is None:
+                        result.append(
+                            _blank_preserving_newlines(text[raw_start:position])
+                        )
+                        raw_code_closer = None
+                        break
                 position += 1
             if raw_code_element is not None:
                 result.append(_blank_preserving_newlines(text[raw_start:]))
@@ -324,7 +339,6 @@ def _without_html_comments_and_code_spans(text: str) -> str:
                 tag_match is not None
                 and not tag_text.startswith("</")
                 and tag_match.group(1).casefold() in RAW_CODE_ELEMENTS
-                and not re.search(r"/[\t\n\f\r ]*>$", tag_text)
             ):
                 raw_code_element = tag_match.group(1)
                 if raw_code_element.casefold() != "plaintext":
