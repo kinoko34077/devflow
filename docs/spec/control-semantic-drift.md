@@ -170,6 +170,9 @@ end tags, do not terminate the region. In raw-text/RCDATA elements (`script`,
 matching end tag closes the region. A trailing slash does not self-close these
 non-void elements; `<plaintext>` consumes the rest of the PR body. An owner
 declaration remains ignored until the applicable end condition or body end.
+Fence-looking lines inside a block HTML comment are comment content and do not
+open or close Markdown fences; declarations after the comment closes remain
+eligible.
 A closing declaration is accepted only
 when the PR targets the repository's default branch, matching GitHub's
 closing behavior.

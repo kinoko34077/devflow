@@ -142,6 +142,7 @@ def _without_markdown_examples(text: str) -> str:
     fence_char: str | None = None
     fence_length = 0
     fence_indent = 0
+    in_html_comment_block = False
 
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
@@ -164,6 +165,12 @@ def _without_markdown_examples(text: str) -> str:
                 fence_length = 0
                 fence_indent = 0
             result.append(ending)
+            continue
+
+        if in_html_comment_block:
+            result.append(line)
+            if "-->" in content:
+                in_html_comment_block = False
             continue
 
         list_opening = FENCED_CODE_LIST_START.fullmatch(content)
@@ -193,6 +200,12 @@ def _without_markdown_examples(text: str) -> str:
             fence_char = fence[0]
             fence_length = len(fence)
             result.append(ending)
+            continue
+
+        if re.match(r"^ {0,3}<!--", content):
+            result.append(line)
+            if "-->" not in content:
+                in_html_comment_block = True
             continue
 
         result.append(line)

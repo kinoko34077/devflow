@@ -91,6 +91,15 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_fence_markers_inside_html_comment_do_not_hide_following_owner(self):
+        result = self.check(
+            "<!--\n"
+            "```\n"
+            "-->\n"
+            "- Owning-Issue: #726\n"
+        )
+        self.assertEqual(result["status"], "VALID")
+
     def test_backticks_in_html_attributes_do_not_expose_commented_owner(self):
         result = self.check(
             '<span title="`">x</span>\n'
@@ -246,6 +255,47 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
         )
         read.assert_called_once_with(f"repos/{OWNER}/pulls/777")
+
+    def test_postmerge_reader_preserves_owner_after_fence_inside_html_comment(self):
+        merged_at = "2026-11-07T07:00:00Z"
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{OWNER}/pull/777",
+            "state": "closed",
+            "merged": True,
+            "merged_at": merged_at,
+            "base": {
+                "repo": {"full_name": OWNER, "default_branch": "main"},
+                "ref": "main",
+            },
+            "body": (
+                "<!--\n"
+                "```\n"
+                "-->\n"
+                "- Owning-Issue: #726\n"
+            ),
+        }
+        owner = {
+            "number": 726,
+            "state": "open",
+            "html_url": f"https://github.com/{OWNER}/issues/726",
+        }
+        with patch.object(
+            target.pilot,
+            "_read_json",
+            side_effect=[(pr, None), (owner, None)],
+        ) as read:
+            result = target._owner_reconciliation_candidate(
+                "Current owner #726 still needs review", 777, merged_at, OWNER
+            )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("RECONCILIATION_REVIEW_REQUIRED", "OWNER_ACTIVE_WITHOUT_PR_LINK"),
+        )
+        read.assert_has_calls([
+            call(f"repos/{OWNER}/pulls/777"),
+            call(f"repos/{OWNER}/issues/726"),
+        ])
 
     def test_postmerge_reader_preserves_owner_after_inline_comment_marker(self):
         merged_at = "2026-11-07T02:00:00Z"
