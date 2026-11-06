@@ -101,6 +101,30 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_owner_and_closing_examples_inside_raw_html_code_do_not_satisfy_gate(self):
+        result = self.check(
+            "<pre>\n"
+            "- Owning-Issue: #726\n"
+            "- Closes #726\n"
+            "</pre>\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
+    def test_unclosed_html_tag_suffix_is_scanned_once_and_fails_closed(self):
+        body = "<a " * 128 + "\n- Owning-Issue: #726\n"
+        with patch.object(
+            target, "_html_tag_end", wraps=target._html_tag_end
+        ) as tag_end:
+            result = self.check(body)
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+        self.assertEqual(tag_end.call_count, 1)
+
     def test_html_comment_marker_in_inline_code_does_not_hide_owner(self):
         result = self.check(
             "This change removes the literal `<!--` marker.\n"
@@ -204,6 +228,32 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
                 "- Owning-Issue: #726\n"
                 "example`\n"
             ),
+        }
+        with patch.object(
+            target.pilot, "_read_json", return_value=(pr, None)
+        ) as read:
+            result = target._owner_reconciliation_candidate(
+                "No owner relation in current state", 777, merged_at, OWNER
+            )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
+        )
+        read.assert_called_once_with(f"repos/{OWNER}/pulls/777")
+
+    def test_postmerge_reader_ignores_owner_example_inside_raw_html_code(self):
+        merged_at = "2026-11-07T04:00:00Z"
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{OWNER}/pull/777",
+            "state": "closed",
+            "merged": True,
+            "merged_at": merged_at,
+            "base": {
+                "repo": {"full_name": OWNER, "default_branch": "main"},
+                "ref": "main",
+            },
+            "body": "<pre>\n- Owning-Issue: #726\n</pre>\n",
         }
         with patch.object(
             target.pilot, "_read_json", return_value=(pr, None)

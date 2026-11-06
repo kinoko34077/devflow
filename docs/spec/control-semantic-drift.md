@@ -159,10 +159,10 @@ The Required `verify` job in `.github/workflows/project-sync-tests.yml`
 validates the PR body on `opened`, `synchronize`, `reopened`, and
 `edited`. A PR must declare one valid `Owning-Issue` reference or one
 valid GitHub closing reference; when both are populated they must identify
-the same Issue. Duplicate, malformed, fenced-only, HTML-commented, missing,
-or contradictory declarations fail the Required check. Declarations inside
-inline code spans are ignored; literal HTML-comment markers in code spans are
-not interpreted as comments and cannot hide a following rendered declaration.
+the same Issue. Duplicate, malformed, fenced-only, inline-code, raw HTML
+code-block, HTML-commented, missing, or contradictory declarations fail the
+Required check. Literal HTML-comment markers in code spans are not interpreted
+as comments and cannot hide a following rendered declaration.
 A closing declaration is accepted only
 when the PR targets the repository's default branch, matching GitHub's
 closing behavior.

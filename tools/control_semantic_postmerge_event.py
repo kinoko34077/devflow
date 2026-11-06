@@ -125,6 +125,9 @@ HTML_TAG_START = re.compile(
     r"</?[A-Za-z][A-Za-z0-9:-]*(?=[\t\n\f\r >]|/>)|"
     r"<![A-Za-z]|<\?[A-Za-z]"
 )
+RAW_CODE_ELEMENTS = frozenset({
+    "code", "listing", "plaintext", "pre", "script", "style", "textarea", "xmp",
+})
 
 
 def _without_markdown_examples(text: str) -> str:
@@ -200,8 +203,11 @@ def _blank_preserving_newlines(text: str) -> str:
     return "".join(character if character in "\r\n" else " " for character in text)
 
 
-def _html_tag_end(text: str, start: int) -> int | None:
-    opening = HTML_TAG_START.match(text, start)
+def _html_tag_end(
+    text: str, start: int, opening: re.Match[str] | None = None,
+) -> int | None:
+    if opening is None:
+        opening = HTML_TAG_START.match(text, start)
     if opening is None:
         return None
     quote = None
@@ -242,8 +248,24 @@ def _without_html_comments_and_code_spans(text: str) -> str:
 
     result: list[str] = []
     in_comment = False
+    raw_code_element: str | None = None
     position = 0
     while position < len(text):
+        if raw_code_element is not None:
+            closing_pattern = re.compile(
+                rf"</[\t\n\f\r ]*{re.escape(raw_code_element)}"
+                rf"[\t\n\f\r ]*>", re.IGNORECASE,
+            )
+            closing = closing_pattern.search(text, position)
+            if closing is None:
+                result.append(_blank_preserving_newlines(text[position:]))
+                break
+            end = closing.end()
+            result.append(_blank_preserving_newlines(text[position:end]))
+            position = end
+            raw_code_element = None
+            continue
+
         if in_comment:
             if text.startswith("-->", position):
                 in_comment = False
@@ -259,9 +281,27 @@ def _without_html_comments_and_code_spans(text: str) -> str:
             position += 4
             continue
 
-        tag_end = _html_tag_end(text, position)
-        if tag_end is not None:
+        tag_opening = HTML_TAG_START.match(text, position)
+        if tag_opening is not None:
+            tag_end = _html_tag_end(text, position, tag_opening)
+            if tag_end is None:
+                # An unterminated tag makes the remaining markup ambiguous.
+                # Fail closed in one bounded scan rather than retrying each
+                # nested '<' against the same suffix of an untrusted body.
+                result.append(_blank_preserving_newlines(text[position:]))
+                break
+            tag_text = text[position:tag_end]
             result.append(_blank_preserving_newlines(text[position:tag_end]))
+            tag_match = re.match(
+                r"</?([A-Za-z][A-Za-z0-9:-]*)", tag_text,
+            )
+            if (
+                tag_match is not None
+                and not tag_text.startswith("</")
+                and tag_match.group(1).casefold() in RAW_CODE_ELEMENTS
+                and not re.search(r"/[\t\n\f\r ]*>$", tag_text)
+            ):
+                raw_code_element = tag_match.group(1)
             position = tag_end
             continue
 
