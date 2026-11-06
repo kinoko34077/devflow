@@ -121,14 +121,18 @@ FENCED_CODE_LIST_START = re.compile(
     r"^(?P<indent> {0,3})(?P<marker>[-+*]|[0-9]{1,9}[.)])"
     r"(?P<gap> {1,4})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
 )
+HTML_TAG_START = re.compile(
+    r"</?[A-Za-z][A-Za-z0-9:-]*(?=[\t\n\f\r >]|/>)|"
+    r"<![A-Za-z]|<\?[A-Za-z]"
+)
 
 
-def _without_fenced_code_blocks(text: str) -> str:
-    """Keep rendered prose while blanking code blocks and HTML comments.
+def _without_markdown_examples(text: str) -> str:
+    """Keep rendered prose while blanking code blocks, spans, and comments.
 
     Owner and closing-keyword declarations are metadata only when they are
-    actual PR-body fields. Examples inside fenced code or HTML comments must
-    not create an ownership or GitHub closing-issue relation.
+    actual PR-body fields. Examples inside fenced/inline code or HTML comments
+    must not create an ownership or GitHub closing-issue relation.
     """
     result: list[str] = []
     fence_char: str | None = None
@@ -189,11 +193,34 @@ def _without_fenced_code_blocks(text: str) -> str:
 
         result.append(line)
 
-    return _without_html_comments("".join(result))
+    return _without_html_comments_and_code_spans("".join(result))
 
 
-def _without_html_comments(text: str) -> str:
-    """Blank HTML comments while preserving comment markers in Markdown code spans."""
+def _blank_preserving_newlines(text: str) -> str:
+    return "".join(character if character in "\r\n" else " " for character in text)
+
+
+def _html_tag_end(text: str, start: int) -> int | None:
+    opening = HTML_TAG_START.match(text, start)
+    if opening is None:
+        return None
+    quote = None
+    position = opening.end()
+    while position < len(text):
+        character = text[position]
+        if quote is not None:
+            if character == quote:
+                quote = None
+        elif character in "\"'":
+            quote = character
+        elif character == ">":
+            return position + 1
+        position += 1
+    return None
+
+
+def _without_html_comments_and_code_spans(text: str) -> str:
+    """Blank HTML comments, tags, and code spans without crossing their scopes."""
     backtick_runs: dict[int, list[int]] = {}
     position = 0
     while position < len(text):
@@ -232,6 +259,12 @@ def _without_html_comments(text: str) -> str:
             position += 4
             continue
 
+        tag_end = _html_tag_end(text, position)
+        if tag_end is not None:
+            result.append(_blank_preserving_newlines(text[position:tag_end]))
+            position = tag_end
+            continue
+
         if text[position] == "`" and not escaped(position):
             start = position
             while position < len(text) and text[position] == "`":
@@ -242,7 +275,7 @@ def _without_html_comments(text: str) -> str:
             if candidate_index < len(candidates):
                 closing = candidates[candidate_index]
                 end = closing + run_length
-                result.append(text[start:end])
+                result.append(_blank_preserving_newlines(text[start:end]))
                 position = end
             else:
                 result.append(text[start:position])
@@ -323,7 +356,7 @@ def validate_pr_owner_metadata_event(
         body = ""
     if type(body) is not str:
         return _result("INVALID", "INVALID_PR_OWNER_METADATA")
-    declaration_text = _without_fenced_code_blocks(body)
+    declaration_text = _without_markdown_examples(body)
     declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
     filled = [part for part in declarations if part]
     if len(filled) > 1:
@@ -390,7 +423,7 @@ def _owner_reconciliation_candidate(
         body = ""
     if type(body) is not str:
         return _result("UNKNOWN", "INVALID_PR_OWNER_METADATA", number, repository)
-    declaration_text = _without_fenced_code_blocks(body)
+    declaration_text = _without_markdown_examples(body)
     declarations = [part.strip() for part in OWNER_LINE.findall(declaration_text)]
     # Blank template fields are not evidence; do not guess from prose.
     filled = [part for part in declarations if part]

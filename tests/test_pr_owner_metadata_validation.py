@@ -91,12 +91,34 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             ("INVALID", "OWNER_RELATION_REQUIRED"),
         )
 
+    def test_backticks_in_html_attributes_do_not_expose_commented_owner(self):
+        result = self.check(
+            '<span title="`">x</span>\n'
+            "<!--\n`\n- Owning-Issue: #726\n-->\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
+
     def test_html_comment_marker_in_inline_code_does_not_hide_owner(self):
         result = self.check(
             "This change removes the literal `<!--` marker.\n"
             "- Owning-Issue: #726\n"
         )
         self.assertEqual(result["status"], "VALID")
+
+    def test_owner_and_closing_examples_inside_inline_code_do_not_satisfy_gate(self):
+        result = self.check(
+            "`example\n"
+            "- Owning-Issue: #726\n"
+            "example`\n"
+            "`- Closes #726`\n"
+        )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("INVALID", "OWNER_RELATION_REQUIRED"),
+        )
 
     def test_postmerge_reader_does_not_reconcile_html_commented_relations(self):
         merged_at = "2026-11-07T01:00:00Z"
@@ -164,6 +186,36 @@ class RequiredOwnerMetadataTests(unittest.TestCase):
             call(f"repos/{OWNER}/pulls/777"),
             call(f"repos/{OWNER}/issues/726"),
         ])
+
+    def test_postmerge_reader_ignores_owner_example_inside_inline_code(self):
+        merged_at = "2026-11-07T03:00:00Z"
+        pr = {
+            "number": 777,
+            "html_url": f"https://github.com/{OWNER}/pull/777",
+            "state": "closed",
+            "merged": True,
+            "merged_at": merged_at,
+            "base": {
+                "repo": {"full_name": OWNER, "default_branch": "main"},
+                "ref": "main",
+            },
+            "body": (
+                "`example\n"
+                "- Owning-Issue: #726\n"
+                "example`\n"
+            ),
+        }
+        with patch.object(
+            target.pilot, "_read_json", return_value=(pr, None)
+        ) as read:
+            result = target._owner_reconciliation_candidate(
+                "No owner relation in current state", 777, merged_at, OWNER
+            )
+        self.assertEqual(
+            (result["status"], result["reason"]),
+            ("NOT_APPLICABLE", "NO_PR_OR_OWNER_REFERENCE"),
+        )
+        read.assert_called_once_with(f"repos/{OWNER}/pulls/777")
 
     def test_contradictory_owner_and_closing_issue_are_rejected(self):
         result = self.check("- Closes #725\n- Owning-Issue: #726\n")
