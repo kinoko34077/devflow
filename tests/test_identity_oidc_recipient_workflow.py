@@ -5,12 +5,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ".github/workflows/identity-oidc-recipient-pilot.yml"
+ISSUER_PATH = ".github/workflows/identity-oidc-issuer-pilot.yml"
 
 
 class IdentityOidcRecipientWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = (ROOT / PATH).read_text(encoding="utf-8")
+        cls.issuer_source = (ROOT / ISSUER_PATH).read_text(encoding="utf-8")
 
     def test_workflow_call_uses_numeric_owner_gate(self):
         self.assertIn("  workflow_call:", self.source)
@@ -23,6 +25,23 @@ class IdentityOidcRecipientWorkflowTests(unittest.TestCase):
                 "github.ref == 'refs/heads/main'",
                 "github.actor_id == '79015263'",
                 "github.actor == 'kinoko34077'",
+                "github.triggering_actor == 'kinoko34077'",
+            ],
+        )
+
+    def test_issuer_gate_binds_owner_identity_and_current_dispatcher(self):
+        guard = self.issuer_source.split("    if: >-\n", 1)[1].split(
+            "\n    runs-on:", 1
+        )[0]
+        self.assertEqual(
+            [part.strip() for part in guard.split("&&")],
+            [
+                "github.repository == 'kinoko34077/testapp'",
+                "github.event_name == 'workflow_dispatch'",
+                "github.ref == 'refs/heads/main'",
+                "github.actor_id == '79015263'",
+                "github.actor == 'kinoko34077'",
+                "github.triggering_actor == 'kinoko34077'",
             ],
         )
 
