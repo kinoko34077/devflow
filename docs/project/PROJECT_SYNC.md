@@ -136,10 +136,11 @@ for its repository; bot ID or title alone is not authority.
 
 Event-initiator authorization is a separate boundary from Issue authorship.
 The Project Sync actor-admission job checks the GitHub-provided event sender,
-numeric run actor, login consistency, repository, and event-specific mode before
-the secret-bearing sync job; `scripts/project_sync.py` repeats the check before
-Project access. An authenticated Issue author does not authorize an event
-started by a different actor.
+`GITHUB_ACTOR_ID`, `GITHUB_ACTOR`, `GITHUB_TRIGGERING_ACTOR`, repository
+identity, and event-specific mode before the secret-bearing sync job;
+`scripts/project_sync.py` repeats the check before Project access. An
+authenticated Issue author does not authorize an event started by a different
+actor.
 
 ### Manual-dispatch ref boundary
 
