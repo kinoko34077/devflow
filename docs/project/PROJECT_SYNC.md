@@ -64,7 +64,7 @@ Project custom TEXT fields are **bounded display projections**, not alternative 
 
 Workflow: `.github/workflows/project-sync.yml`
 
-### Owner-only GitHub-native command transport (devflow#395 — Draft)
+### Owner-only GitHub-native command transport (accepted on main; devflow [#395](https://github.com/kinoko34077/devflow/issues/395) / [PR #405](https://github.com/kinoko34077/devflow/pull/405))
 
 On accepted default-branch code, a trusted owner-authored Issue comment may
 request a **full-scope** Project Sync with exact text:
@@ -89,14 +89,23 @@ A successful run does not imply Sync Health PASS: check the actual run and
 machine Health #41 before advancing or calling reconcile → verify complete.
 
 No private App key or cross-repository token is needed for the request path.
-In the reviewed default-branch workflow, the Project Sync secrets are supplied
-to the sync steps only after the no-secret actor-admission job returns
-`admitted=true`; the CLI repeats the admission check before Project access.
-This is an in-workflow gate, not an independent workflow-ref or secret-scope
-policy. There is no new background scheduler.
-This feature does **not** configure a repo created outside devflow Bootstrap.
-The actual GitHub Actions trigger and secret boundary must receive independent
-security Review and Human-authorized merge before becoming active.
+The owner-command transport is active on main following the explicitly
+approved merge of [PR #405](https://github.com/kinoko34077/devflow/pull/405)
+on 2026-10-09. Its recorded full-scope owner-issued `reconcile`
+([run 37943843401](https://github.com/kinoko34077/devflow/actions/runs/37943843401))
+and `verify`
+([run 37944169930](https://github.com/kinoko34077/devflow/actions/runs/37944169930))
+both succeeded; at that acceptance, Health #41 reported PASS, 274/274 matched,
+zero drift and zero errors ([#395 acceptance record](https://github.com/kinoko34077/devflow/issues/395#issuecomment-6087862521)).
+This is historical, repository-specific runtime acceptance; consult Health #41
+for current status. In the current default-branch workflow, Project Sync
+secrets are supplied to sync steps only after the no-secret actor-admission job
+returns `admitted=true`; the CLI repeats admission before Project access.
+That is an in-workflow gate, not an independent workflow-ref or secret-scope
+policy. The owner-command acceptance did not verify live Actions workflow
+execution policy, dispatch-capable collaborator scope or secret placement.
+There is no new background scheduler. This feature does **not** configure a
+repo created outside devflow Bootstrap.
 
 
 Event sync runs for devflow Issue events:
