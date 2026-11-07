@@ -12,7 +12,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  actor-admission:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      admitted: ${{ steps.admit.outputs.admitted }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: Admit only the canonical initiating actor without write credentials
+        id: admit
+        env:
+          DEVFLOW_EVENT_NAME: ${{ github.event_name }}
+          DEVFLOW_EVENT_ACTOR_ID: ${{ github.actor_id }}
+          DEVFLOW_EVENT_ACTOR_LOGIN: ${{ github.actor }}
+          DEVFLOW_EVENT_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DEVFLOW_EVENT_REPOSITORY: ${{ github.repository }}
+        run: >-
+          python scripts/repository_bootstrap.py admit-event
+          --event "$GITHUB_EVENT_PATH"
+          --github-output "$GITHUB_OUTPUT"
+
   validate:
+    needs: actor-admission
+    if: ${{ github.triggering_actor == github.actor && needs.actor-admission.outputs.admitted == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,14 +57,19 @@ jobs:
         id: validate
         env:
           DEVFLOW_TOKEN: ${{ github.token }}
+          DEVFLOW_EVENT_NAME: ${{ github.event_name }}
+          DEVFLOW_EVENT_ACTOR_ID: ${{ github.actor_id }}
+          DEVFLOW_EVENT_ACTOR_LOGIN: ${{ github.actor }}
+          DEVFLOW_EVENT_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DEVFLOW_EVENT_REPOSITORY: ${{ github.repository }}
         run: >-
           python scripts/repository_bootstrap.py validate-event
           --event "$GITHUB_EVENT_PATH"
           --github-output "$GITHUB_OUTPUT"
 
   provision:
-    needs: validate
-    if: ${{ needs.validate.outputs.valid == 'true' && needs.validate.outputs.authorized == 'true' }}
+    needs: [actor-admission, validate]
+    if: ${{ github.triggering_actor == github.actor && needs.actor-admission.outputs.admitted == 'true' && needs.validate.outputs.valid == 'true' && needs.validate.outputs.authorized == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,4 +83,9 @@ jobs:
         env:
           DEVFLOW_TOKEN: ${{ github.token }}
           REPOSITORY_BOOTSTRAP_TOKEN: ${{ secrets.REPOSITORY_BOOTSTRAP_TOKEN }}
+          DEVFLOW_EVENT_NAME: ${{ github.event_name }}
+          DEVFLOW_EVENT_ACTOR_ID: ${{ github.actor_id }}
+          DEVFLOW_EVENT_ACTOR_LOGIN: ${{ github.actor }}
+          DEVFLOW_EVENT_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DEVFLOW_EVENT_REPOSITORY: ${{ github.repository }}
         run: python scripts/repository_bootstrap.py execute-event --event "$GITHUB_EVENT_PATH"

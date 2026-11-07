@@ -97,12 +97,13 @@ Stable Issue `key` values are request-local idempotency keys. Reusing the same B
 
 `.github/workflows/repository-bootstrap.yml` is triggered by Issue `opened`, `edited`, and `reopened` events.
 
-The workflow has two security stages:
+The workflow has three security stages:
 
-1. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; checks observed devflow Issue identity, exact request syntax, schema and the allowlisted numeric author ID (`79015263`), with supplied login consistency. `author_association` is supplementary defense-in-depth only.
-2. **provision** — runs only when validation reports both `valid=true` and `authorized=true`; this stage receives the external bootstrap credential.
+1. **actor-admission** — `contents:read` only; requires the event sender to be the canonical allowlisted numeric principal and match the GitHub Actions actor ID, actor login, triggering actor, repository, and Issue event identity.
+2. **validate** — its job condition requires both the admission output and `github.triggering_actor == github.actor`; it receives `issues:write` only after that gate. The step has no `REPOSITORY_BOOTSTRAP_TOKEN`; it rechecks the initiating actor, then validates the devflow Issue identity, request syntax/schema, and allowlisted numeric Issue-author ID (`79015263`) with supplied-login consistency. `author_association` is supplementary defense-in-depth only.
+3. **provision** — its job condition requires the same current-run actor equality plus successful admission and validation. This prevents a partial rerun by a different writer from reusing successful admission outputs from the original attempt to start a privileged job. The step rechecks the initiating actor and Issue author before reading tokens, then receives the external bootstrap credential.
 
-A normal Issue is ignored successfully. A malformed trusted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. An untrusted Issue author cannot reach the secret-bearing provisioning job.
+A normal Issue or non-allowlisted event actor is skipped without an Issue mutation. A different actor who reruns a failed job cannot start validation or provisioning using the previous attempt's admission output. A malformed allowlisted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. `author_association` is supplementary metadata; it does not grant authority without the canonical numeric user ID.
 
 ## 5. Idempotency
 

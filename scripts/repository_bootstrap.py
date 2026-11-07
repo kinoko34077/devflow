@@ -22,6 +22,7 @@ from tools.repository_bootstrap import (  # noqa: E402
     normalize_request,
     parse_request_body,
 )
+from tools import github_issue_trust  # noqa: E402
 
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 TITLE_PREFIX = "[REPO CREATE] "
@@ -74,6 +75,29 @@ def _write_output(path: Path, values: dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
+def _trusted_event_actor(event: dict[str, Any]) -> bool:
+    return github_issue_trust.is_trusted_issue_event_actor(
+        event,
+        event_name=os.environ.get("DEVFLOW_EVENT_NAME", ""),
+        actor_id=os.environ.get("DEVFLOW_EVENT_ACTOR_ID", ""),
+        actor_login=os.environ.get("DEVFLOW_EVENT_ACTOR_LOGIN", ""),
+        triggering_actor=os.environ.get("DEVFLOW_EVENT_TRIGGERING_ACTOR", ""),
+        repository=os.environ.get("DEVFLOW_EVENT_REPOSITORY", ""),
+        expected_repository=DEVFLOW_REPOSITORY,
+    )
+
+
+def admit_event(event_path: Path, github_output: Path) -> int:
+    try:
+        event = _load_json(event_path)
+    except BootstrapError:
+        event = {}
+    admitted = _trusted_event_actor(event)
+    _write_output(github_output, {"admitted": "true" if admitted else "false"})
+    print("repository-bootstrap actor admission: " + ("ADMITTED" if admitted else "SKIPPED"))
+    return 0
+
+
 def _comment_validation_failure(
     repository: str,
     issue_number: int,
@@ -100,6 +124,8 @@ def _comment_validation_failure(
 def validate_event(event_path: Path, github_output: Path) -> int:
     try:
         event = _load_json(event_path)
+        if not _trusted_event_actor(event):
+            raise EventError("initiating actor is not allowlisted")
         issue, repository, number, _ = _event_identity(event)
     except BootstrapError as exc:
         _write_output(
@@ -181,6 +207,8 @@ def _record_missing_credential(
 
 def execute_event(event_path: Path) -> int:
     event = _load_json(event_path)
+    if not _trusted_event_actor(event):
+        raise EventError("execute-event initiating actor is not allowlisted")
     issue, repository, number, issue_url = _event_identity(event)
     title = issue.get("title")
     body = issue.get("body")
@@ -220,6 +248,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="devflow repository-bootstrap.v1 event runner")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    admit = subparsers.add_parser("admit-event")
+    admit.add_argument("--event", help="GitHub event JSON path; defaults to GITHUB_EVENT_PATH")
+    admit.add_argument("--github-output", required=True, help="GitHub Actions output file")
+
     validate = subparsers.add_parser("validate-event")
     validate.add_argument("--event", help="GitHub event JSON path; defaults to GITHUB_EVENT_PATH")
     validate.add_argument("--github-output", required=True, help="GitHub Actions output file")
@@ -233,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         event_path = _event_path(args.event)
+        if args.command == "admit-event":
+            return admit_event(event_path, Path(args.github_output))
         if args.command == "validate-event":
             return validate_event(event_path, Path(args.github_output))
         if args.command == "execute-event":

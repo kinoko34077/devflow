@@ -182,10 +182,25 @@ Secret-bearing provisioning requires all of the following:
 2. exact GitHub Issue identity and canonical URL;
 3. title exactly matches `[REPO CREATE] <repository.name>`;
 4. one valid `repository-bootstrap.v1` payload;
-5. request author has the allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` may be checked as supplementary defense-in-depth, but never grants trust by itself;
-6. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
+5. initiating Issue-event sender is the canonical allowlisted numeric principal and matches the GitHub Actions actor ID, actor login, and triggering actor;
+6. request author has the allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` may be checked as supplementary defense-in-depth, but never grants trust by itself;
+7. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
 
-Validation runs without the repository-creation credential. Untrusted Issue authors MUST NOT cause that credential to enter their job environment.
+The current canonical human allowlist is owned by `tools/github_issue_trust.py`
+and contains only user ID `79015263` (`kinoko34077`). `author_association`
+is defense-in-depth metadata and MUST NOT grant authority by itself. Event
+sender and Issue author are separate identities; both must pass the applicable
+numeric-principal check.
+
+A minimal no-secret actor-admission job runs before validation and has only
+`contents:read`. It fails closed on missing, malformed, mismatched or
+non-allowlisted event identity. Both the validation and secret-bearing
+provisioning job conditions also require `github.triggering_actor ==
+github.actor`, in addition to the admission output; this prevents a partial
+rerun by a different writer from reusing successful prerequisite outputs to
+start a privileged job. The executor repeats the actor and Issue-author checks
+before reading either token. Untrusted actors or Issue authors MUST NOT cause
+the repository-creation credential to enter their job environment.
 
 ## 7. Credential boundary / Human Gate
 
@@ -236,10 +251,10 @@ following are true:
 3. the Control contains one valid `repository-bootstrap-control.v1` provenance
    block, or the canonical legacy generated-Control provenance text;
 4. the referenced open `[REPO CREATE] <name>` request is in the exact devflow
-   repository, has an allowlisted numeric author identity (with supplied login
-   consistency checked; association alone is insufficient), and contains one valid
-   `repository-bootstrap.v1` payload for the same target with management and
-   Control creation enabled;
+   repository, its author has an allowlisted numeric user ID with supplied-login
+   consistency checked (`author_association` is supplementary only), and contains
+   one valid `repository-bootstrap.v1` payload for the same target with
+   management and Control creation enabled;
 5. the request has a terminal `DONE` bootstrap comment emitted by the GitHub
    Actions bootstrap executor, naming the exact target repository and this
    exact Control URL; and
