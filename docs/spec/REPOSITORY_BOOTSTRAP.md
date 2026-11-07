@@ -183,7 +183,7 @@ Secret-bearing provisioning requires all of the following:
 3. title exactly matches `[REPO CREATE] <repository.name>`;
 4. one valid `repository-bootstrap.v1` payload;
 5. initiating Issue-event sender is the canonical allowlisted numeric principal and matches the GitHub Actions actor ID, actor login, and triggering actor;
-6. request author's numeric user ID is allowlisted and any observed login matches its canonical login;
+6. request author has the allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` may be checked as supplementary defense-in-depth, but never grants trust by itself;
 7. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
 
 The current canonical human allowlist is owned by `tools/github_issue_trust.py`
@@ -249,10 +249,10 @@ following are true:
 3. the Control contains one valid `repository-bootstrap-control.v1` provenance
    block, or the canonical legacy generated-Control provenance text;
 4. the referenced open `[REPO CREATE] <name>` request is in the exact devflow
-   repository, its author's numeric user ID is on the canonical allowlist with
-   consistent login evidence, and it contains one valid
-   `repository-bootstrap.v1` payload for the same target with management and
-   Control creation enabled; `author_association` is supplementary only;
+   repository, its author has an allowlisted numeric user ID with supplied-login
+   consistency checked (`author_association` is supplementary only), and contains
+   one valid `repository-bootstrap.v1` payload for the same target with
+   management and Control creation enabled;
 5. the request has a terminal `DONE` bootstrap comment emitted by the GitHub
    Actions bootstrap executor, naming the exact target repository and this
    exact Control URL; and
@@ -361,7 +361,7 @@ Credential-independent acceptance requires:
 
 - parser/normalization tests;
 - malformed/unknown schema rejection;
-- exact trust-association tests;
+- exact trusted-principal identity tests;
 - idempotency/collision tests;
 - partial-failure recovery evidence tests;
 - static workflow secret-fencing tests;

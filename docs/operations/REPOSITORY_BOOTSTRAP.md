@@ -100,7 +100,7 @@ Stable Issue `key` values are request-local idempotency keys. Reusing the same B
 The workflow has three security stages:
 
 1. **actor-admission** — `contents:read` only; requires the event sender to be the canonical allowlisted numeric principal and match the GitHub Actions actor ID, actor login, triggering actor, repository, and Issue event identity. Unadmitted events stop before the validation job's `issues:write` permission.
-2. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; rechecks the initiating actor, then validates the devflow Issue identity, request syntax/schema, and canonical numeric Issue-author identity.
+2. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; rechecks the initiating actor, then validates the devflow Issue identity, request syntax/schema, and allowlisted numeric Issue-author ID (`79015263`) with supplied-login consistency. `author_association` is supplementary defense-in-depth only.
 3. **provision** — runs only when actor admission and validation both succeed; rechecks the initiating actor and Issue author before reading tokens, then receives the external bootstrap credential.
 
 A normal Issue or non-allowlisted event actor is skipped without an Issue mutation. A malformed allowlisted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. `author_association` is supplementary metadata; it does not grant authority without the canonical numeric user ID.

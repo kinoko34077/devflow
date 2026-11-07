@@ -16,6 +16,8 @@ The initial v1 implementation was accepted through PR #257. The later bounded ca
 
 **Standing-policy supersession (2026-10-01):** `devflow#290` / PR #291 changes only the eligibility/default relationship with durable progress: a Task Checkpoint Cursor is required for eligible single-frontier multi-step work and is paired with the designated durable progress surface. Historical statements below that described the Cursor as optional are superseded by this note and the updated wording in §2–§3. Cursor authority remains navigation/drift projection only.
 
+**Standing-policy supersession (2026-11-07):** devflow #178 / PR #811 supersedes the association-only human-author trust wording in the original design §4.1. Human-authored cursor comments require allowlisted numeric GitHub `user.id` `79015263`; a supplied login must match `kinoko34077`, and `author_association` is supplementary only. The existing `github-actions[bot]` helper-contract exception remains unchanged. Cursor authority and its navigation-only semantics are unchanged.
+
 ## 2. Relationship to durable progress
 
 `docs/operations/DURABLE_PROGRESS_EXTERNALIZATION.md` remains the standing operational contract.
