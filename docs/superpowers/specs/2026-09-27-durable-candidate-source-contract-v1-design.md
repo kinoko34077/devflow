@@ -42,7 +42,7 @@ This is a procedural authority boundary, not a cryptographic identity claim. The
 
 ### 2.2 Trusted-author boundary
 
-Every GitHub Issue used as execution authority or provenance under this contract MUST satisfy the current trusted-principal rule from devflow #178, implemented by devflow PR #811:
+Every human-authored GitHub Issue used as execution authority or provenance under this contract MUST satisfy the current trusted-principal rule from devflow #178, implemented by devflow PR #811:
 
 - the actor MUST have the allowlisted numeric GitHub `user.id` `79015263`;
 - if GitHub supplies a login, it MUST match `kinoko34077`;
@@ -52,7 +52,7 @@ Every GitHub Issue used as execution authority or provenance under this contract
 - the exact owning task Issue named by `task` MUST be trusted before its body digest can authorize a candidate;
 - an Issue named by `work_order_ref` MUST also be trusted before it can provide Work Order provenance.
 
-The trust test is applied to the GitHub object itself, not inferred from title, labels, repository visibility, links, nearby prose, or association. Adding principals requires a separate explicit policy and implementation decision; v1 consumers must not silently broaden the numeric allowlist.
+The trust test is applied to the GitHub object itself, not inferred from title, labels, repository visibility, links, nearby prose, or association. A bot-authored Repository Control is the only exception here and is trusted only through the exact derived-provenance verifier in `docs/spec/REPOSITORY_BOOTSTRAP.md`; its source request must satisfy the human numeric-identity rule above. Bot identity, login, association, or title alone is insufficient, and this exception does not apply to candidate task or Work Order Issues. Adding principals requires a separate explicit policy and implementation decision; v1 consumers must not silently broaden the numeric allowlist.
 
 This closes the public-repository impersonation path tracked by devflow #127. Candidate discovery must not accept a machine block, task body, or Work Order provenance from an outsider-authored Issue merely because its title or body matches the expected shape.
 
