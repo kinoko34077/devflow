@@ -245,9 +245,9 @@ class WriteEntrypointTests(unittest.TestCase):
 class ReusableWorkflowStructureTests(unittest.TestCase):
     def setUp(self):
         self.text = WORKFLOW.read_text(encoding="utf-8")
-        produce, write = self.text.split("\n  write:\n", 1)
-        self.produce = produce.split("\n  produce:\n", 1)[1]
-        self.write = write
+        self.produce = self.text.split("\n  produce:\n", 1)[1].split("\n  verify:\n", 1)[0]
+        self.verify = self.text.split("\n  verify:\n", 1)[1].split("\n  write:\n", 1)[0]
+        self.write = self.text.split("\n  write:\n", 1)[1]
 
     def test_only_workflow_call_and_empty_top_level_permissions(self):
         on_block = self.text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
@@ -266,6 +266,27 @@ class ReusableWorkflowStructureTests(unittest.TestCase):
             key, value = [part.strip() for part in line.split(":", 1)]
             if key != "contents":
                 self.assertEqual(value, "read", line)
+
+    def test_dry_run_uses_read_only_job(self):
+        verify_parts = self.text.split("\n  verify:\n", 1)
+        verify = verify_parts[1].split("\n  write:\n", 1)[0] if len(verify_parts) == 2 else ""
+        self.assertTrue(verify, "dry-run must use a separate read-only verify job")
+        verify_header = verify.split("\n    runs-on:", 1)[0]
+        self.assertIn("if: ${{ inputs.mode == 'dry-run' }}", verify_header)
+        verify_perms = verify.split("permissions:", 1)[1].split("env:", 1)[0]
+        self.assertIn("contents: read", verify_perms)
+        self.assertIn("actions: read", verify_perms)
+        self.assertIn("pull-requests: read", verify_perms)
+        self.assertNotIn("write", verify_perms)
+        self.assertIn("MODE: dry-run", verify)
+        self.assertIn("WRITER_TOKEN: ${{ github.token }}", verify)
+        self.assertIn("generated_artifact_pilot import main", verify)
+        self.assertIn("write --artifact ../artifact", verify)
+
+        write_header = self.write.split("\n    runs-on:", 1)[0]
+        self.assertIn("inputs.mode == 'write'", write_header)
+        self.assertIn("inputs.mode == 'write-replay-test'", write_header)
+        self.assertNotIn("dry-run", write_header)
 
     def test_writer_job_never_executes_target_code(self):
         for forbidden in ("npm", "node", "actions/checkout", "setup-node", "pip install", "source"):
@@ -296,10 +317,12 @@ class ReusableWorkflowStructureTests(unittest.TestCase):
         self.assertNotIn('npm run check', self.write)
         self.assertNotIn('npm run validate:orthography-accounting', self.write)
 
-    def test_token_only_in_writer_and_no_secrets(self):
+    def test_tokens_are_scoped_to_verifier_and_writer_without_secrets(self):
         self.assertNotIn("secrets.", self.text)
         self.assertNotIn("github.token", self.produce)
-        self.assertEqual(self.text.count("github.token"), 1)
+        self.assertIn("WRITER_TOKEN: ${{ github.token }}", self.verify)
+        self.assertIn("WRITER_TOKEN: ${{ github.token }}", self.write)
+        self.assertEqual(self.text.count("github.token"), 2)
         self.assertIn("persist-credentials: false", self.produce)
 
     def test_actions_are_pinned_to_full_shas(self):
@@ -313,7 +336,7 @@ class ReusableWorkflowStructureTests(unittest.TestCase):
             self.assertNotIn("${{", block)
 
     def test_devflow_helpers_fetched_at_pinned_sha_without_credentials(self):
-        for job in (self.produce, self.write):
+        for job in (self.produce, self.verify, self.write):
             self.assertIn('fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"', job)
             self.assertIn('test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"', job)
 

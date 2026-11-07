@@ -3,10 +3,14 @@
 **適用範囲:** 単一JO Pilotの安全境界と運用手順。親[devflow #384](https://github.com/kinoko34077/devflow/issues/384)・子[#415](https://github.com/kinoko34077/devflow/issues/415)・JO owner[#300](https://github.com/kinoko34077/japanese-orthography/issues/300)が受入判定の正本。**S0–S5は#384でCOMPLETE / ACCEPTED**（S3 [親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106230186)、S4 [親記録](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106251550)、S5 [最終受入](https://github.com/kinoko34077/devflow/issues/384#issuecomment-6106565389)、[PR #429](https://github.com/kinoko34077/devflow/pull/429) / post-main Required [#38120459183](https://github.com/kinoko34077/devflow/actions/runs/38120459183) SUCCESS）。受入範囲は元の単一JO Pilotであり、他repoへのrolloutは[#386](https://github.com/kinoko34077/devflow/issues/386)が別に管理しNO_GO。以下の受入前草案は履歴として保持する。  
 **trusted devflow pin:** `f886877e7110f2499125ecc6e07294798c33fe93`。JO CallerはこのSHAを`uses`／`devflow_sha`へ両方固定し、devflow mainへの別案件コミットで自動更新しない。
 
+## 2026-11-07 devflow source hardening（JO受入済みpinとは別）
+
+この版の共有workflowは`mode=dry-run`をread-only権限の専用verify jobへ分離し、`contents:write`を持つwriter jobを効果のあるmodeに限定する。これはdevflow sourceの権限境界を狭めるコード変更であり、受入済みJO Callerは引き続き上記`f886877e7110f2499125ecc6e07294798c33fe93`を使用する。Callerのpin更新、別repositoryへの導入、実writeをこの変更から推定しない。
+
 ## 実証済みの安全運用と再開条件（2026-10-11）
 
 1. **通常起動:** JO main Callerの手動`workflow_dispatch`、`mode=dry-run|write`、対象PR branch・正確な`expected_head`を指定。実行対象は許可レシピとJSON1件に限定し、repo/actor/branch/PR/保護状態をGitHub APIで再認証する。想定外のmodeはCaller job-level allowlistでSKIPPEDとなる。SKIPPEDは**受入成功の証拠ではない**。
-2. **権限分離:** produceはreadのみ・secretsなし、固定recipe生成物を検証してZIP+manifestへ梱包する。writerのみ`contents:write`、`actions:read`、`pull-requests:read`。writerは未信頼のZIPやJO sourceのコードを実行せず、認証したfirst-party run/attempt＋Caller SHA/pin＋ZIP/path/mode/digestを検証する。
+2. **権限分離:** produceはreadのみ・secretsなし、固定recipe生成物を検証してZIP+manifestへ梱包する。`dry-run`は専用verify jobで`contents:read`・`actions:read`・`pull-requests:read`だけを使う。`write`と一時的な`write-replay-test`だけが別writer jobの`contents:write`・`actions:read`・`pull-requests:read`を必要とする。いずれの検証jobも対象repoコードを実行せず、認証したfirst-party run/attempt＋Caller SHA/pin＋ZIP/path/mode/digestを検証する。
 3. **更新と競合:** 1 open same-repo PR＋expected HEAD、未保護scratch branchでCAS更新。commit parentはexpected HEAD、`force:false`、事後readback必須。競合/不明結果は停止し、新たな受入なしで再実行しない。
 4. **同一receiptの重複防止:** 受入専用`write-replay-test`は一時的な限定モードで実証を終えた。Run [#38072681245](https://github.com/kinoko34077/japanese-orthography/actions/runs/38072681245)は初回`COMMITTED`→同一runner/run/attempt/manifestで2回目`NO_OP_REPLAY`、追加書込0。**恒常Callerには同モードを残さない**。[PR #308](https://github.com/kinoko34077/japanese-orthography/pull/308)でUI選択肢とAPI経由のジョブ起動可能性をともに除去済み。
 5. **exact writer HEADのテスト:** token書込は通常のPR CIを自動起動しない。またPRイベントの通常checkoutは仮想マージになる場合がある。受入では一時的read-only手動[Verify #38078533001](https://github.com/kinoko34077/japanese-orthography/actions/runs/38078533001)のpilot-head両OSがwriter commit`87557afe9d3585252c94cf5352515943323dd708`を直接checkoutし、SHA assert→全check→Ubuntu buildを成功させた。GitHub run自体のhead SHA（手動起動元main）とは区別。通常運用で必要な場合も、権限変更なく**実際のcheckout SHA**で必要CIを判定する。
@@ -50,7 +54,7 @@
 
 ### 4. 実装した入口（当時の仕様・現行pinは冒頭優先）
 
-- 共通workflow: `.github/workflows/generated-artifact-writeback.yml`。top-level `permissions: {}`、`produce`は固定recipeを`tools/generated_artifact_pilot.py`の`RECIPE_NPM_SCRIPT`経由でのみ生成し、`write`は上記認証/ZIP/CASを担当。
+- 共通workflow: `.github/workflows/generated-artifact-writeback.yml`。top-level `permissions: {}`、`produce`は固定recipeを`tools/generated_artifact_pilot.py`の`RECIPE_NPM_SCRIPT`経由でのみ生成し、`verify`は`dry-run`をread-only権限で、`write`は効果を持つmodeだけを上記認証/ZIP/CASで担当。
 - JO Caller雛形: `docs/operations/templates/verified-artifacts-pilot.yml`（devflowでは非稼働）。JO側のreviewed default branchでのみ起動する。固有の受入済み`<DEVFLOW_SHA>`を`uses`と`devflow_sha`へ固定し、意図しないpin更新を行わない。
 - 初期のexact-HEAD CI確保案：`actions:write`を新たに付与せず、Humanによるscratch PRのclose/reopenなど**GitHubの本来のPRイベント**で検証。認証・権限・実行境界を別tool/迂回経路で無効化しない。
 
