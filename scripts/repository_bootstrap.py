@@ -18,6 +18,7 @@ from tools.repository_bootstrap import (  # noqa: E402
     BootstrapError,
     BootstrapExecutor,
     GitHubApi,
+    GitHubApiError,
     is_trusted_issue_author,
     normalize_request,
     parse_request_body,
@@ -66,6 +67,37 @@ def _event_identity(event: dict[str, Any]) -> tuple[dict[str, Any], str, int, st
     return issue, full_name, number, expected_url
 
 
+def _current_issue_snapshot(
+    event: dict[str, Any],
+    api: GitHubApi,
+) -> tuple[dict[str, Any], str, int, str]:
+    event_issue, repository, number, issue_url = _event_identity(event)
+    try:
+        current = api.get_issue(repository, number)
+    except GitHubApiError as exc:
+        raise EventError(f"current Issue revalidation failed: {exc}") from None
+    if (
+        current.get("number") != number
+        or current.get("html_url") != issue_url
+        or type(event_issue.get("id")) is not int
+        or event_issue.get("id") <= 0
+        or current.get("id") != event_issue.get("id")
+    ):
+        raise EventError("current Issue identity does not match the triggering event")
+    if current.get("state") != "open":
+        raise EventError("current Issue is closed")
+    event_revision = event_issue.get("updated_at")
+    if (
+        not isinstance(event_revision, str)
+        or not event_revision
+        or current.get("updated_at") != event_revision
+        or current.get("title") != event_issue.get("title")
+        or current.get("body") != event_issue.get("body")
+    ):
+        raise EventError("current Issue revision differs from the triggering event snapshot")
+    return current, repository, number, issue_url
+
+
 def _write_output(path: Path, values: dict[str, str]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         for key, value in values.items():
@@ -100,7 +132,31 @@ def _comment_validation_failure(
 def validate_event(event_path: Path, github_output: Path) -> int:
     try:
         event = _load_json(event_path)
-        issue, repository, number, _ = _event_identity(event)
+        event_issue, repository, number, _ = _event_identity(event)
+    except BootstrapError as exc:
+        _write_output(
+            github_output,
+            {"candidate": "false", "valid": "false", "authorized": "false", "repository_name": ""},
+        )
+        print(f"repository-bootstrap event ignored: {exc}", file=sys.stderr)
+        return 0
+
+    event_title = event_issue.get("title")
+    if not isinstance(event_title, str) or not event_title.startswith(TITLE_PREFIX):
+        _write_output(
+            github_output,
+            {"candidate": "false", "valid": "false", "authorized": "false", "repository_name": ""},
+        )
+        return 0
+
+    try:
+        devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+        if not devflow_token:
+            raise EventError("DEVFLOW_TOKEN is required to revalidate the current Issue")
+        issue, repository, number, _ = _current_issue_snapshot(
+            event,
+            GitHubApi(devflow_token),
+        )
     except BootstrapError as exc:
         _write_output(
             github_output,
@@ -181,7 +237,14 @@ def _record_missing_credential(
 
 def execute_event(event_path: Path) -> int:
     event = _load_json(event_path)
-    issue, repository, number, issue_url = _event_identity(event)
+    _, repository, number, issue_url = _event_identity(event)
+
+    devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+    if not devflow_token:
+        raise EventError("DEVFLOW_TOKEN is required to revalidate the current Issue")
+    devflow_api = GitHubApi(devflow_token)
+    issue, repository, number, issue_url = _current_issue_snapshot(event, devflow_api)
+
     title = issue.get("title")
     body = issue.get("body")
     if not isinstance(title, str) or not title.startswith(TITLE_PREFIX):
@@ -191,10 +254,10 @@ def execute_event(event_path: Path) -> int:
     raw = parse_request_body(body if isinstance(body, str) else "")
     request = normalize_request(raw, title)
 
-    devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+    # Recheck after parsing and immediately before accessing the external
+    # repository-creation credential. An old rerun snapshot must not provision.
+    issue, repository, number, issue_url = _current_issue_snapshot(event, devflow_api)
     bootstrap_token = os.environ.get("REPOSITORY_BOOTSTRAP_TOKEN", "")
-    if not devflow_token:
-        raise EventError("DEVFLOW_TOKEN is required")
     if not bootstrap_token:
         _record_missing_credential(repository, number, devflow_token)
         raise EventError("approved REPOSITORY_BOOTSTRAP_TOKEN is not configured")
@@ -210,7 +273,7 @@ def execute_event(event_path: Path) -> int:
     )
     result = BootstrapExecutor(
         GitHubApi(bootstrap_token),
-        GitHubApi(devflow_token),
+        devflow_api,
     ).execute(request, context)
     print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
     return 0

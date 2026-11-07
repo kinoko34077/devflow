@@ -104,6 +104,12 @@ The workflow has two security stages:
 
 A normal Issue is ignored successfully. A malformed trusted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. An untrusted Issue author cannot reach the secret-bearing provisioning job.
 
+### Current request freshness
+
+The event JSON is an immutable snapshot. Before validation, the workflow fetches the source Issue through the existing DEVFLOW_TOKEN and requires the current Issue to remain open with the same Issue ID, URL, revision timestamp, title, and body as the event. The provisioner repeats this check after parsing and immediately before reading REPOSITORY_BOOTSTRAP_TOKEN. A closed Issue or older event snapshot fails closed without provisioning; edit or reopen the current request to create a fresh event.
+
+This is a freshness check, not an atomic compare-and-swap. A change concurrent with the final read and the first external effect is not excluded by GitHub's Issue API.
+
 ## 5. Idempotency
 
 Repository Bootstrap is ensure-oriented.
