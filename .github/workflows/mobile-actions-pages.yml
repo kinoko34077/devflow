@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 
-# The single Pages artifact contains the existing five mobile files AND only
-# kaep/index.html built from public, already redacted source metadata.
+# The single Pages artifact contains the five mobile/status files plus only
+# these public, redacted KAEP candidate views: kaep/index.html, kaep/index.json.
 # Manual publication refresh is owner-only. No issue dispatch/write, secret,
 # recurring schedule, new credential, or liveness enrollment.
 permissions:
