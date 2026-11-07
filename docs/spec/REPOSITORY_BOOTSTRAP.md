@@ -182,7 +182,7 @@ Secret-bearing provisioning requires all of the following:
 2. exact GitHub Issue identity and canonical URL;
 3. title exactly matches `[REPO CREATE] <repository.name>`;
 4. one valid `repository-bootstrap.v1` payload;
-5. request author association is exactly `OWNER`, `MEMBER`, or `COLLABORATOR`;
+5. request author has the allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` may be checked as supplementary defense-in-depth, but never grants trust by itself;
 6. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
 
 Validation runs without the repository-creation credential. Untrusted Issue authors MUST NOT cause that credential to enter their job environment.
@@ -236,7 +236,8 @@ following are true:
 3. the Control contains one valid `repository-bootstrap-control.v1` provenance
    block, or the canonical legacy generated-Control provenance text;
 4. the referenced open `[REPO CREATE] <name>` request is in the exact devflow
-   repository, has a trusted author association, and contains one valid
+   repository, has an allowlisted numeric author identity (with supplied login
+   consistency checked; association alone is insufficient), and contains one valid
    `repository-bootstrap.v1` payload for the same target with management and
    Control creation enabled;
 5. the request has a terminal `DONE` bootstrap comment emitted by the GitHub
@@ -347,7 +348,7 @@ Credential-independent acceptance requires:
 
 - parser/normalization tests;
 - malformed/unknown schema rejection;
-- exact trust-association tests;
+- exact trusted-principal identity tests;
 - idempotency/collision tests;
 - partial-failure recovery evidence tests;
 - static workflow secret-fencing tests;

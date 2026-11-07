@@ -77,7 +77,7 @@ These writer-side restrictions ensure `render_cursor_comment()` does not emit a 
 
 ## 4. Trust boundary
 
-On a public repository, recognize a marker as trusted when its owning-Issue comment has GitHub `author_association` `OWNER`, `MEMBER`, or `COLLABORATOR`. A repository-authorized `github-actions[bot]` cursor may also be trusted by the helper contract.
+On a public repository, recognize a human-authored marker as trusted only when its owning-Issue comment has the allowlisted numeric GitHub `user.id` `79015263`; if a login is supplied, it must match `kinoko34077`. `author_association` `OWNER`, `MEMBER`, or `COLLABORATOR` is supplementary metadata, not sufficient authority. A repository-authorized `github-actions[bot]` cursor may also be trusted by the helper contract.
 
 An untrusted comment copying the sentinel is noise, not task authority. Surface `WARN_UNTRUSTED_MARKER`, ignore it for resume position, and continue evaluating any unique trusted marker.
 

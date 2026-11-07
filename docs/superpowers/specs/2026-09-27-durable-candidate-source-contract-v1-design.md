@@ -1,6 +1,6 @@
 # Durable Candidate Source Contract v1
 
-Status: proposed for devflow Issue #125  
+Status: accepted by devflow Issue #125; corrective source-contract PR #132 merged
 Parent: devflow #105  
 Protocol authority: devflow #106 / merged PR #108  
 Runtime consumer: `kinoko34077/execution-coordinator`
@@ -42,15 +42,17 @@ This is a procedural authority boundary, not a cryptographic identity claim. The
 
 ### 2.2 Trusted-author boundary
 
-Every GitHub Issue used as execution authority or provenance under this contract MUST satisfy the same trusted-author rule as devflow Control discovery:
+Every GitHub Issue used as execution authority or provenance under this contract MUST satisfy the current trusted-principal rule from devflow #178, implemented by devflow PR #811:
 
-- `author_association` MUST be one of `OWNER`, `MEMBER`, or `COLLABORATOR`;
-- missing, empty, or any other association is untrusted and fails closed;
+- the actor MUST have the allowlisted numeric GitHub `user.id` `79015263`;
+- if GitHub supplies a login, it MUST match `kinoko34077`;
+- `author_association` MAY be checked as supplementary defense-in-depth, but MUST NOT grant trust by itself;
+- missing, malformed, or unlisted numeric identity and a supplied mismatched login are untrusted and fail closed;
 - untrusted `[REPO]` lookalikes do not count toward canonical-Control cardinality and cannot become fallback Controls;
 - the exact owning task Issue named by `task` MUST be trusted before its body digest can authorize a candidate;
 - an Issue named by `work_order_ref` MUST also be trusted before it can provide Work Order provenance.
 
-The trust test is applied to the GitHub object itself, not inferred from title, labels, repository visibility, links, or nearby prose. A future accepted trust policy may extend the trusted association set, but v1 consumers must not silently broaden it.
+The trust test is applied to the GitHub object itself, not inferred from title, labels, repository visibility, links, nearby prose, or association. Adding principals requires a separate explicit policy and implementation decision; v1 consumers must not silently broaden the numeric allowlist.
 
 This closes the public-repository impersonation path tracked by devflow #127. Candidate discovery must not accept a machine block, task body, or Work Order provenance from an outsider-authored Issue merely because its title or body matches the expected shape.
 
@@ -333,7 +335,7 @@ For one managed repository:
 5. validate exact single block, JSON syntax, schema version, unknown-field prohibition, `source_ref`, and `repository`;
 6. validate unique task envelopes, non-empty role arrays, unique roles within each envelope, and section 7 task-level consistency;
 7. for each distinct task, fetch the exact owning Issue;
-8. verify trusted author association, same repository, open Issue, not PR, and non-empty durable body;
+8. verify trusted-principal identity, same repository, open Issue, not PR, and non-empty durable body;
 9. compute canonical body digest and compare every record for that task;
 10. validate role/status/action combinations;
 11. validate optional `work_order_ref` structurally and require its Issue to satisfy the trusted-author rule when present;
