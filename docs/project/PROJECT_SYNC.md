@@ -140,7 +140,11 @@ The Project Sync actor-admission job checks the GitHub-provided event sender,
 identity, and event-specific mode before the secret-bearing sync job;
 `scripts/project_sync.py` repeats the check before Project access. An
 authenticated Issue author does not authorize an event started by a different
-actor.
+actor. `workflow_dispatch` and owner-comment commands admit only the canonical
+owner principal. For `issues` events, admission also permits the canonical bot
+on a bot-authored `[REPO]` Control candidate; the sync script must then verify
+that the exact Issue is the repository's canonical Control before Project
+access.
 
 ### Manual-dispatch ref boundary
 
