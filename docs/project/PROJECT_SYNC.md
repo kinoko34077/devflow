@@ -64,7 +64,7 @@ Project custom TEXT fields are **bounded display projections**, not alternative 
 
 Workflow: `.github/workflows/project-sync.yml`
 
-### Owner-only GitHub-native command transport (devflow#395 — Draft)
+### Owner-only GitHub-native command transport (accepted on main; devflow [#395](https://github.com/kinoko34077/devflow/issues/395) / [PR #405](https://github.com/kinoko34077/devflow/pull/405))
 
 On accepted default-branch code, a trusted owner-authored Issue comment may
 request a **full-scope** Project Sync with exact text:
@@ -88,12 +88,26 @@ a fixed mode, with an empty issue_number (full scope). Existing manual
 A successful run does not imply Sync Health PASS: check the actual run and
 machine Health #41 before advancing or calling reconcile → verify complete.
 
-No private App key or cross-repository token is needed for the request path;
-the existing Project Sync secret remains privileged as before and is supplied
-only to a guarded, authorized job. There is no new background scheduler.
-This feature does **not** configure a repo created outside devflow Bootstrap.
-The actual GitHub Actions trigger and secret boundary must receive independent
-security Review and Human-authorized merge before becoming active.
+No private App key or cross-repository token is needed to issue the owner
+comment; after admission, the workflow uses its existing Project Sync
+credentials.
+The owner-command transport is active on main following the explicitly
+approved merge of [PR #405](https://github.com/kinoko34077/devflow/pull/405)
+on 2026-10-09. Its recorded full-scope owner-issued `reconcile`
+([run 37943843401](https://github.com/kinoko34077/devflow/actions/runs/37943843401))
+and `verify`
+([run 37944169930](https://github.com/kinoko34077/devflow/actions/runs/37944169930))
+both succeeded; at that acceptance, Health #41 reported PASS, 274/274 matched,
+zero drift and zero errors ([#395 acceptance record](https://github.com/kinoko34077/devflow/issues/395#issuecomment-6087862521)).
+This is historical, repository-specific runtime acceptance; consult Health #41
+for current status. In the current default-branch workflow, Project Sync
+secrets are supplied to sync steps only after the no-secret actor-admission job
+returns `admitted=true`; the CLI repeats admission before Project access.
+That is an in-workflow gate, not an independent workflow-ref or secret-scope
+policy. The owner-command acceptance did not verify live Actions workflow
+execution policy, dispatch-capable collaborator scope or secret placement.
+There is no new background scheduler. This feature does **not** configure a
+repo created outside devflow Bootstrap.
 
 
 Event sync runs for devflow Issue events:
@@ -111,7 +125,53 @@ Manual workflow modes:
 
 There is no periodic schedule in v1.
 
-Trust boundary: devflow is public, so only Issues whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` are treated as canonical. Event sync for any other author exits without Project access, and verify/reconcile selection skips such Issues (missing association data is treated as untrusted).
+Trust boundary: direct Issue-author trust uses the canonical numeric GitHub
+user ID required by devflow [#178](https://github.com/kinoko34077/devflow/issues/178)
+(`79015263`); login is secondary identity-consistency evidence, and
+`author_association` is provenance/defense-in-depth metadata, never sufficient
+by itself. Missing, malformed, unlisted IDs or a mismatched supplied login fail
+closed. A bot-authored `[REPO]` Control is accepted only when the existing
+devflow provenance verifier resolves that exact Issue as the canonical Control
+for its repository; bot ID or title alone is not authority.
+
+Event-initiator authorization is a separate boundary from Issue authorship.
+The Project Sync actor-admission job checks the GitHub-provided event sender,
+`GITHUB_ACTOR_ID`, `GITHUB_ACTOR`, `GITHUB_TRIGGERING_ACTOR`, repository
+identity, and event-specific mode before the secret-bearing sync job;
+`scripts/project_sync.py` repeats the check before Project access. An
+authenticated Issue author does not authorize an event started by a different
+actor. `workflow_dispatch` and owner-comment commands admit only the canonical
+owner principal. For `issues` events, admission also permits the canonical bot
+on a bot-authored `[REPO]` Control candidate; the sync script must then verify
+that the exact Issue is the repository's canonical Control before Project
+access.
+
+### Manual-dispatch ref boundary
+
+GitHub requires repository write access to start a manual run, permits selecting
+a branch or tag, and runs the workflow version associated with that event ref
+([manual-run guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
+[`workflow_dispatch` behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
+[workflow source selection](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows)).
+Therefore the actor gate in this workflow and its CLI cannot independently
+protect against a changed workflow version on a selected ref that removes or
+alters the same gate. A `github.ref == 'refs/heads/main'` condition inside that
+same mutable workflow is not an external workflow-source boundary.
+
+The Project Sync spec identifies `PROJECTS_TOKEN` as a repository Actions
+secret. GitHub documents that repository secrets are available to all workflows
+in that repository
+([secret scope](https://docs.github.com/en/code-security/reference/secret-security/secret-types)).
+The workflow also reads `MAINTENANCE_AUDIT_TOKEN` from the Actions `secrets`
+context, but the reviewed source does not establish its actual secret scope or
+live placement. Any claim that an unlisted writer cannot run modified
+secret-bearing workflow code therefore requires separate verification of the
+live Actions workflow execution actor/event policy
+([workflow execution protections](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution))
+and the relevant live secret scopes or another protected secret boundary. The
+policy, dispatch-capable collaborator population and live secret placement are
+not established by this source specification; see the dated [#801 audit checkpoint](https://github.com/kinoko34077/devflow/issues/801#issuecomment-6704906965).
+Do not infer a configuration change or live exploit from the source review.
 
 The workflow uses `$GITHUB_REPOSITORY` at runtime for repository-scoped Issue operations; the workflow YAML itself does not depend on the literal repository name.
 
