@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts import repository_bootstrap as cli
 from tests.test_repository_bootstrap import issue_body
@@ -23,8 +23,11 @@ def issue_event(*, sender=None, action="opened", repository="kinoko34077/devflow
     return {
         "action": action,
         "issue": {
+            "id": 975000,
             "number": 975,
             "html_url": "https://github.com/kinoko34077/devflow/issues/975",
+            "state": "open",
+            "updated_at": "2026-11-07T05:00:00Z",
             "title": "[REPO CREATE] example-repo",
             "body": issue_body(),
             "author_association": "OWNER",
@@ -165,11 +168,16 @@ class RepositoryBootstrapEventAdmissionTests(unittest.TestCase):
             )
 
     def test_validate_event_keeps_allowlisted_owner_request_flow(self):
+        event = issue_event()
+        api = Mock()
+        api.get_issue.return_value = event["issue"]
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
             output_path = Path(directory) / "github-output"
-            event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
-            with patch.dict(os.environ, {**OWNER_ENV, "DEVFLOW_TOKEN": ""}, clear=True):
+            event_path.write_text(json.dumps(event), encoding="utf-8")
+            with patch.dict(os.environ, {**OWNER_ENV, "DEVFLOW_TOKEN": "read-token"}, clear=True), patch.object(
+                cli, "GitHubApi", return_value=api
+            ):
                 self.assertEqual(cli.validate_event(event_path, output_path), 0)
             self.assertEqual(
                 output_path.read_text(encoding="utf-8"),
