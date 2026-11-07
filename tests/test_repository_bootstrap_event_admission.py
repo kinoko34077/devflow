@@ -214,11 +214,11 @@ class RepositoryBootstrapEventAdmissionTests(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
-                    "GITHUB_EVENT_NAME": "issues",
-                    "GITHUB_ACTOR_ID": "123456789",
-                    "GITHUB_ACTOR": "other-user",
-                    "GITHUB_TRIGGERING_ACTOR": "other-user",
-                    "GITHUB_REPOSITORY": "kinoko34077/devflow",
+                    "DEVFLOW_EVENT_NAME": "issues",
+                    "DEVFLOW_EVENT_ACTOR_ID": "123456789",
+                    "DEVFLOW_EVENT_ACTOR_LOGIN": "other-user",
+                    "DEVFLOW_EVENT_TRIGGERING_ACTOR": "other-user",
+                    "DEVFLOW_EVENT_REPOSITORY": "kinoko34077/devflow",
                 },
                 clear=True,
             ):
