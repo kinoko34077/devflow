@@ -8,7 +8,7 @@
 - **Current trigger state (2026-11-07):** `.github/workflows/gpt-liveness-pilot.yml` is `workflow_dispatch`-only. It has no periodic schedule, push trigger, or Issue-edit trigger. The original five-minute schedule and push/Issue-edit triggers described in the archival note below were removed by accepted [PR #546](https://github.com/kinoko34077/devflow/pull/546). A run dispatched on `main` without an exact active opt-in enrollment in owning Issue #519 exits `NO_ACTIVE_ENROLLMENT` without any POST.
 - The original pilot used a five-minute schedule, a first-merge `push` smoke, and an `issues.edited` event for Issue #519. Those are historical behavior, not current operation. A queued or delayed Actions run was never a precise timer or proof of model liveness.
 - Only a GPT-initiated/authorized tool invocation consuming a PING and authoring an `ANSWER` can support the weaker label *model-mediated answer observed*. The comment actor proves GitHub transport identity, not which model authored the text. `ACK` and sidecar auto-PONG prove neither.
-- This pilot does not autonomously start a ChatGPT turn, execute arbitrary text from comments, touch credentials, change Claims or shorten Manual 1-hour stale policy. The prototype only runs against #519; fleet rollout is out of scope.
+- This pilot does not autonomously start a ChatGPT turn, execute arbitrary text from comments, require a separately configured PAT, change Claims or shorten Manual 1-hour stale policy. The workflow uses the GitHub-provided per-run token described below for its fixed Issue operation. The prototype only runs against #519; fleet rollout is out of scope.
 
 ## Opt-in enrollment: manual, time-bounded
 
@@ -56,7 +56,7 @@ The original pilot's `schedule` could start up to 288 Actions invocations/day wi
 
 `python3 -m unittest tests.test_gpt_liveness_pilot -v`
 
-Regression covers: absence/expiry opt-in, registration strictness, KAEP envelope interoperability, 5-min bucket idempotency, three unanswered bound, delivery ACK exclusion, nonce/turn/expiry matching, long-running deadline, GitHub actor mismatch, offline/no-POST behavior.
+Regression covers: absence/expiry opt-in, registration strictness, KAEP envelope interoperability, 5-min bucket idempotency, three unanswered bound, delivery ACK exclusion, nonce/turn/expiry matching, long-running deadline, reply-comment actor mismatch, offline/no-POST behavior.
 
 **Live E2E limitation:** PR CI runs offline tests. The accepted pilot has no active five-minute cron; its workflow is manual-only. A real interactive ChatGPT reply still requires a live GPT tool call and explicit opt-in. Do not equate offline fixture passage or a manually started Actions run to observed GPT liveness. Production adoption, runner credentials and cross-repo rollout require separate evidence and appropriate approval.
 
