@@ -1,6 +1,6 @@
 # Autonomous Work Allocation Policy v1 — Design
 
-Status: user-approved architecture decision; repository merge pending written-spec review  
+Status: accepted by written-spec review; merged via devflow PR #134
 Date: 2026-09-27  
 Parent: devflow #105  
 Execution protocol: devflow #106 / merged PR #108  
@@ -36,7 +36,7 @@ A candidate projection is not a second durable task truth. It is an admission pr
 
 ### Trust prerequisite
 
-Control discovery and every consumer of the projection MUST enforce the trusted-author rule from devflow #127: accept only the unique `[REPO] <repository>` Control whose GitHub `author_association` is `OWNER`, `MEMBER`, or `COLLABORATOR`. Outsider-authored lookalikes MUST be ignored and reported, while duplicate trusted Controls MUST fail closed. The exact owning Issue/Work Order snapshot used for `task_body_sha256` MUST pass the same trusted-author check, as required by execution-coordinator#34; missing or unknown association fails closed.
+Control discovery and every consumer of the projection MUST enforce the current trusted-principal rule from devflow #178, implemented by devflow PR #811. Directly authored Controls and human-authored owning Issue/Work Order snapshots require allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` is supplementary defense-in-depth metadata and never grants trust by itself. The existing exception for a bot-authored Repository Control is limited to the exact derived-provenance verifier in `docs/spec/REPOSITORY_BOOTSTRAP.md`; bot identity, login, association, or title alone is not trust. Missing, malformed, or unlisted human numeric IDs and supplied login mismatches fail closed. Outsider-authored lookalikes MUST be ignored and reported, while duplicate trusted Controls MUST fail closed.
 
 `REQUIRED_FOR_AUTONOMOUS` MUST NOT be enabled until this trust rule is implemented and verified in every canonical Control/discovery path. `PILOT` may exercise only the bounded trusted path; it does not waive the trust prerequisite.
 

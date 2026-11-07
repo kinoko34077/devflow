@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts import project_sync
 
@@ -490,6 +491,208 @@ class RuntimeFlowTests(unittest.TestCase):
         gql = FakeGQL()
         self.assertEqual(project_sync.ensure_health_not_project_item(health, snap, gql, mode="reconcile"), "REPAIRED")
         self.assertEqual(gql.deleted, [("P", "HI")])
+
+
+class EventSyncCanonicalSelectionTests(unittest.TestCase):
+    @staticmethod
+    def _field_snapshot_fields():
+        fields = {}
+        for name in project_sync.EXPECTED_FIELDS:
+            if name in project_sync.SELECT_OPTIONS:
+                kind = "single"
+                options = {value: value for value in project_sync.SELECT_OPTIONS[name]}
+            elif name in project_sync.TEXT_FIELDS:
+                kind = "text"
+                options = {}
+            else:
+                kind = "date"
+                options = {}
+            fields[name] = project_sync.ProjectField(name, name, kind, options)
+        return fields
+
+    def _run_event(self, event_issue, live_issue, tracked_items=None):
+        tracked_items = dict(tracked_items or {})
+
+        class FakeREST:
+            def __init__(self):
+                self.issue_reads = []
+
+            def find_issue_by_title(self, title):
+                return None
+
+            def get_issue(self, number):
+                self.issue_reads.append(number)
+                return live_issue
+
+        class FakeGraphQL:
+            def __init__(self):
+                self.adds = []
+                self.updates = []
+
+            def add_item(self, project_id, content_id):
+                self.adds.append((project_id, content_id))
+                tracked_items[content_id] = project_sync.ProjectItem(
+                    f"ITEM-{content_id}", content_id, live_issue["number"],
+                    "kinoko34077/devflow", {},
+                )
+                return f"ITEM-{content_id}"
+
+            def update_single_select(self, *args):
+                self.updates.append(args)
+                self._set_field(args[1], args[2], args[3])
+
+            def update_text(self, *args):
+                self.updates.append(args)
+                self._set_field(args[1], args[2], args[3])
+
+            def update_date(self, *args):
+                self.updates.append(args)
+                self._set_field(args[1], args[2], args[3])
+
+            @staticmethod
+            def _set_field(item_id, field_id, value):
+                for content_id, item in list(tracked_items.items()):
+                    if item.id == item_id:
+                        fields = dict(item.fields)
+                        fields[field_id] = value
+                        tracked_items[content_id] = project_sync.ProjectItem(
+                            item.id, item.content_id, item.number, item.repository, fields,
+                        )
+                        return
+
+        rest = FakeREST()
+        gql = FakeGraphQL()
+
+        def snapshot():
+            return project_sync.ProjectSnapshot(
+                "P", project_sync.PROJECT_TITLE, False,
+                self._field_snapshot_fields(), dict(tracked_items),
+            )
+
+        cfg = project_sync.RuntimeConfig(
+            repository="kinoko34077/devflow", project_token="project-token",
+            github_token="repo-token",
+        )
+        with (
+            mock.patch.object(project_sync, "ensure_audit_freshness_labels", return_value=0),
+            mock.patch.object(project_sync, "discover_project", side_effect=lambda *args: snapshot()),
+            mock.patch.object(project_sync, "_validate_project_options"),
+            mock.patch.object(project_sync, "upsert_health_issue"),
+        ):
+            result = project_sync.run_sync(
+                "event-sync", cfg, rest=rest, gql=gql, event_issue=event_issue,
+            )
+        return result, rest, gql
+
+    @staticmethod
+    def _trusted_issue(state, number=59):
+        return {
+            "number": number,
+            "node_id": f"ISSUE-{number}",
+            "title": "Project sync test",
+            "state": state,
+            "body": "",
+            "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "kinoko34077"},
+            "labels": [],
+        }
+
+    def test_closed_untracked_event_does_not_add_project_item(self):
+        issue = self._trusted_issue("closed")
+
+        result, rest, gql = self._run_event(issue, issue)
+
+        self.assertEqual(gql.adds, [])
+        self.assertEqual(result, 0)
+        self.assertEqual(rest.issue_reads, [59, 59])
+
+    def test_stale_open_event_uses_current_closed_untracked_issue(self):
+        event_issue = self._trusted_issue("open")
+        live_issue = self._trusted_issue("closed")
+
+        result, rest, gql = self._run_event(event_issue, live_issue)
+
+        self.assertEqual(gql.adds, [])
+        self.assertEqual(result, 0)
+        self.assertEqual(rest.issue_reads, [59, 59])
+
+    def test_open_untracked_event_remains_eligible(self):
+        issue = self._trusted_issue("open")
+
+        result, _, gql = self._run_event(issue, issue)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(gql.adds, [("P", "ISSUE-59")])
+
+    def test_closed_after_add_remains_in_delayed_membership_readback(self):
+        event_issue = self._trusted_issue("open")
+        live_issues = [event_issue, self._trusted_issue("closed")]
+        health_bodies = []
+        snapshots = []
+
+        class FakeREST:
+            def __init__(self):
+                self.issue_reads = 0
+
+            def find_issue_by_title(self, title):
+                return None
+
+            def get_issue(self, number):
+                issue = live_issues[min(self.issue_reads, len(live_issues) - 1)]
+                self.issue_reads += 1
+                return issue
+
+        class FakeGraphQL:
+            def __init__(self):
+                self.adds = []
+
+            def add_item(self, project_id, content_id):
+                self.adds.append((project_id, content_id))
+                return "ITEM-ISSUE-59"
+
+        def snapshot():
+            snapshots.append(True)
+            return project_sync.ProjectSnapshot(
+                "P", project_sync.PROJECT_TITLE, False,
+                self._field_snapshot_fields(), {},
+            )
+
+        cfg = project_sync.RuntimeConfig(
+            repository="kinoko34077/devflow", project_token="project-token",
+            github_token="repo-token",
+        )
+        rest = FakeREST()
+        gql = FakeGraphQL()
+        with (
+            mock.patch.object(project_sync, "ensure_audit_freshness_labels", return_value=0),
+            mock.patch.object(project_sync, "discover_project", side_effect=lambda *args: snapshot()),
+            mock.patch.object(project_sync, "_validate_project_options"),
+            mock.patch.object(project_sync, "upsert_health_issue", side_effect=lambda _rest, body: health_bodies.append(body)),
+            mock.patch.object(project_sync.time, "sleep"),
+        ):
+            result = project_sync.run_sync(
+                "event-sync", cfg, rest=rest, gql=gql, event_issue=event_issue,
+            )
+
+        self.assertEqual(gql.adds, [("P", "ISSUE-59")])
+        self.assertEqual(len(snapshots), 4)  # initial + post-write + both bounded retries
+        self.assertEqual(result, 1)
+        self.assertIn("- Canonical issues checked: 1", health_bodies[-1])
+        self.assertIn("Project membership drift: 1", health_bodies[-1])
+
+    def test_closed_tracked_event_remains_eligible(self):
+        issue = self._trusted_issue("closed")
+        tracked = {
+            "ISSUE-59": project_sync.ProjectItem(
+                "ITEM-ISSUE-59", "ISSUE-59", 59, "kinoko34077/devflow",
+                {"Status": "DONE"},
+            )
+        }
+
+        result, _, gql = self._run_event(issue, issue, tracked)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(gql.adds, [])
 
     def test_load_event_issue_reads_issue_payload(self):
         with tempfile.TemporaryDirectory() as td:

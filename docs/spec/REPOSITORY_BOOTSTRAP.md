@@ -182,10 +182,41 @@ Secret-bearing provisioning requires all of the following:
 2. exact GitHub Issue identity and canonical URL;
 3. title exactly matches `[REPO CREATE] <repository.name>`;
 4. one valid `repository-bootstrap.v1` payload;
-5. request author association is exactly `OWNER`, `MEMBER`, or `COLLABORATOR`;
-6. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
+5. initiating Issue-event sender is the canonical allowlisted numeric principal and matches the GitHub Actions actor ID, actor login, and triggering actor;
+6. request author has the allowlisted numeric GitHub `user.id` `79015263`; if GitHub supplies a login, it must match `kinoko34077`. `author_association` may be checked as supplementary defense-in-depth, but never grants trust by itself;
+7. an approved `REPOSITORY_BOOTSTRAP_TOKEN` is configured.
 
-Validation runs without the repository-creation credential. Untrusted Issue authors MUST NOT cause that credential to enter their job environment.
+The current canonical human allowlist is owned by `tools/github_issue_trust.py`
+and contains only user ID `79015263` (`kinoko34077`). `author_association`
+is defense-in-depth metadata and MUST NOT grant authority by itself. Event
+sender and Issue author are separate identities; both must pass the applicable
+numeric-principal check.
+
+A minimal no-secret actor-admission job runs before validation and has only
+`contents:read`. It fails closed on missing, malformed, mismatched or
+non-allowlisted event identity. Both the validation and secret-bearing
+provisioning job conditions also require `github.triggering_actor ==
+github.actor`, in addition to the admission output; this prevents a partial
+rerun by a different writer from reusing successful prerequisite outputs to
+start a privileged job. The `actor-admission` and `validate` jobs do not receive
+`REPOSITORY_BOOTSTRAP_TOKEN`; failed admission or validation prevents the gated
+`provision` job from starting. The workflow injects `REPOSITORY_BOOTSTRAP_TOKEN`
+into the gated provision step environment before Python performs the final Issue
+recheck. A failed final check prevents Python from reading or using that value
+and from constructing the executor; it does not mean the credential was absent
+from the step environment. Python first reads `DEVFLOW_TOKEN` to fetch the
+current Issue. After request parsing and the final current-Issue and trusted
+author checks, it reads the external bootstrap token and constructs the executor.
+
+### 6.1 Current request freshness
+
+The GitHub event payload is a historical Issue snapshot and may be replayed by a workflow rerun. Before validation, the executor MUST fetch the current source Issue using the existing `DEVFLOW_TOKEN`. The fetched Issue MUST match the event's positive numeric Issue ID, number, canonical URL, `updated_at`, title, and body, and MUST still be open. Validation MUST use the fetched current Issue for title, author, and request-body checks. A missing token, failed read, identity mismatch, closed Issue, or changed revision fails closed.
+
+Immediately before Python reads `REPOSITORY_BOOTSTRAP_TOKEN` from its environment, the provisioner MUST repeat the current-Issue comparison and trusted author check after parsing. A stale, closed, or untrusted final Issue MUST NOT cause Python to read or use the external bootstrap credential or construct or invoke the provisioning executor. When the current Issue identity, its `[REPO CREATE]` title, and trusted author are verified, validation records a `FAILED / VALIDATION` status comment explaining the stale or closed snapshot; read failures and unverified identities MUST NOT mutate the Issue.
+
+Re-running a stale or closed historical snapshot is expected to fail freshness checks; an unchanged open snapshot remains retryable. Edit or reopen the current request to create a fresh Issue event when needed.
+
+This is a freshness fence, not an atomic compare-and-swap. A change concurrent with the final read and the first external effect is not excluded by the GitHub Issue API.
 
 ## 7. Credential boundary / Human Gate
 
@@ -236,9 +267,10 @@ following are true:
 3. the Control contains one valid `repository-bootstrap-control.v1` provenance
    block, or the canonical legacy generated-Control provenance text;
 4. the referenced open `[REPO CREATE] <name>` request is in the exact devflow
-   repository, has a trusted author association, and contains one valid
-   `repository-bootstrap.v1` payload for the same target with management and
-   Control creation enabled;
+   repository, its author has an allowlisted numeric user ID with supplied-login
+   consistency checked (`author_association` is supplementary only), and contains
+   one valid `repository-bootstrap.v1` payload for the same target with
+   management and Control creation enabled;
 5. the request has a terminal `DONE` bootstrap comment emitted by the GitHub
    Actions bootstrap executor, naming the exact target repository and this
    exact Control URL; and
@@ -347,7 +379,7 @@ Credential-independent acceptance requires:
 
 - parser/normalization tests;
 - malformed/unknown schema rejection;
-- exact trust-association tests;
+- exact trusted-principal identity tests;
 - idempotency/collision tests;
 - partial-failure recovery evidence tests;
 - static workflow secret-fencing tests;

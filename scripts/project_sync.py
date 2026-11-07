@@ -1304,15 +1304,15 @@ def reread_event_issue(
 ) -> dict[str, Any]:
     issue_number = int(event_issue.get("number") or 0)
     if issue_number <= 0:
-        raise ConfigError("event-sync post-write readback requires a valid issue number")
+        raise ConfigError("event-sync live Issue read requires a valid issue number")
     live = rest.get_issue(issue_number)
     if not isinstance(live, dict):
-        raise ConfigError("event-sync post-write readback returned no Issue")
+        raise ConfigError("event-sync live Issue read returned no Issue")
     if is_health_issue(live) or not is_trusted_sync_issue(
         live,
         control_trust_service=control_trust_service,
     ):
-        raise ConfigError("event-sync post-write readback is not a trusted canonical Issue")
+        raise ConfigError("event-sync live Issue read is not a trusted canonical Issue")
     return live
 
 
@@ -1475,20 +1475,45 @@ def run_sync(
             issue = event_issue
             if issue is None:
                 raise ConfigError("event-sync requires an issue event payload")
-            issues = [issue]
-            summary = process_issues(
-                issues, snapshot, gql, mode="event-sync",
-                freshness_resolver=freshness_resolver, rest=rest,
-            )
             if rest is None:
-                raise ConfigError("event-sync post-write readback requires repository access")
+                raise ConfigError("event-sync requires repository access before Project mutation")
             live_issue = reread_event_issue(
                 rest,
                 issue,
                 control_trust_service=control_trust_service,
             )
-            issues = [live_issue]
+            issues = select_canonical_issues(
+                [live_issue],
+                snapshot.items_by_content_id,
+                control_trust_service=control_trust_service,
+            )
+            mutation_target_ids = {
+                selected_issue.get("node_id") or selected_issue.get("id")
+                for selected_issue in issues
+            }
+            summary = process_issues(
+                issues, snapshot, gql, mode="event-sync",
+                freshness_resolver=freshness_resolver, rest=rest,
+            )
+            postwrite_issue = reread_event_issue(
+                rest,
+                issue,
+                control_trust_service=control_trust_service,
+            )
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
+            postwrite_issues = select_canonical_issues(
+                [postwrite_issue],
+                snapshot2.items_by_content_id,
+                control_trust_service=control_trust_service,
+            )
+            postwrite_node_id = postwrite_issue.get("node_id") or postwrite_issue.get("id")
+            # Keep every attempted mutation in readback even if the Issue closes
+            # before delayed Project membership becomes visible.
+            issues = (
+                [postwrite_issue]
+                if postwrite_node_id in mutation_target_ids
+                else postwrite_issues
+            )
             verify_summary = process_issues(
                 issues, snapshot2, gql, mode="verify",
                 freshness_resolver=freshness_resolver, rest=rest,

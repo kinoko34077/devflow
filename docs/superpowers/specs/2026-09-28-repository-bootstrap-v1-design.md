@@ -108,20 +108,19 @@ The workflow separately checks request author trust before any secret-bearing jo
 
 Workflow trigger: `issues` events `opened`, `edited`, `reopened`.
 
-A non-secret validation job may inspect any candidate request. The provisioning job is eligible only if all are true:
+The original trust model in this historical design is superseded by the current contract in `docs/spec/REPOSITORY_BOOTSTRAP.md`. The workflow now uses three ordered security stages:
 
-1. title starts with `[REPO CREATE] `;
-2. parser/validator succeeds;
-3. author association is one of `OWNER`, `MEMBER`, `COLLABORATOR`;
-4. `REPOSITORY_BOOTSTRAP_TOKEN` is available.
+1. `actor-admission` has only `contents:read` and admits only the canonical numeric event principal with matching actor ID, login, triggering actor, repository, and Issue-event identity.
+2. `validate` runs only after admission and when `github.triggering_actor == github.actor`. It fetches the current Issue, validates the request, and authorizes only the allowlisted numeric Issue-author ID `79015263` with supplied-login consistency. `author_association` is supplementary defense-in-depth and never grants trust by itself.
+3. `provision` requires the same actor equality, successful admission, and successful validation. The workflow injects `REPOSITORY_BOOTSTRAP_TOKEN` into its gated step environment before Python performs the final Issue recheck. The Python process reads `DEVFLOW_TOKEN` first to fetch the current Issue, then after parsing and a final freshness/author check reads/uses the external token and constructs the executor. A failed final check prevents those Python actions, but does not mean the credential was absent from the step environment.
 
-The secret is exposed only to the provisioning job/step. Validation never receives it.
+The external bootstrap secret is exposed only to the provisioning job/step. Validation never receives it. A different actor who reruns a failed job cannot start validation or provisioning using an earlier admission output.
 
-`GITHUB_TOKEN` is used for devflow-local Issue reads, comments, and Control creation. The external bootstrap token is used only for account/new-repository operations.
+The existing `DEVFLOW_TOKEN` is used for devflow-local Issue reads, comments, and Control creation. The external bootstrap token is used only for account/new-repository operations.
 
 ### Current request freshness
 
-The event payload is a historical snapshot, including on workflow reruns. Before validation, fetch the current source Issue through the existing GITHUB_TOKEN and require the exact Issue ID, canonical URL and number, open state, updated_at, title, and body to match the event. The provisioner repeats this comparison after parsing and immediately before reading the external bootstrap token. A closed or changed Issue fails closed; retry from a new edited or reopened event. This read is a freshness fence, not an atomic Issue compare-and-swap, so concurrent changes after the final read are outside this guarantee.
+The event payload is a historical snapshot, including on workflow reruns. Before validation, fetch the current source Issue through the existing `DEVFLOW_TOKEN` and require the same positive numeric Issue ID, number, canonical URL, `updated_at`, title, and body as the event; the Issue must remain open. Validate the current Issue's author and request data. During provisioning, the Python process reads `DEVFLOW_TOKEN` to fetch the Issue, then repeats this comparison and the author trust check after parsing and immediately before it reads `REPOSITORY_BOOTSTRAP_TOKEN` from its environment. A read failure, identity mismatch, closed Issue, or stale revision prevents Python from reading or using that external credential and prevents executor construction or effects. Once the current Issue identity, its `[REPO CREATE]` title, and trusted author are verified, validation records a `FAILED / VALIDATION` comment to explain the stale snapshot. Re-running a stale or closed historical snapshot is expected to fail freshness checks; an unchanged open snapshot remains retryable. Edit or reopen the current request to create a fresh Issue event when needed. This read is a freshness fence, not an atomic Issue compare-and-swap, so concurrent changes after the final read are outside this guarantee.
 
 ## 6. Credential boundary
 
