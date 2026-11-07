@@ -1487,6 +1487,10 @@ def run_sync(
                 snapshot.items_by_content_id,
                 control_trust_service=control_trust_service,
             )
+            mutation_target_ids = {
+                selected_issue.get("node_id") or selected_issue.get("id")
+                for selected_issue in issues
+            }
             summary = process_issues(
                 issues, snapshot, gql, mode="event-sync",
                 freshness_resolver=freshness_resolver, rest=rest,
@@ -1497,10 +1501,18 @@ def run_sync(
                 control_trust_service=control_trust_service,
             )
             snapshot2 = discover_project(gql, cfg.owner, cfg.project_number)
-            issues = select_canonical_issues(
+            postwrite_issues = select_canonical_issues(
                 [postwrite_issue],
                 snapshot2.items_by_content_id,
                 control_trust_service=control_trust_service,
+            )
+            postwrite_node_id = postwrite_issue.get("node_id") or postwrite_issue.get("id")
+            # Keep every attempted mutation in readback even if the Issue closes
+            # before delayed Project membership becomes visible.
+            issues = (
+                [postwrite_issue]
+                if postwrite_node_id in mutation_target_ids
+                else postwrite_issues
             )
             verify_summary = process_issues(
                 issues, snapshot2, gql, mode="verify",

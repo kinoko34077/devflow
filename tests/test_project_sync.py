@@ -624,6 +624,62 @@ class EventSyncCanonicalSelectionTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(gql.adds, [("P", "ISSUE-59")])
 
+    def test_closed_after_add_remains_in_delayed_membership_readback(self):
+        event_issue = self._trusted_issue("open")
+        live_issues = [event_issue, self._trusted_issue("closed")]
+        health_bodies = []
+        snapshots = []
+
+        class FakeREST:
+            def __init__(self):
+                self.issue_reads = 0
+
+            def find_issue_by_title(self, title):
+                return None
+
+            def get_issue(self, number):
+                issue = live_issues[min(self.issue_reads, len(live_issues) - 1)]
+                self.issue_reads += 1
+                return issue
+
+        class FakeGraphQL:
+            def __init__(self):
+                self.adds = []
+
+            def add_item(self, project_id, content_id):
+                self.adds.append((project_id, content_id))
+                return "ITEM-ISSUE-59"
+
+        def snapshot():
+            snapshots.append(True)
+            return project_sync.ProjectSnapshot(
+                "P", project_sync.PROJECT_TITLE, False,
+                self._field_snapshot_fields(), {},
+            )
+
+        cfg = project_sync.RuntimeConfig(
+            repository="kinoko34077/devflow", project_token="project-token",
+            github_token="repo-token",
+        )
+        rest = FakeREST()
+        gql = FakeGraphQL()
+        with (
+            mock.patch.object(project_sync, "ensure_audit_freshness_labels", return_value=0),
+            mock.patch.object(project_sync, "discover_project", side_effect=lambda *args: snapshot()),
+            mock.patch.object(project_sync, "_validate_project_options"),
+            mock.patch.object(project_sync, "upsert_health_issue", side_effect=lambda _rest, body: health_bodies.append(body)),
+            mock.patch.object(project_sync.time, "sleep"),
+        ):
+            result = project_sync.run_sync(
+                "event-sync", cfg, rest=rest, gql=gql, event_issue=event_issue,
+            )
+
+        self.assertEqual(gql.adds, [("P", "ISSUE-59")])
+        self.assertEqual(len(snapshots), 4)  # initial + post-write + both bounded retries
+        self.assertEqual(result, 1)
+        self.assertIn("- Canonical issues checked: 1", health_bodies[-1])
+        self.assertIn("Project membership drift: 1", health_bodies[-1])
+
     def test_closed_tracked_event_remains_eligible(self):
         issue = self._trusted_issue("closed")
         tracked = {
