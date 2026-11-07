@@ -198,9 +198,25 @@ non-allowlisted event identity. Both the validation and secret-bearing
 provisioning job conditions also require `github.triggering_actor ==
 github.actor`, in addition to the admission output; this prevents a partial
 rerun by a different writer from reusing successful prerequisite outputs to
-start a privileged job. The executor repeats the actor and Issue-author checks
-before reading either token. Untrusted actors or Issue authors MUST NOT cause
-the repository-creation credential to enter their job environment.
+start a privileged job. The `actor-admission` and `validate` jobs do not receive
+`REPOSITORY_BOOTSTRAP_TOKEN`; failed admission or validation prevents the gated
+`provision` job from starting. The workflow injects `REPOSITORY_BOOTSTRAP_TOKEN`
+into the gated provision step environment before Python performs the final Issue
+recheck. A failed final check prevents Python from reading or using that value
+and from constructing the executor; it does not mean the credential was absent
+from the step environment. Python first reads `DEVFLOW_TOKEN` to fetch the
+current Issue. After request parsing and the final current-Issue and trusted
+author checks, it reads the external bootstrap token and constructs the executor.
+
+### 6.1 Current request freshness
+
+The GitHub event payload is a historical Issue snapshot and may be replayed by a workflow rerun. Before validation, the executor MUST fetch the current source Issue using the existing `DEVFLOW_TOKEN`. The fetched Issue MUST match the event's positive numeric Issue ID, number, canonical URL, `updated_at`, title, and body, and MUST still be open. Validation MUST use the fetched current Issue for title, author, and request-body checks. A missing token, failed read, identity mismatch, closed Issue, or changed revision fails closed.
+
+Immediately before Python reads `REPOSITORY_BOOTSTRAP_TOKEN` from its environment, the provisioner MUST repeat the current-Issue comparison and trusted author check after parsing. A stale, closed, or untrusted final Issue MUST NOT cause Python to read or use the external bootstrap credential or construct or invoke the provisioning executor. When the current Issue identity, its `[REPO CREATE]` title, and trusted author are verified, validation records a `FAILED / VALIDATION` status comment explaining the stale or closed snapshot; read failures and unverified identities MUST NOT mutate the Issue.
+
+Re-running a stale or closed historical snapshot is expected to fail freshness checks; an unchanged open snapshot remains retryable. Edit or reopen the current request to create a fresh Issue event when needed.
+
+This is a freshness fence, not an atomic compare-and-swap. A change concurrent with the final read and the first external effect is not excluded by the GitHub Issue API.
 
 ## 7. Credential boundary / Human Gate
 

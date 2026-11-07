@@ -18,6 +18,7 @@ from tools.repository_bootstrap import (  # noqa: E402
     BootstrapError,
     BootstrapExecutor,
     GitHubApi,
+    GitHubApiError,
     is_trusted_issue_author,
     normalize_request,
     parse_request_body,
@@ -30,6 +31,12 @@ TITLE_PREFIX = "[REPO CREATE] "
 
 class EventError(BootstrapError):
     pass
+
+
+class StaleIssueSnapshotError(EventError):
+    def __init__(self, message: str, current_issue: dict[str, Any]):
+        super().__init__(message)
+        self.current_issue = current_issue
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -58,13 +65,54 @@ def _event_identity(event: dict[str, Any]) -> tuple[dict[str, Any], str, int, st
     if full_name != DEVFLOW_REPOSITORY:
         raise EventError("GitHub event repository identity does not match devflow")
     number = issue.get("number")
-    if not isinstance(number, int) or number <= 0:
+    if type(number) is not int or number <= 0:
         raise EventError("GitHub event Issue number is invalid")
     expected_url = f"https://github.com/{DEVFLOW_REPOSITORY}/issues/{number}"
     html_url = issue.get("html_url")
     if html_url != expected_url:
         raise EventError("GitHub event Issue URL does not match observed identity")
     return issue, full_name, number, expected_url
+
+
+def _current_issue_snapshot(
+    event: dict[str, Any],
+    api: GitHubApi,
+) -> tuple[dict[str, Any], str, int, str]:
+    event_issue, repository, number, issue_url = _event_identity(event)
+    try:
+        current = api.get_issue(repository, number)
+    except GitHubApiError as exc:
+        raise EventError(f"current Issue revalidation failed: {exc}") from None
+    current_number = current.get("number")
+    current_id = current.get("id")
+    event_id = event_issue.get("id")
+    if (
+        type(current_number) is not int
+        or current_number <= 0
+        or current_number != number
+        or current.get("html_url") != issue_url
+        or type(event_id) is not int
+        or event_id <= 0
+        or type(current_id) is not int
+        or current_id <= 0
+        or current_id != event_id
+    ):
+        raise EventError("current Issue identity does not match the triggering event")
+    if current.get("state") != "open":
+        raise StaleIssueSnapshotError("current Issue is closed", current)
+    event_revision = event_issue.get("updated_at")
+    if (
+        not isinstance(event_revision, str)
+        or not event_revision
+        or current.get("updated_at") != event_revision
+        or current.get("title") != event_issue.get("title")
+        or current.get("body") != event_issue.get("body")
+    ):
+        raise StaleIssueSnapshotError(
+            "current Issue revision differs from the triggering event snapshot",
+            current,
+        )
+    return current, repository, number, issue_url
 
 
 def _write_output(path: Path, values: dict[str, str]) -> None:
@@ -121,12 +169,79 @@ def _comment_validation_failure(
     )
 
 
+def _comment_stale_snapshot_failure(
+    repository: str,
+    issue_number: int,
+    message: str,
+) -> None:
+    token = os.environ.get("DEVFLOW_TOKEN", "")
+    if not token:
+        return
+    api = GitHubApi(token)
+    bounded = message.replace("\r", " ").replace("\n", " ")[:600]
+    api.comment_issue(
+        repository,
+        issue_number,
+        "Repository-Bootstrap-State: FAILED\n"
+        "Stage: VALIDATION\n"
+        "Safe-Retry: yes\n"
+        "Created/Observed Resources:\n"
+        "- none\n"
+        f"Failure: {bounded}\n"
+        "Next-Action: Edit or reopen this current trusted request to create a fresh Issue event. "
+        "Re-running this stale event snapshot is expected to fail freshness checks.",
+    )
+
+
 def validate_event(event_path: Path, github_output: Path) -> int:
     try:
         event = _load_json(event_path)
         if not _trusted_event_actor(event):
             raise EventError("initiating actor is not allowlisted")
-        issue, repository, number, _ = _event_identity(event)
+        event_issue, repository, number, _ = _event_identity(event)
+    except BootstrapError as exc:
+        _write_output(
+            github_output,
+            {"candidate": "false", "valid": "false", "authorized": "false", "repository_name": ""},
+        )
+        print(f"repository-bootstrap event ignored: {exc}", file=sys.stderr)
+        return 0
+
+    event_title = event_issue.get("title")
+    if not isinstance(event_title, str) or not event_title.startswith(TITLE_PREFIX):
+        _write_output(
+            github_output,
+            {"candidate": "false", "valid": "false", "authorized": "false", "repository_name": ""},
+        )
+        return 0
+
+    try:
+        devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+        if not devflow_token:
+            raise EventError("DEVFLOW_TOKEN is required to revalidate the current Issue")
+        issue, repository, number, _ = _current_issue_snapshot(
+            event,
+            GitHubApi(devflow_token),
+        )
+    except StaleIssueSnapshotError as exc:
+        if (
+            isinstance(exc.current_issue.get("title"), str)
+            and exc.current_issue["title"].startswith(TITLE_PREFIX)
+            and is_trusted_issue_author(exc.current_issue)
+        ):
+            try:
+                _comment_stale_snapshot_failure(repository, number, str(exc))
+            except Exception as comment_exc:
+                print(
+                    f"repository-bootstrap stale-snapshot comment could not be recorded: {type(comment_exc).__name__}",
+                    file=sys.stderr,
+                )
+        _write_output(
+            github_output,
+            {"candidate": "false", "valid": "false", "authorized": "false", "repository_name": ""},
+        )
+        print(f"repository-bootstrap event ignored: {exc}", file=sys.stderr)
+        return 0
     except BootstrapError as exc:
         _write_output(
             github_output,
@@ -209,7 +324,12 @@ def execute_event(event_path: Path) -> int:
     event = _load_json(event_path)
     if not _trusted_event_actor(event):
         raise EventError("execute-event initiating actor is not allowlisted")
-    issue, repository, number, issue_url = _event_identity(event)
+
+    devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+    if not devflow_token:
+        raise EventError("DEVFLOW_TOKEN is required to revalidate the current Issue")
+    devflow_api = GitHubApi(devflow_token)
+    issue, repository, number, issue_url = _current_issue_snapshot(event, devflow_api)
     title = issue.get("title")
     body = issue.get("body")
     if not isinstance(title, str) or not title.startswith(TITLE_PREFIX):
@@ -219,10 +339,12 @@ def execute_event(event_path: Path) -> int:
     raw = parse_request_body(body if isinstance(body, str) else "")
     request = normalize_request(raw, title)
 
-    devflow_token = os.environ.get("DEVFLOW_TOKEN", "")
+    # Recheck after parsing and immediately before accessing the external
+    # repository-creation credential. An old rerun snapshot must not provision.
+    issue, repository, number, issue_url = _current_issue_snapshot(event, devflow_api)
+    if not is_trusted_issue_author(issue):
+        raise EventError("execute-event request author is not trusted after final Issue revalidation")
     bootstrap_token = os.environ.get("REPOSITORY_BOOTSTRAP_TOKEN", "")
-    if not devflow_token:
-        raise EventError("DEVFLOW_TOKEN is required")
     if not bootstrap_token:
         _record_missing_credential(repository, number, devflow_token)
         raise EventError("approved REPOSITORY_BOOTSTRAP_TOKEN is not configured")
@@ -238,7 +360,7 @@ def execute_event(event_path: Path) -> int:
     )
     result = BootstrapExecutor(
         GitHubApi(bootstrap_token),
-        GitHubApi(devflow_token),
+        devflow_api,
     ).execute(request, context)
     print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
     return 0
