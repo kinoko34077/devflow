@@ -117,6 +117,16 @@ Event sync runs for devflow Issue events:
 - reopened
 - closed
 
+For each event, the payload identifies the Issue, then the synchronizer reads
+the current trusted Issue before Project mutation. Event eligibility uses the
+same canonical selection rule as full sync: open Issues are eligible, and
+closed Issues are eligible only when already tracked in the Project. The
+post-write readback re-reads the current Issue and applies that rule against
+the latest Project snapshot. An Issue selected for mutation remains in
+readback verification even if it closes before delayed Project membership
+becomes visible; this preserves the bounded membership retry and prevents a
+successful write from being reported as an empty, clean verification.
+
 Manual workflow modes:
 
 - `verify`: read-only comparison of canonical devflow state against Project state.
