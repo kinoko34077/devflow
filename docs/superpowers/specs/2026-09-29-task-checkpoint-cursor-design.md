@@ -54,7 +54,7 @@ Each eligible owning Issue / Work Order MAY have exactly one recognized cursor c
 
 The comment is task-owned, not worker-owned. Different authorized workers may update the same cursor comment after re-reading live state. This is intentionally different from Execution Session Records, which remain worker/session-owned.
 
-A recognized cursor comment must be on the owning Issue and come from a trusted write-capable source. On public repositories, a same-repository comment from an `OWNER`, `MEMBER`, or `COLLABORATOR` is trusted. A future GitHub Actions adapter may also create/update the canonical comment as `github-actions[bot]` when the workflow runs with repository-authorized Issue write permission. Untrusted comments that copy the sentinel are ignored and reported as spoof/noise rather than treated as cursor authority.
+A recognized cursor comment must be on the owning Issue and come from a trusted write-capable source. On public repositories, a human-authored comment is trusted only when the actor has the allowlisted numeric GitHub `user.id` `79015263`; if a login is supplied, it must match `kinoko34077`. `author_association` (`OWNER`, `MEMBER`, or `COLLABORATOR`) is supplementary metadata and never grants trust by itself. The cursor helper retains its explicit `github-actions[bot]` system-provenance exception; this policy does not extend that exception to other bots. Untrusted comments that copy the sentinel are ignored and reported as spoof/noise rather than treated as cursor authority.
 
 A dedicated comment is selected because it:
 

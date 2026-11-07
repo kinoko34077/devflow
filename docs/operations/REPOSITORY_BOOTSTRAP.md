@@ -99,7 +99,7 @@ Stable Issue `key` values are request-local idempotency keys. Reusing the same B
 
 The workflow has two security stages:
 
-1. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; checks observed devflow Issue identity, exact request syntax, schema and trusted `author_association`.
+1. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; checks observed devflow Issue identity, exact request syntax, schema and the allowlisted numeric author ID (`79015263`), with supplied login consistency. `author_association` is supplementary defense-in-depth only.
 2. **provision** — runs only when validation reports both `valid=true` and `authorized=true`; this stage receives the external bootstrap credential.
 
 A normal Issue is ignored successfully. A malformed trusted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. An untrusted Issue author cannot reach the secret-bearing provisioning job.
