@@ -49,11 +49,16 @@ class RepositoryBootstrapWorkflowTests(unittest.TestCase):
         self.assertIn("github.actor_id", admission_block)
         self.assertIn("github.triggering_actor", admission_block)
         self.assertIn("needs: actor-admission", validate_block)
-        self.assertIn("needs.actor-admission.outputs.admitted == 'true'", validate_block)
+        self.assertRegex(
+            validate_block,
+            r"(?m)^\s*if: \$\{\{ github\.triggering_actor == github\.actor "
+            r"&& needs\.actor-admission\.outputs\.admitted == 'true' \}\}$",
+        )
         self.assertIn("needs: [actor-admission, validate]", provision_block)
         self.assertRegex(
             provision_block,
-            r"(?m)^\s*if: \$\{\{ needs\.actor-admission\.outputs\.admitted == 'true' "
+            r"(?m)^\s*if: \$\{\{ github\.triggering_actor == github\.actor "
+            r"&& needs\.actor-admission\.outputs\.admitted == 'true' "
             r"&& needs\.validate\.outputs\.valid == 'true' "
             r"&& needs\.validate\.outputs\.authorized == 'true' \}\}$",
         )

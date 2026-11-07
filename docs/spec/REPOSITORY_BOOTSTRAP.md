@@ -194,11 +194,13 @@ numeric-principal check.
 
 A minimal no-secret actor-admission job runs before validation and has only
 `contents:read`. It fails closed on missing, malformed, mismatched or
-non-allowlisted event identity. The validation job and secret-bearing
-provisioning job run only after admission. The executor repeats the actor and
-Issue-author checks before reading either token. Untrusted actors or Issue
-authors MUST NOT cause the repository-creation credential to enter their job
-environment.
+non-allowlisted event identity. Both the validation and secret-bearing
+provisioning job conditions also require `github.triggering_actor ==
+github.actor`, in addition to the admission output; this prevents a partial
+rerun by a different writer from reusing successful prerequisite outputs to
+start a privileged job. The executor repeats the actor and Issue-author checks
+before reading either token. Untrusted actors or Issue authors MUST NOT cause
+the repository-creation credential to enter their job environment.
 
 ## 7. Credential boundary / Human Gate
 
