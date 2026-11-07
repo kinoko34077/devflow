@@ -117,7 +117,11 @@ A non-secret validation job may inspect any candidate request. The provisioning 
 
 The secret is exposed only to the provisioning job/step. Validation never receives it.
 
-`GITHUB_TOKEN` is used only for devflow-local Issue comments/Control creation. The external bootstrap token is used only for account/new-repository operations.
+`GITHUB_TOKEN` is used for devflow-local Issue reads, comments, and Control creation. The external bootstrap token is used only for account/new-repository operations.
+
+### Current request freshness
+
+The event payload is a historical snapshot, including on workflow reruns. Before validation, fetch the current source Issue through the existing GITHUB_TOKEN and require the exact Issue ID, canonical URL and number, open state, updated_at, title, and body to match the event. The provisioner repeats this comparison after parsing and immediately before reading the external bootstrap token. A closed or changed Issue fails closed; retry from a new edited or reopened event. This read is a freshness fence, not an atomic Issue compare-and-swap, so concurrent changes after the final read are outside this guarantee.
 
 ## 6. Credential boundary
 
