@@ -88,7 +88,9 @@ a fixed mode, with an empty issue_number (full scope). Existing manual
 A successful run does not imply Sync Health PASS: check the actual run and
 machine Health #41 before advancing or calling reconcile → verify complete.
 
-No private App key or cross-repository token is needed for the request path.
+No private App key or cross-repository token is needed to issue the owner
+comment; after admission, the workflow uses its existing Project Sync
+credentials.
 The owner-command transport is active on main following the explicitly
 approved merge of [PR #405](https://github.com/kinoko34077/devflow/pull/405)
 on 2026-10-09. Its recorded full-scope owner-issued `reconcile`
@@ -151,17 +153,19 @@ protect against a changed workflow version on a selected ref that removes or
 alters the same gate. A `github.ref == 'refs/heads/main'` condition inside that
 same mutable workflow is not an external workflow-source boundary.
 
-The Project Sync credential documentation identifies `PROJECTS_TOKEN` and
-`MAINTENANCE_AUDIT_TOKEN` as repository Actions secrets. GitHub documents that
-repository secrets are available to all workflows in that repository
+The Project Sync spec identifies `PROJECTS_TOKEN` as a repository Actions
+secret. GitHub documents that repository secrets are available to all workflows
+in that repository
 ([secret scope](https://docs.github.com/en/code-security/reference/secret-security/secret-types)).
-Any claim that an unlisted writer cannot run modified secret-bearing workflow
-code therefore requires separate verification of the live Actions workflow
-execution actor/event policy
+The workflow also reads `MAINTENANCE_AUDIT_TOKEN` from the Actions `secrets`
+context, but the reviewed source does not establish its actual secret scope or
+live placement. Any claim that an unlisted writer cannot run modified
+secret-bearing workflow code therefore requires separate verification of the
+live Actions workflow execution actor/event policy
 ([workflow execution protections](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution))
-or another protected secret boundary. The policy,
-dispatch-capable collaborator population and live secret placement are not
-established by this source specification; see the dated [#801 audit checkpoint](https://github.com/kinoko34077/devflow/issues/801#issuecomment-6704906965).
+and the relevant live secret scopes or another protected secret boundary. The
+policy, dispatch-capable collaborator population and live secret placement are
+not established by this source specification; see the dated [#801 audit checkpoint](https://github.com/kinoko34077/devflow/issues/801#issuecomment-6704906965).
 Do not infer a configuration change or live exploit from the source review.
 
 The workflow uses `$GITHUB_REPOSITORY` at runtime for repository-scoped Issue operations; the workflow YAML itself does not depend on the literal repository name.
