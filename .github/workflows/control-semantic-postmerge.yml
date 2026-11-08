@@ -1,8 +1,9 @@
 name: Devflow post-merge Control semantic check
 
 # Read-only, single-repository pilot. This is not a fleet webhook.
-# A PR merge may cause a *failed audit run* if its current Control PR stage
-# is stale. A non-referenced PR is NOT_APPLICABLE, never ALIGNED.
+# GitHub-native PR status is not independent Control authority: stale copied
+# stages remain visible in diagnostics but must not force a Control write.
+# Missing/invalid sources still fail closed; no merge/claim rights are granted.
 on:
   pull_request:
     types: [closed]
@@ -42,7 +43,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo 'Result is scoped to one PR, not product or fleet acceptance.' >> "$GITHUB_STEP_SUMMARY"
           echo 'A missing exact PR reference is NOT_APPLICABLE, not ALIGNED.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Mismatch, unknown, or owner-linked review candidate requires producer follow-up; no auto-write.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PR-stage drift/owner-link candidates are informational: do not copy GitHub PR facts into Control just to clear this run. Unknown sources still fail closed; independently changed cross-repo gates remain owned by Control.' >> "$GITHUB_STEP_SUMMARY"
           echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
           cat semantic-observation.json >> "$GITHUB_STEP_SUMMARY"
           echo '~~~' >> "$GITHUB_STEP_SUMMARY"
