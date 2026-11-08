@@ -111,6 +111,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("not** a per-event local-state write obligation", spec)
         self.assertIn("current M3 fallback", spec)
         self.assertIn("skip the Control `Active Work` / `Next Action` write", manual)
+        workflow = (ROOT / ".devflow" / "WORKFLOW.yaml").read_text(encoding="utf-8")
+        _, lists = self._contract_module()._parse_scalar_contract(workflow)
+        triggers = set(lists[("repository_control", "update_when")])
+        exclusions = set(lists[("repository_control", "do_not_update_for")])
+        self.assertIn("cross_repository_active_work_pointer_or_independent_gate_owner_changes", triggers)
+        self.assertIn("cross_repository_human_security_or_policy_next_action_changes", triggers)
+        self.assertNotIn("active_work_reference_changes", triggers)
+        self.assertNotIn("next_action_changes", triggers)
+        self.assertIn(
+            "local_issue_pr_merge_review_or_ci_fact_without_independent_cross_repository_change",
+            exclusions,
+        )
 
     def test_project_sync_and_bootstrap_do_not_own_duplicate_workflow_enum_sets(self):
         project_sync_source = (ROOT / "scripts" / "project_sync.py").read_text(encoding="utf-8")
