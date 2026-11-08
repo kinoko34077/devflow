@@ -75,18 +75,20 @@ New Controls must use the current template and include an explicit `Canonical En
 
 The Control Issue is an index/current-state summary and must not duplicate detailed repository specifications, full task logs or implementation history.
 
-Update the Control Issue when at least one of these changes:
+Update the Control Issue only when its **independent repository-level or cross-repository meaning** changes:
 
 - accepted Audit SHA;
 - Work Status or Repository State;
 - cross-repository Priority/Risk;
-- Active Work reference;
-- Next Action;
+- a cross-repository `Active Work` pointer or independent gate owner changes;
+- a cross-repository, Human/security or policy `Next Action` decision changes;
 - repository-local canonical entry points;
-- a P0/P1 finding materially changes readiness;
+- a P0/P1 finding materially changes repository-level readiness;
 - managed/parked/deprecated/cancelled/excluded state.
 
-Do not update it merely for every Execution Session checkpoint, commit, test run, comment or implementation detail. Execution Session detail belongs on the owning Issue / Work Order unless that task itself is devflow-owned.
+A local Issue/PR/merge/Review/CI fact remains authoritative at its GitHub owner. Do **not** update Control merely to copy its stage, HEAD, checks, local task count, or local Next Action; read the original fact instead. Existing manually maintained `Active Work` and `Next Action` fields remain readable/required under the current M3 fallback, but that requirement is **not** a per-event local-state write obligation. Do not erase independent Human/security/policy gates or infer complete work coverage from a partial Projection.
+
+Execution Session checkpoints, commits, tests, comments and implementation details belong to their owning Issue/PR rather than a duplicated Control log.
 
 Managed scope excludes:
 

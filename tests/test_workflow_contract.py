@@ -97,6 +97,21 @@ class WorkflowContractTests(unittest.TestCase):
             {"Work Status": "AUDITED"}
         )
 
+    def test_control_write_triggers_own_cross_repository_meaning_not_local_pr_copy(self):
+        # #325 D/E / #477: required M3 fallback headings do not imply
+        # a separate Control write for each owner-local PR/CI transition.
+        spec = (ROOT / "docs" / "spec" / "CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md").read_text(
+            encoding="utf-8"
+        )
+        manual = (ROOT / "docs" / "operations" / "AGENT_OPERATING_MANUAL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("independent repository-level or cross-repository meaning", spec)
+        self.assertIn("Do **not** update Control merely to copy its stage", spec)
+        self.assertIn("not** a per-event local-state write obligation", spec)
+        self.assertIn("current M3 fallback", spec)
+        self.assertIn("skip the Control `Active Work` / `Next Action` write", manual)
+
     def test_project_sync_and_bootstrap_do_not_own_duplicate_workflow_enum_sets(self):
         project_sync_source = (ROOT / "scripts" / "project_sync.py").read_text(encoding="utf-8")
         bootstrap_source = (ROOT / "tools" / "repository_bootstrap.py").read_text(encoding="utf-8")
