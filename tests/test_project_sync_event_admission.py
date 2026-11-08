@@ -38,6 +38,125 @@ def invoke(event, *, name="issues", principal=OWNER, triggering=None, repository
 
 
 class EventActorAdmissionTests(unittest.TestCase):
+    def test_generated_marker_only_control_edit_skips_project_sync(self):
+        from tools import human_portfolio_cache, repository_projection_cache
+
+        repository = "kinoko34077/demo"
+        def block(begin, end, schema, generation):
+            return (
+                begin + "\n" + json.dumps({
+                    "schema_version": schema,
+                    "repository": repository,
+                    "generation_id": generation,
+                }, sort_keys=True) + "\n" + end
+            )
+
+        def body(p, h, next_action="Cross-repository gate unchanged."):
+            return (
+                "## Repository\n\n`kinoko34077/demo`\n\n"
+                "## Next Action\n\n" + next_action + "\n\n"
+                + block(repository_projection_cache.CACHE_MARKER_BEGIN,
+                        repository_projection_cache.CACHE_MARKER_END,
+                        repository_projection_cache.CACHE_SCHEMA_VERSION, p)
+                + "\n\n"
+                + block(human_portfolio_cache.CACHE_MARKER_BEGIN,
+                        human_portfolio_cache.CACHE_MARKER_END,
+                        human_portfolio_cache.CACHE_SCHEMA_VERSION, h)
+            )
+
+        original = body("old", "old")
+        changed = body("new", "new")
+        event = issue_event()
+        event["issue"].update({"body": changed, "state": "open"})
+        event["changes"] = {"body": {"from": original}}
+
+        self.assertEqual(
+            gate.admission_decision(
+                event, event_name="issues", actor_id="79015263",
+                actor_login="kinoko34077", triggering_actor="kinoko34077",
+                repository="kinoko34077/devflow",
+            ),
+            gate.CACHE_ONLY_EDIT,
+        )
+        self.assertFalse(invoke(event))
+        # This also applies to the already-allowed verified bot actor;
+        # no new author class receives admission.
+        event["sender"] = BOT
+        event["issue"]["user"] = BOT
+        self.assertFalse(invoke(event, principal=BOT))
+        event["sender"] = OWNER
+        event["issue"]["user"] = OWNER
+
+        # Any independent source field change must preserve the normal sync.
+        event["issue"]["body"] = body("new", "new", "Human Gate changed.")
+        self.assertTrue(invoke(event))
+        event["issue"]["body"] = changed
+        event["changes"]["title"] = {"from": "[REPO] old"}
+        self.assertTrue(invoke(event))
+        del event["changes"]["title"]
+
+        # No old-body evidence, missing blocks, invalid or duplicated marker
+        # means normal admission: unknown evidence is never a silent skip.
+        for old in ("no machine blocks", original.replace(
+            human_portfolio_cache.CACHE_MARKER_END, ""),
+            original + "\n" + repository_projection_cache.CACHE_MARKER_BEGIN,
+        ):
+            with self.subTest(old=old[-60:]):
+                event["changes"]["body"]["from"] = old
+                self.assertTrue(invoke(event))
+        event["changes"]["body"]["from"] = original
+        event["issue"]["state"] = "closed"
+        self.assertTrue(invoke(event))
+        event["issue"]["state"] = "open"
+        event["action"] = "reopened"
+        self.assertTrue(invoke(event))
+        event["action"] = "edited"
+        self.assertFalse(invoke(event, triggering="other-collaborator"))
+
+    def test_generated_marker_only_event_does_not_allocate_sync_job(self):
+        from tools import human_portfolio_cache, repository_projection_cache
+
+        def marker(begin, end, schema, generation):
+            return begin + "\n" + json.dumps({
+                "repository": "kinoko34077/demo",
+                "schema_version": schema,
+                "generation_id": generation,
+            }) + "\n" + end
+
+        old = "\n".join((
+            "## Repository", "`kinoko34077/demo`",
+            marker(repository_projection_cache.CACHE_MARKER_BEGIN,
+                   repository_projection_cache.CACHE_MARKER_END,
+                   repository_projection_cache.CACHE_SCHEMA_VERSION, "old"),
+            marker(human_portfolio_cache.CACHE_MARKER_BEGIN,
+                   human_portfolio_cache.CACHE_MARKER_END,
+                   human_portfolio_cache.CACHE_SCHEMA_VERSION, "old"),
+        ))
+        new = old.replace('"old"', '"new"')
+        event = issue_event()
+        event["issue"].update({"body": new, "state": "open"})
+        event["changes"] = {"body": {"from": old}}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            event_path = root / "event.json"
+            output_path = root / "output.txt"
+            event_path.write_text(json.dumps(event), encoding="utf-8")
+            env = {
+                "GITHUB_EVENT_PATH": str(event_path),
+                "GITHUB_EVENT_NAME": "issues",
+                "GITHUB_ACTOR_ID": "79015263",
+                "GITHUB_ACTOR": "kinoko34077",
+                "GITHUB_TRIGGERING_ACTOR": "kinoko34077",
+                "GITHUB_REPOSITORY": "kinoko34077/devflow",
+                "GITHUB_OUTPUT": str(output_path),
+            }
+            with patch.dict(gate.os.environ, env), redirect_stdout(StringIO()):
+                self.assertEqual(gate.main(), 0)
+            self.assertEqual(
+                output_path.read_text(encoding="utf-8"),
+                "admitted=false\n",
+            )
+
     def test_owner_issue_edits_are_admitted(self):
         for action in ("opened", "edited", "reopened", "closed"):
             with self.subTest(action=action):
