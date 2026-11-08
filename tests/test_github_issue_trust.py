@@ -1,3 +1,5 @@
+from contextlib import redirect_stdout
+from io import StringIO
 import unittest
 from pathlib import Path
 
@@ -12,6 +14,7 @@ class GitHubIssueTrustTests(unittest.TestCase):
                 {"user": {"id": 79015263, "login": "kinoko34077"}, "author_association": "OWNER"}
             )
         )
+        self.assertTrue(github_issue_trust.is_trusted_issue_author({"user": {"id": 79015263}}))
 
     def test_collaborator_association_does_not_grant_trust_to_other_id(self):
         self.assertFalse(
@@ -38,6 +41,24 @@ class GitHubIssueTrustTests(unittest.TestCase):
                 {"user": {"id": 79015263, "login": "renamed-or-spoofed"}, "author_association": "OWNER"}
             )
         )
+
+    def test_login_mismatch_has_a_bounded_reconciliation_decision(self):
+        self.assertEqual(
+            github_issue_trust.assess_issue_author(
+                {"user": {"id": 79015263, "login": "renamed-or-spoofed"}}
+            ),
+            "EXPECTED_LOGIN_RECONCILIATION_REQUIRED",
+        )
+
+    def test_malformed_supplied_login_is_generic_untrusted(self):
+        for login in ("", [], {}, False, 42):
+            with self.subTest(login=login):
+                author = {"user": {"id": 79015263, "login": login}}
+                self.assertEqual(
+                    github_issue_trust.assess_issue_author(author),
+                    github_issue_trust.PRINCIPAL_UNTRUSTED,
+                )
+                self.assertFalse(github_issue_trust.is_trusted_issue_author(author))
 
     def test_project_sync_rejects_unallowlisted_collaborator_before_project_access(self):
         class NoAccess:
@@ -68,6 +89,79 @@ class GitHubIssueTrustTests(unittest.TestCase):
             ),
             0,
         )
+
+    def test_project_sync_surfaces_login_reconciliation_without_project_access(self):
+        class NoAccess:
+            def __getattr__(self, name):
+                raise AssertionError(f"login-mismatch event must not access Project/REST: {name}")
+
+        cfg = project_sync.RuntimeConfig(
+            repository="kinoko34077/devflow",
+            project_token="token",
+            github_token="token",
+        )
+        issue = {
+            "number": 7,
+            "node_id": "G",
+            "title": "[REPO] spoof",
+            "state": "open",
+            "body": "untrusted body must not be logged",
+            "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "renamed-or-spoofed"},
+        }
+        output = StringIO()
+        with redirect_stdout(output):
+            result = project_sync.run_sync(
+                "event-sync",
+                cfg,
+                rest=NoAccess(),
+                gql=NoAccess(),
+                event_issue=issue,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("reason=EXPECTED_LOGIN_RECONCILIATION_REQUIRED", output.getvalue())
+        self.assertIn("issue=7", output.getvalue())
+        self.assertNotIn("renamed-or-spoofed", output.getvalue())
+        self.assertNotIn("untrusted body", output.getvalue())
+
+    def test_login_mismatch_cannot_fall_through_canonical_control_trust(self):
+        class NoAccess:
+            def __getattr__(self, name):
+                raise AssertionError(f"login-mismatch event must not access Project/REST: {name}")
+
+        class CanonicalControlTrust:
+            def get_repository_control(self, repository):
+                return {"repository": repository, "issue_number": 7}
+
+        cfg = project_sync.RuntimeConfig(
+            repository="kinoko34077/devflow",
+            project_token="token",
+            github_token="token",
+        )
+        issue = {
+            "number": 7,
+            "node_id": "I_7",
+            "title": "[REPO] demo",
+            "state": "open",
+            "body": "## Repository\n\n`kinoko34077/demo`",
+            "author_association": "OWNER",
+            "user": {"id": 79015263, "login": "renamed-or-spoofed"},
+        }
+        output = StringIO()
+        with redirect_stdout(output):
+            result = project_sync.run_sync(
+                "event-sync",
+                cfg,
+                rest=NoAccess(),
+                gql=NoAccess(),
+                event_issue=issue,
+                control_trust_service=CanonicalControlTrust(),
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("reason=EXPECTED_LOGIN_RECONCILIATION_REQUIRED", output.getvalue())
+        self.assertNotIn("renamed-or-spoofed", output.getvalue())
 
     def test_project_sync_workflow_uses_numeric_principal_gate(self):
         workflow = Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"

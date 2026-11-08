@@ -144,6 +144,17 @@ closed. A bot-authored `[REPO]` Control is accepted only when the existing
 devflow provenance verifier resolves that exact Issue as the canonical Control
 for its repository; bot ID or title alone is not authority.
 
+When an allowlisted numeric principal has a supplied login mismatch, the
+no-secret admission job may report
+`EXPECTED_LOGIN_RECONCILIATION_REQUIRED` only for a supported event shape and
+after the event sender, actor login, and triggering actor pass the applicable
+identity checks. This applies to valid `issues` events, owner-authored
+`/kinotch sync verify` or `/kinotch sync reconcile` comments, and supported
+`workflow_dispatch` modes. The job still writes `admitted=false`; the
+diagnostic neither authorizes the secret-bearing job nor echoes the observed
+login or Issue content. Other malformed or incoherent identities remain
+generic fail-closed skips.
+
 Event-initiator authorization is a separate boundary from Issue authorship.
 The Project Sync actor-admission job checks the GitHub-provided event sender,
 `GITHUB_ACTOR_ID`, `GITHUB_ACTOR`, `GITHUB_TRIGGERING_ACTOR`, repository
