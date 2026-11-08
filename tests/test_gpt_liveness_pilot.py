@@ -329,6 +329,17 @@ class LivenessContractTests(unittest.TestCase):
         self.assertNotIn("  schedule:", triggers)
         self.assertNotIn("  issues:", triggers)
         self.assertNotIn("  push:", triggers)
+        job = content.split("  ping:\n", 1)[1].split("    runs-on:", 1)[0]
+        self.assertIn(
+            "    if: >-\n"
+            "      github.event_name == 'workflow_dispatch' &&\n"
+            "      github.ref == 'refs/heads/main' &&\n"
+            "      github.repository == 'kinoko34077/devflow' &&\n"
+            "      github.actor_id == '79015263' &&\n"
+            "      github.actor == 'kinoko34077' &&\n"
+            "      github.triggering_actor == 'kinoko34077'\n",
+            job,
+        )
 
     def test_cli_without_enrollment_does_not_fetch_mailbox(self):
         with patch("tools.gpt_liveness_pilot.fetch_issue", return_value="no enrollment"), \

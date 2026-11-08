@@ -97,12 +97,23 @@ Stable Issue `key` values are request-local idempotency keys. Reusing the same B
 
 `.github/workflows/repository-bootstrap.yml` is triggered by Issue `opened`, `edited`, and `reopened` events.
 
-The workflow has two security stages:
+The workflow has three security stages:
 
-1. **validate** — no `REPOSITORY_BOOTSTRAP_TOKEN`; checks observed devflow Issue identity, exact request syntax, schema and trusted `author_association`.
-2. **provision** — runs only when validation reports both `valid=true` and `authorized=true`; this stage receives the external bootstrap credential.
+1. **actor-admission** — `contents:read` only; requires the event sender to be the canonical allowlisted numeric principal and match the GitHub Actions actor ID, actor login, triggering actor, repository, and Issue event identity.
+2. **validate** — its job condition requires both the admission output and `github.triggering_actor == github.actor`; it receives `issues:write` only after that gate. The step has no `REPOSITORY_BOOTSTRAP_TOKEN`; it rechecks the initiating actor, then validates the devflow Issue identity, request syntax/schema, and allowlisted numeric Issue-author ID (`79015263`) with supplied-login consistency. `author_association` is supplementary defense-in-depth only.
+3. **provision** — its job condition requires the same current-run actor equality plus successful admission and validation. This prevents a partial rerun by a different writer from reusing successful admission outputs from the original attempt to start a privileged job. The step rechecks the initiating actor and current Issue. Python reads `DEVFLOW_TOKEN` first to fetch the current Issue; after parsing and a final freshness/author recheck, it reads `REPOSITORY_BOOTSTRAP_TOKEN` and constructs the executor.
 
-A normal Issue is ignored successfully. A malformed trusted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. An untrusted Issue author cannot reach the secret-bearing provisioning job.
+The workflow injects `REPOSITORY_BOOTSTRAP_TOKEN` into the gated provision step environment before Python performs the final Issue recheck. A failed final check prevents Python from reading or using that value and from constructing the executor; it does not mean the credential was absent from the step environment. The earlier actor-admission and validation jobs do not receive this external credential, and their failed gates prevent the provision step from starting.
+
+A normal Issue or non-allowlisted event actor is skipped without an Issue mutation. A different actor who reruns a failed job cannot start validation or provisioning using the previous attempt's admission output. A malformed allowlisted `[REPO CREATE]` request is recorded as `FAILED / VALIDATION`. `author_association` is supplementary metadata; it does not grant authority without the canonical numeric user ID.
+
+### Current request freshness
+
+The event JSON is an immutable snapshot. Before validation, the workflow fetches the source Issue through the existing `DEVFLOW_TOKEN` and requires it to remain open with the same positive numeric Issue ID, number, canonical URL, `updated_at`, title, and body as the event. Validation uses that current Issue for author and request checks. The provisioner reads `DEVFLOW_TOKEN` to fetch the Issue, then repeats the comparison and trusted author check after parsing and immediately before Python reads `REPOSITORY_BOOTSTRAP_TOKEN` from its environment. A read failure, identity mismatch, untrusted author, closed Issue, or stale revision prevents Python from reading or using that external credential and prevents executor construction or effects. When the current Issue identity, its `[REPO CREATE]` title, and trusted author are verified, validation records a `FAILED / VALIDATION` status comment; read failures and unverified identities do not mutate the Issue.
+
+Re-running a stale or closed historical snapshot is expected to fail freshness checks; an unchanged open snapshot remains retryable. Edit or reopen the current request to create a fresh Issue event when needed.
+
+This is a freshness check, not an atomic compare-and-swap. A change concurrent with the final read and the first external effect is not excluded by GitHub's Issue API.
 
 ## 5. Idempotency
 

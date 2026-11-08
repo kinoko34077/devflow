@@ -913,6 +913,17 @@ class GitHubApi:
     def get_repository(self, full_name: str) -> dict[str, Any] | None:
         return self._request("GET", f"/repos/{self._repo_path(full_name)}", allow_404=True)
 
+    def get_issue(self, full_name: str, issue_number: int) -> dict[str, Any]:
+        if type(issue_number) is not int or issue_number <= 0:
+            raise BootstrapError("Issue number must be a positive integer")
+        result = self._request(
+            "GET",
+            f"/repos/{self._repo_path(full_name)}/issues/{issue_number}",
+        )
+        if not isinstance(result, dict) or "pull_request" in result:
+            raise GitHubApiError("get Issue returned a malformed or non-Issue response")
+        return result
+
     def create_repository(
         self,
         owner: str,

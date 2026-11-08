@@ -507,10 +507,12 @@ repository_bootstrap:
     interactive_unspecified_action: ask_user_before_request
     noninteractive_or_delegated_unspecified_fallback: private
     infer_public_from_prose: forbidden
-  trusted_author_associations:
-    - OWNER
-    - MEMBER
-    - COLLABORATOR
+  author_trust:
+    authority: devflow#178
+    implementation: tools/github_issue_trust.py
+    canonical_key: numeric_github_user_id_allowlist
+    login_consistency: secondary
+    author_association: defense_in_depth_only
   secret_boundary:
     name: REPOSITORY_BOOTSTRAP_TOKEN
     validation_job_receives_secret: false
