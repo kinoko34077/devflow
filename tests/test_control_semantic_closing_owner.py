@@ -218,10 +218,11 @@ class ClosingIssueTests(TestCase):
         self.assertEqual(self.check(pr_data=pr(bad))[0]["reason"],
                          "CONTRADICTORY_OWNER_AND_CLOSING_MARKER")
 
-    def test_owner_reference_must_be_in_current_control(self):
+    def test_verified_owner_does_not_require_current_control_copy(self):
         result, paths = self.check(control_data=control("Work #7260 only"))
         self.assertEqual((result["status"], result["reason"]),
-                         ("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL"))
+                         ("NOT_APPLICABLE", "OWNER_LOCAL_SOURCE_NOT_CONTROL_CLAIM"))
+        # Still requires live PR + exact owning Issue reads before this decision.
         self.assertEqual(len(paths), 3)
 
     def test_closed_owner_without_closes_keyword_remains_unknown(self):
@@ -251,7 +252,7 @@ class ClosingIssueTests(TestCase):
                         "--event-path", str(path),
                         "--repository", OWNER,
                     ])
-                self.assertEqual(code, 4)
+                self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

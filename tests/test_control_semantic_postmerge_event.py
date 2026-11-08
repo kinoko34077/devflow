@@ -291,7 +291,7 @@ class PostMergeEventTests(unittest.TestCase):
             ({"body": "Owning-Issue: https://other.invalid/issues/726"}, {}, {}, "UNKNOWN"),
             ({"body": basic["body"].replace("/726", "/7260")}, {}, {}, "UNKNOWN"),
             ({"merged": False}, {}, {}, "UNKNOWN"),
-            ({}, {"body": current["body"].replace("#726 is current", "#7260 is current")}, {}, "UNKNOWN"),
+            ({}, {"body": current["body"].replace("#726 is current", "#7260 is current")}, {}, "NOT_APPLICABLE"),
             ({}, {}, {"state": "closed"}, "UNKNOWN"),
             ({}, {}, {"html_url": "https://evil.invalid"}, "UNKNOWN"),
         ]
@@ -314,7 +314,7 @@ class PostMergeEventTests(unittest.TestCase):
                     result = target.check_native_postmerge_once(e, target.REPOSITORY)
                 self.assertEqual(result["status"], status)
 
-    def test_owner_issue_url_prefix_collision_is_unknown(self):
+    def test_owner_issue_url_prefix_collision_is_not_control_authority(self):
         e = event()
         c = control(number=775)
         c["body"] = c["body"].replace(
@@ -346,8 +346,8 @@ class PostMergeEventTests(unittest.TestCase):
 
         with patch.object(target.pilot, "_read_json", side_effect=look):
             result = target.check_native_postmerge_once(e, target.REPOSITORY)
-        self.assertEqual(result["status"], "UNKNOWN")
-        self.assertEqual(result["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+        self.assertEqual(result["status"], "NOT_APPLICABLE")
+        self.assertEqual(result["reason"], "OWNER_LOCAL_SOURCE_NOT_CONTROL_CLAIM")
 
     def test_owner_marker_accepts_crlf_while_not_loosening_identity(self):
         self.assertEqual(
@@ -506,8 +506,8 @@ class PostMergeEventTests(unittest.TestCase):
         )
         with patch.object(target.pilot, "_read_json", side_effect=lookup):
             value = target.check_native_postmerge_once(e, caller, 6)
-        self.assertEqual(value["status"], "UNKNOWN")
-        self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+        self.assertEqual(value["status"], "NOT_APPLICABLE")
+        self.assertEqual(value["reason"], "OWNER_LOCAL_SOURCE_NOT_CONTROL_CLAIM")
 
         # Another account's same-named repo is NOT the caller's owner.
         c["body"] = (
@@ -517,8 +517,8 @@ class PostMergeEventTests(unittest.TestCase):
         )
         with patch.object(target.pilot, "_read_json", side_effect=lookup):
             value = target.check_native_postmerge_once(e, caller, 6)
-        self.assertEqual(value["status"], "UNKNOWN")
-        self.assertEqual(value["reason"], "OWNER_NOT_IN_CURRENT_CONTROL")
+        self.assertEqual(value["status"], "NOT_APPLICABLE")
+        self.assertEqual(value["reason"], "OWNER_LOCAL_SOURCE_NOT_CONTROL_CLAIM")
 
         # Unqualified short repo identity without an account is allowed
         # only when NOT embedded inside somebody else's account/repo.
@@ -624,8 +624,8 @@ class PostMergeEventTests(unittest.TestCase):
             for state, expected_code in (
                 ("ALIGNED", 0),
                 ("NOT_APPLICABLE", 0),
-                ("POTENTIAL_MISMATCH", 2),
-                ("RECONCILIATION_REVIEW_REQUIRED", 4),
+                ("POTENTIAL_MISMATCH", 0),
+                ("RECONCILIATION_REVIEW_REQUIRED", 0),
                 ("UNKNOWN", 3),
             ):
                 with self.subTest(state=state):
@@ -641,6 +641,34 @@ class PostMergeEventTests(unittest.TestCase):
                             ])
                     self.assertEqual(code, expected_code)
                     self.assertEqual(json.loads(output.getvalue())["status"], state)
+
+    def test_native_postmerge_drift_remains_visible_without_forcing_control_write(self):
+        # Local PR state is GitHub-owned: preserve the diagnostic payload
+        # while avoiding a required duplicate Control update to make CI green.
+        with tempfile.TemporaryDirectory() as folder:
+            p = Path(folder) / "event.json"
+            p.write_text(json.dumps(event()), encoding="utf-8")
+            for status in ("POTENTIAL_MISMATCH", "RECONCILIATION_REVIEW_REQUIRED"):
+                with self.subTest(status=status):
+                    output = StringIO()
+                    with patch.object(target, "check_native_postmerge_once",
+                                      return_value={"status": status, "reason": "fixture"}):
+                        with redirect_stdout(output):
+                            code = target.main(["--event-path", str(p)])
+                    self.assertEqual(code, 0)
+                    self.assertEqual(json.loads(output.getvalue())["status"], status)
+
+    def test_explicit_owner_issue_audit_keeps_strict_exit(self):
+        for status, expected in (("POTENTIAL_MISMATCH", 2),
+                                 ("RECONCILIATION_REVIEW_REQUIRED", 4)):
+            with self.subTest(status=status), patch.object(
+                target, "check_owner_transition_once",
+                return_value={"status": status, "reason": "fixture"},
+            ):
+                output = StringIO()
+                with redirect_stdout(output):
+                    code = target.main(["--owner-issue", "38"])
+                self.assertEqual(code, expected)
 
     def test_missing_event_fails_closed(self):
         with redirect_stdout(StringIO()):
