@@ -16,13 +16,84 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools import github_issue_trust
+from tools import github_issue_trust, human_portfolio_cache, marker_json, repository_projection_cache
 
 REPOSITORY = "kinoko34077/devflow"
 BOT_ID = 41898282  # GitHub's github-actions[bot] identity, not a human allowlist member.
 BOT_LOGIN = "github-actions[bot]"
 COMMANDS = frozenset({"/kinotch sync verify", "/kinotch sync reconcile"})
 ISSUE_ACTIONS = frozenset({"opened", "edited", "reopened", "closed"})
+
+CACHE_ONLY_EDIT = "DERIVED_CACHE_ONLY_NO_PROJECT_CHANGE"
+
+
+def _without_machine_cache_blocks(body: str, repository: str) -> str | None:
+    """Preserve non-cache bytes exactly; never ignore malformed marker edits."""
+    blocks = (
+        (repository_projection_cache.CACHE_MARKER_BEGIN,
+         repository_projection_cache.CACHE_MARKER_END,
+         repository_projection_cache.CACHE_SCHEMA_VERSION, "projection"),
+        (human_portfolio_cache.CACHE_MARKER_BEGIN,
+         human_portfolio_cache.CACHE_MARKER_END,
+         human_portfolio_cache.CACHE_SCHEMA_VERSION, "portfolio"),
+    )
+    spans: list[tuple[int, int]] = []
+    try:
+        for start_marker, end_marker, schema, label in blocks:
+            payload = marker_json.parse_json_object_block(
+                body, start_marker, end_marker, label=label
+            )
+            if (payload is None or payload.get("schema_version") != schema
+                    or payload.get("repository") != repository):
+                return None
+            bounds = marker_json.marker_bounds(
+                body, start_marker, end_marker, label=label
+            )
+            if bounds is None:
+                return None
+            start, end_start = bounds
+            spans.append((start, end_start + len(end_marker)))
+    except marker_json.MarkerJSONError:
+        return None
+    spans.sort()
+    if spans[0][1] > spans[1][0]:
+        return None
+    # Distinct marker placeholders retain ordering and all surrounding prose.
+    return (
+        body[:spans[0][0]] + "<DERIVED_CACHE_1>"
+        + body[spans[0][1]:spans[1][0]] + "<DERIVED_CACHE_2>"
+        + body[spans[1][1]:]
+    )
+
+
+def _is_derived_cache_only_edit(event: Mapping[str, object]) -> bool:
+    """Skip no-op Project sync only for a proved body-only generated edit."""
+    if event.get("action") != "edited":
+        return False
+    changes = event.get("changes")
+    issue = event.get("issue")
+    if (not isinstance(changes, Mapping)
+            or set(changes) != {"body"}
+            or not isinstance(changes.get("body"), Mapping)
+            or set(changes["body"]) != {"from"}
+            or not isinstance(issue, Mapping)
+            or issue.get("state") != "open"):
+        return False
+    old = changes["body"].get("from")
+    new = issue.get("body")
+    title = issue.get("title")
+    if (not isinstance(old, str) or not isinstance(new, str)
+            or old == new or not isinstance(title, str)
+            or not title.startswith("[REPO] ")):
+        return False
+    name = title[len("[REPO] "):]
+    if not name or name.strip() != name or "/" in name:
+        return False
+    repository = "kinoko34077/" + name
+    original = _without_machine_cache_blocks(old, repository)
+    updated = _without_machine_cache_blocks(new, repository)
+    return original is not None and original == updated
+
 
 
 def _principal_id(value: object) -> int | None:
@@ -220,7 +291,7 @@ def admission_decision(
                 and str(issue.get("title") or "").startswith("[REPO] ")
             )
         ):
-            return "ADMITTED"
+            return CACHE_ONLY_EDIT if _is_derived_cache_only_edit(event) else "ADMITTED"
         return "UNTRUSTED"
     # The sole machine exception is a bot event on a bot-authored Control;
     # this does NOT remove the canonical downstream provenance verifier.
@@ -228,7 +299,7 @@ def admission_decision(
         _identity(creator, BOT_ID, BOT_LOGIN)
         and str(issue.get("title") or "").startswith("[REPO] ")
     ):
-        return "ADMITTED"
+        return CACHE_ONLY_EDIT if _is_derived_cache_only_edit(event) else "ADMITTED"
     return "UNTRUSTED"
 
 
