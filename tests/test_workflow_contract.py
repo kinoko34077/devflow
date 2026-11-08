@@ -109,7 +109,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("independent repository-level or cross-repository meaning", spec)
         self.assertIn("Do **not** update Control merely to copy its stage", spec)
         self.assertIn("not** a per-event local-state write obligation", spec)
-        self.assertIn("manual Control fallback", spec)
+        self.assertIn("current M3 fallback", spec)
         self.assertIn("skip the Control `Active Work` / `Next Action` write", manual)
 
     def test_project_sync_and_bootstrap_do_not_own_duplicate_workflow_enum_sets(self):
