@@ -417,7 +417,12 @@ def is_trusted_sync_issue(
     control_trust_service: Any | None = None,
 ) -> bool:
     """Return whether an Issue may drive Project synchronization."""
-    if is_trusted_author(issue):
+    author_decision = github_issue_trust.assess_issue_author(issue)
+    if author_decision == github_issue_trust.EXPECTED_LOGIN_RECONCILIATION_REQUIRED:
+        # A canonical Control lookup must not override contradictory identity
+        # evidence for the allowlisted human principal.
+        return False
+    if author_decision == github_issue_trust.ISSUE_AUTHOR_TRUSTED:
         return True
     repository = _repository_from_control(issue)
     if repository is None or control_trust_service is None:
@@ -1405,16 +1410,35 @@ def run_sync(
             devflow_mcp_core.GitHubReader(token=cfg.maintenance_audit_token)
         )
 
-    if mode == "event-sync" and event_issue and (
-        is_health_issue(event_issue)
-        or not is_trusted_sync_issue(
+    if mode == "event-sync" and event_issue:
+        if is_health_issue(event_issue):
+            print("Project sync run: current=SKIPPED; aggregate=SKIPPED; no Project access", flush=True)
+            return 0
+        if not is_trusted_sync_issue(
             event_issue,
             control_trust_service=control_trust_service,
-        )
-    ):
-        # Only direct trusted-author Issues or canonical verified Repository Controls may drive Project writes.
-        print("Project sync run: current=SKIPPED; aggregate=SKIPPED; no Project access", flush=True)
-        return 0
+        ):
+            # Keep arbitrary Issue content out of logs; emit only the shared
+            # trust decision and a validated positive Issue number.
+            decision = github_issue_trust.assess_issue_author(event_issue)
+            if decision == github_issue_trust.EXPECTED_LOGIN_RECONCILIATION_REQUIRED:
+                issue_number = event_issue.get("number")
+                issue_reference = (
+                    f"; issue={issue_number}"
+                    if type(issue_number) is int and issue_number > 0
+                    else ""
+                )
+                print(
+                    "Project sync run: current=SKIPPED; aggregate=SKIPPED; "
+                    "reason=EXPECTED_LOGIN_RECONCILIATION_REQUIRED"
+                    f"{issue_reference}; no Project access",
+                    flush=True,
+                )
+            else:
+                # Only direct trusted-author Issues or canonical verified
+                # Repository Controls may drive Project writes.
+                print("Project sync run: current=SKIPPED; aggregate=SKIPPED; no Project access", flush=True)
+            return 0
 
     if rest is None and cfg.github_token:
         rest = GitHubREST(cfg.github_token, cfg.repository)
