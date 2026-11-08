@@ -531,7 +531,7 @@ After merge:
 3. update repository-local Current State/specs if needed;
 4. update the devflow Control Issue only when its summary changed;
 5. set `Audit SHA` to an accepted current SHA only when the relevant state has actually been rechecked;
-6. ensure `Active Work` and `Next Action` point to current reality;
+6. do **not** rewrite Control `Active Work` / `Next Action` merely to mirror a local Issue, PR, merge, Review or CI event: read those facts at their GitHub owners. Update only a genuinely changed cross-repository pointer, gate or independent decision, without copying local status history. Until a scoped M3.1 authority admission, retain the existing manual Control fallback for unresolved local-work authority; this is not permission to erase it or infer a complete task inventory;
 7. set the active Execution Session Record to `RELEASED`, `HANDOFF` or `FAILED` with the final checkpoint/next state rather than leaving it apparently running;
 8. allow Project event-sync to update the display layer;
 9. inspect Sync Health when Project synchronization is part of acceptance.
