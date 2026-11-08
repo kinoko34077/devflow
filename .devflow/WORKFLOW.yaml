@@ -185,8 +185,8 @@ repository_control:
     - work_status_changes
     - repository_state_changes
     - cross_repository_priority_or_risk_changes
-    - active_work_reference_changes
-    - next_action_changes
+    - cross_repository_active_work_pointer_or_independent_gate_owner_changes
+    - cross_repository_human_security_or_policy_next_action_changes
     - canonical_entry_points_change
     - p0_or_p1_finding_changes_readiness
     - managed_lifecycle_state_changes
@@ -195,6 +195,7 @@ repository_control:
     - repeated_test_with_same_outcome
     - minor_implementation_comment
     - local_detail_without_cross_repository_state_change
+    - local_issue_pr_merge_review_or_ci_fact_without_independent_cross_repository_change
 
   audit_provenance:
     machine_owned: true
