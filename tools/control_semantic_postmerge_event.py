@@ -596,7 +596,10 @@ def _owner_reconciliation_candidate(
         )
     mentioned = explicit_url or scoped_text
     if not mentioned:
-        return _result("UNKNOWN", "OWNER_NOT_IN_CURRENT_CONTROL", number, repository)
+        # The owning Issue is already proven at its GitHub source. A local
+        # task need not be duplicated in cross-repository Control just to
+        # make an unrelated PR merge appear reconciled.
+        return _result("NOT_APPLICABLE", "OWNER_LOCAL_SOURCE_NOT_CONTROL_CLAIM", number, repository)
     answer = _result(
         "RECONCILIATION_REVIEW_REQUIRED",
         ("CLOSING_ISSUE_WITHOUT_PR_LINK" if closing_owner is not None
@@ -783,10 +786,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if result["status"] in ("ALIGNED", "NOT_APPLICABLE"):
         return 0
-    if result["status"] == "POTENTIAL_MISMATCH":
-        return 2
-    if result["status"] == "RECONCILIATION_REVIEW_REQUIRED":
-        return 4
+    if result["status"] in ("POTENTIAL_MISMATCH", "RECONCILIATION_REVIEW_REQUIRED"):
+        # Native post-merge observations are diagnostic, not a demand to
+        # copy GitHub-native PR stages/owner links into Control. Preserve
+        # strict nonzero exit codes for the separate owner-Issue audit.
+        return 0 if args.owner_issue is None else (2 if result["status"] == "POTENTIAL_MISMATCH" else 4)
     return 3
 
 
