@@ -35,6 +35,7 @@ The server exposes only read operations:
 - `list_managed_repositories()`
 - `get_repository_projection(repository)`
 - `get_repository_work_view(repository)`
+- `get_scoped_task_read(repository, issue_number)`
 - `get_agent_inbox(repository, recipient="claude-code", limit=20, offset=0, work_status=None)`
 - `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None, include_recent_kaep=False, include_published_supply=False)`
 - `get_portfolio_projection()`
@@ -64,6 +65,29 @@ exactly the same `tools.devflow_mcp_core.default_service()` as the stdio MCP:
 python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
+
+### P2a exact TASK read without a full repository Issue inventory
+
+A selected read-only Consumer may ask the same existing Devflow source classifier
+to verify **one** owning Issue using the direct GitHub Issue GET. This does not
+list the target repository's other Issues, depend on their classification or
+pretend to know whether other tasks exist. The trusted devflow Repository Control
+is still checked, and the source author, exact Issue identity, V1/V2 metadata
+and open TASK state pass the existing single-issue classifier.
+
+```sh
+python -m tools.devflow_read_cli scoped-task --repository kinoko34077/devflow --issue-number 477
+```
+
+MCP equivalent: `get_scoped_task_read(repository, issue_number)`. A verified
+open TASK returns `VERIFIED_SCOPED_TASK` plus **one** `task_record`;
+closed/non-TASK/untrusted/invalid source returns no verified task and an explicit
+reason. Source read/identity failure remains `SOURCE_UNAVAILABLE`, not zero
+work. `coverage_status=NOT_EVALUATED_FOR_OTHER_ISSUES` and both
+`can_replace_manual_active_work=false` / `can_authorize_execution=false`
+are invariant. The independent manual Control and Human/security/Claim gates
+remain authoritative where required. Do not use this endpoint as an all-work
+inventory, automatic selection feed or permission to start execution.
 
 The Workspace command combines repository TASK observations, bounded recipient KAEP discovery and published Control candidate evidence. It does not prove there are no historical requests when `has_unknown_work=true`; a published candidate is not a currently claimable Task. The additional flags are optional; for smaller checks or old clients, `work-view` and `inbox` remain valid, and the manual Control/#503 fallback remains in force. Existing operating Codex processes are not silently migrated by updating this document; the new tool must be visible to that client's own MCP registry after its normal refresh. Portfolio-wide discovery starts with existing `get_portfolio_projection()`, which does not authorize widening repository-scoped work or selecting a runnable Task.
 

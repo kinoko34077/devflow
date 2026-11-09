@@ -400,9 +400,6 @@ def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue
         raise DevflowMCPError(
             f"Observed Issue number {observed_number!r} does not match requested #{issue_number} in {requested}."
         )
-    if "pull_request" in issue:
-        raise DevflowMCPError(f"{requested}#{issue_number} is a pull request, not an Issue.")
-
     repositories: set[str] = set()
     issue_numbers: set[int] = set()
     for field in ("repository_url", "url", "html_url"):
@@ -441,6 +438,12 @@ def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue
                 raise _identity_mismatch(requested, f"repository.{key} is invalid") from None
         if not repository_values or repository_values != {requested.casefold()}:
             raise _identity_mismatch(requested, f"repository object {sorted(repository_values)!r}")
+    if "pull_request" in issue:
+        # Validate the full Issue identity before giving a precise PR status.
+        raise DevflowMCPError(
+            f"{requested}#{issue_number} is a pull request, not an Issue.",
+            reason_code="PULL_REQUEST_NOT_TASK",
+        )
 
 
 TRUSTED_AUTHOR_ASSOCIATIONS = github_issue_trust.TRUSTED_AUTHOR_ASSOCIATIONS
@@ -988,6 +991,88 @@ class DevflowService:
             # An empty but complete repository cannot prove a live task cycle.
             "can_replace_manual_active_work": False,
         }
+
+    def get_scoped_task_read(
+        self, repository: str, issue_number: int,
+    ) -> dict[str, Any]:
+        """P2a direct source-owned TASK read: no owning-repo work-list scan.
+
+        Verification is limited to this exact Issue. It never proves that
+        other work is absent, changes the legacy Control authority, or grants
+        execution/Claim/Human/security permissions.
+        """
+        if type(issue_number) is not int or issue_number < 1:
+            raise DevflowMCPError(
+                "Issue number must be a positive integer.",
+                reason_code="INVALID_ISSUE_NUMBER",
+            )
+        normalized = normalize_repository(repository)
+        control = self.get_repository_control(normalized)
+        result: dict[str, Any] = {
+            "repository": normalized,
+            "issue_number": issue_number,
+            "issue_ref": f"{normalized}#{issue_number}",
+            "control_ref": control["url"],
+            "observed_at": self._observed_at_factory(),
+            "source": "DIRECT_GITHUB_ISSUE_GET",
+            "source_status": "UNKNOWN",
+            "source_freshness": "UNKNOWN",
+            "status": "SOURCE_UNAVAILABLE",
+            "reason_code": "SOURCE_READ_UNAVAILABLE",
+            "task_record": None,
+            "coverage_status": "NOT_EVALUATED_FOR_OTHER_ISSUES",
+            "unresolved_open_issue_count": None,
+            "is_full_work_inventory": False,
+            "manual_control": {
+                "active_work": control["active_work"],
+                "next_action": control["next_action"],
+                "canonical_entry_points": control["canonical_entry_points"],
+            },
+            "can_replace_manual_active_work": False,
+            "can_authorize_execution": False,
+            "is_authoritative_assignment": False,
+        }
+        try:
+            issue = self.reader.get_issue(normalized, issue_number)
+            verify_observed_issue_identity(issue, normalized, issue_number)
+            record = repository_projection.classify_issue(issue)
+        except DevflowMCPError as exc:
+            if exc.reason_code == "PULL_REQUEST_NOT_TASK":
+                # Both the real GitHubReader and alternative readers reach
+                # this result only after exact repository/Issue identity proof.
+                result.update(
+                    source_status="AVAILABLE", source_freshness="CURRENT",
+                    status="NOT_A_VERIFIED_OPEN_TASK", reason_code="PULL_REQUEST_NOT_TASK",
+                )
+            # A missing/failed/identity-mismatched exact read cannot be
+            # substituted by a cached list, title guess or Control link.
+            return result
+        except repository_projection.ProjectionContractError:
+            result.update(
+                source_status="UNKNOWN", source_freshness="UNKNOWN",
+                status="SOURCE_UNAVAILABLE", reason_code="ISSUE_SOURCE_INVALID",
+            )
+            return result
+        result.update(source_status="AVAILABLE", source_freshness="CURRENT")
+        if record.state != "open":
+            result.update(
+                status="NOT_A_VERIFIED_OPEN_TASK", reason_code="ISSUE_NOT_OPEN",
+            )
+        elif record.source_kind != "MACHINE" or not record.is_task:
+            result.update(
+                status="NOT_A_VERIFIED_OPEN_TASK",
+                reason_code=(
+                    "UNTRUSTED_OR_INVALID_METADATA"
+                    if record.source_kind in ("UNTRUSTED_METADATA", "INVALID_METADATA")
+                    else "ISSUE_NOT_CLASSIFIED_AS_TASK"
+                ),
+            )
+        else:
+            result.update(
+                status="VERIFIED_SCOPED_TASK", reason_code=None,
+                task_record=self._issue_record_dict(record),
+            )
+        return result
 
     def get_agent_inbox(
         self, repository: str, recipient: str = "claude-code",
