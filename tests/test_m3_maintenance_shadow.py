@@ -395,7 +395,7 @@ class MaintenanceCLIParityTests(unittest.TestCase):
         from scripts import maintenance_audit as cli
 
         control_body = (
-            f"## Repository\n\n" + f"\`{REPOSITORY}\`\n\n"
+            f"## Repository\n\n" + f"`{REPOSITORY}`\n\n"
             + f"## Active Work\n\n{ACTIVE}\n\n"
             + f"## Next Action\n\n{NEXT}\n"
         )
@@ -424,7 +424,7 @@ class MaintenanceCLIParityTests(unittest.TestCase):
                 raise AssertionError(path)
 
         canonical = view(task(status="IMPLEMENTING"))
-        canonical["manual_control"]["next_action"] = NEXT.strip("\`")
+        canonical["manual_control"]["next_action"] = NEXT.strip("`")
         reports = []
         with (
             mock.patch.object(cli, "_token_from_env", return_value="test-token"),
