@@ -574,7 +574,7 @@ class EventSyncCanonicalSelectionTests(unittest.TestCase):
             github_token="repo-token",
         )
         with (
-            mock.patch.object(project_sync, "ensure_audit_freshness_labels", return_value=0),
+            mock.patch.object(project_sync, "ensure_audit_freshness_labels", return_value=0) as ensure_labels,
             mock.patch.object(project_sync, "discover_project", side_effect=lambda *args: snapshot()),
             mock.patch.object(project_sync, "_validate_project_options"),
             mock.patch.object(project_sync, "upsert_health_issue"),
@@ -582,6 +582,10 @@ class EventSyncCanonicalSelectionTests(unittest.TestCase):
             result = project_sync.run_sync(
                 "event-sync", cfg, rest=rest, gql=gql, event_issue=event_issue,
             )
+            if project_sync._is_repository_control(event_issue):
+                ensure_labels.assert_called_once_with(rest)
+            else:
+                ensure_labels.assert_not_called()
         return result, rest, gql
 
     @staticmethod
@@ -596,6 +600,16 @@ class EventSyncCanonicalSelectionTests(unittest.TestCase):
             "user": {"id": 79015263, "login": "kinoko34077"},
             "labels": [],
         }
+
+    def test_control_event_still_ensures_audit_freshness_labels(self):
+        issue = self._trusted_issue("open")
+        issue["title"] = "[REPO] demo"
+        issue["body"] = "## Repository\n\n`kinoko34077/demo`"
+        # Focus on global label definitions; per-Control label mutation
+        # retains its independent existing tests.
+        with mock.patch.object(project_sync, "derive_audit_freshness", return_value=None):
+            result, _, _ = self._run_event(issue, issue)
+        self.assertEqual(result, 0)
 
     def test_closed_untracked_event_does_not_add_project_item(self):
         issue = self._trusted_issue("closed")

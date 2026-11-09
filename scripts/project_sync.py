@@ -1467,7 +1467,14 @@ def run_sync(
             return 2
 
         gql = gql or GitHubGraphQL(cfg.project_token)
-        if mode in {"reconcile", "event-sync"} and rest is not None:
+        # Audit Freshness labels belong to Repository Controls only. Normal
+        # Issue event-sync must not enumerate/create all repo labels as a
+        # side-effect of unrelated Project field synchronization.
+        if rest is not None and (
+            mode == "reconcile"
+            or (mode == "event-sync" and isinstance(event_issue, dict)
+                and _is_repository_control(event_issue))
+        ):
             ensure_audit_freshness_labels(rest)
         if mode == "reconcile":
             ensure_audit_project_fields(gql, cfg.owner, cfg.project_number)
