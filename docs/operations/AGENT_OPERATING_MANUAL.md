@@ -62,7 +62,9 @@ Non-Base repository:
 
 ### Step 4 — Resolve active work
 
-If the Devflow MCP `get_repository_work_view` tool is available, use it after `bootstrap_repository` when resolving local open TASKs: its untruncated live M1 `task_records` and explicit `view_mode`/`coverage_status` tell whether machine evidence is complete. Regardless of mode, keep reading canonical owning Issues and the Control's `manual_control`; `MACHINE_COMPLETE_SHADOW` does **not** retire manual Active Work authority and cannot grant claims. On an absent/malformed/untrusted Control or unavailable/partial source, do not conclude there is no work; hold source-dependent decisions and follow trusted manual Control/local Issues instead.
+For a **known exact repository-local Issue number**, prefer the accepted read-only Devflow MCP `get_scoped_task_read(repository, issue_number)` (CLI: `scoped-task`) after `bootstrap_repository`. It verifies that Issue directly without listing unrelated open Issues. Accept `VERIFIED_SCOPED_TASK` only for that exact trusted, current open TASK; use its owning Issue for status/detail. `NOT_A_VERIFIED_OPEN_TASK` or `SOURCE_UNAVAILABLE` must retain the local Issue/manual Control fallback, **not** imply that no work exists. This P2a preference does not assert a complete work inventory or authorize assignment/Claim/Human/security decisions.
+
+When the task reference is **not known** or an actual inventory/absence-of-other-work decision is required, use `get_repository_work_view` if available: its full-state M1 `task_records` and explicit `view_mode`/`coverage_status` distinguish observed TASKs from unresolved Issues. Do not promote a partial inventory to COMPLETE. Regardless of read mode, keep reading canonical owning Issues and the Control's `manual_control`; `MACHINE_COMPLETE_SHADOW` does **not** retire manual Active Work authority and cannot grant claims. On an absent/malformed/untrusted Control or unavailable/partial source, do not conclude there is no work; hold source-dependent decisions and follow trusted manual Control/local Issues instead.
 
 If `Active Work` references a local Issue, Work Order or PR, open it before creating a duplicate.
 
