@@ -624,6 +624,13 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(parallel["machine"]["status"], "OBSERVED_PARTIAL")
         self.assertEqual(len(parallel["machine"]["tasks"]), 1)
         self.assertEqual(parallel["machine"]["unresolved_open_issue_count"], 1)
+        scoped = view["scoped_known_task_read"]
+        self.assertEqual(scoped["precedence"], "LIVE_SOURCE_FOR_EXACT_KNOWN_TASKS")
+        self.assertEqual(scoped["record_field"], "task_records")
+        self.assertEqual(scoped["unresolved_open_issue_count"], 1)
+        self.assertFalse(scoped["covers_all_local_work"])
+        self.assertFalse(scoped["can_replace_manual_active_work"])
+        self.assertFalse(scoped["can_authorize_execution"])
         self.assertEqual(parallel["link_crosscheck"]["linked_known_machine_tasks"], [])
         self.assertFalse(parallel["can_replace_manual_active_work"])
 
@@ -699,6 +706,10 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertFalse(view["can_replace_manual_active_work"])
         self.assertFalse(view["observed_task_view"]["can_replace_manual_active_work"])
         self.assertFalse(view["observed_task_view"]["can_authorize_execution"])
+        scoped = view["scoped_known_task_read"]
+        self.assertEqual(scoped["precedence"], "LIVE_SOURCE_FOR_EXACT_KNOWN_TASKS")
+        self.assertTrue(scoped["covers_all_local_work"])
+        self.assertFalse(scoped["can_replace_manual_active_work"])
 
     def test_m3_parallel_unavailable_is_unknown_not_empty(self):
         control = self._control("demo", 70)
@@ -719,6 +730,10 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertIsNone(parallel["link_crosscheck"]["known_machine_tasks_not_manually_referenced"])
         self.assertFalse(parallel["link_crosscheck"]["semantic_equivalence_proven"])
         self.assertFalse(parallel["can_replace_manual_active_work"])
+        scoped = view["scoped_known_task_read"]
+        self.assertEqual(scoped["precedence"], "SOURCE_UNAVAILABLE")
+        self.assertIsNone(scoped["unresolved_open_issue_count"])
+        self.assertFalse(scoped["covers_all_local_work"])
 
     def test_m3_local_work_view_partial_and_untrusted_fall_back(self):
         control = self._control("demo", 70)
@@ -744,6 +759,21 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         })
         self.assertEqual(len(view["task_records"]), 1)
         self.assertFalse(view["can_replace_manual_active_work"])
+
+    def test_m3_scoped_no_known_task_never_means_all_work_absent(self):
+        control = self._control("demo", 70)
+        unknown = self._task_issue(2, author_association="NONE")
+        view = devflow_mcp_core.DevflowService(
+            FakeReader([], issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                "kinoko34077/demo": [unknown],
+            })
+        ).get_repository_work_view("demo")
+        scoped = view["scoped_known_task_read"]
+        self.assertEqual(scoped["precedence"], "NO_VERIFIED_TASK_SCOPE")
+        self.assertEqual(scoped["unresolved_open_issue_count"], 1)
+        self.assertFalse(scoped["covers_all_local_work"])
+        self.assertFalse(scoped["can_replace_manual_active_work"])
 
     def test_m3_local_work_view_unavailable_falls_back_not_empty_success(self):
         control = self._control("demo", 70)

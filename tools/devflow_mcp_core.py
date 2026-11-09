@@ -943,6 +943,28 @@ class DevflowService:
             "source_error": projection.source_error,
             "coverage_status": coverage,
             "observed_task_view": observed_task_view,
+            # P2 scoped read precedence: an admitted read-only consumer can
+            # use the live, verified records for their EXACT Issue refs even
+            # when other open Issues remain unclassified. This is NOT a
+            # complete work-inventory or local-work authority switch.
+            # task_records is the sole record payload; do not copy the data.
+            "scoped_known_task_read": {
+                "precedence": (
+                    "LIVE_SOURCE_FOR_EXACT_KNOWN_TASKS"
+                    if source_is_current and projection.task_records
+                    else "NO_VERIFIED_TASK_SCOPE"
+                    if source_is_current
+                    else "SOURCE_UNAVAILABLE"
+                ),
+                "record_field": "task_records",
+                "scope": "VERIFIED_KNOWN_TASK_REFERENCES_ONLY",
+                "covers_all_local_work": complete,
+                "unresolved_open_issue_count": (
+                    unresolved if source_is_current else None
+                ),
+                "can_replace_manual_active_work": False,
+                "can_authorize_execution": False,
+            },
             "parallel_read": parallel_read,
             "machine_task_count": projection.machine_task_count,
             "legacy_hint_count": projection.legacy_hint_count,
@@ -1475,6 +1497,8 @@ class DevflowService:
                         view["observed_task_view"]["unresolved_open_issue_count"]
                     ),
                     "claimability": "NOT_EVALUATED",
+                    "scoped_read_precedence": view["scoped_known_task_read"]["precedence"],
+                    "scoped_read_record_field": view["scoped_known_task_read"]["record_field"],
                 },
                 "offers": {
                     **not_integrated,
