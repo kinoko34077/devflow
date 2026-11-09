@@ -669,6 +669,9 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
     def test_m3_source_task_gates_survive_work_view_and_exact_read(self):
         control = self._control("demo", 70)
         source_issue = self._task_issue(7)
+        source_issue["repository_url"] = (
+            "https://api.github.com/repos/kinoko34077/demo"
+        )
         payload = {
             "schema_version": 1, "record_role": "TASK", "type": "BUG",
             "work_status": "BLOCKED", "scope_ready": False,
@@ -678,6 +681,9 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         }
         source_issue["body"] = repository_projection.render_issue_metadata_v1(payload)
         untrusted = self._task_issue(8, author_association="NONE")
+        untrusted["repository_url"] = (
+            "https://api.github.com/repos/kinoko34077/demo"
+        )
         reader = FakeReader([], issues_by_repository={
             devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
             "kinoko34077/demo": [source_issue, untrusted],
