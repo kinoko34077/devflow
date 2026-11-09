@@ -1497,6 +1497,8 @@ class DevflowService:
                         view["observed_task_view"]["unresolved_open_issue_count"]
                     ),
                     "claimability": "NOT_EVALUATED",
+                    "scoped_read_precedence": view["scoped_known_task_read"]["precedence"],
+                    "scoped_read_record_field": view["scoped_known_task_read"]["record_field"],
                 },
                 "offers": {
                     **not_integrated,
