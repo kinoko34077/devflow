@@ -171,8 +171,10 @@ def _repository(args: argparse.Namespace) -> int:
                 devflow_mcp_core.GitHubReader(token=token),
             )
             m3_view = service.get_repository_work_view(args.repository)
-        except (devflow_mcp_core.DevflowMCPError, OSError, ValueError):
-            # The existing shadow fails closed on an unavailable source.
+        except Exception:
+            # This GET-only advisory read may fail on malformed responses or
+            # transport/parser errors. Keep the normal Maintenance report
+            # available; never use this optional read for action authority.
             m3_view = None
     observation = collect_repository(
         transport,
@@ -187,7 +189,11 @@ def _repository(args: argparse.Namespace) -> int:
         if not isinstance(shadow, dict):
             shadow = {
                 "status": "MANUAL_CONTROL_FALLBACK",
-                "reason": "MACHINE_SOURCE_UNAVAILABLE",
+                "reason": (
+                    "MACHINE_SOURCE_UNAVAILABLE"
+                    if m3_view is None
+                    else "CONTROL_OR_OWNER_NOT_VERIFIED"
+                ),
                 "can_replace_manual_active_work": False,
             }
         report["m3_read_parity"] = {
