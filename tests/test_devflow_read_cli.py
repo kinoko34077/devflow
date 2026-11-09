@@ -28,6 +28,16 @@ class FakeService:
             "can_authorize_execution": False,
         }
 
+    def get_scoped_task_read(self, repository, issue_number):
+        self.calls.append(("scoped-task", repository, issue_number))
+        return {
+            "repository": repository, "issue_number": issue_number,
+            "status": "VERIFIED_SCOPED_TASK",
+            "coverage_status": "NOT_EVALUATED_FOR_OTHER_ISSUES",
+            "task_record": {"issue_number": issue_number, "record_role": "TASK"},
+            "can_authorize_execution": False, "can_replace_manual_active_work": False,
+        }
+
     def get_agent_inbox(self, repository, recipient, *, limit, offset, work_status):
         self.calls.append(("inbox", repository, recipient, limit, offset, work_status))
         return {
@@ -96,6 +106,35 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(result["observed_task_view"]["unresolved_open_issue_count"], 87)
         self.assertFalse(result["can_authorize_execution"])
         self.assertEqual(service.calls, [("work-view", self.REPOSITORY)])
+
+    def test_scoped_task_cli_delegates_exact_issue_without_full_inventory(self):
+        service = FakeService()
+        output = cli.read_operation(
+            service, operation="scoped-task",
+            repository=self.REPOSITORY, issue_number=477)
+        self.assertEqual(service.calls, [("scoped-task", self.REPOSITORY, 477)])
+        self.assertEqual(output["status"], "VERIFIED_SCOPED_TASK")
+        self.assertEqual(output["task_record"]["issue_number"], 477)
+        self.assertFalse(output["can_authorize_execution"])
+        self.assertFalse(output["can_replace_manual_active_work"])
+        for bad in (None, True, -1, 0, "477"):
+            with self.subTest(issue_number=bad):
+                with self.assertRaisesRegex(ValueError, "INVALID_ISSUE_NUMBER"):
+                    cli.read_operation(
+                        service, operation="scoped-task",
+                        repository=self.REPOSITORY, issue_number=bad)
+        self.assertEqual(len(service.calls), 1)
+
+    def test_scoped_task_cli_main_route(self):
+        service = FakeService()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as output:
+                rc = cli.main(["scoped-task", "--repository", self.REPOSITORY,
+                               "--issue-number", "477"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(output.call_args.args[0])["status"],
+                         "VERIFIED_SCOPED_TASK")
+        self.assertEqual(service.calls, [("scoped-task", self.REPOSITORY, 477)])
 
     def test_inbox_forwards_codex_paging_and_keeps_unknown_empty_distinction(self):
         service = FakeService()
