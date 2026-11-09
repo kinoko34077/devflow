@@ -798,6 +798,19 @@ def collect_repository(
 
     body = str(control.get("body") or "")
     sections = _sections(body)
+    # Shadow-only semantic comparison must use the SAME canonical scalar
+    # parsing as Devflow MCP Work View. The normal Maintenance extractor
+    # preserves Markdown wrapping backticks in e.g. Next Action, whereas the
+    # MCP's canonical parser removes them; a formatting-only difference is
+    # not a Control revision conflict. Duplicates still fail closed.
+    shadow_sections = None
+    if m3_work_view is not None:
+        try:
+            shadow_sections = devflow_mcp_core.parse_sections(
+                body, reject_duplicates=True,
+            )
+        except devflow_mcp_core.DevflowMCPError:
+            shadow_sections = {}
     try:
         WORKFLOW_CONTRACT.validate_repository_control_sections(sections)
     except workflow_contract.WorkflowContractError as exc:
@@ -878,7 +891,7 @@ def collect_repository(
         if m3_work_view is not None:
             result["m3_shadow"] = _m3_owner_shadow(
                 m3_work_view, repository=repository, control_ref=control_ref,
-                sections=sections, trusted=trusted, source_status=source_status,
+                sections=shadow_sections, trusted=trusted, source_status=source_status,
                 manual_owner_ref=None,
             )
         return result
@@ -955,7 +968,7 @@ def collect_repository(
     if m3_work_view is not None:
         result["m3_shadow"] = _m3_owner_shadow(
             m3_work_view, repository=repository, control_ref=control_ref,
-            sections=sections, trusted=trusted, source_status=source_status,
+            sections=shadow_sections, trusted=trusted, source_status=source_status,
             manual_owner_ref=owner_ref,
         )
     return result
