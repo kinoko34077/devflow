@@ -74,6 +74,12 @@ def get_repository_work_view(repository: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_scoped_task_read(repository: str, issue_number: int) -> dict[str, Any]:
+    """Direct read-only verification of one exact owning TASK Issue; never assert all work or grant claims."""
+    return _service().get_scoped_task_read(repository, issue_number)
+
+
+@mcp.tool()
 def get_agent_inbox(
     repository: str, recipient: str = "claude-code",
     limit: int = 20, offset: int = 0, work_status: str | None = None,
