@@ -44,7 +44,10 @@ def view(*records):
     }
 
 
-def shadow(work_view, manual_owner_ref=OWNER_REF, *, trusted=True, source_status="OK"):
+def shadow(
+    work_view, manual_owner_ref=OWNER_REF, *, trusted=True,
+    source_status="OK", legacy_owner_work_status="AWAITING_REVIEW",
+):
     return mg._m3_owner_shadow(
         work_view,
         repository=REPOSITORY,
@@ -53,6 +56,7 @@ def shadow(work_view, manual_owner_ref=OWNER_REF, *, trusted=True, source_status
         trusted=trusted,
         source_status=source_status,
         manual_owner_ref=manual_owner_ref,
+        legacy_owner_work_status=legacy_owner_work_status,
     )
 
 
@@ -60,10 +64,34 @@ class M3OwnerShadowTests(unittest.TestCase):
     def test_review_and_blocked_are_retained_without_runtime_authority(self):
         for state in ("READY_FOR_IMPLEMENTATION", "IMPLEMENTING", "AWAITING_REVIEW", "BLOCKED", "DONE"):
             with self.subTest(state=state):
-                result = shadow(view(task(status=state)))
+                result = shadow(
+                    view(task(status=state)),
+                    legacy_owner_work_status=state,
+                )
                 self.assertEqual(result["status"], "MATCHED_SHADOW")
+                self.assertEqual(
+                    result["reason"], "SAME_SINGLE_OWNER_AND_WORK_STATUS",
+                )
                 self.assertEqual(result["machine_task_refs"], [OWNER_REF])
                 self.assertFalse(result["can_replace_manual_active_work"])
+
+    def test_same_owner_reference_does_not_hide_missing_or_conflicting_status(self):
+        current = view(task(status="IMPLEMENTING"))
+        missing = shadow(current, legacy_owner_work_status=None)
+        self.assertEqual(missing["status"], "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(missing["reason"], "OWNER_STATUS_NOT_VERIFIED")
+        self.assertIsNone(missing["legacy_owner_work_status"])
+        self.assertEqual(missing["machine_owner_work_status"], "IMPLEMENTING")
+        mismatch = shadow(current, legacy_owner_work_status="AWAITING_REVIEW")
+        self.assertEqual(mismatch["status"], "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(mismatch["reason"], "MANUAL_MACHINE_STATUS_DISAGREEMENT")
+        self.assertEqual(mismatch["machine_owner_work_status"], "IMPLEMENTING")
+        self.assertEqual(mismatch["legacy_owner_work_status"], "AWAITING_REVIEW")
+        self.assertFalse(missing["can_replace_manual_active_work"])
+        self.assertFalse(mismatch["can_replace_manual_active_work"])
+        matched = shadow(current, legacy_owner_work_status="IMPLEMENTING")
+        self.assertEqual(matched["status"], "MATCHED_SHADOW")
+        self.assertFalse(matched["can_replace_manual_active_work"])
 
     def test_multiple_full_state_tasks_never_become_one_maintenance_owner(self):
         result = shadow(view(task(), task(31, "BLOCKED")))
@@ -187,6 +215,55 @@ class M3OwnerShadowTests(unittest.TestCase):
         )
         self.assertFalse(conflict["m3_shadow"]["can_replace_manual_active_work"])
         self.assertEqual(ma.classify_repository(conflict), baseline)
+
+    def test_collector_never_calls_matching_owner_status_parity_on_missing_heading(self):
+        body = (
+            f"## Repository\\n\\n`{REPOSITORY}`\\n\\n"
+            f"## Active Work\\n\\n{ACTIVE}\\n\\n"
+            f"## Next Action\\n\\n{NEXT}\\n"
+        )
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/32"):
+                    return {
+                        "number": 32, "title": "[REPO] testapp", "state": "open",
+                        "html_url": CONTROL_URL, "body": body,
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-10-12T07:00:00Z",
+                    }
+                if path.endswith("/issues/30"):
+                    return {
+                        "number": 30, "title": "M3 genuine Issue metadata only",
+                        "state": "open",
+                        "html_url": f"https://github.com/{REPOSITORY}/issues/30",
+                        "body": "## Scope\\n\\nThe Work Status is in trusted V1 metadata.",
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-10-12T07:00:00Z",
+                    }
+                raise AssertionError(path)
+
+        canonical = view(task(status="IMPLEMENTING"))
+        canonical["manual_control"]["next_action"] = NEXT.strip("`")
+        baseline = mg.collect_repository(
+            Transport(), REPOSITORY, CONTROL_REF, "2026-10-12T07:01:00Z",
+        )
+        observed = mg.collect_repository(
+            Transport(), REPOSITORY, CONTROL_REF, "2026-10-12T07:01:00Z",
+            m3_work_view=canonical,
+        )
+        self.assertEqual(
+            observed["m3_shadow"]["reason"], "OWNER_STATUS_NOT_VERIFIED",
+        )
+        self.assertFalse(observed["m3_shadow"]["can_replace_manual_active_work"])
+        observed.pop("m3_shadow")
+        self.assertEqual(observed, baseline)
+        self.assertEqual(
+            ma.classify_repository(observed),
+            ma.classify_repository(baseline),
+        )
 
     def test_mismatched_optional_view_does_not_change_maintenance_result(self):
         control = (
