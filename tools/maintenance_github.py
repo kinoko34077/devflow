@@ -600,18 +600,23 @@ def _m3_owner_shadow(
     trusted: bool,
     source_status: str,
     manual_owner_ref: str | None,
+    legacy_owner_work_status: str | None,
 ) -> dict[str, object]:
     """Compare a live all-state M1 read view to legacy single-owner evidence.
 
     Strictly observational. Never use this result for Maintenance classification,
     task supply, execution claims or authority removal.
     """
-    def fallback(reason: str) -> dict[str, object]:
+    def fallback(
+        reason: str, *, machine_owner_work_status: str | None = None,
+    ) -> dict[str, object]:
         return {
             "status": "MANUAL_CONTROL_FALLBACK",
             "reason": reason,
             "machine_task_refs": [],
             "manual_owner_ref": manual_owner_ref,
+            "legacy_owner_work_status": legacy_owner_work_status,
+            "machine_owner_work_status": machine_owner_work_status,
             "can_replace_manual_active_work": False,
         }
 
@@ -681,7 +686,22 @@ def _m3_owner_shadow(
     if len(refs) > 1:
         status, reason = "MULTIPLE_TASKS_SHADOW", "ONE_OWNER_CONTRACT_INSUFFICIENT"
     elif len(refs) == 1 and manual_owner_ref == refs[0]:
-        status, reason = "MATCHED_SHADOW", "SAME_SINGLE_OWNER"
+        # The old Maintenance consumer derives work status from the
+        # optional Markdown Work Status heading, while the canonical M1
+        # reader derives it from trusted V1 Issue metadata. Matching Issue
+        # URLs alone must not certify semantic status equivalence for P3.
+        machine_status = records[0]["work_status"]
+        if not legacy_owner_work_status:
+            return fallback(
+                "OWNER_STATUS_NOT_VERIFIED",
+                machine_owner_work_status=machine_status,
+            )
+        if legacy_owner_work_status != machine_status:
+            return fallback(
+                "MANUAL_MACHINE_STATUS_DISAGREEMENT",
+                machine_owner_work_status=machine_status,
+            )
+        status, reason = "MATCHED_SHADOW", "SAME_SINGLE_OWNER_AND_WORK_STATUS"
     elif not refs and manual_owner_ref is None:
         status, reason = "MATCHED_EMPTY_SHADOW", "NO_OPEN_TASKS"
     else:
@@ -691,6 +711,10 @@ def _m3_owner_shadow(
         "reason": reason,
         "machine_task_refs": refs,
         "manual_owner_ref": manual_owner_ref,
+        "legacy_owner_work_status": legacy_owner_work_status,
+        "machine_owner_work_status": (
+            records[0]["work_status"] if len(records) == 1 else None
+        ),
         "can_replace_manual_active_work": False,
     }
 
@@ -892,7 +916,7 @@ def collect_repository(
             result["m3_shadow"] = _m3_owner_shadow(
                 m3_work_view, repository=repository, control_ref=control_ref,
                 sections=shadow_sections, trusted=trusted, source_status=source_status,
-                manual_owner_ref=None,
+                manual_owner_ref=None, legacy_owner_work_status=None,
             )
         return result
 
@@ -970,6 +994,7 @@ def collect_repository(
             m3_work_view, repository=repository, control_ref=control_ref,
             sections=shadow_sections, trusted=trusted, source_status=source_status,
             manual_owner_ref=owner_ref,
+            legacy_owner_work_status=work_status or None,
         )
     return result
 
