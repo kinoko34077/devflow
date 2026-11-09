@@ -27,6 +27,9 @@ permissions:
 
 jobs:
   actor-admission:
+    # Ordinary comments are not sync commands. Skip the runner entirely;
+    # eligible command comments still face the existing strict actor gate.
+    if: ${{ github.event_name != 'issue_comment' || (github.event.comment.body == '/kinotch sync verify' || github.event.comment.body == '/kinotch sync reconcile') }}
     # Untrusted issue/dispatch events see only this no-secret, read-only job.
     # Its output is NOT Control provenance; the sync script verifies that separately.
     runs-on: ubuntu-latest

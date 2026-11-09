@@ -435,6 +435,30 @@ class EventActorAdmissionTests(unittest.TestCase):
         self.assertFalse(invoke({"repository": REPO, "sender": OWNER, "inputs": {"mode": "publish"}}, name="workflow_dispatch"))
         self.assertFalse(invoke({"repository": REPO, "sender": OUTSIDER, "inputs": {"mode": "verify"}}, name="workflow_dispatch"))
 
+    def test_project_sync_workflow_skips_non_command_comments_before_runner(self):
+        workflow = (
+            Path(__file__).parents[1] / ".github" / "workflows" / "project-sync.yml"
+        ).read_text(encoding="utf-8")
+        actor_job = workflow.split("  actor-admission:\n", 1)[1].split("  sync:\n", 1)[0]
+        self.assertIn("github.event_name != 'issue_comment'", actor_job)
+        self.assertIn(
+            "github.event.comment.body == '/kinotch sync verify'",
+            actor_job,
+        )
+        self.assertIn(
+            "github.event.comment.body == '/kinotch sync reconcile'",
+            actor_job,
+        )
+        # A job-level skip is only an optimization. Exact command events
+        # still run the no-secret Python identity gate before sync secrets.
+        self.assertIn("run: python tools/project_sync_event_admission.py", actor_job)
+        self.assertNotIn("PROJECTS_TOKEN", actor_job)
+        self.assertNotIn("MAINTENANCE_AUDIT_TOKEN", actor_job)
+        self.assertIn(
+            "needs.actor-admission.outputs.admitted == 'true'",
+            workflow.split("  sync:\n", 1)[1],
+        )
+
     def test_read_only_preauthorization_payload_and_workflow_contract(self):
         event = issue_event()
         with tempfile.TemporaryDirectory() as folder:
