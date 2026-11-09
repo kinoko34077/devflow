@@ -321,7 +321,8 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
 
     def test_scoped_task_reads_only_exact_issue_and_works_with_other_unknown_issues(self):
         control = self._control("demo", 70)
-        issue = self._task_issue(477)
+        issue = {**self._task_issue(477),
+                 "repository_url": "https://api.github.com/repos/kinoko34077/demo"}
         unknown = {**self._task_issue(478), "body": "unclassified real work"}
         reader = FakeReader([], issues_by_repository={
             devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
@@ -346,10 +347,13 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
 
     def test_scoped_task_fail_closed_for_non_task_untrusted_invalid_closed_and_pr(self):
         control = self._control("demo", 70)
-        valid = self._task_issue(7)
+        valid = {**self._task_issue(7),
+                 "repository_url": "https://api.github.com/repos/kinoko34077/demo"}
         candidates = (
             ({**valid, "body": "ordinary unknown Issue"}, "ISSUE_NOT_CLASSIFIED_AS_TASK"),
-            (self._task_issue(7, author_association="NONE"), "UNTRUSTED_OR_INVALID_METADATA"),
+            ({**self._task_issue(7, author_association="NONE"),
+              "repository_url": "https://api.github.com/repos/kinoko34077/demo"},
+             "UNTRUSTED_OR_INVALID_METADATA"),
             ({**valid, "body": valid["body"] + "\n"
               + repository_projection.ISSUE_METADATA_MARKER_BEGIN}, "UNTRUSTED_OR_INVALID_METADATA"),
             ({**valid, "state": "closed"}, "ISSUE_NOT_OPEN"),
@@ -372,6 +376,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
     def test_scoped_task_unknown_source_and_identity_mismatch_keep_manual_fallback(self):
         control = self._control("demo", 70)
         for issue in (None, {**self._task_issue(7),
+                             "repository_url": "https://api.github.com/repos/kinoko34077/demo",
                              "html_url": "https://github.com/kinoko34077/other/issues/7"}):
             class SourceReader(FakeReader):
                 def get_issue(self, repository, issue_number):
