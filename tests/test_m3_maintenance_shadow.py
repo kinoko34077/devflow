@@ -156,9 +156,14 @@ class M3OwnerShadowTests(unittest.TestCase):
         self.assertNotIn("m3_shadow", no_shadow)
         baseline = ma.classify_repository(no_shadow)
         transport = Transport()
+        # Work View's canonical parser strips the enclosing Markdown ticks
+        # from the Control's scalar Next Action. The Maintenance collector
+        # must not misdiagnose that formatting as a changed Control revision.
+        canonical_view = view(task())
+        canonical_view["manual_control"]["next_action"] = NEXT.strip("`")
         with_shadow = mg.collect_repository(
             transport, REPOSITORY, CONTROL_REF, "2026-10-12T07:01:00Z",
-            m3_work_view=view(task()),
+            m3_work_view=canonical_view,
         )
         self.assertEqual(with_shadow["m3_shadow"]["status"], "MATCHED_SHADOW")
         self.assertEqual(transport.paths, [
@@ -167,6 +172,21 @@ class M3OwnerShadowTests(unittest.TestCase):
         with_shadow.pop("m3_shadow")
         self.assertEqual(no_shadow, with_shadow)
         self.assertEqual(ma.classify_repository(with_shadow), baseline)
+
+        changed = copy.deepcopy(canonical_view)
+        changed["manual_control"]["next_action"] = "[WAIT] A different Human gate."
+        conflict = mg.collect_repository(
+            Transport(), REPOSITORY, CONTROL_REF, "2026-10-12T07:01:00Z",
+            m3_work_view=changed,
+        )
+        self.assertEqual(
+            conflict["m3_shadow"]["status"], "MANUAL_CONTROL_FALLBACK",
+        )
+        self.assertEqual(
+            conflict["m3_shadow"]["reason"], "MANUAL_CONTROL_REVISION_MISMATCH",
+        )
+        self.assertFalse(conflict["m3_shadow"]["can_replace_manual_active_work"])
+        self.assertEqual(ma.classify_repository(conflict), baseline)
 
     def test_mismatched_optional_view_does_not_change_maintenance_result(self):
         control = (
