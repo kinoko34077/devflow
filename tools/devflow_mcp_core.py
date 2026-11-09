@@ -1031,13 +1031,14 @@ class DevflowService:
         }
         try:
             issue = self.reader.get_issue(normalized, issue_number)
-            verify_observed_issue_identity(issue, normalized, issue_number)
+            # Direct GitHubReader already rejects PRs; also deny them on the
+            # alternative read-only service-reader path before classification.
             if "pull_request" in issue:
                 result.update(
-                    source_status="AVAILABLE", source_freshness="CURRENT",
                     status="NOT_A_VERIFIED_OPEN_TASK", reason_code="PULL_REQUEST_NOT_TASK",
                 )
                 return result
+            verify_observed_issue_identity(issue, normalized, issue_number)
             record = repository_projection.classify_issue(issue)
         except DevflowMCPError:
             # A missing/failed/identity-mismatched exact read cannot be
