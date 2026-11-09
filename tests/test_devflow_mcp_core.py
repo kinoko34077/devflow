@@ -319,6 +319,86 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             ),
         }
 
+    def test_scoped_task_reads_only_exact_issue_and_works_with_other_unknown_issues(self):
+        control = self._control("demo", 70)
+        issue = self._task_issue(477)
+        unknown = {**self._task_issue(478), "body": "unclassified real work"}
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [issue, unknown],
+        })
+        result = devflow_mcp_core.DevflowService(reader).get_scoped_task_read("demo", 477)
+        self.assertEqual(result["status"], "VERIFIED_SCOPED_TASK")
+        self.assertEqual(result["task_record"]["issue_number"], 477)
+        self.assertEqual(result["task_record"]["work_status"], "READY_FOR_IMPLEMENTATION")
+        self.assertEqual(result["source"], "DIRECT_GITHUB_ISSUE_GET")
+        self.assertEqual(result["source_freshness"], "CURRENT")
+        self.assertEqual(result["coverage_status"], "NOT_EVALUATED_FOR_OTHER_ISSUES")
+        self.assertIsNone(result["unresolved_open_issue_count"])
+        self.assertFalse(result["is_full_work_inventory"])
+        self.assertFalse(result["can_replace_manual_active_work"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["is_authoritative_assignment"])
+        self.assertIn(("kinoko34077/demo", 477), reader.calls)
+        self.assertNotIn(("kinoko34077/demo", "open"), reader.calls)
+        self.assertNotIn(("kinoko34077/demo", 478), reader.calls)
+        self.assertIn(("kinoko34077/devflow", "open"), reader.calls)
+
+    def test_scoped_task_fail_closed_for_non_task_untrusted_invalid_closed_and_pr(self):
+        control = self._control("demo", 70)
+        valid = self._task_issue(7)
+        candidates = (
+            ({**valid, "body": "ordinary unknown Issue"}, "ISSUE_NOT_CLASSIFIED_AS_TASK"),
+            (self._task_issue(7, author_association="NONE"), "UNTRUSTED_OR_INVALID_METADATA"),
+            ({**valid, "body": valid["body"] + "\n"
+              + repository_projection.ISSUE_METADATA_MARKER_BEGIN}, "UNTRUSTED_OR_INVALID_METADATA"),
+            ({**valid, "state": "closed"}, "ISSUE_NOT_OPEN"),
+            ({**valid, "pull_request": {"url": "https://example.invalid/pulls/7"}},
+             "PULL_REQUEST_NOT_TASK"),
+        )
+        for issue, reason in candidates:
+            with self.subTest(reason=reason):
+                reader = FakeReader([], issues_by_repository={
+                    devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                    "kinoko34077/demo": [issue],
+                })
+                result = devflow_mcp_core.DevflowService(reader).get_scoped_task_read("demo", 7)
+                self.assertEqual(result["status"], "NOT_A_VERIFIED_OPEN_TASK")
+                self.assertEqual(result["reason_code"], reason)
+                self.assertIsNone(result["task_record"])
+                self.assertFalse(result["can_authorize_execution"])
+                self.assertFalse(result["is_full_work_inventory"])
+
+    def test_scoped_task_unknown_source_and_identity_mismatch_keep_manual_fallback(self):
+        control = self._control("demo", 70)
+        for issue in (None, {**self._task_issue(7),
+                             "html_url": "https://github.com/kinoko34077/other/issues/7"}):
+            class SourceReader(FakeReader):
+                def get_issue(self, repository, issue_number):
+                    self.calls.append((repository, issue_number))
+                    if issue is None:
+                        raise devflow_mcp_core.DevflowMCPError("source unavailable")
+                    return issue
+            reader = SourceReader([], issues_by_repository={
+                devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            })
+            result = devflow_mcp_core.DevflowService(reader).get_scoped_task_read("demo", 7)
+            self.assertEqual(result["status"], "SOURCE_UNAVAILABLE")
+            self.assertEqual(result["source_freshness"], "UNKNOWN")
+            self.assertIsNone(result["task_record"])
+            self.assertIn("next_action", result["manual_control"])
+            self.assertFalse(result["can_replace_manual_active_work"])
+            self.assertNotIn(("kinoko34077/demo", "open"), reader.calls)
+
+    def test_scoped_task_rejects_invalid_issue_numbers_before_read(self):
+        reader = FakeReader([])
+        service = devflow_mcp_core.DevflowService(reader)
+        for value in (True, 0, -1, "477"):
+            with self.subTest(value=value):
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+                    service.get_scoped_task_read("demo", value)
+        self.assertEqual(reader.calls, [])
+
     def test_repository_projection_reads_managed_repository_directly(self):
         control = self._control("demo", 70)
         issue = self._task_issue(1)
