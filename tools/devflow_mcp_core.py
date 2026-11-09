@@ -400,9 +400,6 @@ def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue
         raise DevflowMCPError(
             f"Observed Issue number {observed_number!r} does not match requested #{issue_number} in {requested}."
         )
-    if "pull_request" in issue:
-        raise DevflowMCPError(f"{requested}#{issue_number} is a pull request, not an Issue.")
-
     repositories: set[str] = set()
     issue_numbers: set[int] = set()
     for field in ("repository_url", "url", "html_url"):
@@ -441,6 +438,12 @@ def verify_observed_issue_identity(issue: dict[str, Any], repository: str, issue
                 raise _identity_mismatch(requested, f"repository.{key} is invalid") from None
         if not repository_values or repository_values != {requested.casefold()}:
             raise _identity_mismatch(requested, f"repository object {sorted(repository_values)!r}")
+    if "pull_request" in issue:
+        # Validate the full Issue identity before giving a precise PR status.
+        raise DevflowMCPError(
+            f"{requested}#{issue_number} is a pull request, not an Issue.",
+            reason_code="PULL_REQUEST_NOT_TASK",
+        )
 
 
 TRUSTED_AUTHOR_ASSOCIATIONS = github_issue_trust.TRUSTED_AUTHOR_ASSOCIATIONS
@@ -1031,16 +1034,16 @@ class DevflowService:
         }
         try:
             issue = self.reader.get_issue(normalized, issue_number)
-            # Direct GitHubReader already rejects PRs; also deny them on the
-            # alternative read-only service-reader path before classification.
-            if "pull_request" in issue:
-                result.update(
-                    status="NOT_A_VERIFIED_OPEN_TASK", reason_code="PULL_REQUEST_NOT_TASK",
-                )
-                return result
             verify_observed_issue_identity(issue, normalized, issue_number)
             record = repository_projection.classify_issue(issue)
-        except DevflowMCPError:
+        except DevflowMCPError as exc:
+            if exc.reason_code == "PULL_REQUEST_NOT_TASK":
+                # Both the real GitHubReader and alternative readers reach
+                # this result only after exact repository/Issue identity proof.
+                result.update(
+                    source_status="AVAILABLE", source_freshness="CURRENT",
+                    status="NOT_A_VERIFIED_OPEN_TASK", reason_code="PULL_REQUEST_NOT_TASK",
+                )
             # A missing/failed/identity-mismatched exact read cannot be
             # substituted by a cached list, title guess or Control link.
             return result
