@@ -15,7 +15,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
 OPERATIONS = (
-    "bootstrap", "work-view", "inbox", "workspace", "issue-goal-context",
+    "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
     "assess-issue-plan", "assess-outcome-observation",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
@@ -82,7 +82,7 @@ def read_operation(
         raise ValueError("INVALID_RECENT_DISCOVERY_OPTION")
     if type(include_published_supply) is not bool or (include_published_supply and operation != "workspace"):
         raise ValueError("INVALID_SUPPLY_OBSERVATION_OPTION")
-    if operation in {"issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
+    if operation in {"scoped-task", "issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
         if type(issue_number) is not int or issue_number < 1:
             raise ValueError("INVALID_ISSUE_NUMBER")
         if operation == "assess-issue-plan" and plan is None:
@@ -95,6 +95,8 @@ def read_operation(
         return service.bootstrap_repository(repository)
     if operation == "work-view":
         return service.get_repository_work_view(repository)
+    if operation == "scoped-task":
+        return service.get_scoped_task_read(repository, issue_number)
     if operation == "inbox":
         return service.get_agent_inbox(
             repository, recipient, limit=limit, offset=offset,
@@ -162,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             agent_inbox.validate_inbox_options(
                 args.recipient, args.limit, args.offset, args.work_status
             )
-        if args.operation in {"issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
+        if args.operation in {"scoped-task", "issue-goal-context", "assess-issue-plan", "assess-outcome-observation"}:
             if args.issue_number is None or args.issue_number < 1:
                 raise ValueError("INVALID_ISSUE_NUMBER")
         elif args.issue_number is not None:
