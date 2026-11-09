@@ -178,13 +178,43 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(reader.calls.count((REPO, "comments", 21)), 1)
         self.assertEqual(result["sections"]["messages"]["entries"][0]["recipient"], "claude-code")
         self.assertEqual(result["sections"]["messages"]["entries"][0]["source_kind"], "KAEP_REQUEST")
-        self.assertEqual(result["sections"]["known_tasks"]["entries"][0]["claimability"], "NOT_EVALUATED")
+        known = result["sections"]["known_tasks"]["entries"][0]
+        self.assertEqual(known["claimability"], "NOT_EVALUATED")
+        self.assertEqual(known["source_gates"], {
+            "scope_ready": True, "requires_user_confirmation": False,
+            "external_wait": True, "blocked_by": [],
+            "next_action_tag": None,
+        })
         self.assertEqual(result["sections"]["known_tasks"]["scoped_read_precedence"], "LIVE_SOURCE_FOR_EXACT_KNOWN_TASKS")
         self.assertEqual(result["sections"]["known_tasks"]["scoped_read_record_field"], "task_records")
         self.assertTrue(result["has_unknown_work"])
         self.assertIsNone(result["sections"]["offers"]["entries"])
         self.assertIsNone(result["sections"]["ongoing"]["entries"])
         self.assertIsNone(result["sections"]["waiting_recovery"]["entries"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["can_replace_manual_active_work"])
+
+    def test_workspace_known_task_gates_remain_true_without_claim_authority(self):
+        issue = task(21, status="BLOCKED")
+        payload = {
+            "schema_version": 1, "record_role": "TASK", "type": "AUDIT",
+            "work_status": "BLOCKED", "scope_ready": False,
+            "requires_user_confirmation": True, "external_wait": True,
+            "blocked_by": ["kinoko34077/devflow#801"],
+            "next_action_tag": "WAIT_REVIEW",
+        }
+        issue["body"] = repository_projection.render_issue_metadata_v1(payload)
+        result = devflow_mcp_core.DevflowService(
+            fixture_reader([issue])
+        ).get_agent_workspace("demo", recipient="codex")
+        row = result["sections"]["known_tasks"]["entries"][0]
+        self.assertEqual(row["source_gates"], {
+            "scope_ready": False, "requires_user_confirmation": True,
+            "external_wait": True, "blocked_by": ["kinoko34077/devflow#801"],
+            "next_action_tag": "WAIT_REVIEW",
+        })
+        self.assertEqual(row["observed_state"], "BLOCKED")
+        self.assertEqual(row["claimability"], "NOT_EVALUATED")
         self.assertFalse(result["can_authorize_execution"])
         self.assertFalse(result["can_replace_manual_active_work"])
 

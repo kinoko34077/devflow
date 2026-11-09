@@ -666,6 +666,65 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertFalse(view["can_replace_manual_active_work"])
         self.assertNotIn("body", view["task_records"][0])
 
+    def test_m3_source_task_gates_survive_work_view_and_exact_read(self):
+        control = self._control("demo", 70)
+        source_issue = self._task_issue(7)
+        source_issue["repository_url"] = (
+            "https://api.github.com/repos/kinoko34077/demo"
+        )
+        payload = {
+            "schema_version": 1, "record_role": "TASK", "type": "BUG",
+            "work_status": "BLOCKED", "scope_ready": False,
+            "requires_user_confirmation": True, "external_wait": True,
+            "blocked_by": ["kinoko34077/devflow#801"],
+            "next_action_tag": "WAIT_EXTERNAL",
+        }
+        source_issue["body"] = repository_projection.render_issue_metadata_v1(payload)
+        untrusted = self._task_issue(8, author_association="NONE")
+        untrusted["repository_url"] = (
+            "https://api.github.com/repos/kinoko34077/demo"
+        )
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [source_issue, untrusted],
+        })
+        service = devflow_mcp_core.DevflowService(reader)
+        result = service.get_repository_work_view("demo")
+        self.assertEqual(result["coverage_status"], "INCOMPLETE")
+        self.assertEqual(len(result["task_records"]), 1)
+        gates = {
+            key: result["task_records"][0][key]
+            for key in ("scope_ready", "requires_user_confirmation",
+                        "external_wait", "blocked_by", "next_action_tag")
+        }
+        self.assertEqual(gates, {
+            "scope_ready": False, "requires_user_confirmation": True,
+            "external_wait": True, "blocked_by": ["kinoko34077/devflow#801"],
+            "next_action_tag": "WAIT_EXTERNAL",
+        })
+        exact = service.get_scoped_task_read("demo", 7)
+        self.assertEqual(exact["status"], "VERIFIED_SCOPED_TASK")
+        self.assertEqual(
+            {key: exact["task_record"][key] for key in gates}, gates,
+        )
+        self.assertFalse(exact["can_authorize_execution"])
+        unknown = service.get_scoped_task_read("demo", 8)
+        self.assertIsNone(unknown["task_record"])
+        self.assertFalse(unknown["can_authorize_execution"])
+        self.assertFalse(result["can_replace_manual_active_work"])
+
+    def test_m3_non_task_gates_are_unknown_not_false(self):
+        issue = self._task_issue(1)
+        issue["body"] = ""
+        record = repository_projection.classify_issue(issue)
+        out = devflow_mcp_core.DevflowService._issue_record_dict(record)
+        for field in (
+            "scope_ready", "requires_user_confirmation", "external_wait",
+            "blocked_by", "next_action_tag",
+        ):
+            self.assertIsNone(out[field])
+        self.assertIsNone(out["work_status"])
+
     def test_m3_parallel_read_keeps_manual_and_machine_without_double_authority(self):
         control = self._control("demo", 70)
         control["body"] += (
