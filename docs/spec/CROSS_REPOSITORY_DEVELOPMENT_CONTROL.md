@@ -40,7 +40,7 @@ Given only a managed repository name, a new worker must use this sequence:
 
 1. read devflow `AGENTS.md`;
 2. locate exactly one open devflow Issue titled `[REPO] <repository>`;
-3. read its Work Status, Repository State, Audit SHA, Active Work, Next Action and repository-local entry references; if the read-only Devflow MCP is available, a worker evaluating local open tasks may additionally call `get_repository_work_view` after `bootstrap_repository` to inspect all trusted machine TASK states **without transferring Control authority**;
+3. read its Work Status, Repository State, Audit SHA, Active Work, Next Action and repository-local entry references; after `bootstrap_repository`, when a **specific Issue number is already known**, the read-only Devflow MCP `get_scoped_task_read(repository, issue_number)` may verify that exact current TASK without scanning other open Issues. For work discovery, full-list/absence judgments, or unknown references use `get_repository_work_view` with its explicit unresolved coverage instead. Neither operation transfers Control authority, certifies a complete inventory on partial input, or grants Claim/execution/Human/security permission;
 4. follow the Canonical Entry Points section when present, or equivalent verified repository-local entry references recorded in Detailed Current State / Control Notes for legacy Controls;
 5. open referenced repository-local Issue/Work Order/PR before creating duplicates;
 6. inspect active or latest relevant Execution Session Record(s) before non-trivial mutation or resumed work;
