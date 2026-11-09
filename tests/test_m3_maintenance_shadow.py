@@ -218,9 +218,9 @@ class M3OwnerShadowTests(unittest.TestCase):
 
     def test_collector_never_calls_matching_owner_status_parity_on_missing_heading(self):
         body = (
-            f"## Repository\\n\\n`{REPOSITORY}`\\n\\n"
-            f"## Active Work\\n\\n{ACTIVE}\\n\\n"
-            f"## Next Action\\n\\n{NEXT}\\n"
+            f"## Repository\n\n`{REPOSITORY}`\n\n"
+            f"## Active Work\n\n{ACTIVE}\n\n"
+            f"## Next Action\n\n{NEXT}\n"
         )
 
         class Transport:
@@ -238,7 +238,7 @@ class M3OwnerShadowTests(unittest.TestCase):
                         "number": 30, "title": "M3 genuine Issue metadata only",
                         "state": "open",
                         "html_url": f"https://github.com/{REPOSITORY}/issues/30",
-                        "body": "## Scope\\n\\nThe Work Status is in trusted V1 metadata.",
+                        "body": "## Scope\n\nThe Work Status is in trusted V1 metadata.",
                         "author_association": "OWNER",
                         "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-10-12T07:00:00Z",
