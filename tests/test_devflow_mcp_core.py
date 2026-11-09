@@ -395,6 +395,25 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             self.assertFalse(result["can_replace_manual_active_work"])
             self.assertNotIn(("kinoko34077/demo", "open"), reader.calls)
 
+    def test_scoped_task_pr_identity_is_checked_before_non_task_status(self):
+        control = self._control("demo", 70)
+        pr = {**self._task_issue(7),
+              "repository_url": "https://api.github.com/repos/kinoko34077/demo",
+              "pull_request": {"url": "https://api.github.com/repos/kinoko34077/demo/pulls/7"}}
+        wrong = {**pr, "html_url": "https://github.com/kinoko34077/other/pull/7"}
+        for issue, expected in ((pr, "NOT_A_VERIFIED_OPEN_TASK"),
+                                (wrong, "SOURCE_UNAVAILABLE")):
+            with self.subTest(expected=expected):
+                reader = FakeReader([], issues_by_repository={
+                    devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+                    "kinoko34077/demo": [issue],
+                })
+                result = devflow_mcp_core.DevflowService(reader).get_scoped_task_read("demo", 7)
+                self.assertEqual(result["status"], expected)
+                self.assertIsNone(result["task_record"])
+                self.assertFalse(result["can_authorize_execution"])
+                self.assertFalse(result["is_full_work_inventory"])
+
     def test_scoped_task_rejects_invalid_issue_numbers_before_read(self):
         reader = FakeReader([])
         service = devflow_mcp_core.DevflowService(reader)
