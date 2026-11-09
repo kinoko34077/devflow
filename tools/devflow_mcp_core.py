@@ -698,6 +698,10 @@ class DevflowService:
     def _issue_record_dict(
         record: repository_projection.IssueRecord,
     ) -> dict[str, Any]:
+        # Only a trusted, source-classified TASK supplies explicit action
+        # gates. Non-TASK/unknown/invalid metadata remains null, never
+        # silently becoming gate=false. Read data is not permission.
+        task_metadata = record.metadata if record.is_task else None
         return {
             "issue_number": record.number,
             "title": record.title,
@@ -710,6 +714,25 @@ class DevflowService:
             "type": record.type,
             "work_status": record.work_status,
             "attention_disposition": record.attention_disposition,
+            # Additive source-backed TASK metadata for safe read consumers.
+            # Live PR/reviewer status and execution authority are separate.
+            "scope_ready": (
+                task_metadata.scope_ready if task_metadata is not None else None
+            ),
+            "requires_user_confirmation": (
+                task_metadata.requires_user_confirmation
+                if task_metadata is not None else None
+            ),
+            "external_wait": (
+                task_metadata.external_wait if task_metadata is not None else None
+            ),
+            "blocked_by": (
+                list(task_metadata.blocked_by)
+                if task_metadata is not None else None
+            ),
+            "next_action_tag": (
+                task_metadata.next_action_tag if task_metadata is not None else None
+            ),
             "metadata_error": record.metadata_error,
         }
 
@@ -1545,6 +1568,15 @@ class DevflowService:
                 "source_ref": task["url"],
                 "observed_state": task["work_status"],
                 "record_role": task["record_role"],
+                # Directly references the same already-verified Work View
+                # source record; no second parser, store or trust authority.
+                "source_gates": {
+                    "scope_ready": task["scope_ready"],
+                    "requires_user_confirmation": task["requires_user_confirmation"],
+                    "external_wait": task["external_wait"],
+                    "blocked_by": task["blocked_by"],
+                    "next_action_tag": task["next_action_tag"],
+                },
                 "claimability": "NOT_EVALUATED",
             }
             for task in view["task_records"]
