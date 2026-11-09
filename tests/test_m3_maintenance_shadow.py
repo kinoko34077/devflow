@@ -1,6 +1,8 @@
 """M3 Maintenance consumer shadow: no authority or runtime classifier changes."""
+import argparse
 import copy
 import unittest
+from unittest import mock
 
 from tools import maintenance_github as mg
 from tools import maintenance_audit as ma
@@ -284,6 +286,189 @@ class M3OwnerShadowTests(unittest.TestCase):
                                     "2026-10-12T07:01:00Z", m3_work_view=view(task()))
         self.assertEqual(out["m3_shadow"]["status"], "MANUAL_CONTROL_FALLBACK")
         self.assertEqual(ma.classify_repository(out)["disposition"], "NO_ACTION")
+
+
+class MaintenanceCLIParityTests(unittest.TestCase):
+    def _run_repository(self, *, opt_in, source_unavailable=False,
+                        source_error=None, control_unavailable=False):
+        from scripts import maintenance_audit as cli
+
+        args = argparse.Namespace(
+            repository=REPOSITORY, control=32, observed_at="2026-10-12T07:01:00Z",
+            output=None, token_env="GITHUB_TOKEN", m3_read_parity=opt_in,
+        )
+        writes = []
+        work_view = view(task(status="IMPLEMENTING"))
+        shadow_value = {
+            "status": "MANUAL_CONTROL_FALLBACK",
+            "reason": "OWNER_STATUS_NOT_VERIFIED",
+            "manual_owner_ref": OWNER_REF,
+            "legacy_owner_work_status": None,
+            "machine_owner_work_status": "IMPLEMENTING",
+            "can_replace_manual_active_work": False,
+        }
+        seen = []
+
+        def collect(_transport, repository, control_ref, observed_at, *,
+                    m3_work_view=None):
+            seen.append(m3_work_view)
+            data = {
+                "source_status": "UNAVAILABLE" if control_unavailable else "OK",
+                "owner": {"ref": OWNER_REF},
+            }
+            if m3_work_view is not None and not control_unavailable:
+                data["m3_shadow"] = dict(shadow_value)
+            return data
+
+        with (
+            mock.patch.object(cli, "_token_from_env", return_value="opaque-test-token"),
+            mock.patch.object(cli, "GitHubReadTransport"),
+            mock.patch.object(cli, "_classify_observation",
+                              return_value={"disposition": "NO_ACTION"}),
+            mock.patch.object(cli, "collect_repository", side_effect=collect),
+            mock.patch.object(cli, "_write", side_effect=lambda value, _: writes.append(value)),
+            mock.patch.object(cli.devflow_mcp_core, "GitHubReader"),
+            mock.patch.object(cli.devflow_mcp_core, "DevflowService") as service_type,
+        ):
+            service = service_type.return_value
+            if source_unavailable:
+                service.get_repository_work_view.side_effect = (
+                    cli.devflow_mcp_core.DevflowMCPError("unavailable")
+                )
+            elif source_error is not None:
+                service.get_repository_work_view.side_effect = source_error
+            else:
+                service.get_repository_work_view.return_value = work_view
+            code = cli._repository(args)
+            self.assertEqual(code, 0)
+            self.assertEqual(service.get_repository_work_view.call_count,
+                             1 if opt_in else 0)
+        return writes[0], seen
+
+    def test_default_cli_does_not_read_m3_or_change_existing_report(self):
+        result, seen = self._run_repository(opt_in=False)
+        self.assertEqual(result, {"disposition": "NO_ACTION"})
+        self.assertEqual(seen, [None])
+
+    def test_opt_in_cli_exposes_existing_shadow_without_changing_classification(self):
+        result, seen = self._run_repository(opt_in=True)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["task_records"][0]["work_status"], "IMPLEMENTING")
+        self.assertEqual(result["disposition"], "NO_ACTION")
+        diagnostic = result["m3_read_parity"]
+        self.assertEqual(diagnostic["reason"], "OWNER_STATUS_NOT_VERIFIED")
+        self.assertEqual(diagnostic["use_level"], "READ_ONLY_DIAGNOSTIC")
+        self.assertFalse(diagnostic["can_authorize_execution"])
+        self.assertFalse(diagnostic["can_replace_manual_active_work"])
+
+    def test_opt_in_unavailable_m3_source_preserves_manual_disposition(self):
+        result, seen = self._run_repository(opt_in=True, source_unavailable=True)
+        self.assertEqual(seen, [None])
+        self.assertEqual(result["disposition"], "NO_ACTION")
+        self.assertEqual(result["m3_read_parity"]["status"], "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(result["m3_read_parity"]["reason"], "MACHINE_SOURCE_UNAVAILABLE")
+        self.assertFalse(result["m3_read_parity"]["can_authorize_execution"])
+
+    def test_malformed_optional_view_reader_does_not_abort_normal_audit(self):
+        result, seen = self._run_repository(
+            opt_in=True, source_error=KeyError("unexpected payload"),
+        )
+        self.assertEqual(seen, [None])
+        self.assertEqual(result["disposition"], "NO_ACTION")
+        self.assertEqual(result["m3_read_parity"]["reason"],
+                         "MACHINE_SOURCE_UNAVAILABLE")
+
+    def test_control_failure_does_not_mislabel_machine_source(self):
+        result, seen = self._run_repository(
+            opt_in=True, control_unavailable=True,
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertIsNotNone(seen[0])
+        self.assertEqual(result["disposition"], "NO_ACTION")
+        self.assertEqual(result["m3_read_parity"]["status"],
+                         "MANUAL_CONTROL_FALLBACK")
+        self.assertEqual(result["m3_read_parity"]["reason"],
+                         "CONTROL_OR_OWNER_NOT_VERIFIED")
+        self.assertFalse(result["m3_read_parity"]["can_authorize_execution"])
+
+    def test_actual_collector_and_classifier_are_identical_with_parity_flag(self):
+        from scripts import maintenance_audit as cli
+
+        control_body = (
+            f"## Repository\n\n" + f"`{REPOSITORY}`\n\n"
+            + f"## Active Work\n\n{ACTIVE}\n\n"
+            + f"## Next Action\n\n{NEXT}\n"
+        )
+
+        class Transport:
+            def get_json(self, path):
+                if path.endswith("/issues/32"):
+                    return {
+                        "number": 32, "title": "[REPO] testapp",
+                        "state": "open", "html_url": CONTROL_URL,
+                        "body": control_body,
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-10-12T07:00:00Z",
+                    }
+                if path.endswith("/issues/30"):
+                    return {
+                        "number": 30, "title": "Actual metadata-only TASK",
+                        "state": "open",
+                        "html_url": f"https://github.com/{REPOSITORY}/issues/30",
+                        "body": "## Scope\n\nWork Status only in V1 metadata.\n",
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-10-12T07:00:00Z",
+                    }
+                raise AssertionError(path)
+
+        canonical = view(task(status="IMPLEMENTING"))
+        canonical["manual_control"]["next_action"] = NEXT.strip("`")
+        reports = []
+        with (
+            mock.patch.object(cli, "_token_from_env", return_value="test-token"),
+            mock.patch.object(cli, "GitHubReadTransport",
+                              side_effect=lambda token: Transport()),
+            mock.patch.object(cli, "_write",
+                              side_effect=lambda value, _: reports.append(value)),
+            mock.patch.object(cli.devflow_mcp_core, "GitHubReader"),
+            mock.patch.object(cli.devflow_mcp_core, "DevflowService") as service,
+        ):
+            service.return_value.get_repository_work_view.return_value = canonical
+            for opt_in in (False, True):
+                args = argparse.Namespace(
+                    repository=REPOSITORY, control=32, token_env="GITHUB_TOKEN",
+                    observed_at="2026-10-12T07:01:00Z",
+                    output=None, m3_read_parity=opt_in,
+                )
+                self.assertEqual(cli._repository(args), 0)
+
+        plain, diagnostic = reports
+        self.assertNotIn("m3_read_parity", plain)
+        self.assertEqual({k: v for k, v in diagnostic.items()
+                          if k != "m3_read_parity"}, plain)
+        self.assertEqual(plain["disposition"], "NO_ACTION")
+        self.assertEqual(diagnostic["m3_read_parity"]["reason"],
+                         "OWNER_STATUS_NOT_VERIFIED")
+        self.assertEqual(diagnostic["m3_read_parity"]["machine_owner_work_status"],
+                         "IMPLEMENTING")
+        self.assertFalse(diagnostic["m3_read_parity"]["can_authorize_execution"])
+
+    def test_flag_is_not_available_on_effectful_subcommands(self):
+        from scripts import maintenance_audit as cli
+        parser = cli._parser()
+        args = parser.parse_args([
+            "repository", "--repository", REPOSITORY, "--control", "32",
+            "--m3-read-parity",
+        ])
+        self.assertTrue(args.m3_read_parity)
+        with mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "select-maintenance", "--repository", REPOSITORY,
+                    "--control", "32", "--m3-read-parity",
+                ])
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from tools import devflow_mcp_core  # noqa: E402
 from tools.maintenance_audit import (  # noqa: E402
     AuditContractError,
     classify_repository,
@@ -160,13 +161,46 @@ def _repository(args: argparse.Namespace) -> int:
     transport = GitHubReadTransport(token)
     observed_at = args.observed_at or _utc_now()
     control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
+    # Opt-in M3 read-only Consumer: use exactly the existing Work View
+    # classifier and live source. Never change the operational Maintenance
+    # classifier, owner selector, Claim/offer or any GitHub state.
+    m3_view = None
+    if args.m3_read_parity:
+        try:
+            service = devflow_mcp_core.DevflowService(
+                devflow_mcp_core.GitHubReader(token=token),
+            )
+            m3_view = service.get_repository_work_view(args.repository)
+        except Exception:
+            # This GET-only advisory read may fail on malformed responses or
+            # transport/parser errors. Keep the normal Maintenance report
+            # available; never use this optional read for action authority.
+            m3_view = None
     observation = collect_repository(
         transport,
         args.repository,
         control_ref,
         observed_at,
+        m3_work_view=m3_view if args.m3_read_parity else None,
     )
+    shadow = observation.pop("m3_shadow", None)
     report = _classify_observation(observation)
+    if args.m3_read_parity:
+        if not isinstance(shadow, dict):
+            shadow = {
+                "status": "MANUAL_CONTROL_FALLBACK",
+                "reason": (
+                    "MACHINE_SOURCE_UNAVAILABLE"
+                    if m3_view is None
+                    else "CONTROL_OR_OWNER_NOT_VERIFIED"
+                ),
+                "can_replace_manual_active_work": False,
+            }
+        report["m3_read_parity"] = {
+            **shadow,
+            "use_level": "READ_ONLY_DIAGNOSTIC",
+            "can_authorize_execution": False,
+        }
     _write(report, args.output)
     return 0
 
@@ -1744,6 +1778,11 @@ def _parser() -> argparse.ArgumentParser:
         default="GITHUB_TOKEN",
     )
     repository.add_argument("--observed-at")
+    repository.add_argument(
+        "--m3-read-parity",
+        action="store_true",
+        help="opt-in read-only M3 Work View vs legacy owner/status diagnostic; never changes Maintenance action authority",
+    )
     repository.add_argument("--output")
     repository.set_defaults(func=_repository)
 
