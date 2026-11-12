@@ -795,6 +795,7 @@ def collect_repository(
     observed_at: str,
     *,
     m3_work_view: object | None = None,
+    candidate_owner_ref: str | None = None,
 ) -> dict[str, object]:
     try:
         control_repo, control_number = _split_ref(control_ref)
@@ -856,11 +857,25 @@ def collect_repository(
         or "[HUMAN_GATE]" in next_action
     )
     try:
-        owner_ref, candidate_present = _active_owner_ref(
-            body,
-            repository,
-            control_ref,
-        )
+        if candidate_owner_ref is None:
+            owner_ref, candidate_present = _active_owner_ref(
+                body,
+                repository,
+                control_ref,
+            )
+        else:
+            # An explicitly named existing candidate is verified against the
+            # Control admission. Never derive admission from manual Active Work.
+            candidate_repository, _number = _split_ref(candidate_owner_ref)
+            candidates = _candidate_tasks(body, repository, control_ref)
+            if (
+                candidate_repository != repository
+                or candidate_owner_ref not in candidates
+            ):
+                raise GitHubReadError(
+                    "requested owner is not a current Control candidate"
+                )
+            owner_ref, candidate_present = candidate_owner_ref, True
     except GitHubReadError as exc:
         return _unavailable(
             repository,
