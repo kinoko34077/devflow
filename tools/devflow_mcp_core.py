@@ -1635,7 +1635,7 @@ class DevflowService:
             result["sections"]["messages"]["entries"] = messages
             result["sections"]["messages"]["status"] = (
                 "TASK_AND_RECENT_ORIGINALS"
-                if current and recent_discovery["status"] in (
+                if current and not inbox["errors"] and recent_discovery["status"] in (
                     "LIVE_WINDOW_READ", "BOUNDED_UNION_READ"
                 )
                 else "RECENT_DISCOVERY_PARTIAL"
