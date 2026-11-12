@@ -149,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Default legacy #503; explicitly approved successor #789")
     args = parser.parse_args(argv)
     try:
+        # Reject arbitrary index targets before any network GET.
+        if args.discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+            raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
         original = fetch_gh_pages(args.repository, args.issue)
         index = fetch_gh_pages(DISCOVERY_REPOSITORY, args.discovery_issue)
         out = audit_route(
