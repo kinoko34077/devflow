@@ -48,6 +48,8 @@ Write execution is available only through an explicit manual CLI invocation:
 
 `python scripts/maintenance_audit.py sync-check ... --apply`
 
+For an existing **exact Control candidate** when several candidates coexist, use `sync-check --repository owner/repo --control N --candidate-owner owner/repo#ISSUE` to inspect that candidate without changing manual `Active Work`. This is dry-run by default; `--apply` is a separate explicit action. The specified candidate must already belong to the trusted Control projection; it cannot introduce a task or bypass owner, freshness, reviewer/Human/security or external gates. Only the named terminal candidate may be withdrawn; unrelated candidates and cross-repository `Next Action` are preserved. This is a **scoped operator action**, not automatic multi-candidate discovery or an M3.1 authority switch.
+
 The scheduled/read-only audit job never invokes this path.
 
 ### Existing-owner supply publication
