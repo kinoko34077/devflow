@@ -339,6 +339,7 @@ def read_union(
     public_marker_discovery: dict[str, Any] | None = None,
     previous_report: dict[str, Any] | None = None,
     scoped_repository: str | None = None,
+    source_offset: int | None = None,
 ) -> dict[str, Any]:
     """Recheck one deduplicated cohort in canonical original sources.
 
@@ -347,6 +348,14 @@ def read_union(
     """
     if recipient not in RECIPIENTS:
         fail("INVALID_RECIPIENT")
+    if source_offset is not None and (
+        type(source_offset) is not int or source_offset < 0
+    ):
+        fail("INVALID_SOURCE_OFFSET")
+    if source_offset is not None and previous_report is not None:
+        # Prior snapshots are not a page-stable cursor: never compare root
+        # absence across independently selected source batches.
+        fail("PAGED_PREVIOUS_REPORT_UNSUPPORTED")
     info = cached.validate_index(snapshot)
     # Optional Workspace consumer scope is a strict subset of a fully validated
     # public snapshot (or one explicitly requested extra repo). No other
@@ -409,10 +418,30 @@ def read_union(
         )
     )
 
-    all_sources = sorted(indexed_sources | recent_sources | marker_in_scope | prior_source_keys)
-    # A cap cannot silently drop a known source. Fail closed and retain fallback.
-    if len(all_sources) > MAX_SOURCES:
-        fail("UNION_SOURCE_LIMIT")
+    all_candidate_sources = sorted(
+        indexed_sources | recent_sources | marker_in_scope | prior_source_keys
+    )
+    # Default remains fail-closed; an explicit offset selects one bounded
+    # batch from the fully validated candidate locations, never a source
+    # universe or a stable cross-call pagination snapshot.
+    if source_offset is None:
+        if len(all_candidate_sources) > MAX_SOURCES:
+            fail("UNION_SOURCE_LIMIT")
+        all_sources = all_candidate_sources
+        batch_offset = 0
+        next_source_offset = None
+    else:
+        if source_offset > len(all_candidate_sources):
+            fail("INVALID_SOURCE_OFFSET")
+        batch_offset = source_offset
+        all_sources = all_candidate_sources[
+            source_offset:source_offset + MAX_SOURCES
+        ]
+        next_source_offset = (
+            source_offset + len(all_sources)
+            if source_offset + len(all_sources) < len(all_candidate_sources)
+            else None
+        )
     locators: dict[str, dict[str, Any]] = {}
     for repo in repos:
         subset = [
@@ -446,7 +475,13 @@ def read_union(
         marker_in_scope=marker_in_scope,
     )
 
-    removed = set(indexed_by_key) - set(current_by_key)
+    # Unselected indexed roots were not read in this batch; never classify
+    # them as missing from the canonical source.
+    selected_sources = set(all_sources)
+    removed = {
+        key for key in indexed_by_key
+        if key[:2] in selected_sources and key not in current_by_key
+    }
     missing_previous = set(prior_rows) - set(current_by_key)
     partial = bool(
         snapshot["status"] != "BOUNDED_SEARCH_READ"
@@ -454,6 +489,7 @@ def read_union(
         or verified["errors"] or warnings or removed
         or marker_partial or bool(marker_out_of_scope)
         or previous_partial or bool(missing_previous)
+        or source_offset is not None
     )
     return {
         "schema_version": "kaep.live-union-check.v0.1",
@@ -469,8 +505,16 @@ def read_union(
         "updated_comment_pages_read": updated_pages_read,
         "window_limit_per_repository": delta.MAX_WINDOW,
         "indexed_issue_count": len(indexed_sources),
+        "indexed_issue_count_in_batch": len(indexed_sources & selected_sources),
         "recent_marker_issue_count": len(recent_sources),
+        "recent_marker_issue_count_in_batch": len(recent_sources & selected_sources),
         "source_issue_count": len(all_sources),
+        "source_candidate_total_count": len(all_candidate_sources),
+        "source_batch_offset": batch_offset,
+        "source_next_offset": next_source_offset,
+        "source_batch_explicit": source_offset is not None,
+        "source_candidates_not_checked": len(all_candidate_sources) - len(all_sources),
+        "source_batch_snapshot_stable": False,
         "public_marker_discovery_used": public_marker_discovery is not None,
         "public_marker_issue_count_in_scope": len(marker_in_scope),
         "public_marker_issue_count_out_of_scope": len(marker_out_of_scope),
@@ -523,6 +567,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--previous-report", type=Path,
                         help="Optional prior union JSON: revalidate its original Issues, compare old states")
     parser.add_argument("--since", default=None)
+    parser.add_argument("--source-offset", type=int, default=None,
+                        help="Opt-in 40-source batch start; default refuses overflow. "
+                             "Never proves complete source coverage or stable pagination")
     parser.add_argument("--updated-pages", type=int, default=1,
                         choices=range(1, delta.MAX_UPDATED_PAGES + 1),
                         help="Opt-in bounded updated-desc GitHub comment pages (default: 1)")
@@ -560,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
             recent_read=recent_reader,
             additional_repositories=tuple(args.additional_repository),
             public_marker_discovery=public_markers,
-            previous_report=prior)
+            previous_report=prior, source_offset=args.source_offset)
         if args.response_format == "agent-api":
             result = project_agent_view(result)
     except (InvalidMessage, OSError, ValueError, UnicodeError, TypeError) as exc:
