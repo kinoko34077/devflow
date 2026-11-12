@@ -475,7 +475,13 @@ def read_union(
         marker_in_scope=marker_in_scope,
     )
 
-    removed = set(indexed_by_key) - set(current_by_key)
+    # Unselected indexed roots were not read in this batch; never classify
+    # them as missing from the canonical source.
+    selected_sources = set(all_sources)
+    removed = {
+        key for key in indexed_by_key
+        if key[:2] in selected_sources and key not in current_by_key
+    }
     missing_previous = set(prior_rows) - set(current_by_key)
     partial = bool(
         snapshot["status"] != "BOUNDED_SEARCH_READ"
@@ -499,7 +505,9 @@ def read_union(
         "updated_comment_pages_read": updated_pages_read,
         "window_limit_per_repository": delta.MAX_WINDOW,
         "indexed_issue_count": len(indexed_sources),
+        "indexed_issue_count_in_batch": len(indexed_sources & selected_sources),
         "recent_marker_issue_count": len(recent_sources),
+        "recent_marker_issue_count_in_batch": len(recent_sources & selected_sources),
         "source_issue_count": len(all_sources),
         "source_candidate_total_count": len(all_candidate_sources),
         "source_batch_offset": batch_offset,
