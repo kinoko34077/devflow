@@ -1,4 +1,4 @@
-"""GET-only per-original KAEP source-to-#503 pointer audit (Issue #771).
+"""GET-only per-original KAEP source-to-approved-index pointer audit (Issue #771).
 
 Do not infer all-source coverage, pending work, recipient pickup, or permission
 from a finite source/index observation. Reuse existing canonical wire decoders.
@@ -16,7 +16,8 @@ from tools.kaep_mailbox_codec import (
     MARKER, decode_comment, read_mailbox,
 )
 from tools.kaep_route_notice import (
-    DISCOVERY_ISSUE, DISCOVERY_REPOSITORY, verify_source_request,
+    DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, DISCOVERY_REPOSITORY,
+    verify_source_request,
 )
 from tools.kaep_mailbox_support import ACTOR, matching_actor
 
@@ -32,6 +33,7 @@ def audit_route(
     message_id: str,
     expected_source_actor: str,
     expected_notice_actor: str,
+    discovery_issue: int = DISCOVERY_ISSUE,
 ) -> dict[str, Any]:
     """Verify one original request and observe exact matching stored pointers.
 
@@ -40,12 +42,18 @@ def audit_route(
     Unrecognized/invalid index messages prohibit a negative completeness
     conclusion; they never become valid pointers.
     """
+    if (type(discovery_issue) is not int or discovery_issue not in
+            (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
+        raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
+    if repository == DISCOVERY_REPOSITORY and issue in (
+            DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+        raise InvalidMessage("DISCOVERY_LOOP")
     source = verify_source_request(
         source_pages, repository=repository, issue=issue,
         message_id=message_id, expected_actor=expected_source_actor,
     )
     comments = parse_pages(
-        index_pages, repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+        index_pages, repository=DISCOVERY_REPOSITORY, issue=discovery_issue,
     )
     if len(comments) > MAX_INDEX_COMMENTS:
         raise InvalidMessage("DISCOVERY_INDEX_TOO_LARGE")
@@ -66,10 +74,10 @@ def audit_route(
             continue
         try:
             msg = decode_comment(
-                body, task_ref=f"{DISCOVERY_REPOSITORY}#{DISCOVERY_ISSUE}",
+                body, task_ref=f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
             )
             index_messages.append({"id": cid, "body": body})
-            # Only the already accepted #503 discovery REQUEST envelope is
+            # Only the already accepted discovery REQUEST envelope is
             # considered, never arbitrary JSON in a comment or Issue title.
             if (msg["recipient"] != "claude-code" or msg["kind"] != "REQUEST"
                     or msg["intent"] != "REPORT" or msg["in_reply_to"] is not None
@@ -97,7 +105,7 @@ def audit_route(
         try:
             read_mailbox(
                 [{"id": row["id"], "body": row["body"]} for row in index_messages],
-                task_ref=f"{DISCOVERY_REPOSITORY}#{DISCOVERY_ISSUE}",
+                task_ref=f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
             )
         except InvalidMessage as exc:
             warnings.append({"reason_code": str(exc)})
@@ -111,6 +119,7 @@ def audit_route(
     )
     return {
         "schema_version": "kaep.source-route-audit.v0.1",
+        "discovery_issue": f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
         "status": status,
         "owning_issue": source["owning_issue"],
         "source_comment_id": source["comment_id"],
@@ -136,15 +145,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--message-id", required=True)
     parser.add_argument("--expect-source-actor", required=True)
     parser.add_argument("--expect-notice-actor", required=True)
+    parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
+                        help="Default legacy #503; explicitly approved successor #789")
     args = parser.parse_args(argv)
     try:
+        # Reject arbitrary index targets before any network GET.
+        if args.discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+            raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
         original = fetch_gh_pages(args.repository, args.issue)
-        index = fetch_gh_pages(DISCOVERY_REPOSITORY, DISCOVERY_ISSUE)
+        index = fetch_gh_pages(DISCOVERY_REPOSITORY, args.discovery_issue)
         out = audit_route(
             original, index, repository=args.repository,
             issue=args.issue, message_id=args.message_id,
             expected_source_actor=args.expect_source_actor,
             expected_notice_actor=args.expect_notice_actor,
+            discovery_issue=args.discovery_issue,
         )
     except (InvalidMessage, ValueError, OSError, UnicodeError) as exc:
         out = {

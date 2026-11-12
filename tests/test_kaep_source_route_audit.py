@@ -8,7 +8,7 @@ from unittest.mock import patch
 from tools.kaep_mailbox_codec import encode_comment, InvalidMessage
 from tools.kaep_request_sender import make_request
 from tools.kaep_route_notice import (
-    DISCOVERY_ISSUE, DISCOVERY_REPOSITORY,
+    DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, DISCOVERY_REPOSITORY,
     verify_source_request,
 )
 from tools.kaep_source_route_audit import audit_route, main
@@ -44,14 +44,14 @@ def source():
 
 
 def route_comment(root, *, source_comment_id=101, index_comment_id=301,
-                  actor=ACTOR):
+                  actor=ACTOR, discovery_issue=DISCOVERY_ISSUE):
     pointer = verify_source_request(
         pages([comment(source_comment_id, root)]),
         repository=REPO, issue=ISSUE, message_id=root["message_id"],
         expected_actor=ACTOR,
     )
     request, old = make_request(
-        pages([]), repository=DISCOVERY_REPOSITORY, issue=DISCOVERY_ISSUE,
+        pages([]), repository=DISCOVERY_REPOSITORY, issue=discovery_issue,
         recipient="claude-code", intent="REPORT",
         request_key="kaep.discovery." + root["message_id"],
         request_text=json.dumps(pointer, sort_keys=True, separators=(",", ":")),
@@ -61,7 +61,8 @@ def route_comment(root, *, source_comment_id=101, index_comment_id=301,
     return comment(index_comment_id, request, actor=actor)
 
 
-def audited(root, *index, source_actor=ACTOR):
+def audited(root, *index, source_actor=ACTOR,
+            discovery_issue=DISCOVERY_ISSUE):
     # The canonical provider adapter admits up to 100 comments per page.
     batches = [list(index)[i:i + 100] for i in range(0, len(index), 100)] or [[]]
     return audit_route(
@@ -70,6 +71,7 @@ def audited(root, *index, source_actor=ACTOR):
         repository=REPO, issue=ISSUE,
         message_id=root["message_id"],
         expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
+        discovery_issue=discovery_issue,
     )
 
 
@@ -143,6 +145,80 @@ class RouteAuditTests(unittest.TestCase):
         self.assertFalse(out["exact_pointer_observed"])
         self.assertEqual(out["index_warnings"][0]["reason_code"],
                          "DISCOVERY_SOURCE_MISMATCH")
+
+    def test_approved_successor_pointer_is_verified_in_its_own_index(self):
+        root = source()
+        out = audited(
+            root, route_comment(root, discovery_issue=APPROVED_SUCCESSOR_ISSUE),
+            discovery_issue=APPROVED_SUCCESSOR_ISSUE,
+        )
+        self.assertEqual(out["status"], "EXACT_POINTER_OBSERVED")
+        self.assertEqual(out["discovery_issue"], "kinoko34077/devflow#789")
+        self.assertTrue(out["exact_pointer_observed"])
+        self.assertFalse(out["recipient_pickup_proven"])
+        self.assertFalse(out["can_authorize_execution"])
+
+    def test_successor_requires_the_matching_canonical_index_envelope(self):
+        root = source()
+        legacy_notice = route_comment(root)
+        out = audited(root, legacy_notice,
+                      discovery_issue=APPROVED_SUCCESSOR_ISSUE)
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertFalse(out["exact_pointer_observed"])
+        self.assertEqual(out["index_warnings"][0]["reason_code"],
+                         "TASK_MISMATCH")
+
+    def test_unknown_discovery_index_and_source_loop_are_rejected(self):
+        root = source()
+        for invalid in (9001, 0, True, "789"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                InvalidMessage, "DISCOVERY_INDEX_NOT_APPROVED"
+            ):
+                audited(root, discovery_issue=invalid)
+        with self.assertRaisesRegex(InvalidMessage, "DISCOVERY_LOOP"):
+            audit_route(
+                pages([]), pages([]), repository=DISCOVERY_REPOSITORY,
+                issue=APPROVED_SUCCESSOR_ISSUE, message_id=root["message_id"],
+                expected_source_actor=ACTOR, expected_notice_actor=ACTOR,
+                discovery_issue=DISCOVERY_ISSUE,
+            )
+
+    def test_cli_789_fetches_selected_index_not_legacy(self):
+        root = source()
+        with patch("tools.kaep_source_route_audit.fetch_gh_pages",
+                   side_effect=[
+                       pages([comment(101, root)]),
+                       pages([route_comment(root,
+                           discovery_issue=APPROVED_SUCCESSOR_ISSUE)]),
+                   ]) as get, redirect_stdout(io.StringIO()) as stdout:
+            rc = main([
+                "--repository", REPO, "--issue", str(ISSUE),
+                "--message-id", root["message_id"],
+                "--expect-source-actor", ACTOR,
+                "--expect-notice-actor", ACTOR,
+                "--discovery-issue", "789",
+            ])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["discovery_issue"],
+                         "kinoko34077/devflow#789")
+        self.assertEqual(get.call_args_list[1].args,
+                         (DISCOVERY_REPOSITORY, APPROVED_SUCCESSOR_ISSUE))
+
+    def test_cli_rejects_arbitrary_index_before_external_reads(self):
+        root = source()
+        with patch("tools.kaep_source_route_audit.fetch_gh_pages") as get, \
+             redirect_stdout(io.StringIO()) as stdout:
+            rc = main([
+                "--repository", REPO, "--issue", str(ISSUE),
+                "--message-id", root["message_id"],
+                "--expect-source-actor", ACTOR,
+                "--expect-notice-actor", ACTOR,
+                "--discovery-issue", "9001",
+            ])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(stdout.getvalue())["reason_code"],
+                         "DISCOVERY_INDEX_NOT_APPROVED")
+        get.assert_not_called()
 
     def test_source_actor_and_source_mailbox_remain_canonical(self):
         root = source()
