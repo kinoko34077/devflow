@@ -303,6 +303,39 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
+    def test_workspace_b6_success_does_not_hide_failed_task_comment_read(self):
+        reader = fixture_reader(
+            [task(), unclassified_issue()],
+            comments={(REPO, 22): [issue_comment(31, message(issue=22))]},
+            recent_comments={REPO: [recent_marker()]},
+        )
+        original_comments = reader.list_issue_comments
+
+        def unavailable_task_comments(repository, number, *, max_comments):
+            if repository == REPO and number == 21:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "simulated TASK comment source outage",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
+            return original_comments(repository, number, max_comments=max_comments)
+
+        reader.list_issue_comments = unavailable_task_comments
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True,
+        )
+        section = result["sections"]["messages"]
+        self.assertEqual(result["source_status"], "AVAILABLE")
+        self.assertEqual(section["recent_discovery"]["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(section["status"], "RECENT_DISCOVERY_PARTIAL")
+        self.assertEqual(len(section["errors"]), 1)
+        self.assertEqual(len(section["entries"]), 1)
+        self.assertEqual(
+            section["entries"][0]["subject_ref"],
+            f"https://github.com/{REPO}/issues/22",
+        )
+        self.assertTrue(section["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_b6_finds_strict_non_task_recipient_root_without_promotion(self):
         reader = fixture_reader(
             [task(), unclassified_issue()],
