@@ -279,6 +279,7 @@ def source_root_shadow(
     result["status"] = (
         "BOUNDED_CANDIDATE_SOURCE_READ"
         if not index["rejected"] and not result["errors"]
+        and not isolate_invalid_wrapper
         else "PARTIAL_UNKNOWN"
     )
     return result
