@@ -328,6 +328,123 @@ class LiveUnionTests(TestCase):
                 public_marker_discovery=markers,
                 recent_read=lambda repo, since=None: [])
 
+    def test_opt_in_41_sources_in_two_strictly_checked_batches(self):
+        # No fabricated acceptance for 41+ sources: the default still fails,
+        # but explicit slices can verify the original Issue at each position.
+        markers = self.public_markers(
+            *((REPO, number, number + 1000) for number in range(1, 42))
+        )
+        msg = root(number=88, issue=41, recipient="chatgpt")
+        calls = []
+
+        def get_issue(repo, number):
+            calls.append(("issue", number))
+            return issue_object(number)
+
+        def get_comments(repo, number):
+            calls.append(("comments", number))
+            return source_page((1041, msg, "kinoko34077")) if number == 41 \
+                else source_page()
+
+        def run(offset):
+            return union.read_union(
+                index_with(status="BOUNDED_SEARCH_READ"),
+                recipient="chatgpt",
+                public_marker_discovery=markers,
+                recent_read=lambda repo, since=None: [],
+                issue_read=get_issue, comments_read=get_comments,
+                source_offset=offset,
+            )
+
+        first = run(0)
+        self.assertEqual(first["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(first["source_candidate_total_count"], 41)
+        self.assertEqual(first["source_issue_count"], 40)
+        self.assertEqual(first["source_batch_offset"], 0)
+        self.assertEqual(first["source_next_offset"], 40)
+        self.assertEqual(first["source_candidates_not_checked"], 1)
+        self.assertEqual(len(first["source_candidates"]), 40)
+        self.assertFalse(first["source_batch_snapshot_stable"])
+        self.assertEqual(first["cached_rows_not_verified_live"], 0)
+        self.assertEqual(first["live_original_roots"], 0)
+        self.assertEqual(len(calls), 80)
+        self.assertNotIn(("issue", 41), calls)
+
+        calls.clear()
+        second = run(40)
+        self.assertEqual(second["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(second["source_candidate_total_count"], 41)
+        self.assertEqual(second["source_issue_count"], 1)
+        self.assertEqual(second["source_batch_offset"], 40)
+        self.assertIsNone(second["source_next_offset"])
+        self.assertEqual(second["source_candidates_not_checked"], 40)
+        self.assertEqual(second["live_original_roots"], 1)
+        self.assertEqual(second["live_rows"][0]["issue_number"], 41)
+        self.assertEqual(calls, [("issue", 41), ("comments", 41)])
+        self.assertTrue(second["has_unknown_work"])
+        self.assertFalse(second["can_authorize_execution"])
+        self.assertFalse(second["complete_source_universe"])
+
+    def test_opt_in_source_batch_never_marks_unscanned_indexed_root_missing(self):
+        msg = root(number=89, issue=41, recipient="chatgpt")
+        snapshot = index_with((41, 1001, msg), status="BOUNDED_SEARCH_READ")
+        markers = self.public_markers(
+            *((REPO, number, number + 1000) for number in range(1, 42))
+        )
+        seen = []
+        out = union.read_union(
+            snapshot, recipient="chatgpt",
+            public_marker_discovery=markers, source_offset=0,
+            recent_read=lambda repo, since=None: [],
+            issue_read=lambda repo, number: (
+                seen.append(number) or issue_object(number)
+            ),
+            comments_read=lambda repo, number: source_page(),
+        )
+        self.assertEqual(out["source_issue_count"], 40)
+        self.assertNotIn(41, seen)
+        self.assertEqual(out["cached_rows_not_verified_live"], 0)
+        self.assertEqual(out["indexed_issue_count"], 1)
+        self.assertEqual(out["indexed_issue_count_in_batch"], 0)
+        self.assertTrue(out["has_unknown_work"])
+
+    def test_paged_source_offsets_and_previous_report_fail_closed(self):
+        snapshot = index_with(status="BOUNDED_SEARCH_READ")
+        for invalid in (-1, True, "40", 1.5):
+            with self.subTest(offset=invalid), self.assertRaisesRegex(
+                InvalidMessage, "INVALID_SOURCE_OFFSET"
+            ):
+                union.read_union(
+                    snapshot, recipient="chatgpt", source_offset=invalid,
+                    recent_read=lambda repo, since=None:
+                        self.fail("invalid offset must not read GitHub"),
+                )
+        with self.assertRaisesRegex(InvalidMessage, "PAGED_PREVIOUS_REPORT_UNSUPPORTED"):
+            union.read_union(
+                snapshot, recipient="chatgpt", source_offset=0,
+                previous_report={}, recent_read=lambda repo, since=None:
+                self.fail("cross-page previous report must not read GitHub"),
+            )
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_SOURCE_OFFSET"):
+            union.read_union(
+                snapshot, recipient="chatgpt", source_offset=41,
+                recent_read=lambda repo, since=None: [],
+            )
+
+    def test_cli_explicit_offset_is_forwarded_without_writing(self):
+        with (mock.patch.object(union.cached, "fetch_public_json",
+                                return_value=index_with(status="BOUNDED_SEARCH_READ")),
+              mock.patch.object(union, "read_union", return_value={
+                  "status": "PARTIAL_UNKNOWN",
+                  "has_unknown_work": True,
+                  "can_authorize_execution": False,
+              }) as verify,
+              mock.patch("sys.stdout", new_callable=io.StringIO) as stream):
+            rc = union.main(["--recipient", "chatgpt", "--source-offset", "40"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(verify.call_args.kwargs["source_offset"], 40)
+        self.assertFalse(json.loads(stream.getvalue())["can_authorize_execution"])
+
     def test_marker_and_cached_source_combines_once_when_issue_only_state_changes(self):
         msg = root(number=44)
         snap = index_with((576, 122, msg), status="BOUNDED_SEARCH_READ")
