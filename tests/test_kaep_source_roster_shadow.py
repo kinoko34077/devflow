@@ -188,11 +188,10 @@ class SourceRootShadowTests(unittest.TestCase):
         good_notice = pointer_notice(valid, issue=576, cid=601, notice_id=812)
         bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=813)
         malformed = {
-            "id": 702, "body": "<!-- kaep:message:v0.2 -->\\ninvalid",
+            "id": 702,
+            "body": "<!-- kaep:message:v0.2 -->\\n\u0060\u0060\u0060json\\n{}\\n\u0060\u0060\u0060",
             "user": {"id": 79015263, "login": ACTOR},
         }
-        # Even the opt-in mode cannot quarantine this arbitrarily broken
-        # envelope if the parser's reason is not INVALID_WRAPPER.
         out, _ = compare(
             pages([comment(901, good_notice), comment(902, bad_notice)]),
             {
@@ -200,8 +199,52 @@ class SourceRootShadowTests(unittest.TestCase):
                 (REPO, 577): pages([comment(701, broken), malformed]),
             }, isolate_invalid_wrapper=True,
         )
-        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
-        self.assertEqual(out["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(out["status"], "BLOCKED")
+        self.assertEqual(out["issues"], [])
+        self.assertEqual(out["isolated_invalid_wrapper_sources"], 0)
+        self.assertEqual(out["index_blockers"][-1]["reason_code"], "INVALID_FIELDS")
+
+    def test_opt_in_isolates_malformed_independent_task_source(self):
+        good = root(814, issue=576)
+        corrupted = root(815, issue=577)
+        invalid = {
+            "id": 703,
+            "body": "<!-- kaep:message:v0.2 -->\\n\u0060\u0060\u0060json\\n{}\\n\u0060\u0060\u0060\\nextra",
+            "user": {"id": 79015263, "login": ACTOR},
+        }
+        source_map = {
+            (REPO, 576): pages([comment(601, good)]),
+            (REPO, 577): pages([comment(701, corrupted), invalid]),
+        }
+        calls = []
+
+        def fetch(repo, issue):
+            calls.append((repo, issue))
+            return source_map[(repo, issue)]
+
+        view = self.task_view([576, 577])
+        strict = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[view],
+        )
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(len(strict["issues"]), 1)
+        calls.clear()
+        isolated = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[view], isolate_invalid_wrapper=True,
+        )
+        self.assertEqual(isolated["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(len(isolated["issues"]), 1)
+        self.assertEqual(isolated["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(isolated["errors"][-1]["owning_issue"],
+                         f"https://github.com/{REPO}/issues/577")
+        self.assertEqual(isolated["errors"][-1]["reason_code"], "INVALID_WRAPPER")
+        self.assertFalse(isolated["can_authorize_execution"])
+        self.assertFalse(isolated["complete_source_universe"])
+        self.assertEqual(calls, [(REPO, 576), (REPO, 577)])
 
     def test_invalid_diagnostic_type_fails_without_fetching_sources(self):
         from tools.kaep_inbox_reader import InvalidMessage
@@ -218,7 +261,8 @@ class SourceRootShadowTests(unittest.TestCase):
                 "--isolate-invalid-wrapper",
             ])
         data = json.loads(capture.getvalue())
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 2)
+        self.assertEqual(data["status"], "PARTIAL_UNKNOWN")
         self.assertTrue(data["diagnostic_isolation_enabled"])
         self.assertFalse(data["complete_source_universe"])
         self.assertFalse(data["can_authorize_execution"])
