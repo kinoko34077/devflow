@@ -691,5 +691,27 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
         self.assertNotIn(token, str(ctx.exception))
 
 
+class CandidateScopedSyncCheckCliTests(unittest.TestCase):
+    def test_exact_candidate_requires_explicit_flag_and_apply_opt_in(self):
+        from scripts import maintenance_audit as cli
+
+        parser = cli._parser()
+        default = parser.parse_args(
+            ["sync-check", "--repository", "o/r", "--control", "1"]
+        )
+        self.assertIsNone(default.candidate_owner)
+        self.assertFalse(default.apply)
+        scoped = parser.parse_args([
+            "sync-check", "--repository", "o/r", "--control", "1",
+            "--candidate-owner", "o/r#7",
+        ])
+        self.assertEqual(scoped.candidate_owner, "o/r#7")
+        self.assertFalse(scoped.apply)
+        self.assertTrue(parser.parse_args([
+            "sync-check", "--repository", "o/r", "--control", "1",
+            "--candidate-owner", "o/r#7", "--apply",
+        ]).apply)
+
+
 if __name__ == "__main__":
     unittest.main()
