@@ -166,7 +166,7 @@ class RouteAuditTests(unittest.TestCase):
         self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
         self.assertFalse(out["exact_pointer_observed"])
         self.assertEqual(out["index_warnings"][0]["reason_code"],
-                         "INVALID_TASK_REF")
+                         "TASK_MISMATCH")
 
     def test_unknown_discovery_index_and_source_loop_are_rejected(self):
         root = source()
