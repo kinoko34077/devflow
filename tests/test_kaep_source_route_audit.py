@@ -204,6 +204,22 @@ class RouteAuditTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[1].args,
                          (DISCOVERY_REPOSITORY, APPROVED_SUCCESSOR_ISSUE))
 
+    def test_cli_rejects_arbitrary_index_before_external_reads(self):
+        root = source()
+        with patch("tools.kaep_source_route_audit.fetch_gh_pages") as get, \
+             redirect_stdout(io.StringIO()) as stdout:
+            rc = main([
+                "--repository", REPO, "--issue", str(ISSUE),
+                "--message-id", root["message_id"],
+                "--expect-source-actor", ACTOR,
+                "--expect-notice-actor", ACTOR,
+                "--discovery-issue", "9001",
+            ])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(stdout.getvalue())["reason_code"],
+                         "DISCOVERY_INDEX_NOT_APPROVED")
+        get.assert_not_called()
+
     def test_source_actor_and_source_mailbox_remain_canonical(self):
         root = source()
         with self.assertRaisesRegex(InvalidMessage, "SOURCE_ACTOR_MISMATCH"):
