@@ -7,6 +7,7 @@ import unittest
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import POINTER_VERSION
+from tools.kaep_route_notice import DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE
 from tools.kaep_source_roster_shadow import (
     source_root_shadow, MAX_SOURCE_ISSUES, MAX_OPT_IN_SOURCE_ISSUES,
 )
@@ -37,7 +38,8 @@ def root(number, *, issue=ISSUE, recipient="claude-code"):
     return msg
 
 
-def pointer_notice(msg, *, issue=ISSUE, cid, notice_id):
+def pointer_notice(msg, *, issue=ISSUE, cid, notice_id,
+                   discovery_issue=DISCOVERY_ISSUE):
     pointer = {
         "type": POINTER_VERSION,
         "owning_issue": f"https://github.com/{REPO}/issues/{issue}",
@@ -45,7 +47,8 @@ def pointer_notice(msg, *, issue=ISSUE, cid, notice_id):
         "comment_id": cid,
     }
     notice, _ = make_request(
-        pages([]), repository=REPO, issue=503, recipient="claude-code",
+        pages([]), repository=REPO, issue=discovery_issue,
+        recipient="claude-code",
         intent="REPORT", expected_head=None,
         request_key=f"kaep.shadow.pointer.{notice_id:04d}.{issue}",
         request_text=json.dumps(pointer, sort_keys=True, separators=(",", ":")),
@@ -54,7 +57,8 @@ def pointer_notice(msg, *, issue=ISSUE, cid, notice_id):
     return notice
 
 
-def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES):
+def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
+            discovery_issue=DISCOVERY_ISSUE):
     fetched = []
     def fetch(r, i):
         fetched.append((r, i))
@@ -62,6 +66,7 @@ def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES):
     output = source_root_shadow(
         index, fetch_source=fetch, expected_notice_actor=ACTOR,
         expected_source_actor=ACTOR, max_sources=max_sources,
+        discovery_issue=discovery_issue,
     )
     return output, fetched
 
@@ -85,6 +90,46 @@ class SourceRootShadowTests(unittest.TestCase):
                 for n in numbers
             ],
         }
+
+    def test_successor_index_roster_reads_verified_original_without_503(self):
+        original = root(782)
+        successor = pointer_notice(
+            original, cid=701, notice_id=782,
+            discovery_issue=APPROVED_SUCCESSOR_ISSUE,
+        )
+        out, fetched = compare(
+            pages([comment(801, successor)]),
+            {(REPO, ISSUE): pages([comment(701, original)])},
+            discovery_issue=APPROVED_SUCCESSOR_ISSUE,
+        )
+        self.assertEqual(out["status"], "BOUNDED_CANDIDATE_SOURCE_READ")
+        self.assertEqual(out["discovery_issue"], f"{REPO}#789")
+        self.assertEqual(fetched, [(REPO, ISSUE)])
+        self.assertEqual(out["issues"][0]["root_count"], 1)
+        self.assertEqual(out["issues"][0]["roots"][0]["comparison"],
+                         "INDEXED_AND_ORIGINAL")
+        self.assertFalse(out["complete_source_universe"])
+        self.assertFalse(out["can_authorize_execution"])
+
+    def test_successor_rejects_legacy_task_ref_without_source_fetch(self):
+        original = root(783)
+        legacy = pointer_notice(original, cid=701, notice_id=783)
+        out, fetched = compare(
+            pages([comment(801, legacy)]), {},
+            discovery_issue=APPROVED_SUCCESSOR_ISSUE,
+        )
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["issues"], [])
+        self.assertEqual(fetched, [])
+        self.assertGreater(out["rejected_index_count"], 0)
+        self.assertTrue(out["has_unknown_work"])
+
+    def test_unapproved_successor_never_fetches_original(self):
+        for invalid in (9001, True, "789", 0):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                Exception, "DISCOVERY_INDEX_NOT_APPROVED"
+            ):
+                compare(pages([]), {}, discovery_issue=invalid)
 
     def test_trusted_live_task_without_pointer_admits_nonpointer_issue(self):
         # Unlike historical closed #553, this fixture represents an OPEN
