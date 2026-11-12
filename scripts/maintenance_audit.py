@@ -651,6 +651,7 @@ def _sync_check(args: argparse.Namespace) -> int:
         args.repository,
         control_ref,
         observed_at,
+        candidate_owner_ref=args.candidate_owner,
     )
     report = _classify_observation(observation)
     owner_ref = report.get("owner_ref")
@@ -1840,6 +1841,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     sync_check.add_argument("--observed-at")
     sync_check.add_argument("--output")
+    sync_check.add_argument(
+        "--candidate-owner",
+        help="exact currently registered Control candidate Issue ref; "
+             "read/withdraw only this candidate, without rewriting Active Work",
+    )
     sync_check.add_argument(
         "--apply",
         action="store_true",
