@@ -143,7 +143,7 @@ class SourceRootShadowTests(unittest.TestCase):
         bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=811)
         malformed = {
             "id": 702,
-            "body": "<!-- kaep:message:v0.2 -->\\n\u0060\u0060\u0060json\\n{}\\n\u0060\u0060\u0060\\nextra historical prose",
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra historical prose",
             "user": {"id": 79015263, "login": ACTOR},
         }
         index = pages([comment(901, good_notice), comment(902, bad_notice)])
@@ -189,7 +189,7 @@ class SourceRootShadowTests(unittest.TestCase):
         bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=813)
         malformed = {
             "id": 702,
-            "body": "<!-- kaep:message:v0.2 -->\\n\u0060\u0060\u0060json\\n{}\\n\u0060\u0060\u0060",
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060",
             "user": {"id": 79015263, "login": ACTOR},
         }
         out, _ = compare(
@@ -209,7 +209,7 @@ class SourceRootShadowTests(unittest.TestCase):
         corrupted = root(815, issue=577)
         invalid = {
             "id": 703,
-            "body": "<!-- kaep:message:v0.2 -->\\n\u0060\u0060\u0060json\\n{}\\n\u0060\u0060\u0060\\nextra",
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra",
             "user": {"id": 79015263, "login": ACTOR},
         }
         source_map = {
