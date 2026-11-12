@@ -252,9 +252,9 @@ class SourceRootShadowTests(unittest.TestCase):
             compare(pages([]), {}, isolate_invalid_wrapper="true")
 
     def test_diagnostic_cli_flag_explicit_and_non_authoritative(self):
-        with patch("tools.kaep_source_roster_shadow.fetch_gh_pages",
-                   return_value=pages([])) as fetch, \\
-             redirect_stdout(io.StringIO()) as capture:
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages",
+                    return_value=pages([])) as fetch,
+              redirect_stdout(io.StringIO()) as capture):
             rc = main([
                 "--expect-notice-actor", ACTOR,
                 "--expect-source-actor", ACTOR,
