@@ -691,6 +691,132 @@ class MaintenanceSyncCheckLiveTransportTests(unittest.TestCase):
         self.assertNotIn(token, str(ctx.exception))
 
 
+
+class CandidateScopedSyncCheckEndToEndTests(unittest.TestCase):
+    def test_terminal_a_is_dry_run_and_withdrawn_while_manual_b_remains(self):
+        """Exact candidate scope must not rewrite Active Work to find stale A."""
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n`o/r#8` in progress\n\n"
+            "## Next Action\n\nContinue B\n\n"
+            + body_with_second_candidate()
+        )
+
+        class Transport:
+            def __init__(self):
+                self.body = body
+                self.writes = []
+                self.owner_bodies = {
+                    "o/r#7": "## Work Status\n\n`DONE`\n",
+                    "o/r#8": "## Work Status\n\n`IMPLEMENTING`\n",
+                }
+
+            def get_json(self, path):
+                if path == "/repos/kinoko34077/devflow/issues/1":
+                    return {
+                        "number": 1, "title": "[REPO] r", "state": "open",
+                        "html_url": "https://github.com/kinoko34077/devflow/issues/1",
+                        "body": self.body, "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-13T00:00:00Z",
+                    }
+                for ref, issue_body in self.owner_bodies.items():
+                    if path == "/repos/o/r/issues/" + ref.split("#")[1]:
+                        return {
+                            "number": int(ref.split("#")[1]),
+                            "state": "closed" if ref == "o/r#7" else "open",
+                            "html_url": "https://github.com/o/r/issues/" + ref.split("#")[1],
+                            "body": issue_body, "author_association": "OWNER",
+                            "user": {"id": 79015263, "login": "kinoko34077"},
+                            "updated_at": "2026-11-13T00:00:00Z",
+                        }
+                raise AssertionError("unexpected GET: " + path)
+
+            def get_control(self, repository, control_ref):
+                self.assert_scope(repository, control_ref)
+                return {
+                    "repository": repository, "control_ref": control_ref,
+                    "body": self.body,
+                    "body_sha256": ms.canonical_body_sha256(self.body),
+                    "candidate_tasks": [
+                        ref for ref in ("o/r#7", "o/r#8")
+                        if '"task": "' + ref + '"' in self.body
+                    ],
+                    "producer_active": False, "human_gate": False,
+                    "reviewer_gate": False, "external_wait": False,
+                    "security_gate": False,
+                }
+
+            def get_owner(self, repository, owner_ref):
+                if repository != "o/r" or owner_ref not in self.owner_bodies:
+                    raise AssertionError("wrong candidate")
+                return {
+                    "repository": repository, "owner_ref": owner_ref,
+                    "body_sha256": ms.canonical_body_sha256(
+                        self.owner_bodies[owner_ref]
+                    ),
+                    "state": "CLOSED" if owner_ref == "o/r#7" else "OPEN",
+                    "terminal": owner_ref == "o/r#7",
+                    "runnable": False,
+                    "producer_active": owner_ref == "o/r#8",
+                    "human_gate": False, "reviewer_gate": False,
+                    "external_wait": False, "security_gate": False,
+                }
+
+            def update_control_body(
+                self, repository, control_ref, expected_body_sha256, edited,
+            ):
+                self.assert_scope(repository, control_ref)
+                if ms.canonical_body_sha256(self.body) != expected_body_sha256:
+                    return False
+                self.writes.append(edited)
+                self.body = edited
+                return True
+
+            @staticmethod
+            def assert_scope(repository, control_ref):
+                if repository != "o/r" or control_ref != "kinoko34077/devflow#1":
+                    raise AssertionError("Control scope changed")
+
+        transport = Transport()
+        outputs = []
+        parser = cli._parser()
+        with patch.object(cli, "_SyncCheckGitHubTransport", return_value=transport), \
+                patch.object(cli, "_token_from_env", return_value="token"), \
+                patch.object(cli, "_write", side_effect=lambda payload, _path: outputs.append(payload)):
+            baseline = parser.parse_args([
+                "sync-check", "--repository", "o/r", "--control", "1",
+                "--observed-at", "2026-11-13T00:01:00Z",
+            ])
+            self.assertEqual(cli._sync_check(baseline), 0)
+            self.assertIsNone(outputs[-1]["plan"])
+            self.assertEqual(outputs[-1]["report"]["owner_ref"], "o/r#8")
+
+            scoped = parser.parse_args([
+                "sync-check", "--repository", "o/r", "--control", "1",
+                "--candidate-owner", "o/r#7",
+                "--observed-at", "2026-11-13T00:01:00Z",
+            ])
+            self.assertEqual(cli._sync_check(scoped), 0)
+            self.assertEqual(outputs[-1]["plan"]["owner_ref"], "o/r#7")
+            self.assertIsNone(outputs[-1]["result"])
+            self.assertEqual(transport.writes, [])
+
+            scoped.apply = True
+            self.assertEqual(cli._sync_check(scoped), 0)
+            self.assertEqual(outputs[-1]["result"]["disposition"], "AUTO_ADVANCE")
+            self.assertTrue(outputs[-1]["result"]["applied"])
+            self.assertEqual(len(transport.writes), 1)
+            self.assertNotIn('"task": "o/r#7"', transport.body)
+            self.assertIn('"task": "o/r#8"', transport.body)
+            self.assertIn("## Active Work\n\n`o/r#8`", transport.body)
+
+
 class CandidateScopedSyncCheckCliTests(unittest.TestCase):
     def test_exact_candidate_requires_explicit_flag_and_apply_opt_in(self):
         from scripts import maintenance_audit as cli
