@@ -1252,10 +1252,10 @@ class MaintenanceMultiCandidateSourceBaselineTests(unittest.TestCase):
             ],
         })
         body = (
-            "## Repository\n\n\`o/r\`\n\n"
-            "## Work Status\n\n\`AUDITED\`\n\n"
-            "## Repository State\n\n\`ACTIVE\`\n\n"
-            "## Active Work\n\n\`o/r#8\` in progress\n\n"
+            "## Repository\n\n`o/r`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n`o/r#8` in progress\n\n"
             "## Next Action\n\nContinue B\n\n"
             "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
             + projection
@@ -1280,7 +1280,16 @@ class MaintenanceMultiCandidateSourceBaselineTests(unittest.TestCase):
                     return {
                         "number": 8, "state": "open",
                         "html_url": "https://github.com/o/r/issues/8",
-                        "body": "## Work Status\n\n\`IMPLEMENTING\`\n",
+                        "body": "## Work Status\n\n`IMPLEMENTING`\n",
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-13T00:00:00Z",
+                    }
+                if path == "/repos/o/r/issues/7":
+                    return {
+                        "number": 7, "state": "closed",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "body": "## Work Status\n\n`DONE`\n",
                         "author_association": "OWNER",
                         "user": {"id": 79015263, "login": "kinoko34077"},
                         "updated_at": "2026-11-13T00:00:00Z",
@@ -1295,6 +1304,32 @@ class MaintenanceMultiCandidateSourceBaselineTests(unittest.TestCase):
         self.assertEqual(observed["control"]["active_owner_ref"], "o/r#8")
         self.assertEqual(ma.classify_repository(observed)["disposition"], "NO_ACTION")
         self.assertNotIn("/repos/o/r/issues/7", transport.paths)
+
+        scoped = mg.collect_repository(
+            transport, repository, control_ref, "2026-11-13T00:01:00Z",
+            candidate_owner_ref="o/r#7",
+        )
+        self.assertEqual(scoped["source_status"], "OK")
+        self.assertEqual(scoped["control"]["active_owner_ref"], "o/r#7")
+        self.assertTrue(scoped["control"]["candidate_present"])
+        self.assertEqual(scoped["owner"]["state"], "CLOSED")
+        scoped_report = ma.classify_repository(scoped)
+        self.assertEqual(scoped_report["disposition"], "AUTO_ADVANCE")
+        self.assertEqual(
+            scoped_report["next_transition"], "WITHDRAW_STALE_CONTROL_CANDIDATE",
+        )
+
+        for invalid in ("o/r#9", "other/repo#7", "not-an-issue-ref"):
+            with self.subTest(invalid=invalid):
+                failed = mg.collect_repository(
+                    transport, repository, control_ref, "2026-11-13T00:01:00Z",
+                    candidate_owner_ref=invalid,
+                )
+                self.assertEqual(failed["source_status"], "UNAVAILABLE")
+                self.assertEqual(
+                    ma.classify_repository(failed)["disposition"],
+                    "NEEDS_EVIDENCE",
+                )
 
 
 if __name__ == "__main__":
