@@ -166,9 +166,15 @@ def source_root_shadow(
     if index["blocked"] or index["truncated"]:
         result["errors"].append({"reason_code": "INDEX_SOURCE_INCOMPLETE"})
         # Diagnostic isolation can proceed only past a known non-authoritative
-        # malformed historical wrapper. Any other failure (including source
-        # read/collision/actor/cap) and index truncation stays fully blocked.
-        if (index["truncated"] or not isolate_invalid_wrapper
+        # malformed historical wrapper. The canonical shadow marks any
+        # blocked index as truncated to prevent cursor advancement, so only
+        # PARTIAL_BLOCKED with wrapper-only reasons may emit a *partial*
+        # diagnostic. A genuinely capped/truncated index remains blocked;
+        # never advance the durable cursor, or label hints after the blocker
+        # as examined. Other failure kinds remain fatal.
+        if (not isolate_invalid_wrapper
+                or index["status"] != "PARTIAL_BLOCKED"
+                or not index["blocked"]
                 or any(b.get("reason_code") != "INVALID_WRAPPER"
                        for b in index["blocked"])):
             return result
