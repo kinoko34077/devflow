@@ -493,6 +493,93 @@ class DiscoveryReaderTests(unittest.TestCase):
         self.assertEqual(out["hints"], [])
         self.assertFalse(out["fallback_retirement_authorized"])
 
+    def test_explicit_shadow_diagnostic_scans_beyond_poison_without_cursor_commit(self):
+        first_root, poisoned_notice, _ = fixtures()
+        other_root, _ = make_request(
+            pages([]), repository=SOURCE_REPO, issue=337,
+            recipient="claude-code", intent="ANALYZE",
+            expected_head="b" * 40,
+            request_key="kaep.shadow.late.independent",
+            request_text="second private original", expect_existing_actor=ACTOR,
+        )
+        ptr = {
+            "type": POINTER_VERSION,
+            "owning_issue": f"https://github.com/{SOURCE_REPO}/issues/337",
+            "message_id": other_root["message_id"],
+            "comment_id": 78,
+        }
+        late_notice = other_notice(
+            json.dumps(ptr), "kaep.shadow.late.notice.337",
+        )
+        index = pages([
+            comment(1000 + i, poisoned_notice) if i == 1 else
+            comment(1000 + i, late_notice) if i == 40 else
+            {"id": 1000 + i, "body": "operator note", "user": actor_user()}
+            for i in range(45)
+        ])
+        bad = {
+            "id": 76,
+            "body": "<!-- kaep:message:v0.2 -->bad",
+            "user": actor_user(),
+        }
+        fetches = []
+        def fetch(repo, issue):
+            fetches.append(issue)
+            return (
+                pages([bad, comment(77, first_root)])
+                if issue == SOURCE_ISSUE
+                else pages([comment(78, other_root)])
+            )
+        normal = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=fetch,
+        )
+        self.assertEqual(normal["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(normal["next_after_id"], 1000)
+        self.assertEqual(normal["scanned_batches"], 1)
+        self.assertEqual(normal["hints"], [])
+        self.assertEqual(fetches, [SOURCE_ISSUE])
+
+        fetches.clear()
+        diagnostic = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=fetch,
+            diagnostic_scan_after_blocked=True,
+        )
+        self.assertEqual(diagnostic["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(diagnostic["next_after_id"], 1000)
+        self.assertTrue(diagnostic["truncated"])
+        self.assertEqual(diagnostic["scanned_batches"], 3)
+        self.assertEqual(diagnostic["blocked"], [
+            {"index_comment_id": 1001, "reason_code": "INVALID_WRAPPER"}
+        ])
+        self.assertEqual(len(diagnostic["hints"]), 1)
+        self.assertEqual(diagnostic["hints"][0]["owning_issue"],
+                         f"https://github.com/{SOURCE_REPO}/issues/337")
+        self.assertEqual(fetches, [SOURCE_ISSUE, 337])
+        self.assertFalse(diagnostic["complete_work_inventory"])
+        self.assertFalse(diagnostic["fallback_retirement_authorized"])
+        self.assertNotIn("second private original", json.dumps(diagnostic))
+
+        capped = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR, fetch_source=fetch,
+            diagnostic_scan_after_blocked=True, max_batches=1,
+        )
+        self.assertEqual(capped["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(capped["scanned_batches"], 1)
+        self.assertEqual(capped["hints"], [])
+        self.assertEqual(capped["next_after_id"], 1000)
+
+    def test_explicit_shadow_diagnostic_rejects_bad_mode(self):
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_SCAN_MODE"):
+            discover_index_shadow(
+                pages([]), expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR, fetch_source=lambda r, i:
+                    self.fail("invalid mode must not fetch"),
+                diagnostic_scan_after_blocked="yes",
+            )
+
     def test_shadow_rejects_untrusted_actor_without_clean_status(self):
         root, hint, _ = fixtures()
         out = discover_index_shadow(

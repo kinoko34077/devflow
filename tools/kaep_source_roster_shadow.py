@@ -118,6 +118,7 @@ def source_root_shadow(
             APPROVED_SUCCESSOR_ISSUE if discovery_issue == DISCOVERY_ISSUE
             else DISCOVERY_ISSUE
         ),
+        diagnostic_scan_after_blocked=isolate_invalid_wrapper,
     )
     # The source proof path itself must be unblocked before exposing any
     # derived root evidence. Partial and rejected index entries remain unknown.

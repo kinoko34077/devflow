@@ -182,6 +182,48 @@ class SourceRootShadowTests(unittest.TestCase):
         self.assertFalse(diagnostic["fallback_retirement_authorized"])
         self.assertNotIn("extra historical prose", json.dumps(diagnostic))
 
+    def test_b5_diagnostic_reaches_later_index_batch_without_claiming_coverage(self):
+        bad_root = root(820, issue=577)
+        good_root = root(821, issue=576)
+        bad_notice = pointer_notice(bad_root, issue=577, cid=701,
+                                    notice_id=820)
+        good_notice = pointer_notice(good_root, issue=576, cid=601,
+                                     notice_id=821)
+        invalid = {
+            "id": 702, "body": "<!-- kaep:message:v0.2 -->bad",
+            "user": {"id": 79015263, "login": ACTOR},
+        }
+        index = pages([
+            comment(1000 + n, bad_notice) if n == 1 else
+            comment(1000 + n, good_notice) if n == 40 else
+            {"id": 1000 + n, "body": "ordinary", "user": {
+                "id": 79015263, "login": ACTOR}}
+            for n in range(45)
+        ])
+        sources = {
+            (REPO, 577): pages([comment(701, bad_root), invalid]),
+            (REPO, 576): pages([comment(601, good_root)]),
+        }
+        strict, strict_reads = compare(index, sources)
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(strict["issues"], [])
+        self.assertEqual(strict_reads, [(REPO, 577)])
+
+        diagnostic, reads = compare(index, sources,
+                                    isolate_invalid_wrapper=True)
+        self.assertEqual(diagnostic["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(diagnostic["index_hint_count"], 1)
+        self.assertEqual(diagnostic["index_blockers"], [
+            {"index_comment_id": 1001, "reason_code": "INVALID_WRAPPER"}
+        ])
+        self.assertEqual(diagnostic["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual([r["owning_issue"] for r in diagnostic["issues"]],
+                         [f"https://github.com/{REPO}/issues/576"])
+        self.assertEqual(reads, [(REPO, 577), (REPO, 576)])
+        self.assertTrue(diagnostic["has_unknown_work"])
+        self.assertFalse(diagnostic["complete_source_universe"])
+        self.assertFalse(diagnostic["can_authorize_execution"])
+
     def test_opt_in_cannot_isolate_non_wrapper_source_failure(self):
         valid = root(812, issue=576)
         broken = root(813, issue=577)

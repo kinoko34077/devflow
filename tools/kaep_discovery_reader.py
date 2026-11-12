@@ -345,6 +345,7 @@ def discover_index_shadow(
     after_id: int = 0, max_batches: int = MAX_SHADOW_BATCHES,
     index_issue: int = DISCOVERY_ISSUE,
     additional_forbidden_issue: int | None = None,
+    diagnostic_scan_after_blocked: bool = False,
 ) -> dict[str, Any]:
     """Opt-in bounded #503 index shadow, using the unchanged strict reader.
 
@@ -353,6 +354,8 @@ def discover_index_shadow(
     """
     if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
         fail("INVALID_SHADOW_LIMIT")
+    if type(diagnostic_scan_after_blocked) is not bool:
+        fail("INVALID_DIAGNOSTIC_SCAN_MODE")
     # Preserve fail-closed provider transport/page validation in discover_batch.
     # Strictly validate the complete provider history once per shadow scan.
     # Repeated _discover_batch calls only traverse its validated comment data.
@@ -361,6 +364,8 @@ def discover_index_shadow(
         index_pages, repository=DISCOVERY_REPOSITORY, issue=index_issue,
     )
     cursor = after_id
+    scan_cursor = after_id
+    first_block_cursor: int | None = None
     source_cache: dict[tuple[str, int], SourceMailbox] = {}
     source_proofs: dict[
         tuple[str, int, str], tuple[dict[str, Any], dict[str, Any]]
@@ -377,7 +382,7 @@ def discover_index_shadow(
         batch = _discover_batch(
             index_pages, expected_notice_actor=expected_notice_actor,
             expected_source_actor=expected_source_actor,
-            fetch_source=fetch_source, after_id=cursor,
+            fetch_source=fetch_source, after_id=scan_cursor,
             index_issue=index_issue,
             additional_forbidden_issue=additional_forbidden_issue,
             source_mailboxes=source_cache,
@@ -396,19 +401,38 @@ def discover_index_shadow(
             hints.append(hint)
         rejected.extend(batch["rejected"])
         blocked.extend(batch["blocked"])
-        if blocked:
-            # Do not advance a durable cursor past an unreadable original.
-            cursor = batch["next_after_id"]
-            status = "PARTIAL_BLOCKED"
-            truncated = True
-            break
+        if batch["blocked"]:
+            # Pin the first blocked original's safe commit cursor for this
+            # complete observation. Never advance it through later scan-only
+            # batches, even when their original roots verify independently.
+            if first_block_cursor is None:
+                first_block_cursor = batch["next_after_id"]
+                cursor = first_block_cursor
+            if (not diagnostic_scan_after_blocked
+                    or any(item.get("reason_code") != "INVALID_WRAPPER"
+                           for item in blocked)):
+                status = "PARTIAL_BLOCKED"
+                truncated = True
+                break
+        if first_block_cursor is not None:
+            # Only explicit read-only diagnostics may use the separate
+            # existing scan cursor past a malformed wrapper. A full-index
+            # source or successful durable cursor is NEVER reported.
+            if not batch["truncated"]:
+                status = "PARTIAL_BLOCKED"
+                truncated = True
+                break
+            scan_cursor = batch["next_scan_after_id"]
+            continue
         cursor = batch["next_after_id"]
         if not batch["truncated"]:
             status = "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY"
             truncated = False
             break
+        scan_cursor = cursor
     else:
-        status = "BOUNDED_TRUNCATED"
+        status = ("PARTIAL_BLOCKED" if first_block_cursor is not None
+                  else "BOUNDED_TRUNCATED")
         truncated = True
 
     if rejected and status == "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY":

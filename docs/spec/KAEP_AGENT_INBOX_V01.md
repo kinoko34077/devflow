@@ -174,7 +174,7 @@ Initial native MCP API [PR #536](https://github.com/kinoko34077/devflow/pull/536
 
 標準の `python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077` は従来どおり、不正な元コメントが1件でも正規index→original検証で見つかれば `BLOCKED` のまま停止する。履歴を書き換えたり不正なKAEPを正規メッセージとして受理したりしない。
 
-異なるIssueに独立して存在する正常な原典だけを追加診断する必要がある場合、明示的に `--isolate-invalid-wrapper` を指定できる。このモードで続行できるのは、既存の厳格なdecoderで理由が `INVALID_WRAPPER` と確定した候補に限る。不正原典は索引候補・正規rootへ昇格させず、原因と元index comment IDを `index_blockers` に維持し、他の正規原典だけを従来のactor/recipient/reply-chain検証に通す。それ以外の検証失敗・source取得不能・上限超過・index途中欠落は引き続き停止する。
+異なるIssueに独立して存在する正常な原典だけを追加診断する必要がある場合、明示的に `--isolate-invalid-wrapper` を指定できる。このモードで続行できるのは、既存の厳格なdecoderで理由が `INVALID_WRAPPER` と確定した候補に限る。不正原典は索引候補・正規rootへ昇格させず、原因と元index comment IDを `index_blockers` に維持する。診断時は既存の `next_scan_after_id` で後続の索引コメント群も有限に検査できるが、最初の異常原典より先へ `next_after_id`（安全な確定カーソル）を進めない。独立して正規検証された原典だけを従来のactor/recipient/reply-chain検証に通す。それ以外の検証失敗・source取得不能・上限超過・index途中欠落は引き続き停止する。
 
 この明示診断は正常候補が検証できても、常に `PARTIAL_UNKNOWN`（CLI終了コード2）、`has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false` とし、Inbox受入や旧#503廃止、Claim/実作業の許可に用いてはならない。旧#503と後継#789の選択は既存の `--discovery-issue` に従い、どちらの索引も改変しない。
 
