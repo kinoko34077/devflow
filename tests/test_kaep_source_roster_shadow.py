@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import POINTER_VERSION
@@ -127,7 +128,7 @@ class SourceRootShadowTests(unittest.TestCase):
     def test_unapproved_successor_never_fetches_original(self):
         for invalid in (9001, True, "789", 0):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(
-                Exception, "DISCOVERY_INDEX_NOT_APPROVED"
+                InvalidMessage, "DISCOVERY_INDEX_NOT_APPROVED"
             ):
                 compare(pages([]), {}, discovery_issue=invalid)
 
