@@ -89,11 +89,14 @@ def source_root_shadow(
     max_sources: int = MAX_SOURCE_ISSUES,
     task_views: list[dict[str, Any]] | None = None,
     discovery_issue: int = DISCOVERY_ISSUE,
+    isolate_invalid_wrapper: bool = False,
 ) -> dict[str, Any]:
     """Compare one strictly verified approved-index cohort, never work supply."""
     if (type(discovery_issue) is not int or discovery_issue not in
             (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
         raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
+    if type(isolate_invalid_wrapper) is not bool:
+        raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
     if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
 
@@ -123,6 +126,8 @@ def source_root_shadow(
         "discovery_issue": f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
         "status": "BLOCKED",
         "source_mode": "VERIFIED_POINTER_ONLY",
+        "diagnostic_isolation_enabled": isolate_invalid_wrapper,
+        "isolated_invalid_wrapper_sources": 0,
         "recipient": RECIPIENT,
         "source_status": index["status"],
         "index_hint_count": len(index["hints"]),
@@ -160,7 +165,20 @@ def source_root_shadow(
     }
     if index["blocked"] or index["truncated"]:
         result["errors"].append({"reason_code": "INDEX_SOURCE_INCOMPLETE"})
-        return result
+        # Diagnostic isolation can proceed only past a known non-authoritative
+        # malformed historical wrapper. The canonical shadow marks any
+        # blocked index as truncated to prevent cursor advancement, so only
+        # PARTIAL_BLOCKED with wrapper-only reasons may emit a *partial*
+        # diagnostic. A genuinely capped/truncated index remains blocked;
+        # never advance the durable cursor, or label hints after the blocker
+        # as examined. Other failure kinds remain fatal.
+        if (not isolate_invalid_wrapper
+                or index["status"] != "PARTIAL_BLOCKED"
+                or not index["blocked"]
+                or any(b.get("reason_code") != "INVALID_WRAPPER"
+                       for b in index["blocked"])):
+            return result
+        result["isolated_invalid_wrapper_sources"] += len(index["blocked"])
 
     try:
         task_sources = trusted_m3_task_locators(task_views or [])
@@ -225,7 +243,11 @@ def source_root_shadow(
                 str(exc) if isinstance(exc, InvalidMessage)
                 else "SOURCE_MAILBOX_UNAVAILABLE",
             })
-            # Fail closed: no successful partial roster claim.
+            # Only the explicit non-authoritative diagnostic may continue
+            # after one malformed wrapper, never after identity/replay errors.
+            if isolate_invalid_wrapper and str(exc) == "INVALID_WRAPPER":
+                result["isolated_invalid_wrapper_sources"] += 1
+                continue
             return result
         observed = set()
         items: list[dict[str, Any]] = []
@@ -263,6 +285,7 @@ def source_root_shadow(
     result["status"] = (
         "BOUNDED_CANDIDATE_SOURCE_READ"
         if not index["rejected"] and not result["errors"]
+        and not isolate_invalid_wrapper
         else "PARTIAL_UNKNOWN"
     )
     return result
@@ -276,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Verified #503/M3 original Issue cap; default 20, explicit maximum 40")
     parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
                         help="Default legacy #503; explicit approved successor #789")
+    parser.add_argument("--isolate-invalid-wrapper", action="store_true",
+                        help="Diagnostic-only partial original read beyond known malformed "
+                             "historical wrapper; never grants completeness or authority")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
@@ -295,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_source_actor=args.expect_source_actor,
             max_sources=args.max_sources, task_views=task_views,
             discovery_issue=args.discovery_issue,
+            isolate_invalid_wrapper=args.isolate_invalid_wrapper,
         )
     except (InvalidMessage, DevflowMCPError, OSError, UnicodeError) as exc:
         # No raw GitHub stderr, messages, prompts or credential data in errors.

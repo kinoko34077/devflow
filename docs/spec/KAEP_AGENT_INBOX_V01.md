@@ -170,6 +170,14 @@ Manual CLI use alone establishes only native read capability. In B3, an actual s
 
 ## Evidence
 Initial native MCP API [PR #536](https://github.com/kinoko34077/devflow/pull/536); truncated page safety [PR #538](https://github.com/kinoko34077/devflow/pull/538); native CLI [PR #539](https://github.com/kinoko34077/devflow/pull/539); security/correlation hardening [PR #540](https://github.com/kinoko34077/devflow/pull/540); check-in entrypoint documentation [PR #548](https://github.com/kinoko34077/devflow/pull/548); Codex test parity [PR #556](https://github.com/kinoko34077/devflow/pull/556); E2E source Issue [#553](https://github.com/kinoko34077/devflow/issues/553).
+### B5原典の不正Wrapperを隔離した部分診断（GET専用）
+
+標準の `python -m tools.kaep_source_roster_shadow --expect-notice-actor kinoko34077 --expect-source-actor kinoko34077` は従来どおり、不正な元コメントが1件でも正規index→original検証で見つかれば `BLOCKED` のまま停止する。履歴を書き換えたり不正なKAEPを正規メッセージとして受理したりしない。
+
+異なるIssueに独立して存在する正常な原典だけを追加診断する必要がある場合、明示的に `--isolate-invalid-wrapper` を指定できる。このモードで続行できるのは、既存の厳格なdecoderで理由が `INVALID_WRAPPER` と確定した候補に限る。不正原典は索引候補・正規rootへ昇格させず、原因と元index comment IDを `index_blockers` に維持し、他の正規原典だけを従来のactor/recipient/reply-chain検証に通す。それ以外の検証失敗・source取得不能・上限超過・index途中欠落は引き続き停止する。
+
+この明示診断は正常候補が検証できても、常に `PARTIAL_UNKNOWN`（CLI終了コード2）、`has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false` とし、Inbox受入や旧#503廃止、Claim/実作業の許可に用いてはならない。旧#503と後継#789の選択は既存の `--discovery-issue` に従い、どちらの索引も改変しない。
+
 ## B5/B6 既存Consumer同一原典の有限パリティ比較（2026-10-20、optional/offline）
 
 [B5 #531](https://github.com/kinoko34077/devflow/issues/531) の最初の未受入条件「原典Source universe/Consumer parity」のうち、**既に取得・検証を実施した同一Issueについてのみ**B5 ShadowとB6 live Unionのroot集合を比較する、offline専用補助器 `tools.kaep_b5_b6_parity_cli` を追加する。原典取得・actor/recipient/KAEP検証器を追加・変更しない。

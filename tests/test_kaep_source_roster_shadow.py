@@ -1,8 +1,11 @@
 """Opt-in B5 verified-pointer candidate shadow, no GitHub or task writes."""
 from __future__ import annotations
 
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_mailbox_codec import encode_comment
@@ -10,7 +13,7 @@ from tools.kaep_request_sender import make_request
 from tools.kaep_discovery_reader import POINTER_VERSION
 from tools.kaep_route_notice import DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE
 from tools.kaep_source_roster_shadow import (
-    source_root_shadow, MAX_SOURCE_ISSUES, MAX_OPT_IN_SOURCE_ISSUES,
+    source_root_shadow, main, MAX_SOURCE_ISSUES, MAX_OPT_IN_SOURCE_ISSUES,
 )
 
 ACTOR = "kinoko34077"
@@ -59,7 +62,7 @@ def pointer_notice(msg, *, issue=ISSUE, cid, notice_id,
 
 
 def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
-            discovery_issue=DISCOVERY_ISSUE):
+            discovery_issue=DISCOVERY_ISSUE, isolate_invalid_wrapper=False):
     fetched = []
     def fetch(r, i):
         fetched.append((r, i))
@@ -68,6 +71,7 @@ def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
         index, fetch_source=fetch, expected_notice_actor=ACTOR,
         expected_source_actor=ACTOR, max_sources=max_sources,
         discovery_issue=discovery_issue,
+        isolate_invalid_wrapper=isolate_invalid_wrapper,
     )
     return output, fetched
 
@@ -131,6 +135,138 @@ class SourceRootShadowTests(unittest.TestCase):
                 InvalidMessage, "DISCOVERY_INDEX_NOT_APPROVED"
             ):
                 compare(pages([]), {}, discovery_issue=invalid)
+
+    def test_opt_in_malformed_source_does_not_starve_valid_peer(self):
+        valid = root(810, issue=576)
+        broken = root(811, issue=577)
+        good_notice = pointer_notice(valid, issue=576, cid=601, notice_id=810)
+        bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=811)
+        malformed = {
+            "id": 702,
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra historical prose",
+            "user": {"id": 79015263, "login": ACTOR},
+        }
+        index = pages([comment(901, good_notice), comment(902, bad_notice)])
+        sources = {
+            (REPO, 576): pages([comment(601, valid)]),
+            (REPO, 577): pages([comment(701, broken), malformed]),
+        }
+        strict, reads = compare(index, sources)
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(strict["issues"], [])
+        self.assertEqual(reads, [(REPO, 576), (REPO, 577)])
+        self.assertEqual(strict["index_blockers"], [
+            {"index_comment_id": 902, "reason_code": "INVALID_WRAPPER"}
+        ])
+
+        diagnostic, reads = compare(
+            index, sources, isolate_invalid_wrapper=True,
+        )
+        self.assertEqual(diagnostic["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(diagnostic["index_blockers"], [
+            {"index_comment_id": 902, "reason_code": "INVALID_WRAPPER"}
+        ])
+        self.assertEqual(diagnostic["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(diagnostic["errors"], [
+            {"reason_code": "INDEX_SOURCE_INCOMPLETE"}
+        ])
+        self.assertEqual(len(diagnostic["issues"]), 1)
+        self.assertEqual(diagnostic["issues"][0]["owning_issue"],
+                         f"https://github.com/{REPO}/issues/576")
+        self.assertEqual(diagnostic["issues"][0]["roots"][0]["comparison"],
+                         "INDEXED_AND_ORIGINAL")
+        self.assertEqual(reads, [(REPO, 576), (REPO, 577)])
+        self.assertTrue(diagnostic["has_unknown_work"])
+        self.assertFalse(diagnostic["complete_source_universe"])
+        self.assertFalse(diagnostic["can_authorize_execution"])
+        self.assertFalse(diagnostic["fallback_retirement_authorized"])
+        self.assertNotIn("extra historical prose", json.dumps(diagnostic))
+
+    def test_opt_in_cannot_isolate_non_wrapper_source_failure(self):
+        valid = root(812, issue=576)
+        broken = root(813, issue=577)
+        good_notice = pointer_notice(valid, issue=576, cid=601, notice_id=812)
+        bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=813)
+        malformed = {
+            "id": 702,
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060",
+            "user": {"id": 79015263, "login": ACTOR},
+        }
+        out, _ = compare(
+            pages([comment(901, good_notice), comment(902, bad_notice)]),
+            {
+                (REPO, 576): pages([comment(601, valid)]),
+                (REPO, 577): pages([comment(701, broken), malformed]),
+            }, isolate_invalid_wrapper=True,
+        )
+        self.assertEqual(out["status"], "BLOCKED")
+        self.assertEqual(out["issues"], [])
+        self.assertEqual(out["isolated_invalid_wrapper_sources"], 0)
+        self.assertEqual(out["index_blockers"][-1]["reason_code"], "INVALID_FIELDS")
+
+    def test_opt_in_isolates_malformed_independent_task_source(self):
+        good = root(814, issue=576)
+        corrupted = root(815, issue=577)
+        invalid = {
+            "id": 703,
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra",
+            "user": {"id": 79015263, "login": ACTOR},
+        }
+        source_map = {
+            (REPO, 576): pages([comment(601, good)]),
+            (REPO, 577): pages([comment(701, corrupted), invalid]),
+        }
+        calls = []
+
+        def fetch(repo, issue):
+            calls.append((repo, issue))
+            return source_map[(repo, issue)]
+
+        view = self.task_view([576, 577])
+        strict = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[view],
+        )
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(len(strict["issues"]), 1)
+        calls.clear()
+        isolated = source_root_shadow(
+            pages([]), fetch_source=fetch,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[view], isolate_invalid_wrapper=True,
+        )
+        self.assertEqual(isolated["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(len(isolated["issues"]), 1)
+        self.assertEqual(isolated["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(isolated["errors"][-1]["owning_issue"],
+                         f"https://github.com/{REPO}/issues/577")
+        self.assertEqual(isolated["errors"][-1]["reason_code"], "INVALID_WRAPPER")
+        self.assertFalse(isolated["can_authorize_execution"])
+        self.assertFalse(isolated["complete_source_universe"])
+        self.assertEqual(calls, [(REPO, 576), (REPO, 577)])
+
+    def test_invalid_diagnostic_type_fails_without_fetching_sources(self):
+        from tools.kaep_inbox_reader import InvalidMessage
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_MODE"):
+            compare(pages([]), {}, isolate_invalid_wrapper="true")
+
+    def test_diagnostic_cli_flag_explicit_and_non_authoritative(self):
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages",
+                    return_value=pages([])) as fetch,
+              redirect_stdout(io.StringIO()) as capture):
+            rc = main([
+                "--expect-notice-actor", ACTOR,
+                "--expect-source-actor", ACTOR,
+                "--isolate-invalid-wrapper",
+            ])
+        data = json.loads(capture.getvalue())
+        self.assertEqual(rc, 2)
+        self.assertEqual(data["status"], "PARTIAL_UNKNOWN")
+        self.assertTrue(data["diagnostic_isolation_enabled"])
+        self.assertFalse(data["complete_source_universe"])
+        self.assertFalse(data["can_authorize_execution"])
+        fetch.assert_called_once_with(REPO, 503)
 
     def test_trusted_live_task_without_pointer_admits_nonpointer_issue(self):
         # Unlike historical closed #553, this fixture represents an OPEN
