@@ -9,6 +9,8 @@ name: Generated artifact writeback (reusable, devflow#384)
 #   caller, authenticates the producer run through GitHub REST, verifies the
 #   caller content at the run's workflow_sha, and performs a non-force CAS
 #   update of one approved PR branch. It is the only job with contents:write.
+# - `dry-run` uses a separate read-only verify job; only effectful write modes
+#   enter the job that receives contents:write.
 # - All caller inputs reach scripts through environment variables, never via
 #   expression interpolation inside `run:`.
 
@@ -105,8 +107,47 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  verify:
+    needs: produce
+    if: ${{ inputs.mode == 'dry-run' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      DEVFLOW_SHA: ${{ inputs.devflow_sha }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      MODE: dry-run
+    steps:
+      - name: Fetch pinned devflow helpers (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEVFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid devflow_sha" >&2; exit 2; }
+          git init -q devflow
+          git -C devflow fetch -q --depth 1 https://github.com/kinoko34077/devflow.git "$DEVFLOW_SHA"
+          git -C devflow checkout -q --detach FETCH_HEAD
+          test "$(git -C devflow rev-parse HEAD)" = "$DEVFLOW_SHA"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: generated-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifact
+      - name: Authenticate caller, inspect low-trust artifact and dry-run with a read-only token
+        shell: bash
+        env:
+          WRITER_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export DEVFLOW_CHECKOUT_SHA="$(git -C devflow rev-parse HEAD)"
+          cd devflow
+          python3 -I -c 'import sys; sys.path.insert(0, "."); from tools.generated_artifact_pilot import main; raise SystemExit(main(sys.argv[1:]))' write --artifact ../artifact
+
   write:
     needs: produce
+    if: ${{ inputs.mode == 'write' || inputs.mode == 'write-replay-test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
