@@ -1,4 +1,4 @@
-"""Opt-in GET-only comparison of the existing #503 pointer cohort with full originals.
+"""Opt-in GET-only comparison of an approved discovery index with full originals.
 
 Only strict SOURCE-VERIFIED #503 pointers may admit an Issue. Reads every
 READ_ONLY claude-code root inside that bounded source Issue, including roots
@@ -17,6 +17,9 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools import agent_inbox
 from tools.kaep_discovery_reader import (
     SOURCE_URL, discover_index_shadow,
+)
+from tools.kaep_route_notice import (
+    DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE,
 )
 from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, parse_pages,
@@ -85,8 +88,12 @@ def source_root_shadow(
     expected_source_actor: str,
     max_sources: int = MAX_SOURCE_ISSUES,
     task_views: list[dict[str, Any]] | None = None,
+    discovery_issue: int = DISCOVERY_ISSUE,
 ) -> dict[str, Any]:
-    """Compare only verified #503 original-Issue locators, never work supply."""
+    """Compare one strictly verified approved-index cohort, never work supply."""
+    if (type(discovery_issue) is not int or discovery_issue not in
+            (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
+        raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
     if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
 
@@ -103,11 +110,17 @@ def source_root_shadow(
     index = discover_index_shadow(
         index_pages, expected_notice_actor=expected_notice_actor,
         expected_source_actor=expected_source_actor, fetch_source=bounded_fetch,
+        index_issue=discovery_issue,
+        additional_forbidden_issue=(
+            APPROVED_SUCCESSOR_ISSUE if discovery_issue == DISCOVERY_ISSUE
+            else DISCOVERY_ISSUE
+        ),
     )
     # The source proof path itself must be unblocked before exposing any
     # derived root evidence. Partial and rejected index entries remain unknown.
     result: dict[str, Any] = {
         "schema_version": "kaep.source-roster-shadow.v0.1",
+        "discovery_issue": f"{DISCOVERY_REPOSITORY}#{discovery_issue}",
         "status": "BLOCKED",
         "source_mode": "VERIFIED_POINTER_ONLY",
         "recipient": RECIPIENT,
@@ -261,22 +274,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-source-actor", required=True)
     parser.add_argument("--max-sources", type=int, default=MAX_SOURCE_ISSUES,
                         help="Verified #503/M3 original Issue cap; default 20, explicit maximum 40")
+    parser.add_argument("--discovery-issue", type=int, default=DISCOVERY_ISSUE,
+                        help="Default legacy #503; explicit approved successor #789")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
     try:
+        if args.discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
+            raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
         if (len(args.task_repository) > MAX_TASK_REPOSITORIES
                 or len(set(args.task_repository)) != len(args.task_repository)):
             raise InvalidMessage("INVALID_TASK_REPOSITORY_COUNT")
         service = default_service() if args.task_repository else None
         task_views = [service.get_repository_work_view(repo)
                       for repo in args.task_repository] if service else []
-        index_pages = fetch_gh_pages("kinoko34077/devflow", 503)
+        index_pages = fetch_gh_pages(DISCOVERY_REPOSITORY, args.discovery_issue)
         output = source_root_shadow(
             index_pages, fetch_source=fetch_gh_pages,
             expected_notice_actor=args.expect_notice_actor,
             expected_source_actor=args.expect_source_actor,
             max_sources=args.max_sources, task_views=task_views,
+            discovery_issue=args.discovery_issue,
         )
     except (InvalidMessage, DevflowMCPError, OSError, UnicodeError) as exc:
         # No raw GitHub stderr, messages, prompts or credential data in errors.
