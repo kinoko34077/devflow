@@ -661,7 +661,7 @@ class SourceRootShadowTests(unittest.TestCase):
         corrupted = root(815, issue=577)
         invalid = {
             "id": 703,
-            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra",
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060 invalid-fence-tail",
             "user": {"id": 79015263, "login": ACTOR},
         }
         source_map = {

@@ -126,7 +126,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
         self.assertFalse(out["recipient_pickup_proven"])
 
     def test_malformed_789_preflight_stops_before_source_post(self):
-        malformed = "<!-- kaep:message:v0.2 -->" + "\n" + chr(96) * 3 + "json" + "\n{}\n" + chr(96) * 3 + "\n"
+        malformed = "<!-- kaep:message:v0.2 -->" + "\n" + chr(96) * 3 + "json" + "\n{}\n" + chr(96) * 3 + " invalid-fence-tail"
         blob = json.dumps([[{"id": 55, "body": malformed, "user": {"login": ACTOR}}]])
         with patch("tools.kaep_send_with_discovery.verify_public_source"), patch(
                 "tools.kaep_send_with_discovery.fetch_gh_pages",
