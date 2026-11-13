@@ -31,6 +31,18 @@ def comment(cid, msg, actor=ACTOR):
                      "login": actor}}
 
 
+def invalid_ref_comment(cid, msg):
+    """Valid outer envelope, invalid evidence URL. The codec must reject it."""
+    payload = {**msg, "evidence_refs": [
+        "https://github.com/kinoko34077/devflow/pull/252#pullrequestreview-1234",
+    ]}
+    fence = chr(96) * 3
+    return {"id": cid,
+            "body": "<!-- kaep:message:v0.2 -->\n" + fence + "json\n"
+                    + json.dumps(payload) + "\n" + fence,
+            "user": {"id": 79015263, "login": ACTOR}}
+
+
 def root(number, *, issue=ISSUE, recipient="claude-code"):
     msg, _ = make_request(
         pages([]), repository=REPO, issue=issue, recipient=recipient,
@@ -62,7 +74,8 @@ def pointer_notice(msg, *, issue=ISSUE, cid, notice_id,
 
 
 def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
-            discovery_issue=DISCOVERY_ISSUE, isolate_invalid_wrapper=False):
+            discovery_issue=DISCOVERY_ISSUE, isolate_invalid_wrapper=False,
+            isolate_invalid_ref=False):
     fetched = []
     def fetch(r, i):
         fetched.append((r, i))
@@ -72,6 +85,7 @@ def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
         expected_source_actor=ACTOR, max_sources=max_sources,
         discovery_issue=discovery_issue,
         isolate_invalid_wrapper=isolate_invalid_wrapper,
+        isolate_invalid_ref=isolate_invalid_ref,
     )
     return output, fetched
 
@@ -223,6 +237,203 @@ class SourceRootShadowTests(unittest.TestCase):
         self.assertTrue(diagnostic["has_unknown_work"])
         self.assertFalse(diagnostic["complete_source_universe"])
         self.assertFalse(diagnostic["can_authorize_execution"])
+
+    def test_invalid_ref_requires_separate_opt_in_and_excludes_whole_issue(self):
+        good = root(841, issue=576)
+        bad = root(842, issue=577)
+        good_notice = pointer_notice(good, issue=576, cid=601, notice_id=841)
+        bad_notice = pointer_notice(bad, issue=577, cid=701, notice_id=842)
+        index = pages([comment(901, good_notice), comment(902, bad_notice)])
+        sources = {
+            (REPO, 576): pages([comment(601, good)]),
+            (REPO, 577): pages([comment(701, bad),
+                                invalid_ref_comment(702, root(843, issue=577))]),
+        }
+        strict, _ = compare(index, sources)
+        wrapper_only, _ = compare(index, sources, isolate_invalid_wrapper=True)
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(wrapper_only["status"], "BLOCKED")
+        self.assertEqual(wrapper_only["issues"], [])
+        self.assertEqual(wrapper_only["index_blockers"], [
+            {"index_comment_id": 902, "reason_code": "INVALID_REF"}
+        ])
+        diagnostic, reads = compare(index, sources,
+                                    isolate_invalid_wrapper=True,
+                                    isolate_invalid_ref=True)
+        self.assertEqual(diagnostic["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(diagnostic["isolated_invalid_ref_sources"], 1)
+        self.assertEqual(diagnostic["isolated_invalid_wrapper_sources"], 0)
+        self.assertEqual(diagnostic["index_blockers"], [
+            {"index_comment_id": 902, "reason_code": "INVALID_REF"}
+        ])
+        self.assertEqual([x["owning_issue"] for x in diagnostic["issues"]],
+                         [f"https://github.com/{REPO}/issues/576"])
+        self.assertEqual(reads, [(REPO, 576), (REPO, 577)])
+        self.assertTrue(diagnostic["has_unknown_work"])
+        self.assertFalse(diagnostic["complete_source_universe"])
+        self.assertFalse(diagnostic["can_authorize_execution"])
+        self.assertFalse(diagnostic["fallback_retirement_authorized"])
+        self.assertNotIn("pullrequestreview-", json.dumps(diagnostic))
+
+    def test_mixed_ref_and_wrapper_reaches_later_batch_safe_cursor_pinned(self):
+        wrapper_root = root(844, issue=577)
+        ref_root = root(845, issue=578)
+        good_root = root(846, issue=576)
+        notices = {
+            1: pointer_notice(wrapper_root, issue=577, cid=701, notice_id=844),
+            2: pointer_notice(ref_root, issue=578, cid=801, notice_id=845),
+            40: pointer_notice(good_root, issue=576, cid=601, notice_id=846),
+        }
+        index = pages([
+            comment(1000 + n, notices[n]) if n in notices else
+            {"id": 1000 + n, "body": "ordinary",
+             "user": {"id": 79015263, "login": ACTOR}}
+            for n in range(45)
+        ])
+        fence = chr(96) * 3
+        sources = {
+            (REPO, 577): pages([
+                comment(701, wrapper_root),
+                {"id": 702, "body": "<!-- kaep:message:v0.2 -->\n"
+                 + fence + "json\n{}\n" + fence + "\nextra",
+                 "user": {"id": 79015263, "login": ACTOR}},
+            ]),
+            (REPO, 578): pages([
+                comment(801, ref_root),
+                invalid_ref_comment(802, root(847, issue=578)),
+            ]),
+            (REPO, 576): pages([comment(601, good_root)]),
+        }
+        strict, _ = compare(index, sources)
+        wrapper_only, _ = compare(index, sources,
+                                  isolate_invalid_wrapper=True)
+        self.assertEqual(strict["status"], "BLOCKED")
+        self.assertEqual(wrapper_only["status"], "BLOCKED")
+        diagnostic, reads = compare(index, sources,
+                                    isolate_invalid_wrapper=True,
+                                    isolate_invalid_ref=True)
+        self.assertEqual(diagnostic["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(diagnostic["index_hint_count"], 1)
+        self.assertEqual(diagnostic["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(diagnostic["isolated_invalid_ref_sources"], 1)
+        self.assertEqual(diagnostic["index_blockers"], [
+            {"index_comment_id": 1001, "reason_code": "INVALID_WRAPPER"},
+            {"index_comment_id": 1002, "reason_code": "INVALID_REF"},
+        ])
+        self.assertEqual([x["owning_issue"] for x in diagnostic["issues"]],
+                         [f"https://github.com/{REPO}/issues/576"])
+        self.assertEqual(reads, [(REPO, 577), (REPO, 578), (REPO, 576)])
+        from tools.kaep_discovery_reader import discover_index_shadow
+        shadow = discover_index_shadow(
+            index, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR,
+            fetch_source=lambda r, i: sources[(r, i)],
+            diagnostic_scan_after_blocked=True,
+            diagnostic_isolate_invalid_ref=True)
+        self.assertEqual(shadow["status"], "PARTIAL_BLOCKED")
+        self.assertEqual(shadow["next_after_id"], 1000)
+        self.assertTrue(shadow["truncated"])
+        self.assertFalse(shadow["fallback_retirement_authorized"])
+
+    def test_invalid_ref_task_only_quarantine_preserves_nonref_errors(self):
+        good = root(848, issue=576)
+        bad = root(849, issue=577)
+        sources = {
+            (REPO, 576): pages([comment(601, good)]),
+            (REPO, 577): pages([comment(701, bad),
+                                invalid_ref_comment(702, root(850, issue=577))]),
+        }
+        def fetch(r, i):
+            return sources[(r, i)]
+        def inspect():
+            return source_root_shadow(
+                pages([]), fetch_source=fetch,
+                expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                task_views=[self.task_view([576, 577])],
+                isolate_invalid_wrapper=True, isolate_invalid_ref=True)
+        out = inspect()
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["isolated_invalid_ref_sources"], 1)
+        self.assertEqual(len(out["issues"]), 1)
+        self.assertEqual(out["errors"][-1], {
+            "owning_issue": f"https://github.com/{REPO}/issues/577",
+            "reason_code": "INVALID_REF",
+        })
+        fence = chr(96) * 3
+        sources[(REPO, 577)] = pages([
+            comment(701, bad),
+            {"id": 702,
+             "body": "<!-- kaep:message:v0.2 -->\n" + fence
+                     + "json\n{}\n" + fence,
+             "user": {"id": 79015263, "login": ACTOR}},
+        ])
+        blocked = inspect()
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["errors"][-1]["reason_code"], "INVALID_FIELDS")
+        self.assertEqual(blocked["isolated_invalid_ref_sources"], 0)
+
+    def test_invalid_ref_diagnostic_never_bypasses_hard_source_cap(self):
+        poisoned = root(851, issue=577)
+        clean_a = root(852, issue=576)
+        clean_b = root(853, issue=578)
+        index = pages([
+            comment(901, pointer_notice(poisoned, issue=577,
+                                        cid=701, notice_id=851)),
+            comment(902, pointer_notice(clean_a, issue=576,
+                                        cid=601, notice_id=852)),
+            comment(903, pointer_notice(clean_b, issue=578,
+                                        cid=801, notice_id=853)),
+        ])
+        sources = {
+            (REPO, 577): pages([
+                comment(701, poisoned),
+                invalid_ref_comment(702, root(854, issue=577)),
+            ]),
+            (REPO, 576): pages([comment(601, clean_a)]),
+            (REPO, 578): pages([comment(801, clean_b)]),
+        }
+        result, fetched = compare(index, sources, max_sources=2,
+                                  isolate_invalid_wrapper=True,
+                                  isolate_invalid_ref=True)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["issues"], [])
+        self.assertIn("CANDIDATE_LIMIT",
+                      [x["reason_code"] for x in result["index_blockers"]])
+        self.assertEqual(fetched, [(REPO, 577), (REPO, 576)])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_index_ref_quarantine_requires_explicit_scan_mode(self):
+        from tools.kaep_discovery_reader import discover_index_shadow
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_SCAN_MODE"):
+            discover_index_shadow(
+                pages([]), expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR,
+                fetch_source=lambda *_: pages([]),
+                diagnostic_isolate_invalid_ref=True,
+            )
+
+    def test_invalid_ref_flag_without_wrapper_fails_before_get(self):
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_MODE"):
+            compare(pages([]), {}, isolate_invalid_ref=True)
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages") as fetch,
+              redirect_stdout(io.StringIO()) as capture):
+            rc = main(["--expect-notice-actor", ACTOR,
+                       "--expect-source-actor", ACTOR,
+                       "--isolate-invalid-ref"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(capture.getvalue())["reason_code"],
+                         "INVALID_DIAGNOSTIC_MODE")
+        fetch.assert_not_called()
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages",
+                    return_value=pages([])) as fetch,
+              redirect_stdout(io.StringIO()) as capture):
+            rc = main(["--expect-notice-actor", ACTOR,
+                       "--expect-source-actor", ACTOR,
+                       "--isolate-invalid-wrapper", "--isolate-invalid-ref"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(capture.getvalue())["status"],
+                         "PARTIAL_UNKNOWN")
+        fetch.assert_called_once_with(REPO, 503)
 
     def test_opt_in_cannot_isolate_non_wrapper_source_failure(self):
         valid = root(812, issue=576)

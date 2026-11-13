@@ -90,12 +90,15 @@ def source_root_shadow(
     task_views: list[dict[str, Any]] | None = None,
     discovery_issue: int = DISCOVERY_ISSUE,
     isolate_invalid_wrapper: bool = False,
+    isolate_invalid_ref: bool = False,
 ) -> dict[str, Any]:
     """Compare one strictly verified approved-index cohort, never work supply."""
     if (type(discovery_issue) is not int or discovery_issue not in
             (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE)):
         raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
-    if type(isolate_invalid_wrapper) is not bool:
+    if type(isolate_invalid_wrapper) is not bool or type(isolate_invalid_ref) is not bool:
+        raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
+    if isolate_invalid_ref and not isolate_invalid_wrapper:
         raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
     if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
@@ -119,6 +122,7 @@ def source_root_shadow(
             else DISCOVERY_ISSUE
         ),
         diagnostic_scan_after_blocked=isolate_invalid_wrapper,
+        diagnostic_isolate_invalid_ref=isolate_invalid_ref,
     )
     # The source proof path itself must be unblocked before exposing any
     # derived root evidence. Partial and rejected index entries remain unknown.
@@ -128,7 +132,9 @@ def source_root_shadow(
         "status": "BLOCKED",
         "source_mode": "VERIFIED_POINTER_ONLY",
         "diagnostic_isolation_enabled": isolate_invalid_wrapper,
+        "diagnostic_invalid_ref_enabled": isolate_invalid_ref,
         "isolated_invalid_wrapper_sources": 0,
+        "isolated_invalid_ref_sources": 0,
         "recipient": RECIPIENT,
         "source_status": index["status"],
         "index_hint_count": len(index["hints"]),
@@ -176,10 +182,17 @@ def source_root_shadow(
         if (not isolate_invalid_wrapper
                 or index["status"] != "PARTIAL_BLOCKED"
                 or not index["blocked"]
-                or any(b.get("reason_code") != "INVALID_WRAPPER"
+                or any(b.get("reason_code") not in
+                       ({"INVALID_WRAPPER", "INVALID_REF"} if isolate_invalid_ref
+                        else {"INVALID_WRAPPER"})
                        for b in index["blocked"])):
             return result
-        result["isolated_invalid_wrapper_sources"] += len(index["blocked"])
+        result["isolated_invalid_wrapper_sources"] += sum(
+            b.get("reason_code") == "INVALID_WRAPPER" for b in index["blocked"]
+        )
+        result["isolated_invalid_ref_sources"] += sum(
+            b.get("reason_code") == "INVALID_REF" for b in index["blocked"]
+        )
 
     try:
         task_sources = trusted_m3_task_locators(task_views or [])
@@ -246,8 +259,14 @@ def source_root_shadow(
             })
             # Only the explicit non-authoritative diagnostic may continue
             # after one malformed wrapper, never after identity/replay errors.
-            if isolate_invalid_wrapper and str(exc) == "INVALID_WRAPPER":
-                result["isolated_invalid_wrapper_sources"] += 1
+            if isolate_invalid_wrapper and str(exc) in (
+                {"INVALID_WRAPPER", "INVALID_REF"} if isolate_invalid_ref
+                else {"INVALID_WRAPPER"}
+            ):
+                # Quarantine this whole original, never its individual roots.
+                counter = ("isolated_invalid_ref_sources" if str(exc) == "INVALID_REF"
+                           else "isolated_invalid_wrapper_sources")
+                result[counter] += 1
                 continue
             return result
         observed = set()
@@ -303,12 +322,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--isolate-invalid-wrapper", action="store_true",
                         help="Diagnostic-only partial original read beyond known malformed "
                              "historical wrapper; never grants completeness or authority")
+    parser.add_argument("--isolate-invalid-ref", action="store_true",
+                        help="Diagnostic-only whole-Issue INVALID_REF exclusion; requires "
+                             "--isolate-invalid-wrapper, never accepts invalid roots")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
     try:
         if args.discovery_issue not in (DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE):
             raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
+        if args.isolate_invalid_ref and not args.isolate_invalid_wrapper:
+            raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
         if (len(args.task_repository) > MAX_TASK_REPOSITORIES
                 or len(set(args.task_repository)) != len(args.task_repository)):
             raise InvalidMessage("INVALID_TASK_REPOSITORY_COUNT")
@@ -323,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             max_sources=args.max_sources, task_views=task_views,
             discovery_issue=args.discovery_issue,
             isolate_invalid_wrapper=args.isolate_invalid_wrapper,
+            isolate_invalid_ref=args.isolate_invalid_ref,
         )
     except (InvalidMessage, DevflowMCPError, OSError, UnicodeError) as exc:
         # No raw GitHub stderr, messages, prompts or credential data in errors.

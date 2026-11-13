@@ -346,6 +346,7 @@ def discover_index_shadow(
     index_issue: int = DISCOVERY_ISSUE,
     additional_forbidden_issue: int | None = None,
     diagnostic_scan_after_blocked: bool = False,
+    diagnostic_isolate_invalid_ref: bool = False,
 ) -> dict[str, Any]:
     """Opt-in bounded #503 index shadow, using the unchanged strict reader.
 
@@ -354,7 +355,9 @@ def discover_index_shadow(
     """
     if type(max_batches) is not int or not (1 <= max_batches <= MAX_SHADOW_BATCHES):
         fail("INVALID_SHADOW_LIMIT")
-    if type(diagnostic_scan_after_blocked) is not bool:
+    if type(diagnostic_scan_after_blocked) is not bool or type(diagnostic_isolate_invalid_ref) is not bool:
+        fail("INVALID_DIAGNOSTIC_SCAN_MODE")
+    if diagnostic_isolate_invalid_ref and not diagnostic_scan_after_blocked:
         fail("INVALID_DIAGNOSTIC_SCAN_MODE")
     # Preserve fail-closed provider transport/page validation in discover_batch.
     # Strictly validate the complete provider history once per shadow scan.
@@ -408,8 +411,13 @@ def discover_index_shadow(
             if first_block_cursor is None:
                 first_block_cursor = batch["next_after_id"]
                 cursor = first_block_cursor
+            # Explicit read-only diagnostic only. INVALID_REF is a syntactic
+            # evidence URL failure, not an identity, transport or reply error.
+            # Never turn the tainted original Issue into a verified source.
+            allowed = ({"INVALID_WRAPPER", "INVALID_REF"}
+                       if diagnostic_isolate_invalid_ref else {"INVALID_WRAPPER"})
             if (not diagnostic_scan_after_blocked
-                    or any(item.get("reason_code") != "INVALID_WRAPPER"
+                    or any(item.get("reason_code") not in allowed
                            for item in blocked)):
                 status = "PARTIAL_BLOCKED"
                 truncated = True
