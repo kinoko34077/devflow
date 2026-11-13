@@ -131,7 +131,7 @@ class HtmlListTests(unittest.TestCase):
 
     def test_browser_candidate_marker_hint_is_not_byte_zero_only(self):
         page = to_html(report())
-        self.assertIn("test(c.body)", page)
+        self.assertIn("^<!-- kaep:message:v0[.]2 -->/m.test(c.body)", page)
         self.assertNotIn('c.body.startsWith("<!-- kaep:message:v0.2 -->")', page)
         self.assertIn("原典未検証", page)
 
