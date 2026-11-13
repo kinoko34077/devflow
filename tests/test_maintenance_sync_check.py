@@ -822,6 +822,136 @@ class CandidateScopedSyncCheckEndToEndTests(unittest.TestCase):
 
 
 
+
+class SourceFirstPortfolioAuditTests(unittest.TestCase):
+    def _run(self, *, candidate_count=2, close_b=False, fail_a=False):
+        import argparse
+        import json
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+        from tools.maintenance_github import GitHubReadError
+
+        tasks = [
+            {"task": f"o/r#{number}", "blocked": False,
+             "requires_user_confirmation": False}
+            for number in ([7, 8] if candidate_count == 2 else [])
+        ]
+        candidate_block = (
+            "<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_BEGIN -->\n"
+            + json.dumps({
+                "schema_version": 1,
+                "repository": "o/r",
+                "source_ref": "kinoko34077/devflow#1",
+                "candidates": tasks,
+            })
+            + "\n<!-- DEVFLOW_EXECUTION_CANDIDATES_V1_END -->\n"
+        ) if candidate_count else ""
+        body = (
+            "## Repository\n\n\x60o/r\x60\n\n"
+            + "## Work Status\n\n\x60AUDITED\x60\n\n"
+            + "## Repository State\n\n\x60ACTIVE\x60\n\n"
+            + "## Active Work\n\n\x60o/r#8\x60 in progress\n\n"
+            + "## Next Action\n\nContinue B\n\n"
+            + candidate_block
+        )
+
+        class Transport:
+            def __init__(self):
+                self.read_paths = []
+                self.control_reads = 0
+
+            def get_json(self, path):
+                self.read_paths.append(path)
+                if path == "/repos/kinoko34077/devflow/issues/1":
+                    return {
+                        "number": 1, "title": "[REPO] r", "state": "open",
+                        "html_url": "https://github.com/kinoko34077/devflow/issues/1",
+                        "body": body, "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                if path == "/repos/o/r/issues/7":
+                    if fail_a:
+                        raise GitHubReadError("original A source unavailable")
+                    return {
+                        "number": 7, "state": "closed",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "body": "## Work Status\n\n\x60DONE\x60\n",
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                if path == "/repos/o/r/issues/8":
+                    return {
+                        "number": 8,
+                        "state": "closed" if close_b else "open",
+                        "html_url": "https://github.com/o/r/issues/8",
+                        "body": ("## Work Status\n\n\x60DONE\x60\n" if close_b
+                                 else "## Work Status\n\n\x60IMPLEMENTING\x60\n"),
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                raise AssertionError("unexpected read: " + path)
+
+            def get_control(self, repository, control_ref):
+                self.control_reads += 1
+                if repository != "o/r" or control_ref != "kinoko34077/devflow#1":
+                    raise AssertionError("Unexpected Control")
+                return {"candidate_tasks": [task["task"] for task in tasks]}
+
+        transport = Transport()
+        args = argparse.Namespace(
+            token_env="GITHUB_TOKEN", observed_at="2026-11-14T00:01:00Z",
+            triage=False, output=None,
+        )
+        outputs = []
+        with (
+            patch.object(cli, "_SyncCheckGitHubTransport",
+                         return_value=transport),
+            patch.object(cli, "_token_from_env", return_value="test"),
+            patch.object(cli, "discover_controls", return_value=[
+                {"repository": "o/r", "control_ref": "kinoko34077/devflow#1"},
+            ]),
+            patch.object(cli, "_write",
+                         side_effect=lambda data, _: outputs.append(data)),
+        ):
+            self.assertEqual(cli._portfolio(args), 0)
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(outputs[0]["repository_count"], 1)
+        self.assertEqual(len(outputs[0]["reports"]), 1)
+        return outputs[0]["reports"][0], transport
+
+    def test_portfolio_discovers_closed_a_without_manual_active_work_edit(self):
+        report, transport = self._run()
+        self.assertEqual(report["owner_ref"], "o/r#7")
+        self.assertEqual(report["disposition"], "AUTO_ADVANCE")
+        self.assertEqual(
+            report["next_transition"], "WITHDRAW_STALE_CONTROL_CANDIDATE",
+        )
+        self.assertIn("/repos/o/r/issues/7", transport.read_paths)
+        self.assertIn("/repos/o/r/issues/8", transport.read_paths)
+        self.assertEqual(transport.control_reads, 1)
+        self.assertFalse(hasattr(transport, "update_control_body"))
+
+    def test_portfolio_preserves_unregistered_legacy_manual_read(self):
+        report, transport = self._run(candidate_count=0)
+        self.assertEqual(report["owner_ref"], "o/r#8")
+        self.assertEqual(report["disposition"], "NO_ACTION")
+        self.assertEqual(transport.control_reads, 0)
+        self.assertNotIn("/repos/o/r/issues/7", transport.read_paths)
+
+    def test_portfolio_fails_closed_if_original_a_is_unavailable(self):
+        report, _ = self._run(fail_a=True)
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertNotIn("next_transition", report)
+
+    def test_portfolio_fails_closed_if_two_terminal_candidates(self):
+        report, _ = self._run(close_b=True)
+        self.assertEqual(report["disposition"], "NEEDS_EVIDENCE")
+        self.assertNotIn("next_transition", report)
+
+
 class SourceFirstRepositoryAuditTests(unittest.TestCase):
     def test_readonly_repository_agrees_with_source_first_sync_check(self):
         """The normal audit must surface A, not the manual B owner."""
