@@ -34,6 +34,46 @@ class DevflowMCPParsingTests(unittest.TestCase):
         )
 
 
+class GitHubReaderMalformedListRowsTests(unittest.TestCase):
+    def test_issue_listing_rejects_malformed_row_instead_of_omitting_work(self):
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda _url, _headers: [
+                {"number": 21, "title": "valid issue"}, None,
+            ],
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "GitHub issues response contained an invalid item",
+        ):
+            reader.list_issues("kinoko34077/devflow")
+
+    def test_comment_listing_rejects_malformed_row_instead_of_omitting_request(self):
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda _url, _headers: [
+                {"id": 1, "body": "valid comment"}, 42,
+            ],
+        )
+        with self.assertRaisesRegex(
+            devflow_mcp_core.DevflowMCPError,
+            "GitHub Issue comments response contained an invalid item",
+        ):
+            reader.list_issue_comments(
+                "kinoko34077/devflow", 21, max_comments=500,
+            )
+
+    def test_issue_listing_still_filters_valid_pull_request_rows(self):
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda _url, _headers: [
+                {"number": 12, "pull_request": {"url": "https://api.github.com/example"}},
+                {"number": 21, "title": "valid issue"},
+            ],
+        )
+        self.assertEqual(
+            [item["number"] for item in reader.list_issues("kinoko34077/devflow")],
+            [21],
+        )
+
+
 class DevflowMCPCommentPageBoundTests(unittest.TestCase):
     def test_bounded_inbox_fetch_stops_once_comment_limit_proved(self):
         for total, expected_pages, expected_count in (
