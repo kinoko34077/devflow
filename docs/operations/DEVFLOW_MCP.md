@@ -89,6 +89,23 @@ or omitting it from the other CLI operations is rejected before any live read.
 There is no new background scan or schedule; this is the same bounded
 read-only MCP service's already-available portfolio projection.
 
+### Per-repository Human Portfolio fallback (already-owned implementation)
+
+After the target repository has been identified and its canonical Control read,
+an MCP-unavailable client may inspect its existing source-owned Human
+Portfolio with the same GET-only service:
+
+```sh
+python -m tools.devflow_read_cli human-portfolio --repository kinoko34077/devflow
+```
+
+This delegates to the accepted MCP `get_human_portfolio(repository)`
+implementation with no duplicate publication parser, source classifier or
+write operation. It preserves its original `complete`, source and
+human-attention diagnostics; it **does not** clear Human gates, authorize a
+Claim or convert publication into an Offer. The repository remains required,
+unlike the targetless `portfolio` locator.
+
 ### P2a exact TASK read without a full repository Issue inventory
 
 A selected read-only Consumer may ask the same existing Devflow source classifier
