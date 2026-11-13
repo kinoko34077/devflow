@@ -1286,6 +1286,32 @@ class DevflowService:
                 "claimability": "NOT_EVALUATED",
                 "can_authorize_execution": False,
             }
+        task_source_current = (
+            view["source_status"] == "AVAILABLE"
+            and view["source_freshness"] == "CURRENT"
+        )
+        tasks_by_ref = (
+            {task["url"]: task for task in view["task_records"]}
+            if task_source_current else {}
+        )
+
+        def source_alignment(row: dict[str, Any]) -> str:
+            if not task_source_current:
+                return "TASK_SOURCE_UNAVAILABLE"
+            current_task = tasks_by_ref.get(row["entry_ref"])
+            if current_task is None:
+                return "TASK_NOT_OBSERVED"
+            if (
+                current_task["work_status"] != row["task_work_status"]
+                or current_task["scope_ready"] != row["scope_ready"]
+                or current_task["requires_user_confirmation"]
+                   != row["requires_user_confirmation"]
+            ):
+                return "TASK_METADATA_DIVERGED"
+            # The Work View does not carry the original Issue body hash.
+            # Matching a few fields is not admission or a fresh source proof.
+            return "TASK_METADATA_MATCH_ONLY"
+
         entries = [
             {
                 "source_kind": "CONTROL_PUBLISHED_CANDIDATE",
@@ -1296,6 +1322,8 @@ class DevflowService:
                     role["role"] for role in row["roles"]
                 ],
                 "publication_state": "PUBLISHED_SNAPSHOT_ONLY",
+                "task_source_alignment": source_alignment(row),
+                "task_body_sha_verified": False,
                 "claimability": "NOT_EVALUATED",
             }
             for row in observed
