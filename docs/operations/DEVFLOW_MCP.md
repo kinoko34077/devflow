@@ -46,6 +46,29 @@ The server exposes only read operations:
 - `assess_outcome_observation(repository, issue_number, evidence)`
 - `get_sync_health()`
 
+### Workspace recipient TASK-cohort status and entries
+
+The Workspace `sections.messages.task_cohort_status` describes only the
+selected, recipient-scoped known-TASK mailbox cohort, independently of B6:
+
+- `BOUNDED_OBSERVED`: the selected, bounded TASK mailboxes were read without a
+  per-Issue comment error. This does **not** establish full KAEP history or a
+  complete repository work inventory.
+- `PARTIAL`: the TASK Issue listing was current, but at least one selected
+  TASK mailbox failed. `sections.messages.errors` retains the failed source.
+- `SOURCE_UNAVAILABLE`: the underlying TASK Issue listing was not current.
+
+With B6 opt-out, `messages.status` is `TASK_SOURCE_COHORT_ONLY` for
+`BOUNDED_OBSERVED`, `TASK_SOURCE_COHORT_PARTIAL` for `PARTIAL`, or
+`SOURCE_UNAVAILABLE`. With B6 enabled, its existing combined status remains
+independent and this `task_cohort_status` still exposes primary TASK failures.
+An empty `messages.entries=[]` denotes an observed empty *bounded* message
+set only when no selected primary mailbox failed; when no verified root can
+be retained and a primary selected mailbox failed, `entries=null` preserves
+the unknown source instead. Verified independent TASK/B6 roots remain visible
+even if other mailboxes fail. No status here authorizes a task Claim or proves
+the absence of historical/unclassified KAEP work.
+
 This list follows the **currently exported** functions in `tools/devflow_mcp.py`. All remain read-only. `get_agent_workspace` reuses `get_repository_work_view`, the bounded `get_agent_inbox` reader and one coordinator snapshot read. Opt in to `include_recent_kaep=True` for B6 latest-comment original-source candidates and `include_published_supply=True` for the validated Control publication snapshot. Both default to `False` and the extra reads are conditional. `known_tasks`, recipient messages, published candidates and coordinator Claims are distinct observations; none grants assignment, Claim/Lease, permission to execute, historical source completeness or successful agent delivery. The default Workspace reader projects only requested-repository coordinator Claims, across all workers because no mapping connects the `recipient` parameter to coordinator `worker_id`: unexpired `CLAIMED`/`RUNNING` claims appear in `ongoing`; `WAITING` or expired-lease claims appear in a partial `waiting_recovery` section. Recovery eligibility remains `NOT_EVALUATED`. `offers` remains `NOT_INTEGRATED`: the Controller's current Offer is held in per-run runner context, while Issue #3 stores Claims only. Published candidates are not current Offers. Missing or invalid coordinator evidence affects only the dependent sections and returns `UNKNOWN/entries=null`. Existing focused readers and manual Control/#503 fallback remain supported. Native check-in CLI usage is documented in [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md).
 
 The Devflow MCP reader exposes only GET operations. The Workspace coordinator adapter invokes the packaged `get_state_result` read path only; no MCP/CLI operation calls `GitHubStateStore.save_body` or exposes coordinator mutation, Claim, Provider, credential, release or deployment capability.
