@@ -158,7 +158,9 @@ def _classify_observation(
 
 def _repository(args: argparse.Namespace) -> int:
     token = _token_from_env(args.token_env)
-    transport = GitHubReadTransport(token)
+    # The accepted source-first observer uses the existing read-only
+    # get_control method; no PATCH is reachable from this audit command.
+    transport = _SyncCheckGitHubTransport(token)
     observed_at = args.observed_at or _utc_now()
     control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
     # Opt-in M3 read-only Consumer: use exactly the existing Work View
@@ -176,13 +178,20 @@ def _repository(args: argparse.Namespace) -> int:
             # transport/parser errors. Keep the normal Maintenance report
             # available; never use this optional read for action authority.
             m3_view = None
-    observation = collect_repository(
-        transport,
-        args.repository,
-        control_ref,
-        observed_at,
-        m3_work_view=m3_view if args.m3_read_parity else None,
-    )
+    if args.m3_read_parity:
+        # This optional diagnostic intentionally compares the *legacy*
+        # manual Control owner against the M3 Work View; changing its owner
+        # source would invalidate the parity being measured.
+        observation = collect_repository(
+            transport, args.repository, control_ref, observed_at,
+            m3_work_view=m3_view,
+        )
+    else:
+        # Normal read-only repository audit now agrees with the accepted
+        # operator sync-check selection on original admitted Issues.
+        observation = _sync_check_source_first_observation(
+            transport, args.repository, control_ref, observed_at,
+        )
     shadow = observation.pop("m3_shadow", None)
     report = _classify_observation(observation)
     if args.m3_read_parity:
