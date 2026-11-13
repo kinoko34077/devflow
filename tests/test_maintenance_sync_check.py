@@ -794,8 +794,10 @@ class CandidateScopedSyncCheckEndToEndTests(unittest.TestCase):
                 "--observed-at", "2026-11-13T00:01:00Z",
             ])
             self.assertEqual(cli._sync_check(baseline), 0)
-            self.assertIsNone(outputs[-1]["plan"])
-            self.assertEqual(outputs[-1]["report"]["owner_ref"], "o/r#8")
+            self.assertEqual(outputs[-1]["plan"]["owner_ref"], "o/r#7")
+            self.assertEqual(outputs[-1]["report"]["owner_ref"], "o/r#7")
+            self.assertIsNone(outputs[-1]["result"])
+            self.assertEqual(transport.writes, [])
 
             scoped = parser.parse_args([
                 "sync-check", "--repository", "o/r", "--control", "1",
@@ -807,14 +809,124 @@ class CandidateScopedSyncCheckEndToEndTests(unittest.TestCase):
             self.assertIsNone(outputs[-1]["result"])
             self.assertEqual(transport.writes, [])
 
-            scoped.apply = True
-            self.assertEqual(cli._sync_check(scoped), 0)
+            # No candidate flag or manual Active Work update is required.
+            baseline.apply = True
+            self.assertEqual(cli._sync_check(baseline), 0)
             self.assertEqual(outputs[-1]["result"]["disposition"], "AUTO_ADVANCE")
             self.assertTrue(outputs[-1]["result"]["applied"])
             self.assertEqual(len(transport.writes), 1)
             self.assertNotIn('"task": "o/r#7"', transport.body)
             self.assertIn('"task": "o/r#8"', transport.body)
             self.assertIn("## Active Work\n\n`o/r#8`", transport.body)
+
+
+
+class SourceFirstSyncCheckSelectionTests(unittest.TestCase):
+    def test_ambiguous_terminal_set_fails_closed_without_manual_owner_authority(self):
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def get_control(self, repository, control_ref):
+                return {"candidate_tasks": ["o/r#7", "o/r#9"]}
+
+        reads = []
+        def collect(_transport, _repository, _control_ref, _when,
+                    *, candidate_owner_ref=None):
+            reads.append(candidate_owner_ref)
+            return {
+                "source_status": "OK",
+                "owner": {"ref": candidate_owner_ref or "o/r#9"},
+            }
+
+        with patch.object(cli, "collect_repository", side_effect=collect), \
+                patch.object(
+                    cli, "_classify_observation",
+                    return_value={
+                        "disposition": "AUTO_ADVANCE",
+                        "next_transition": "WITHDRAW_STALE_CONTROL_CANDIDATE",
+                    },
+                ):
+            observed = cli._sync_check_source_first_observation(
+                Transport(), "o/r", "kinoko34077/devflow#1",
+                "2026-11-14T00:00:00Z",
+            )
+        self.assertEqual(observed["source_status"], "UNAVAILABLE")
+        self.assertEqual(observed["source_error"], "MULTIPLE_TERMINAL_CANDIDATES")
+        self.assertEqual(reads, [None, "o/r#7", "o/r#9"])
+
+    def test_unavailable_candidate_fails_closed_not_to_manual_owner(self):
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def get_control(self, repository, control_ref):
+                return {"candidate_tasks": ["o/r#7", "o/r#8"]}
+
+        def collect(_transport, _repository, _control_ref, _when,
+                    *, candidate_owner_ref=None):
+            if candidate_owner_ref == "o/r#8":
+                return {"source_status": "UNAVAILABLE", "owner": {"ref": "o/r#8"}}
+            return {"source_status": "OK", "owner": {"ref": candidate_owner_ref}}
+
+        with patch.object(cli, "collect_repository", side_effect=collect), \
+                patch.object(
+                    cli, "_classify_observation",
+                    return_value={
+                        "disposition": "AUTO_ADVANCE",
+                        "next_transition": "WITHDRAW_STALE_CONTROL_CANDIDATE",
+                    },
+                ):
+            observed = cli._sync_check_source_first_observation(
+                Transport(), "o/r", "kinoko34077/devflow#1",
+                "2026-11-14T00:00:00Z",
+            )
+        self.assertEqual(observed["source_status"], "UNAVAILABLE")
+
+    def test_oversized_candidate_set_and_invalid_ref_are_not_scanned(self):
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def __init__(self, tasks):
+                self.tasks = tasks
+
+            def get_control(self, repository, control_ref):
+                return {"candidate_tasks": self.tasks}
+
+        for tasks in (
+            [f"o/r#{i}" for i in range(1, 18)],
+            ["o/r#7", "other/repo#8"],
+            ["o/r#7", "o/r#7"],
+        ):
+            with self.subTest(tasks=tasks), patch.object(
+                cli, "collect_repository", return_value={
+                    "source_status": "OK", "owner": {"ref": "o/r#8"},
+                },
+            ) as reader:
+                observed = cli._sync_check_source_first_observation(
+                    Transport(tasks), "o/r", "kinoko34077/devflow#1",
+                    "2026-11-14T00:00:00Z",
+                )
+                self.assertEqual(observed["source_status"], "UNAVAILABLE")
+                reader.assert_called_once()
+
+    def test_no_admitted_candidates_retains_existing_fallback(self):
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def get_control(self, repository, control_ref):
+                return {"candidate_tasks": []}
+
+        fallback = {"source_status": "OK", "owner": {"ref": "o/r#8"}}
+        with patch.object(cli, "collect_repository", return_value=fallback) as reader:
+            actual = cli._sync_check_source_first_observation(
+                Transport(), "o/r", "kinoko34077/devflow#1",
+                "2026-11-14T00:00:00Z",
+            )
+        self.assertIs(actual, fallback)
+        reader.assert_called_once()
 
 
 class CandidateScopedSyncCheckCliTests(unittest.TestCase):
