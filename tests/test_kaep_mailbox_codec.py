@@ -133,6 +133,9 @@ class KAEPMailboxContract(unittest.TestCase):
         self.assertEqual(decode_comment(body + "\n後続"), envelope())
         self.assertEqual(decode_comment("説明文\n" + body), envelope())
         self.assertEqual(encode_comment(decode_comment("説明文\n" + body + "\n後続")), body)
+        # A literal marker inside an untrusted payload is not another envelope.
+        literal = envelope(payload={"text": "The marker is " + MARKER})
+        self.assertEqual(decode_comment(encode_comment(literal), task_ref=TASK), literal)
         self.assertTrue(has_kaep_marker("説明\n" + body))
         self.assertFalse(has_kaep_marker("説明: " + MARKER))
         self.assertTrue(has_kaep_marker(MARKER + " malformed"))
@@ -147,6 +150,8 @@ class KAEPMailboxContract(unittest.TestCase):
             body + "\n" + body,
             "前置き\n" + body + "\n" + MARKER,
             "```text\n" + body + "\n```",
+            "````text\n```json\n" + body + "\n````",
+            "~~~~text\n~~~json\n" + body + "\n~~~~",
             body.replace(MARKER + "\n", MARKER + " extra\n"),
             body.replace('"kind": "REQUEST"', '"kind": "REQUEST", "kind": "ACK"'),
             body + " extra on closing fence",
@@ -154,6 +159,9 @@ class KAEPMailboxContract(unittest.TestCase):
         for sample in bad:
             with self.subTest(sample=sample[:60]), self.assertRaises(InvalidMessage):
                 decode_comment(sample)
+        # A genuinely closed outer prose example before a real marker is fine.
+        closed_sample = "````text\n```json\n````\n"
+        self.assertEqual(decode_comment(closed_sample + body), envelope())
 
     def test_duplicate_json_keys(self):
         body = encode_comment(envelope())

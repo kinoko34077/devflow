@@ -25,6 +25,29 @@ MARKER_LINE = re.compile(r"(?m)^" + re.escape(MARKER))
 def has_kaep_marker(body: object) -> bool:
     """Candidate locator only; not KAEP validity, identity, or work authority."""
     return type(body) is str and MARKER_LINE.search(body) is not None
+
+
+def _inside_markdown_fence(preceding: str) -> bool:
+    """Detect a real unmatched outer Markdown fence before the KAEP marker.
+
+    Closing requires the opening fence's character and at least its length;
+    shorter code examples inside a four-backtick fence must not escape it.
+    """
+    opened: tuple[str, int] | None = None
+    for line in preceding.splitlines():
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if match is None:
+            continue
+        delimiter, tail = match.groups()
+        if opened is None:
+            # A backtick fence cannot include literal backticks in its info.
+            if delimiter[0] == "`" and "`" in tail:
+                continue
+            opened = (delimiter[0], len(delimiter))
+        elif (delimiter[0] == opened[0] and len(delimiter) >= opened[1]
+              and not tail.strip()):
+            opened = None
+    return opened is not None
 FIELDS = set("schema_version exchange_id message_id in_reply_to task_ref recipient kind intent idempotency_key scope payload evidence_refs".split())
 KINDS = set("REQUEST ACK QUESTION ANSWER PROGRESS RESULT REVIEW_REQUEST REVIEW_FEEDBACK CANCEL_REQUEST CANCEL_ACK ERROR BLOCKED".split())
 REPLIES = set("ACK ANSWER PROGRESS RESULT REVIEW_FEEDBACK CANCEL_ACK ERROR BLOCKED".split())
@@ -113,11 +136,11 @@ def decode_comment(body: str, *, task_ref: str | None = None) -> dict[str, Any]:
     # One exact Claude footer is presentation only and cannot identify a model.
     wire = body[:-len(CLAUDE_CODE_FOOTER)] if body.endswith(CLAUDE_CODE_FOOTER) else body
     marks = list(MARKER_LINE.finditer(wire))
-    if len(marks) != 1 or wire.count(MARKER) != 1: fail("INVALID_WRAPPER")
+    # Only a second standalone wrapper marker is ambiguous; a mention of the
+    # marker literal *inside JSON payload text* is ordinary message content.
+    if len(marks) != 1: fail("INVALID_WRAPPER")
     start = marks[0].start()
-    # A pasted example *inside* an outer Markdown fence is not a request.
-    preceding_fences = re.findall(r"(?m)^[ \t]*(?:`{3,}|~{3,})", wire[:start])
-    if len(preceding_fences) % 2: fail("INVALID_WRAPPER")
+    if _inside_markdown_fence(wire[:start]): fail("INVALID_WRAPPER")
     prefix, suffix = MARKER + "\n" + FENCE + "json\n", "\n" + FENCE
     if not wire.startswith(prefix, start): fail("INVALID_WRAPPER")
     data_start = start + len(prefix)
