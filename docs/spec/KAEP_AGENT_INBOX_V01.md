@@ -178,6 +178,8 @@ Initial native MCP API [PR #536](https://github.com/kinoko34077/devflow/pull/536
 
 この明示診断は正常候補が検証できても、常に `PARTIAL_UNKNOWN`（CLI終了コード2）、`has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false` とし、Inbox受入や旧#503廃止、Claim/実作業の許可に用いてはならない。旧#503と後継#789の選択は既存の `--discovery-issue` に従い、どちらの索引も改変しない。
 
+**不正な証拠参照の追加隔離（明示的なGET診断のみ）:** #531の実GitHub読取で、形式上正しい索引先と同じIssue履歴中に`INVALID_REF`の別コメントがあり、従来の`--isolate-invalid-wrapper`だけでは他の正常原典の読取も停止することが確認された。新しい`--isolate-invalid-ref`は**必ず**`--isolate-invalid-wrapper`と併用する追加の明示オプションであり、既存の厳格Decoderが`INVALID_REF`と判定した**原典Issue全体**を未検証として隔離する。索引コメントIDとreasonを残し、後続の独立正常原典を同じ既存の有限scan cursorで確認できる。参照文字列を修正・容認せず、不正なIssue内の一部だけを正規原典として取り込まない。通常モードやWrapper単独モード、actor・identity・reply・transport・capの停止条件は変更しない。混在時も`PARTIAL_UNKNOWN`・終了コード2、安全な確定カーソル不進行、`has_unknown_work=true`、実行権限なし、#503/manual Control維持、全原典網羅性未証明を守る。これは受信完了やB5全体受入の証拠にはならない。
+
 ## B5/B6 既存Consumer同一原典の有限パリティ比較（2026-10-20、optional/offline）
 
 [B5 #531](https://github.com/kinoko34077/devflow/issues/531) の最初の未受入条件「原典Source universe/Consumer parity」のうち、**既に取得・検証を実施した同一Issueについてのみ**B5 ShadowとB6 live Unionのroot集合を比較する、offline専用補助器 `tools.kaep_b5_b6_parity_cli` を追加する。原典取得・actor/recipient/KAEP検証器を追加・変更しない。
