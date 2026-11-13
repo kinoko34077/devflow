@@ -75,11 +75,17 @@ Use `work-view`, `inbox` (`--work-status AWAITING_REVIEW`) or `issue-goal-contex
 
 ### KAEP Agent Inbox on an already-active Claude check-in
 
-**Already-running Claude check-in only.** Before declaring no pending work, use registered `get_agent_inbox` after bootstrap or the existing checkout:
+**Already-running Claude check-in only.** After trusted bootstrap, **if** the existing Claude client exposes the current registered read-only `get_agent_workspace`, use `get_agent_workspace(repository="kinoko34077/devflow", recipient="claude-code", include_recent_kaep=True, include_published_supply=True)` as the first bounded work+recipient-source observation. This shows independently verified non-TASK KAEP originals alongside TASK Inbox roots; `has_unknown_work=true`, partial-source errors, empty publications and `claimability=NOT_EVALUATED` remain non-authoritative. This is **not** proof of actual Claude MCP registration, delivery, historical completeness, current HEAD or a Claim.
+
+If that registered Workspace is unavailable, keep the already-accepted `get_agent_inbox` path and the existing checkout CLI, without creating credentials or installing/reconfiguring MCP:
 ```sh
 python -m tools.kaep_agent_inbox_cli --repository kinoko34077/devflow --recipient claude-code --work-status AWAITING_REVIEW --pending-only
 ```
-Follow `next_offset` with `--offset`. `INCOMPLETE_OR_UNKNOWN`, errors, partial/unavailable input and filtered zero **never prove none**: keep Control/#503. A visible TASK without an explicitly addressed valid READ_ONLY KAEP root is no assignment; re-read Issue, actor/recipient, authority and HEAD before ACK/ANSWER. No new model, timers, MCP install/reconfiguration, fake ACKs or replay of completed #553 no-pointer test. Retain **uncapped idle doubling 5→10→20→40→80…**, resetting only for real new work; log actual invocation on owning Issue. Posted ACK/ANSWER is not evidence of unattended trigger identity. [Inbox spec](https://github.com/kinoko34077/devflow/blob/main/docs/spec/KAEP_AGENT_INBOX_V01.md) · [#531](https://github.com/kinoko34077/devflow/issues/531).
+For an existing authenticated Devflow checkout exposing the shared Workspace CLI, the equivalent **optional** combined read is:
+```sh
+python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient claude-code --include-recent-kaep --include-published-supply
+```
+For the legacy filtered Inbox, follow `next_offset` with `--offset`; this TASK page offset is not B6 full-history pagination. `INCOMPLETE_OR_UNKNOWN`, `INCOMPLETE`, errors, partial/unavailable input and filtered zero **never prove none**: keep Control/#503, #531 and the independent #789 original-source dual reader below. A visible TASK or correctly addressed KAEP root is **not** a work assignment; re-read Issue, actor/recipient, authority and HEAD before ACK/ANSWER or any effectful operation. No new model, timers, automatic wake, MCP install/reconfiguration, fake ACKs or replay of completed #553 no-pointer test. Retain **uncapped idle doubling 5→10→20→40→80…**, resetting only for real new work; log actual invocation on owning Issue. Posted ACK/ANSWER is not evidence of unattended trigger identity. [Inbox spec](https://github.com/kinoko34077/devflow/blob/main/docs/spec/KAEP_AGENT_INBOX_V01.md) · [#531](https://github.com/kinoko34077/devflow/issues/531).
 
 #### Approved #789 successor discovery for an already-running Claude recipient
 
