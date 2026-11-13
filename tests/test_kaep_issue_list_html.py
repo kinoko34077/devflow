@@ -133,7 +133,7 @@ class HtmlListTests(unittest.TestCase):
         page = to_html(report(), public_live=True)
         self.assertIn("^<!-- kaep:message:v0[.]2 -->/m.test(c.body)", page)
         self.assertNotIn('c.body.startsWith("<!-- kaep:message:v0.2 -->")', page)
-        self.assertIn("原典未検証", page)
+        self.assertIn("const candidates=[];", page)  # live JS emitted as ASCII
 
     def test_malformed_display_input_blocks_before_generation(self):
         with self.assertRaisesRegex(ValueError, "INVALID_DISPLAY_RESULT"):
