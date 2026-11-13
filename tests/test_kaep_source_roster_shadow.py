@@ -372,6 +372,46 @@ class SourceRootShadowTests(unittest.TestCase):
         self.assertEqual(blocked["errors"][-1]["reason_code"], "INVALID_FIELDS")
         self.assertEqual(blocked["isolated_invalid_ref_sources"], 0)
 
+    def test_invalid_ref_diagnostic_never_bypasses_hard_source_cap(self):
+        poisoned = root(851, issue=577)
+        clean_a = root(852, issue=576)
+        clean_b = root(853, issue=578)
+        index = pages([
+            comment(901, pointer_notice(poisoned, issue=577,
+                                        cid=701, notice_id=851)),
+            comment(902, pointer_notice(clean_a, issue=576,
+                                        cid=601, notice_id=852)),
+            comment(903, pointer_notice(clean_b, issue=578,
+                                        cid=801, notice_id=853)),
+        ])
+        sources = {
+            (REPO, 577): pages([
+                comment(701, poisoned),
+                invalid_ref_comment(702, root(854, issue=577)),
+            ]),
+            (REPO, 576): pages([comment(601, clean_a)]),
+            (REPO, 578): pages([comment(801, clean_b)]),
+        }
+        result, fetched = compare(index, sources, max_sources=2,
+                                  isolate_invalid_wrapper=True,
+                                  isolate_invalid_ref=True)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["issues"], [])
+        self.assertIn("CANDIDATE_LIMIT",
+                      [x["reason_code"] for x in result["index_blockers"]])
+        self.assertEqual(fetched, [(REPO, 577), (REPO, 576)])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_index_ref_quarantine_requires_explicit_scan_mode(self):
+        from tools.kaep_discovery_reader import discover_index_shadow
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_SCAN_MODE"):
+            discover_index_shadow(
+                pages([]), expected_notice_actor=ACTOR,
+                expected_source_actor=ACTOR,
+                fetch_source=lambda *_: pages([]),
+                diagnostic_isolate_invalid_ref=True,
+            )
+
     def test_invalid_ref_flag_without_wrapper_fails_before_get(self):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_MODE"):
             compare(pages([]), {}, isolate_invalid_ref=True)
