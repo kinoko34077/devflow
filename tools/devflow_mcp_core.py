@@ -1545,7 +1545,7 @@ class DevflowService:
                     (item["source_ref"], item["source_message_id"])
                     for item in (messages or [])
                 }
-                if messages is None:
+                if messages is None and extra_rows:
                     messages = []
                 for row in extra_rows:
                     key = (row["source_ref"], row["source_message_id"])
