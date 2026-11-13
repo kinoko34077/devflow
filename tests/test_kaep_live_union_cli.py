@@ -713,6 +713,72 @@ class LiveUnionTests(TestCase):
         self.assertEqual(output["source_issue_count"], 0)
         self.assertFalse(output["absence_of_work_proven"])
 
+    def test_opt_in_public_owner_scan_feeds_existing_original_verifier_without_file(self):
+        from tools import kaep_public_locator_cli as locator
+        markers = self.public_markers((REPO, 590, 912))
+        markers["schema_version"] = "kaep.public-marker-locators.v0.1"
+        markers["status"] = "BOUNDED_PUBLIC_MARKER_READ"
+        output = {"schema_version": "kaep.live-union-check.v0.1",
+                  "status": "PARTIAL_UNKNOWN", "has_unknown_work": True,
+                  "complete_source_universe": False,
+                  "can_authorize_execution": False,
+                  "read_only": True}
+        with (mock.patch.object(union.cached, "fetch_public_json",
+                                return_value=index_with(status="BOUNDED_SEARCH_READ")),
+              mock.patch.object(locator, "discover", return_value=markers) as scan,
+              mock.patch.object(union, "read_union", return_value=output) as verified,
+              mock.patch("sys.stdout", new_callable=io.StringIO) as stream):
+            rc = union.main(["--recipient", "claude-code",
+                             "--additional-repository", "kinoko34077/frequency-warp-vst",
+                             "--scan-public-markers"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(stream.getvalue()), output)
+        scan.assert_called_once_with()
+        verified.assert_called_once()
+        self.assertIs(verified.call_args.kwargs["public_marker_discovery"], markers)
+        self.assertEqual(verified.call_args.kwargs["additional_repositories"],
+                         ("kinoko34077/frequency-warp-vst",))
+        self.assertFalse(json.loads(stream.getvalue())["can_authorize_execution"])
+
+    def test_public_owner_scan_is_opt_in_and_file_argument_is_exclusive(self):
+        from tools import kaep_public_locator_cli as locator
+        with (mock.patch.object(locator, "discover") as scan,
+              mock.patch.object(union.cached, "fetch_public_json",
+                                side_effect=InvalidMessage("PUBLIC_INDEX_UNAVAILABLE")),
+              mock.patch("sys.stdout", new_callable=io.StringIO) as out):
+            rc = union.main(["--recipient", "claude-code"])
+        self.assertEqual(rc, 2)
+        scan.assert_not_called()
+        self.assertEqual(json.loads(out.getvalue())["status"], "BLOCKED")
+        with (mock.patch.object(locator, "discover") as scan,
+              mock.patch.object(union.cached, "fetch_public_json") as index,
+              mock.patch("sys.stderr", new_callable=io.StringIO)):
+            with self.assertRaises(SystemExit) as cm:
+                union.main(["--recipient", "claude-code",
+                            "--public-marker-discovery", "old.json",
+                            "--scan-public-markers"])
+        self.assertEqual(cm.exception.code, 2)
+        scan.assert_not_called()
+        index.assert_not_called()
+
+    def test_public_owner_scan_transport_failure_never_claims_empty(self):
+        from tools import kaep_public_locator_cli as locator
+        with (mock.patch.object(union.cached, "fetch_public_json",
+                                return_value=index_with(status="BOUNDED_SEARCH_READ")),
+              mock.patch.object(locator, "discover",
+                                side_effect=InvalidMessage("PUBLIC_GITHUB_GET_FAILED")),
+              mock.patch.object(union, "read_union") as reader,
+              mock.patch("sys.stdout", new_callable=io.StringIO) as output):
+            rc = union.main(["--recipient", "claude-code", "--scan-public-markers"])
+        self.assertEqual(rc, 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason_code"], "PUBLIC_GITHUB_GET_FAILED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["complete_source_universe"])
+        self.assertFalse(result["can_authorize_execution"])
+        reader.assert_not_called()
+
     def test_blocked_cli_never_emits_source_body_or_secrets(self):
         with (mock.patch.object(union.cached, "fetch_public_json",
                                 side_effect=InvalidMessage("PUBLIC_INDEX_UNAVAILABLE")),
