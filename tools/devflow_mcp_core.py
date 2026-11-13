@@ -239,7 +239,9 @@ class GitHubReader:
             batch = self._read(url)
             if not isinstance(batch, list):
                 raise DevflowMCPError("GitHub issues response was not a list.")
-            actual_issues = [item for item in batch if isinstance(item, dict) and "pull_request" not in item]
+            if any(not isinstance(item, dict) for item in batch):
+                raise DevflowMCPError("GitHub issues response contained an invalid item.")
+            actual_issues = [item for item in batch if "pull_request" not in item]
             issues.extend(actual_issues)
             if len(batch) < per_page:
                 return issues
@@ -271,7 +273,9 @@ class GitHubReader:
             batch = self._read(url)
             if not isinstance(batch, list):
                 raise DevflowMCPError("GitHub Issue comments response was not a list.")
-            comments.extend(item for item in batch if isinstance(item, dict))
+            if any(not isinstance(item, dict) for item in batch):
+                raise DevflowMCPError("GitHub Issue comments response contained an invalid item.")
+            comments.extend(batch)
             if max_comments is not None and len(comments) > max_comments:
                 # A single extra stored comment proves Inbox's parser limit.
                 # Never fetch the remainder or present this as complete history.
