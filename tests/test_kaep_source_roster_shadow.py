@@ -556,6 +556,36 @@ class SourceRootShadowTests(unittest.TestCase):
                 InvalidMessage, "INDEX_WINDOW_REQUIRES_DIAGNOSTIC"):
             compare(index, sources, index_batches=1)
 
+    def test_failed_task_source_has_no_diagnostic_next_cursor(self):
+        # A clean index-window scan cannot overrule later full-source failure.
+        index = pages([
+            {"id": 2000 + n, "body": "ordinary",
+             "user": {"id": 79015263, "login": ACTOR}}
+            for n in range(25)
+        ])
+        bad = root(880, issue=577)
+        fence = chr(96) * 3
+        bad_source = pages([
+            comment(701, bad),
+            {"id": 702,
+             "body": "<!-- kaep:message:v0.2 -->\n"
+                     + fence + "json\n{}\n" + fence,
+             "user": {"id": 79015263, "login": ACTOR}},
+        ])
+        output = source_root_shadow(
+            index, fetch_source=lambda *_: bad_source,
+            expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+            task_views=[self.task_view([577])],
+            isolate_invalid_wrapper=True,
+            index_batches=1,
+        )
+        self.assertEqual(output["status"], "BLOCKED")
+        self.assertEqual(output["source_status"], "BOUNDED_TRUNCATED")
+        self.assertEqual(output["errors"][-1]["reason_code"], "INVALID_FIELDS")
+        self.assertIsNone(output["index_next_diagnostic_after_id"])
+        self.assertEqual(output["issues"], [])
+        self.assertFalse(output["can_authorize_execution"])
+
     def test_cli_index_window_rejected_before_external_get(self):
         with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages") as fetch,
               redirect_stdout(io.StringIO()) as capture):
