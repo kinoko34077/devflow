@@ -380,6 +380,7 @@ def discover_index_shadow(
     seen_roots: set[tuple[str, str, int]] = set()
     duplicate_verified_pointers = 0
     batches = 0
+    scan_exhausted = False
 
     for _ in range(max_batches):
         batch = _discover_batch(
@@ -423,21 +424,23 @@ def discover_index_shadow(
                 truncated = True
                 break
         if first_block_cursor is not None:
-            # Only explicit read-only diagnostics may use the separate
-            # existing scan cursor past a malformed wrapper. A full-index
-            # source or successful durable cursor is NEVER reported.
+            # A diagnostic-only traversal does not commit the safe cursor.
+            # Keep the last *examined* comment position even if the final
+            # index batch has a poisoned original.
+            scan_cursor = batch["next_scan_after_id"]
             if not batch["truncated"]:
+                scan_exhausted = True
                 status = "PARTIAL_BLOCKED"
                 truncated = True
                 break
-            scan_cursor = batch["next_scan_after_id"]
             continue
         cursor = batch["next_after_id"]
+        scan_cursor = batch["next_scan_after_id"]
         if not batch["truncated"]:
+            scan_exhausted = True
             status = "INDEX_EXHAUSTED_SOURCE_VERIFIED_ONLY"
             truncated = False
             break
-        scan_cursor = cursor
     else:
         status = ("PARTIAL_BLOCKED" if first_block_cursor is not None
                   else "BOUNDED_TRUNCATED")
@@ -448,6 +451,9 @@ def discover_index_shadow(
     return {
         "status": status, "hints": hints, "rejected": rejected,
         "blocked": blocked, "next_after_id": cursor,
+        # Diagnostic scan position is observational, never a durable cursor.
+        "last_scanned_index_comment_id": scan_cursor,
+        "index_scan_exhausted": scan_exhausted,
         "truncated": truncated, "scanned_batches": batches,
         "distinct_source_issue_count": len(source_cache),
         "duplicate_verified_pointers": duplicate_verified_pointers,
