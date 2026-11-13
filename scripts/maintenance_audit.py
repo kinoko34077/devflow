@@ -719,7 +719,12 @@ def _sync_check_source_first_observation(
             classified.get("disposition") == "AUTO_ADVANCE"
             and classified.get("next_transition")
             == "WITHDRAW_STALE_CONTROL_CANDIDATE"
+            and isinstance(observed.get("owner"), dict)
+            and observed["owner"].get("state") == "CLOSED"
+            and observed["owner"].get("runnable") is False
         ):
+            # An open Issue displaying DONE cannot pass the actual executor.
+            # Count only owners that meet the authoritative closed condition.
             eligible.append(observed)
     if len(eligible) == 1:
         return eligible[0]
