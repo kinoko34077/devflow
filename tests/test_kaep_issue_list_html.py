@@ -129,6 +129,12 @@ class HtmlListTests(unittest.TestCase):
         self.assertIn("QUARANTINED_INVALID_WRAPPER", rendered)
         self.assertIn("ANSWER_OBSERVED", rendered)
 
+    def test_browser_candidate_marker_hint_is_not_byte_zero_only(self):
+        page = to_html(report())
+        self.assertIn("test(c.body)", page)
+        self.assertNotIn('c.body.startsWith("<!-- kaep:message:v0.2 -->")', page)
+        self.assertIn("原典未検証", page)
+
     def test_malformed_display_input_blocks_before_generation(self):
         with self.assertRaisesRegex(ValueError, "INVALID_DISPLAY_RESULT"):
             to_html({"rows": None, "errors": []})

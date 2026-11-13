@@ -90,6 +90,15 @@ class RouteAuditTests(unittest.TestCase):
         self.assertFalse(out["fallback_retirement_authorized"])
         self.assertNotIn("Confidential original text", json.dumps(out))
 
+    def test_embedded_notice_uses_canonical_decoder_and_preserves_audit(self):
+        root = source()
+        notice = route_comment(root)
+        notice["body"] = "prefix\n" + notice["body"] + "\nfollow-up"
+        out = audited(root, notice)
+        self.assertEqual(out["status"], "EXACT_POINTER_OBSERVED")
+        self.assertEqual(out["pointer_comment_ids"], [301])
+        self.assertFalse(out["can_authorize_execution"])
+
     def test_true_726_style_unindexed_root_is_not_called_no_work(self):
         root = source()
         out = audited(root)
