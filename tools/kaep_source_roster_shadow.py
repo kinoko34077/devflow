@@ -16,7 +16,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 
 from tools import agent_inbox
 from tools.kaep_discovery_reader import (
-    SOURCE_URL, discover_index_shadow,
+    SOURCE_URL, discover_index_shadow, MAX_SHADOW_BATCHES,
 )
 from tools.kaep_route_notice import (
     DISCOVERY_REPOSITORY, DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE,
@@ -91,6 +91,8 @@ def source_root_shadow(
     discovery_issue: int = DISCOVERY_ISSUE,
     isolate_invalid_wrapper: bool = False,
     isolate_invalid_ref: bool = False,
+    index_after_id: int = 0,
+    index_batches: int = MAX_SHADOW_BATCHES,
 ) -> dict[str, Any]:
     """Compare one strictly verified approved-index cohort, never work supply."""
     if (type(discovery_issue) is not int or discovery_issue not in
@@ -102,6 +104,13 @@ def source_root_shadow(
         raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
     if type(max_sources) is not int or not 1 <= max_sources <= MAX_OPT_IN_SOURCE_ISSUES:
         raise InvalidMessage("INVALID_SOURCE_LIMIT")
+    if (type(index_after_id) is not int or index_after_id < 0
+            or type(index_batches) is not int
+            or not 1 <= index_batches <= MAX_SHADOW_BATCHES):
+        raise InvalidMessage("INVALID_INDEX_WINDOW")
+    window_explicit = index_after_id > 0 or index_batches < MAX_SHADOW_BATCHES
+    if window_explicit and not isolate_invalid_wrapper:
+        raise InvalidMessage("INDEX_WINDOW_REQUIRES_DIAGNOSTIC")
 
     source_cache: dict[tuple[str, int], str] = {}
 
@@ -117,6 +126,7 @@ def source_root_shadow(
         index_pages, expected_notice_actor=expected_notice_actor,
         expected_source_actor=expected_source_actor, fetch_source=bounded_fetch,
         index_issue=discovery_issue,
+        after_id=index_after_id, max_batches=index_batches,
         additional_forbidden_issue=(
             APPROVED_SUCCESSOR_ISSUE if discovery_issue == DISCOVERY_ISSUE
             else DISCOVERY_ISSUE
@@ -137,6 +147,14 @@ def source_root_shadow(
         "isolated_invalid_ref_sources": 0,
         "recipient": RECIPIENT,
         "source_status": index["status"],
+        "index_window_explicit": window_explicit,
+        "index_after_id": index_after_id,
+        "index_batches_limit": index_batches,
+        "index_scanned_batches": index["scanned_batches"],
+        # Strict safe cursor and non-durable diagnostic scan location differ.
+        "index_safe_after_id": index["next_after_id"],
+        "index_scan_exhausted": index["index_scan_exhausted"],
+        "index_next_diagnostic_after_id": None,
         "index_hint_count": len(index["hints"]),
         "candidate_issue_count": len(source_cache),
         "issues": [],
@@ -170,28 +188,35 @@ def source_root_shadow(
         "fallback_retirement_authorized": False,
         "read_only": True,
     }
+    allowed = ({"INVALID_WRAPPER", "INVALID_REF"} if isolate_invalid_ref
+               else {"INVALID_WRAPPER"})
+    fatal_blocker = any(
+        b.get("reason_code") not in allowed for b in index["blocked"]
+    )
     if index["blocked"] or index["truncated"]:
         result["errors"].append({"reason_code": "INDEX_SOURCE_INCOMPLETE"})
-        # Diagnostic isolation can proceed only past a known non-authoritative
-        # malformed historical wrapper. The canonical shadow marks any
-        # blocked index as truncated to prevent cursor advancement, so only
-        # PARTIAL_BLOCKED with wrapper-only reasons may emit a *partial*
-        # diagnostic. A genuinely capped/truncated index remains blocked;
-        # never advance the durable cursor, or label hints after the blocker
-        # as examined. Other failure kinds remain fatal.
-        if (not isolate_invalid_wrapper
-                or index["status"] != "PARTIAL_BLOCKED"
-                or not index["blocked"]
-                or any(b.get("reason_code") not in
-                       ({"INVALID_WRAPPER", "INVALID_REF"} if isolate_invalid_ref
-                        else {"INVALID_WRAPPER"})
-                       for b in index["blocked"])):
+        # An explicitly bounded comment window may return only independently
+        # verified source roots; all unexamined comments remain unknown.
+        # The default complete strict scan and cap/identity/transport failure
+        # behavior are unchanged. No window may advance the safe cursor past
+        # a failed original.
+        if (not isolate_invalid_wrapper or fatal_blocker
+                or index["status"] not in ("PARTIAL_BLOCKED", "BOUNDED_TRUNCATED")
+                or (index["status"] == "BOUNDED_TRUNCATED"
+                    and not window_explicit)):
             return result
         result["isolated_invalid_wrapper_sources"] += sum(
             b.get("reason_code") == "INVALID_WRAPPER" for b in index["blocked"]
         )
         result["isolated_invalid_ref_sources"] += sum(
             b.get("reason_code") == "INVALID_REF" for b in index["blocked"]
+        )
+    # This is only the scan-only location for the NEXT bounded diagnostic.
+    # It is not the validated durable cursor, nor a cross-call snapshot.
+    if (window_explicit and not fatal_blocker
+            and not index["index_scan_exhausted"]):
+        result["index_next_diagnostic_after_id"] = (
+            index["last_scanned_index_comment_id"]
         )
 
     try:
@@ -325,6 +350,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--isolate-invalid-ref", action="store_true",
                         help="Diagnostic-only whole-Issue INVALID_REF exclusion; requires "
                              "--isolate-invalid-wrapper, never accepts invalid roots")
+    parser.add_argument("--index-after-id", type=int, default=0,
+                        help="Diagnostic-only index comment start (exclusive); not durable")
+    parser.add_argument("--index-batches", type=int, default=MAX_SHADOW_BATCHES,
+                        help="Diagnostic-only number of 20-comment batches (1..10)")
     parser.add_argument("--task-repository", action="append", default=[],
                         help="Opt in an explicit trusted M3 live TASK repository (up to 2)")
     args = parser.parse_args(argv)
@@ -333,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
             raise InvalidMessage("DISCOVERY_INDEX_NOT_APPROVED")
         if args.isolate_invalid_ref and not args.isolate_invalid_wrapper:
             raise InvalidMessage("INVALID_DIAGNOSTIC_MODE")
+        if (args.index_after_id < 0 or not 1 <= args.index_batches <= MAX_SHADOW_BATCHES):
+            raise InvalidMessage("INVALID_INDEX_WINDOW")
+        if (args.index_after_id or args.index_batches != MAX_SHADOW_BATCHES) and not args.isolate_invalid_wrapper:
+            raise InvalidMessage("INDEX_WINDOW_REQUIRES_DIAGNOSTIC")
         if (len(args.task_repository) > MAX_TASK_REPOSITORIES
                 or len(set(args.task_repository)) != len(args.task_repository)):
             raise InvalidMessage("INVALID_TASK_REPOSITORY_COUNT")
@@ -348,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
             discovery_issue=args.discovery_issue,
             isolate_invalid_wrapper=args.isolate_invalid_wrapper,
             isolate_invalid_ref=args.isolate_invalid_ref,
+            index_after_id=args.index_after_id,
+            index_batches=args.index_batches,
         )
     except (InvalidMessage, DevflowMCPError, OSError, UnicodeError) as exc:
         # No raw GitHub stderr, messages, prompts or credential data in errors.
