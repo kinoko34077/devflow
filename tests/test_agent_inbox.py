@@ -380,6 +380,31 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertTrue(section["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
+    def test_workspace_b6_same_task_root_is_not_delivered_twice(self):
+        # A strict request visible through both the TASK Inbox and the B6
+        # original-source union is a single request, not two assignments.
+        root = message(issue=21)
+        self.index_mock.return_value = demo_index((21, 11, root))
+        reader = fixture_reader(
+            [task()],
+            comments={(REPO, 21): [issue_comment(11, root)]},
+            recent_comments={REPO: [recent_marker(issue=21, cid=11, msg=root)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True,
+        )
+        section = result["sections"]["messages"]
+        self.assertEqual(section["status"], "TASK_AND_RECENT_ORIGINALS")
+        self.assertEqual(section["recent_discovery"]["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(len(section["entries"]), 1)
+        self.assertEqual(section["entries"][0]["source_message_id"], root["message_id"])
+        self.assertEqual(
+            section["entries"][0]["source_ref"],
+            f"https://github.com/{REPO}/issues/21#issuecomment-11",
+        )
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_b6_finds_strict_non_task_recipient_root_without_promotion(self):
         reader = fixture_reader(
             [task(), unclassified_issue()],
