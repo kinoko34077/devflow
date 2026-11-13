@@ -25,7 +25,7 @@ from tools.kaep_inbox_reader import (
     InvalidMessage, fetch_gh_pages, parse_pages,
 )
 from tools.kaep_mailbox_codec import (
-    MARKER, read_mailbox, verify_reply_chain,
+    MARKER, has_kaep_marker, read_mailbox, verify_reply_chain,
 )
 from tools.kaep_mailbox_support import matching_actor
 
@@ -253,7 +253,7 @@ def source_root_shadow(
             # reply-chain validation, as the accepted Agent Inbox does.
             trusted = [
                 c for c in all_comments
-                if not c["body"].startswith(MARKER)
+                if not has_kaep_marker(c["body"])
                 or matching_actor(c, expected_source_actor)
             ]
             decoded = read_mailbox(trusted, task_ref=f"{repo}#{issue}")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 from tools.kaep_mailbox_codec import (
-    InvalidMessage, MARKER, decode_comment, encode_comment, fingerprint,
+    InvalidMessage, MARKER, decode_comment, encode_comment, has_kaep_marker, fingerprint,
     read_mailbox, unique_pairs, validate, verify_reply_chain,
     isolate_cross_exchange_replies,
 )
@@ -127,10 +127,29 @@ class KAEPMailboxContract(unittest.TestCase):
         with self.assertRaisesRegex(InvalidMessage, "UNKNOWN_PARENT"):
             isolate_cross_exchange_replies([root, orphan])
 
-    def test_no_comment_prefix_or_suffix(self):
+    def test_unique_embedded_block_is_read_and_sender_stays_canonical(self):
         body = encode_comment(envelope())
-        with self.assertRaises(InvalidMessage): decode_comment("extra\n" + body)
-        with self.assertRaises(InvalidMessage): decode_comment(body + "\nextra")
+        self.assertEqual(decode_comment("説明文\n" + body + "\n後続の説明", task_ref=TASK), envelope())
+        self.assertEqual(decode_comment(body + "\n後続"), envelope())
+        self.assertEqual(decode_comment("説明文\n" + body), envelope())
+        self.assertEqual(encode_comment(decode_comment("説明文\n" + body + "\n後続")), body)
+        self.assertTrue(has_kaep_marker("説明\n" + body))
+        self.assertFalse(has_kaep_marker("説明: " + MARKER))
+        self.assertEqual(read_mailbox([{"id": 12, "body": "説明: " + body}], task_ref=TASK), [])
+
+    def test_embedded_ambiguous_and_quoted_samples_fail_closed(self):
+        body = encode_comment(envelope())
+        bad = [
+            body + "\n" + body,
+            "前置き\n" + body + "\n" + MARKER,
+            "```text\n" + body + "\n```",
+            body.replace(MARKER + "\n", MARKER + " extra\n"),
+            body.replace('"kind": "REQUEST"', '"kind": "REQUEST", "kind": "ACK"'),
+            body + " extra on closing fence",
+        ]
+        for sample in bad:
+            with self.subTest(sample=sample[:60]), self.assertRaises(InvalidMessage):
+                decode_comment(sample)
 
     def test_duplicate_json_keys(self):
         body = encode_comment(envelope())

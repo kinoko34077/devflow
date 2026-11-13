@@ -62,6 +62,13 @@ class ReadOnlyInboxTests(unittest.TestCase):
             inspect_pages(text, repository=REPO, issue=503,
                           recipient="claude-code")
 
+    def test_embedded_comment_reads_through_real_inbox(self):
+        body = "通常説明\n" + encode_comment(envelope()) + "\n続き"
+        view = inspect_pages(pages([comment(18, body)]),
+                             repository=REPO, issue=503, recipient="claude-code")
+        self.assertEqual([m["message_id"] for m in view["messages"]], ["msg_msg001"])
+        self.assertFalse(view["claim_or_agent_execution_proven"])
+
     def test_empty_inbox(self):
         d = inspect_pages(pages([]), repository=REPO, issue=503,
                           recipient="claude-code")

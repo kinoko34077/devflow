@@ -10,10 +10,10 @@ from typing import Any, Mapping, Sequence
 import re
 
 try:
-    from .kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from .kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, has_kaep_marker, read_mailbox
     from .github_issue_trust import is_trusted_principal
 except ImportError:  # direct stdio script from the tools directory
-    from kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, read_mailbox
+    from kaep_mailbox_codec import InvalidMessage, MARKER, RECIPIENTS, has_kaep_marker, read_mailbox
     from github_issue_trust import is_trusted_principal
 
 MAX_INBOX_TASKS = 20
@@ -130,7 +130,7 @@ def _issue_messages_for_recipients(
             login.casefold() == expected_actor.casefold()
             and is_trusted_principal(comment)
         )
-        if body.startswith(MARKER) and not trusted_principal:
+        if has_kaep_marker(body) and not trusted_principal:
             # Never let outsider-authored data participate in the global
             # mailbox collision/codec check, or hide legitimate owner roots.
             warnings.append({"comment_id": cid, "reason_code": "UNTRUSTED_MARKER_COMMENT"})
