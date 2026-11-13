@@ -72,7 +72,8 @@ class PublicBrowserLiveTests(unittest.TestCase):
 
     def test_live_candidate_never_trusted_without_original_codec(self):
         src = LIVE_JS
-        self.assertIn('startsWith("<!-- kaep:message:v0.2 -->")', src)
+        self.assertIn('^<!-- kaep:message:v0[.]2 -->/m.test(c.body)', src)
+        self.assertNotIn('c.body.startsWith(', src)
         self.assertIn('c.user.id!==79015263', src)
         self.assertIn('c.user.login!=="kinoko34077"', src)
         self.assertIn('Number.isSafeInteger(c.id)', src)

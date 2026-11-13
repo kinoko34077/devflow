@@ -13,7 +13,7 @@ from typing import Any
 from tools.kaep_discovery_reader import parse_pointer
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
-    MARKER, decode_comment, read_mailbox,
+    MARKER, decode_comment, has_kaep_marker, read_mailbox,
 )
 from tools.kaep_route_notice import (
     DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE, DISCOVERY_REPOSITORY,
@@ -66,7 +66,7 @@ def audit_route(
     index_messages: list[dict[str, Any]] = []
     for comment in comments:
         body = comment["body"]
-        if not body.startswith(MARKER):
+        if not has_kaep_marker(body):
             continue
         cid = comment["id"]
         if not matching_actor(comment, expected_notice_actor):

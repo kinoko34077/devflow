@@ -100,7 +100,7 @@ class DualIndexShadowTests(unittest.TestCase):
     def test_malformed_legacy_index_does_not_hide_new_verified_original(self):
         root, old = source_and_pointer(DISCOVERY_ISSUE)
         _, new = source_and_pointer(SUCCESSOR_ISSUE)
-        malformed = encode_comment(old) + "\n"
+        malformed = encode_comment(old) + " invalid-fence-tail"
         out, _ = dual([comment(90, malformed), comment(91, old)],
                       [comment(301, new)], root)
         self.assertEqual(out["status"], "PARTIAL_UNKNOWN")

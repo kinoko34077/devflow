@@ -136,7 +136,7 @@ LIVE_JS = r"""
       const candidates=[];
       const seen=new Set();
       for(const c of comments){
-        if(!c||typeof c.body!=="string"||!c.body.startsWith("<!-- kaep:message:v0.2 -->"))continue;
+        if(!c||typeof c.body!=="string"||!/^<!-- kaep:message:v0[.]2 -->/m.test(c.body))continue;
         eligible++;
         if(!c.user||c.user.id!==79015263||c.user.login!=="kinoko34077")continue;
         if(!Number.isSafeInteger(c.id)||c.id<=0)continue;

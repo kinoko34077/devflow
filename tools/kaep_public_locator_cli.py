@@ -17,7 +17,7 @@ from tools.kaep_link_validation import (
     API_ISSUE_URL as API_ISSUE,
     owner_comment_url,
 )
-from tools.kaep_mailbox_codec import InvalidMessage, MARKER, fail
+from tools.kaep_mailbox_codec import InvalidMessage, MARKER, has_kaep_marker, fail
 from tools.kaep_repository_validation import REPOSITORY
 
 OWNER = "kinoko34077"
@@ -100,7 +100,7 @@ def _validated_locator_candidate(
     if (type(body) is not str or type(cid) is not int or cid < 1
             or match is None or match.group(1) != repository):
         fail("INVALID_PUBLIC_COMMENT")
-    if not body.startswith(MARKER):
+    if not has_kaep_marker(body):
         return cid, None
     issue = int(match.group(2))
     return cid, {

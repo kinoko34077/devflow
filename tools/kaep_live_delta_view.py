@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from tools import kaep_issue_search_view as search
 from tools.kaep_link_validation import API_ISSUE_URL, owner_issue_url
-from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER
+from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER, has_kaep_marker
 from tools.kaep_repository_validation import REPOSITORY
 
 MAX_REPOSITORIES = 3
@@ -154,7 +154,7 @@ def read_live_candidates(
             match = API_ISSUE.fullmatch(issue_url) if type(issue_url) is str else None
             if match is None or match.group(1) != repo:
                 _error("LIVE_SOURCE_LOCATOR_MISMATCH")
-            if not body.startswith(MARKER):
+            if not has_kaep_marker(body):
                 continue
             # Discovery is independent of claimed sender identity. A bot/third
             # party comment MAY point to a legitimate older root in the same

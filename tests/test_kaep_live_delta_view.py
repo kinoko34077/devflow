@@ -122,6 +122,19 @@ class LiveDeltaTests(unittest.TestCase):
              "https://github.com/kinoko34077/devflow/issues/531"])
         self.assertEqual(len(sources_found), 2)
 
+    def test_nonleading_marker_reaches_existing_strict_source_consumer(self):
+        updates = [comment(number=777, cid=321,
+                           body="説明\n" + MARKER + "\n```json\n{}\n```\n末尾")]
+        with mock.patch.object(live.search, "build_search_list", side_effect=result) as verified:
+            out = live.read_live_candidates(
+                [REPO], recipient="claude-code", expected_actor="kinoko34077",
+                recent_read=lambda repo, since=None: updates,
+                issue_read=lambda *_a: {}, comments_read=lambda *_a: "[]")
+        self.assertEqual(out["status"], "LIVE_WINDOW_READ")
+        self.assertEqual(verified.call_args.args[1][REPO]["items"][0]["html_url"],
+                         "https://github.com/kinoko34077/devflow/issues/777")
+        self.assertFalse(out["can_authorize_execution"])
+
     def test_empty_latest_window_is_not_no_work_proof(self):
         with mock.patch.object(live.search, "build_search_list", side_effect=result):
             out = live.read_live_candidates(

@@ -17,7 +17,7 @@ from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
     fail,
-    MARKER, MESSAGE_ID, decode_comment, fingerprint, reject_constant,
+    MARKER, MESSAGE_ID, decode_comment, has_kaep_marker, fingerprint, reject_constant,
     unique_pairs,
 )
 from tools.kaep_mailbox_support import ACTOR, mailbox, matching_actor
@@ -259,7 +259,7 @@ def _discover_batch(
         source_validation = False
         cid = comment["id"]
         body = comment["body"]
-        if not body.startswith(MARKER):
+        if not has_kaep_marker(body):
             continue
         if not _matching_actor(comment, expected_notice_actor):
             result["rejected"].append({"index_comment_id": cid,

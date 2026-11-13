@@ -85,7 +85,7 @@ class KAEPReadResponsibilityBoundaryTests(unittest.TestCase):
         valid = root(n=576, number=31)
         excluded = root(n=576, number=32)
         bad = comment(2003, root(n=576, number=33))
-        bad["body"] += "\nnon-machine historical note"
+        bad["body"] += " invalid-fence-tail"
         out = build_search_list(
             [DEV], {DEV: searched(DEV, [576])},
             fetch_original_issue=lambda r, n: issue(n=n),

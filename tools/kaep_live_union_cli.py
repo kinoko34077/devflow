@@ -18,7 +18,7 @@ from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
 from tools.kaep_link_validation import owner_comment_url, owner_issue_url
 from tools.kaep_mailbox_codec import (
-    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, fail,
+    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, has_kaep_marker, fail,
 )
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -153,7 +153,7 @@ def _recent_issue_keys(
         matched = delta.API_ISSUE.fullmatch(url) if type(url) is str else None
         if not matched or matched.group(1) != repo:
             fail("INVALID_LIVE_ISSUE_LOCATOR")
-        if body.startswith(MARKER):
+        if has_kaep_marker(body):
             sources.add((repo, int(matched.group(2))))
     return sources
 

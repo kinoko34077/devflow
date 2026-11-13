@@ -52,7 +52,7 @@ def staged_call(**options):
         return publish_source_and_route(**options)
 
 
-def indexed_page(*, trailing_newline=False):
+def indexed_page(*, malformed_fence_tail=False):
     index, existing = make_request(
         json.dumps([[]]), repository="kinoko34077/devflow", issue=503,
         recipient="claude-code", intent="REPORT",
@@ -61,14 +61,14 @@ def indexed_page(*, trailing_newline=False):
         expect_existing_actor=ACTOR,
     )
     assert existing is None
-    wire = encode_comment(index) + ("\n" if trailing_newline else "")
+    wire = encode_comment(index) + (" invalid-fence-tail" if malformed_fence_tail else "")
     return json.dumps([[{"id": 41, "body": wire, "user": {"login": ACTOR}}]])
 
 
 class TwoPhaseSourceRouteTests(unittest.TestCase):
     def test_live_style_malformed_index_blocks_before_any_source_post(self):
         with patch("tools.kaep_send_with_discovery.fetch_gh_pages",
-                   return_value=indexed_page(trailing_newline=True)) as reader, patch(
+                   return_value=indexed_page(malformed_fence_tail=True)) as reader, patch(
                 "tools.kaep_send_with_discovery.verify_public_source") as public, patch(
                 "tools.kaep_send_with_discovery.send_request") as source_writer, patch(
                 "tools.kaep_send_with_discovery.route_request") as route_writer:
@@ -126,7 +126,7 @@ class TwoPhaseSourceRouteTests(unittest.TestCase):
         self.assertFalse(out["recipient_pickup_proven"])
 
     def test_malformed_789_preflight_stops_before_source_post(self):
-        malformed = "<!-- kaep:message:v0.2 -->" + "\n" + chr(96) * 3 + "json" + "\n{}\n" + chr(96) * 3 + "\n"
+        malformed = "<!-- kaep:message:v0.2 -->" + "\n" + chr(96) * 3 + "json" + "\n{}\n" + chr(96) * 3 + " invalid-fence-tail"
         blob = json.dumps([[{"id": 55, "body": malformed, "user": {"login": ACTOR}}]])
         with patch("tools.kaep_send_with_discovery.verify_public_source"), patch(
                 "tools.kaep_send_with_discovery.fetch_gh_pages",

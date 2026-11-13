@@ -30,7 +30,7 @@ from tools.kaep_mailbox_codec import (
     ACTOR_LOGIN, RECIPIENT_ORDER,
     fail,
     MARKER,
-    decode_comment,
+    decode_comment, has_kaep_marker,
     read_mailbox,
     verify_reply_chain,
 )
@@ -96,7 +96,7 @@ def _display_only_trusted_comments(
     usable: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
     for comment in comments:
-        if not comment["body"].startswith(MARKER):
+        if not has_kaep_marker(comment["body"]):
             usable.append(comment)
             continue
         if comment["actor_login"].casefold() != expected_actor.casefold():

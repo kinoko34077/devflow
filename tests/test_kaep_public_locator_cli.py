@@ -23,6 +23,15 @@ def comment(name: str, issue: int, cid: int, *, kaep: bool = True):
 
 
 class PublicLocatorsTests(TestCase):
+    def test_embedded_marker_is_non_authoritative_locator(self):
+        item = comment("devflow", 12, 42)
+        item["body"] = "先行説明\n" + item["body"] + "\n後続説明"
+        cid, found = scan._validated_locator_candidate("kinoko34077/devflow", item)
+        self.assertEqual(cid, 42)
+        self.assertEqual(found["locator"], "devflow#12@42")
+        self.assertFalse(found["strict_source_validated"])
+        self.assertFalse(found["is_authoritative_assignment"])
+
     def test_public_owner_enumeration_is_automatic_and_only_emits_links(self):
         calls = []
         def fetch(path):
