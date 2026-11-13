@@ -135,6 +135,10 @@ class KAEPMailboxContract(unittest.TestCase):
         self.assertEqual(encode_comment(decode_comment("説明文\n" + body + "\n後続")), body)
         self.assertTrue(has_kaep_marker("説明\n" + body))
         self.assertFalse(has_kaep_marker("説明: " + MARKER))
+        self.assertTrue(has_kaep_marker(MARKER + " malformed"))
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_WRAPPER"):
+            read_mailbox([{"id": 13, "body": MARKER + " malformed"}],
+                         task_ref=TASK)
         self.assertEqual(read_mailbox([{"id": 12, "body": "説明: " + body}], task_ref=TASK), [])
 
     def test_embedded_ambiguous_and_quoted_samples_fail_closed(self):
