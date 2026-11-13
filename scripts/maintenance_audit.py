@@ -641,17 +641,108 @@ class _SyncCheckGitHubTransport(GitHubReadTransport):
             ) from None
 
 
+
+_SYNC_CHECK_MAX_ADMITTED_CANDIDATES = 16
+
+
+def _sync_check_source_unavailable(
+    repository: str, control_ref: str, observed_at: str, reason: str,
+) -> dict[str, object]:
+    # No eligible write can be planned from a missing or ambiguous source.
+    return {
+        "repository": repository,
+        "control_ref": control_ref,
+        "observed_at": observed_at,
+        "source_status": "UNAVAILABLE",
+        "source_error": reason,
+        "evidence_refs": [control_ref],
+    }
+
+
+def _sync_check_source_first_observation(
+    transport: _SyncCheckGitHubTransport,
+    repository: str,
+    control_ref: str,
+    observed_at: str,
+    *,
+    candidate_owner: str | None = None,
+) -> dict[str, object]:
+    # Explicit operator scope retains #1008's unchanged exact-target behavior.
+    if candidate_owner is not None:
+        return collect_repository(
+            transport, repository, control_ref, observed_at,
+            candidate_owner_ref=candidate_owner,
+        )
+
+    legacy = collect_repository(transport, repository, control_ref, observed_at)
+    # Read only the existing Control-admitted candidate set; no inventory
+    # discovery, new supply, claim, or change to the global M3 authority flag.
+    try:
+        control = transport.get_control(repository, control_ref)
+    except (GitHubReadError, SyncCheckContractError):
+        return _sync_check_source_unavailable(
+            repository, control_ref, observed_at, "CONTROL_SOURCE_UNAVAILABLE",
+        )
+    candidates = control.get("candidate_tasks")
+    if not isinstance(candidates, list):
+        return _sync_check_source_unavailable(
+            repository, control_ref, observed_at, "CANDIDATE_SOURCE_INVALID",
+        )
+    if len(candidates) <= 1:
+        return legacy
+    if (
+        len(candidates) > _SYNC_CHECK_MAX_ADMITTED_CANDIDATES
+        or len(set(str(ref) for ref in candidates)) != len(candidates)
+        or not all(
+            isinstance(ref, str) and ref.startswith(repository + "#")
+            for ref in candidates
+        )
+    ):
+        return _sync_check_source_unavailable(
+            repository, control_ref, observed_at, "CANDIDATE_SCOPE_AMBIGUOUS",
+        )
+
+    eligible: list[dict[str, object]] = []
+    for ref in candidates:
+        observed = collect_repository(
+            transport, repository, control_ref, observed_at,
+            candidate_owner_ref=ref,
+        )
+        # One missing/untrusted original Issue invalidates the uniqueness
+        # proof. Never select a terminal task from a partial candidate set.
+        if observed.get("source_status") != "OK":
+            return observed
+        classified = _classify_observation(observed)
+        if classified.get("disposition") == "NEEDS_EVIDENCE":
+            return observed
+        if (
+            classified.get("disposition") == "AUTO_ADVANCE"
+            and classified.get("next_transition")
+            == "WITHDRAW_STALE_CONTROL_CANDIDATE"
+        ):
+            eligible.append(observed)
+    if len(eligible) == 1:
+        return eligible[0]
+    if len(eligible) > 1:
+        return _sync_check_source_unavailable(
+            repository, control_ref, observed_at, "MULTIPLE_TERMINAL_CANDIDATES",
+        )
+    # No admitted terminal candidate: preserve the existing read-only report
+    # and do not manufacture a new maintenance action.
+    return legacy
+
+
 def _sync_check(args: argparse.Namespace) -> int:
     token = _token_from_env(args.token_env)
     transport = _SyncCheckGitHubTransport(token)
     observed_at = args.observed_at or _utc_now()
     control_ref = f"{DEVFLOW_REPOSITORY}#{args.control}"
-    observation = collect_repository(
+    observation = _sync_check_source_first_observation(
         transport,
         args.repository,
         control_ref,
         observed_at,
-        candidate_owner_ref=args.candidate_owner,
+        candidate_owner=args.candidate_owner,
     )
     report = _classify_observation(observation)
     owner_ref = report.get("owner_ref")
