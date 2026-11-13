@@ -686,6 +686,89 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(observed["entries"][0]["claimability"], "NOT_EVALUATED")
         self.assertFalse(observed["can_authorize_execution"])
 
+    def test_workspace_published_candidate_matches_current_task_metadata_only(self):
+        candidate = {
+            **supply_candidate(), "task_work_status": "AWAITING_REVIEW",
+        }
+        reader = fixture_reader([task()])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([candidate])
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )
+        entry = result["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"], "TASK_METADATA_MATCH_ONLY")
+        self.assertFalse(entry["task_body_sha_verified"])
+        self.assertEqual(entry["claimability"], "NOT_EVALUATED")
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_published_candidate_reports_stale_task_status(self):
+        reader = fixture_reader([task()])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([supply_candidate()])
+        )
+        entry = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )["sections"]["published_supply"]["entries"][0]
+        # Published READY_FOR_IMPLEMENTATION vs current AWAITING_REVIEW.
+        self.assertEqual(entry["task_source_alignment"], "TASK_METADATA_DIVERGED")
+        self.assertFalse(entry["task_body_sha_verified"])
+
+    def test_workspace_published_candidate_reports_changed_task_confirmation_gate(self):
+        task_issue = task()
+        body = repository_projection.render_issue_metadata_v1({
+            "schema_version": 1, "record_role": "TASK", "type": "AUDIT",
+            "work_status": "READY_FOR_IMPLEMENTATION", "scope_ready": True,
+            "requires_user_confirmation": True, "external_wait": False,
+        })
+        task_issue["body"] = body
+        reader = fixture_reader([task_issue])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([supply_candidate()])
+        )
+        entry = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"], "TASK_METADATA_DIVERGED")
+        self.assertEqual(entry["claimability"], "NOT_EVALUATED")
+
+    def test_workspace_published_candidate_not_seen_in_current_task_cohort(self):
+        reader = fixture_reader([task(23)])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([supply_candidate()])
+        )
+        entry = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"], "TASK_NOT_OBSERVED")
+        self.assertFalse(entry["task_body_sha_verified"])
+
+    def test_workspace_published_candidate_unknown_on_failed_task_listing(self):
+        reader = fixture_reader([task()])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([supply_candidate()])
+        )
+        original = reader.list_issues
+
+        def unavailable(repository, state="open"):
+            if repository == REPO:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "simulated source outage",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
+            return original(repository, state=state)
+
+        reader.list_issues = unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )
+        self.assertEqual(result["source_status"], "UNAVAILABLE")
+        entry = result["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"], "TASK_SOURCE_UNAVAILABLE")
+        self.assertFalse(entry["task_body_sha_verified"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_published_supply_absent_vs_malformed_not_false_empty(self):
         reader = fixture_reader([task()])
         service = devflow_mcp_core.DevflowService(reader)
