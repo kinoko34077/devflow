@@ -322,7 +322,7 @@ class MaintenanceCLIParityTests(unittest.TestCase):
 
         with (
             mock.patch.object(cli, "_token_from_env", return_value="opaque-test-token"),
-            mock.patch.object(cli, "GitHubReadTransport"),
+            mock.patch.object(cli, "_SyncCheckGitHubTransport"),
             mock.patch.object(cli, "_classify_observation",
                               return_value={"disposition": "NO_ACTION"}),
             mock.patch.object(cli, "collect_repository", side_effect=collect),
@@ -423,12 +423,19 @@ class MaintenanceCLIParityTests(unittest.TestCase):
                     }
                 raise AssertionError(path)
 
+            def get_issue(self, repository, number):
+                return self.get_json(f"/repos/{repository}/issues/{number}")
+
+            def get_control(self, repository, control_ref):
+                # The accepted legacy fixture contains no candidate marker.
+                raise cli.SyncCheckContractError("candidate block absent")
+
         canonical = view(task(status="IMPLEMENTING"))
         canonical["manual_control"]["next_action"] = NEXT.strip("`")
         reports = []
         with (
             mock.patch.object(cli, "_token_from_env", return_value="test-token"),
-            mock.patch.object(cli, "GitHubReadTransport",
+            mock.patch.object(cli, "_SyncCheckGitHubTransport",
                               side_effect=lambda token: Transport()),
             mock.patch.object(cli, "_write",
                               side_effect=lambda value, _: reports.append(value)),
