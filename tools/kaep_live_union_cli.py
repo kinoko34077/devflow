@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from tools import kaep_live_candidate_cli as cached
 from tools import kaep_live_delta_view as delta
+from tools import kaep_public_locator_cli as public_locator
 from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
 from tools.kaep_link_validation import owner_comment_url, owner_issue_url
@@ -562,8 +563,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--additional-repository", action="append", default=[],
                         help="Explicit owner-managed repository to read (max 3 total)")
     parser.add_argument("--offline-index", type=Path)
-    parser.add_argument("--public-marker-discovery", type=Path,
-                        help="Optional bounded untrusted public marker JSON; canonical Issues are revalidated")
+    marker_input = parser.add_mutually_exclusive_group()
+    marker_input.add_argument("--public-marker-discovery", type=Path,
+                              help="Existing bounded untrusted marker JSON file; originals revalidated")
+    marker_input.add_argument("--scan-public-markers", action="store_true",
+                              help="Opt-in existing public-owner bounded GET scan in this check-in; "
+                                   "read-only original verification, not all-source completeness")
     parser.add_argument("--previous-report", type=Path,
                         help="Optional prior union JSON: revalidate its original Issues, compare old states")
     parser.add_argument("--since", default=None)
@@ -583,7 +588,11 @@ def main(argv: list[str] | None = None) -> int:
                 fail("PUBLIC_INDEX_TOO_LARGE")
             index = json.loads(raw.decode("utf-8"), object_pairs_hook=cached._unique_pairs)
         public_markers = None
-        if args.public_marker_discovery is not None:
+        if args.scan_public_markers:
+            # Reuse the accepted public-owner locator reader unchanged;
+            # no new index/parser/store, no implicit extra scope or authority.
+            public_markers = public_locator.discover()
+        elif args.public_marker_discovery is not None:
             raw = args.public_marker_discovery.read_bytes()
             if len(raw) > MAX_PUBLIC_MARKER_BYTES:
                 fail("PUBLIC_MARKER_FILE_TOO_LARGE")

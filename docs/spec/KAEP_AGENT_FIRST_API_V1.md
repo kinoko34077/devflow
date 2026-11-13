@@ -173,6 +173,20 @@ python -m tools.kaep_live_union_cli --recipient chatgpt --public-marker-discover
 既存 `get_agent_inbox` と`#503`/manual Control fallback、#531 B5 source completeness HOLD、#681 F10 GPT無人起床の安全境界を維持。有料Provider/新規認証/常駐Host/定時実行は加えない。
 
 
+## 受信者の1回のCLIから公開未索引候補を取得する（明示opt-in、2026-11-14）
+
+従来の公開候補位置取得 CLI と、厳格原典再照合 CLI を2回呼び出して中間JSONをファイル保存する手順は、許可済みのGET-only公開探索を通常check-inから使いにくくしていた。既存の `tools.kaep_public_locator_cli.discover()` を再利用し、`tools.kaep_live_union_cli` に明示的な `--scan-public-markers` を追加する。新しいクローラ・索引・正本ストア・スケジュールは作らない。
+
+```sh
+python -m tools.kaep_live_union_cli --recipient claude-code \
+  --additional-repository kinoko34077/frequency-warp-vst \
+  --scan-public-markers
+```
+
+この一呼出しでは、既存の公開owner所有リポジトリの有限ページ数で **位置候補のみ** を取得し、既存の `read_union` が指定された最大3repo／1回最大40原典Issueを再GETして厳格な原典/actor/recipient/返信検証をする。候補位置は生のメッセージや仕事割当ではない。旧索引にない履歴Issueも、公開コメントの候補位置が探索窓に入る場合に限り観測可能になる。`--public-marker-discovery FILE` との同時指定は拒否する。通常のチェックイン既定挙動は変更しない。
+
+公開位置探索は最大3リポページ、各40コメントページ、最大350 GitHub GET、候補最大5000という**既存の有限上限**を保持。検証側の40原典上限は `--source-offset` で明示的な窓に分けられるが、別実行の原子的同時スナップショットや原典全件の証明ではない。部分取得/取得不能/範囲外/不正/上限に触れた場合は `PARTIAL_UNKNOWN` または `BLOCKED` の非権限状態を保つ。`has_unknown_work=true`、`complete_source_universe=false`、`can_authorize_execution=false`、#503/manual Control fallback維持。新規のCLIコードのCI成功は、実受信Agentの無人起動、現在HEADの承認、source universe完全性、B5 Consumer同等性の実証にはならない。
+
 ## P2 更新済みIssueコメントのページ境界拡張（2026年10月17日）
 
 実GitHub P2再読込では、直近更新順100コメントの上限に到達し `RECENT_WINDOW_TRUNCATED` となった。旧 `read_repository_recent(...)` のデフォルト1ページは保持し、既存 `kaep_live_union_cli` に任意の `--updated-pages 2` / `--updated-pages 3`（最大3）を追加する。
