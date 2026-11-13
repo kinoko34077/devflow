@@ -160,7 +160,7 @@ class SourceRootShadowTests(unittest.TestCase):
         bad_notice = pointer_notice(broken, issue=577, cid=701, notice_id=811)
         malformed = {
             "id": 702,
-            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060\nextra historical prose",
+            "body": "<!-- kaep:message:v0.2 -->\n\u0060\u0060\u0060json\n{}\n\u0060\u0060\u0060 extra historical prose",
             "user": {"id": 79015263, "login": ACTOR},
         }
         index = pages([comment(901, good_notice), comment(902, bad_notice)])
@@ -298,7 +298,7 @@ class SourceRootShadowTests(unittest.TestCase):
             (REPO, 577): pages([
                 comment(701, wrapper_root),
                 {"id": 702, "body": "<!-- kaep:message:v0.2 -->\n"
-                 + fence + "json\n{}\n" + fence + "\nextra",
+                 + fence + "json\n{}\n" + fence + " invalid-fence-tail",
                  "user": {"id": 79015263, "login": ACTOR}},
             ]),
             (REPO, 578): pages([
@@ -491,7 +491,7 @@ class SourceRootShadowTests(unittest.TestCase):
                 comment(701, bad_root),
                 {"id": 702,
                  "body": "<!-- kaep:message:v0.2 -->\n"
-                         + fence + "json\n{}\n" + fence + "\nextra",
+                         + fence + "json\n{}\n" + fence + " invalid-fence-tail",
                  "user": {"id": 79015263, "login": ACTOR}},
             ]),
             (REPO, 576): pages([comment(601, ok_root)]),

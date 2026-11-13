@@ -47,7 +47,7 @@ class LiveV2ReadCLITests(unittest.TestCase):
     def test_dual_shadow_reports_invalid_legacy_and_empty_v2_as_unknown(self):
         fence = chr(96) * 3
         bad = {"id": 1,
-               "body": "<!-- kaep:message:v0.2 -->\n" + fence + "json\n{}\n" + fence + "\n",
+               "body": "<!-- kaep:message:v0.2 -->\n" + fence + "json\n{}\n" + fence + " invalid-fence-tail",
                "user": {"login": "kinoko34077", "id": 79015263}}
         status, result, gh = self._run(
             "--dual-shadow", page_values=[pages([bad]), pages([])])

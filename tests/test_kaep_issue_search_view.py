@@ -201,7 +201,7 @@ class SearchListTests(unittest.TestCase):
         old["message_id"] = "msg_cursor576_readonly_audit_20261015a"
         old["exchange_id"] = "ex_cursor576_readonly_audit_20261015a"
         bad = comment(6221821907, root(number=52))
-        bad["body"] += "\n\nHistorical prose after fenced KAEP v0.2 message"
+        bad["body"] += " invalid-fence-tail"
         out, _ = self.run_view(
             [DEV], {(DEV, 576): issue()},
             {(DEV, 576): [comment(6193914061, old), bad]},
@@ -309,7 +309,7 @@ class SearchListTests(unittest.TestCase):
     def test_quarantined_parent_with_owner_reply_still_blocks(self):
         request = root()
         malformed = comment(100, request)
-        malformed["body"] += "\n\nnoncanonical trailing prose"
+        malformed["body"] += " invalid-fence-tail"
         answer = json.loads(json.dumps(request))
         answer.update({
             "message_id": "msg_search_parent_owner_answer",
