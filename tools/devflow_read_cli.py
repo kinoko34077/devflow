@@ -15,7 +15,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
 OPERATIONS = (
-    "portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
+    "portfolio", "human-portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
     "assess-issue-plan", "assess-outcome-observation",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
@@ -102,6 +102,8 @@ def read_operation(
         raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
     if operation == "portfolio":
         return service.get_portfolio_projection()
+    if operation == "human-portfolio":
+        return service.get_human_portfolio(repository)
     if operation == "bootstrap":
         return service.bootstrap_repository(repository)
     if operation == "work-view":
