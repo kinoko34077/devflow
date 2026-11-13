@@ -1511,6 +1511,16 @@ class DevflowService:
             for issue in inbox["issues"]
             for request in (issue["requests"] or [])
         ] if current else None
+        # TASK Issue listing and its selected comment mailboxes have independent
+        # source failure boundaries. B6 success cannot certify missing TASK roots.
+        task_cohort_status = (
+            "SOURCE_UNAVAILABLE" if not current
+            else "PARTIAL" if inbox["errors"] else "BOUNDED_OBSERVED"
+        )
+        if current and inbox["errors"] and not messages:
+            # No verified TASK recipient roots survived the failed mailbox read.
+            # Unknown is not a confirmed empty list.
+            messages = None
         recent_discovery: dict[str, Any] | None = None
         if include_recent_kaep:
             try:
@@ -1603,7 +1613,12 @@ class DevflowService:
             "sections": {
                 "ongoing": ongoing,
                 "messages": {
-                    "status": "TASK_SOURCE_COHORT_ONLY" if current else "SOURCE_UNAVAILABLE",
+                    "status": (
+                        "SOURCE_UNAVAILABLE" if not current
+                        else "TASK_SOURCE_COHORT_PARTIAL" if inbox["errors"]
+                        else "TASK_SOURCE_COHORT_ONLY"
+                    ),
+                    "task_cohort_status": task_cohort_status,
                     "entries": messages,
                     "errors": inbox["errors"],
                     "offset": offset,
