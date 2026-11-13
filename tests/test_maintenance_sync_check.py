@@ -836,7 +836,10 @@ class SourceFirstSyncCheckSelectionTests(unittest.TestCase):
             reads.append(candidate_owner_ref)
             return {
                 "source_status": "OK",
-                "owner": {"ref": candidate_owner_ref or "o/r#9"},
+                "owner": {
+                    "ref": candidate_owner_ref or "o/r#9",
+                    "state": "CLOSED", "runnable": False,
+                },
             }
 
         with patch.object(cli, "collect_repository", side_effect=collect), \
@@ -882,6 +885,36 @@ class SourceFirstSyncCheckSelectionTests(unittest.TestCase):
                 "2026-11-14T00:00:00Z",
             )
         self.assertEqual(observed["source_status"], "UNAVAILABLE")
+
+    def test_open_done_does_not_count_as_an_executable_terminal(self):
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+
+        class Transport:
+            def get_control(self, repository, control_ref):
+                return {"candidate_tasks": ["o/r#7", "o/r#8"]}
+
+        def collect(_transport, _repository, _control_ref, _when,
+                    *, candidate_owner_ref=None):
+            return {
+                "source_status": "OK",
+                "owner": {
+                    "ref": candidate_owner_ref or "o/r#8",
+                    "state": "OPEN" if candidate_owner_ref == "o/r#7" else "CLOSED",
+                    "runnable": False,
+                },
+            }
+
+        with patch.object(cli, "collect_repository", side_effect=collect), \
+                patch.object(cli, "_classify_observation", return_value={
+                    "disposition": "AUTO_ADVANCE",
+                    "next_transition": "WITHDRAW_STALE_CONTROL_CANDIDATE",
+                }):
+            actual = cli._sync_check_source_first_observation(
+                Transport(), "o/r", "kinoko34077/devflow#1",
+                "2026-11-14T00:00:00Z",
+            )
+        self.assertEqual(actual["owner"]["ref"], "o/r#8")
 
     def test_oversized_candidate_set_and_invalid_ref_are_not_scanned(self):
         from unittest.mock import patch
