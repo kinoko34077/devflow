@@ -821,6 +821,116 @@ class CandidateScopedSyncCheckEndToEndTests(unittest.TestCase):
 
 
 
+
+class SourceFirstRepositoryAuditTests(unittest.TestCase):
+    def test_readonly_repository_agrees_with_source_first_sync_check(self):
+        """The normal audit must surface A, not the manual B owner."""
+        from unittest.mock import patch
+        from scripts import maintenance_audit as cli
+        from tools import maintenance_github as mg
+
+        body = (
+            "## Repository\n\n`o/r`\n\n"
+            "## Work Status\n\n`AUDITED`\n\n"
+            "## Repository State\n\n`ACTIVE`\n\n"
+            "## Active Work\n\n`o/r#8` in progress\n\n"
+            "## Next Action\n\nContinue B\n\n"
+            + body_with_second_candidate()
+        )
+
+        class Transport:
+            def __init__(self):
+                self.reads = []
+                self.fail_b = False
+                self.closed_b = False
+
+            def get_json(self, path):
+                self.reads.append(path)
+                if path == "/repos/kinoko34077/devflow/issues/1":
+                    return {
+                        "number": 1, "title": "[REPO] r", "state": "open",
+                        "html_url": "https://github.com/kinoko34077/devflow/issues/1",
+                        "body": body, "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                if path == "/repos/o/r/issues/7":
+                    return {
+                        "number": 7, "state": "closed",
+                        "html_url": "https://github.com/o/r/issues/7",
+                        "body": "## Work Status\n\n`DONE`\n",
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                if path == "/repos/o/r/issues/8":
+                    if self.fail_b:
+                        raise mg.GitHubReadError("source B unavailable")
+                    return {
+                        "number": 8, "state": "closed" if self.closed_b else "open",
+                        "html_url": "https://github.com/o/r/issues/8",
+                        "body": ("## Work Status\n\n`DONE`\n"
+                                 if self.closed_b
+                                 else "## Work Status\n\n`IMPLEMENTING`\n"),
+                        "author_association": "OWNER",
+                        "user": {"id": 79015263, "login": "kinoko34077"},
+                        "updated_at": "2026-11-14T00:00:00Z",
+                    }
+                raise AssertionError("unexpected GET " + path)
+
+            def get_control(self, repository, control_ref):
+                if repository != "o/r" or control_ref != "kinoko34077/devflow#1":
+                    raise AssertionError("unexpected Control scope")
+                return {"candidate_tasks": ["o/r#7", "o/r#8"]}
+
+        parser = cli._parser()
+        args = parser.parse_args([
+            "repository", "--repository", "o/r", "--control", "1",
+            "--observed-at", "2026-11-14T00:01:00Z",
+        ])
+        transport = Transport()
+        results = []
+        with patch.object(cli, "_SyncCheckGitHubTransport", return_value=transport), \
+                patch.object(cli, "_token_from_env", return_value="token"), \
+                patch.object(cli, "_write", side_effect=lambda payload, output: results.append(payload)):
+            self.assertEqual(cli._repository(args), 0)
+            self.assertEqual(results[-1]["owner_ref"], "o/r#7")
+            self.assertEqual(results[-1]["disposition"], "AUTO_ADVANCE")
+            self.assertEqual(
+                results[-1]["next_transition"],
+                "WITHDRAW_STALE_CONTROL_CANDIDATE",
+            )
+            self.assertIn("/repos/o/r/issues/7", transport.reads)
+            self.assertIn("/repos/o/r/issues/8", transport.reads)
+            # This is strictly read-only, even for an actionable report.
+            self.assertTrue(all(path.startswith("/repos/") for path in transport.reads))
+
+            # Optional parity compares the unchanged legacy Active Work source.
+            args.m3_read_parity = True
+            with patch.object(
+                cli.devflow_mcp_core, "DevflowService",
+                side_effect=RuntimeError("optional read unavailable"),
+            ):
+                self.assertEqual(cli._repository(args), 0)
+            self.assertEqual(results[-1]["owner_ref"], "o/r#8")
+            self.assertEqual(results[-1]["disposition"], "NO_ACTION")
+            self.assertEqual(
+                results[-1]["m3_read_parity"]["use_level"], "READ_ONLY_DIAGNOSTIC",
+            )
+
+            args.m3_read_parity = False
+            transport.fail_b = True
+            self.assertEqual(cli._repository(args), 0)
+            self.assertEqual(results[-1]["disposition"], "NEEDS_EVIDENCE")
+            self.assertNotIn("next_transition", results[-1])
+
+            transport.fail_b = False
+            transport.closed_b = True
+            self.assertEqual(cli._repository(args), 0)
+            self.assertEqual(results[-1]["disposition"], "NEEDS_EVIDENCE")
+            self.assertNotIn("next_transition", results[-1])
+
+
 class SourceFirstSyncCheckSelectionTests(unittest.TestCase):
     def test_ambiguous_terminal_set_fails_closed_without_manual_owner_authority(self):
         from unittest.mock import patch
