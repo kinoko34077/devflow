@@ -211,14 +211,6 @@ def source_root_shadow(
         result["isolated_invalid_ref_sources"] += sum(
             b.get("reason_code") == "INVALID_REF" for b in index["blocked"]
         )
-    # This is only the scan-only location for the NEXT bounded diagnostic.
-    # It is not the validated durable cursor, nor a cross-call snapshot.
-    if (window_explicit and not fatal_blocker
-            and not index["index_scan_exhausted"]):
-        result["index_next_diagnostic_after_id"] = (
-            index["last_scanned_index_comment_id"]
-        )
-
     try:
         task_sources = trusted_m3_task_locators(task_views or [])
     except InvalidMessage as exc:
@@ -333,6 +325,14 @@ def source_root_shadow(
         and not isolate_invalid_wrapper
         else "PARTIAL_UNKNOWN"
     )
+    # Only a fully processed, nonfatal diagnostic window may advertise the
+    # next scan-only location. Source/actor/parent/cap failures above return
+    # without this field, preventing a caller from skipping a blocked window.
+    if (window_explicit and not fatal_blocker
+            and not index["index_scan_exhausted"]):
+        result["index_next_diagnostic_after_id"] = (
+            index["last_scanned_index_comment_id"]
+        )
     return result
 
 
