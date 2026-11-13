@@ -14,6 +14,7 @@ from tools.kaep_discovery_reader import POINTER_VERSION
 from tools.kaep_route_notice import DISCOVERY_ISSUE, APPROVED_SUCCESSOR_ISSUE
 from tools.kaep_source_roster_shadow import (
     source_root_shadow, main, MAX_SOURCE_ISSUES, MAX_OPT_IN_SOURCE_ISSUES,
+    MAX_SHADOW_BATCHES,
 )
 
 ACTOR = "kinoko34077"
@@ -75,7 +76,8 @@ def pointer_notice(msg, *, issue=ISSUE, cid, notice_id,
 
 def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
             discovery_issue=DISCOVERY_ISSUE, isolate_invalid_wrapper=False,
-            isolate_invalid_ref=False):
+            isolate_invalid_ref=False, index_after_id=0,
+            index_batches=MAX_SHADOW_BATCHES):
     fetched = []
     def fetch(r, i):
         fetched.append((r, i))
@@ -86,6 +88,7 @@ def compare(index, sources, *, max_sources=MAX_SOURCE_ISSUES,
         discovery_issue=discovery_issue,
         isolate_invalid_wrapper=isolate_invalid_wrapper,
         isolate_invalid_ref=isolate_invalid_ref,
+        index_after_id=index_after_id, index_batches=index_batches,
     )
     return output, fetched
 
@@ -411,6 +414,172 @@ class SourceRootShadowTests(unittest.TestCase):
                 fetch_source=lambda *_: pages([]),
                 diagnostic_isolate_invalid_ref=True,
             )
+
+    def test_bounded_index_windows_read_45_sources_without_raising_cap(self):
+        # The ordinary full-index read still hits the 40-Issue ceiling.
+        sources = {}
+        indexed = []
+        for n in range(45):
+            issue = 600 + n
+            root_message = root(900 + n, issue=issue)
+            root_id = 1000 + n
+            sources[(REPO, issue)] = pages([comment(root_id, root_message)])
+            notice = pointer_notice(root_message, issue=issue, cid=root_id,
+                                    notice_id=900 + n)
+            indexed.append(comment(2000 + n, notice))
+        index = pages(indexed)
+        blocked, fetched = compare(
+            index, sources, max_sources=40,
+            isolate_invalid_wrapper=True, isolate_invalid_ref=True)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(len(fetched), 40)
+        self.assertEqual(blocked["issues"], [])
+        self.assertIn("CANDIDATE_LIMIT",
+                      [x["reason_code"] for x in blocked["index_blockers"]])
+
+        first, fetched = compare(
+            index, sources, max_sources=40,
+            isolate_invalid_wrapper=True, isolate_invalid_ref=True,
+            index_batches=2)
+        self.assertEqual(first["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(len(fetched), 40)
+        self.assertEqual(len(first["issues"]), 40)
+        self.assertTrue(first["index_window_explicit"])
+        self.assertFalse(first["index_scan_exhausted"])
+        self.assertTrue(first["index_truncated"])
+        self.assertEqual(first["index_scanned_batches"], 2)
+        self.assertEqual(first["index_next_diagnostic_after_id"], 2039)
+        self.assertEqual(first["index_safe_after_id"], 2039)
+        self.assertEqual(first["index_hint_count"], 40)
+        self.assertFalse(first["complete_source_universe"])
+        self.assertTrue(first["has_unknown_work"])
+        self.assertFalse(first["can_authorize_execution"])
+        self.assertFalse(first["fallback_retirement_authorized"])
+
+        second, fetched = compare(
+            index, sources, max_sources=40,
+            isolate_invalid_wrapper=True, isolate_invalid_ref=True,
+            index_after_id=first["index_next_diagnostic_after_id"],
+            index_batches=2)
+        self.assertEqual(second["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(len(fetched), 5)
+        self.assertEqual(len(second["issues"]), 5)
+        self.assertTrue(second["index_scan_exhausted"])
+        self.assertFalse(second["index_truncated"])
+        self.assertIsNone(second["index_next_diagnostic_after_id"])
+        self.assertEqual(second["index_safe_after_id"], 2044)
+        self.assertEqual(len({
+            entry["owning_issue"] for entry in first["issues"] + second["issues"]
+        }), 45)
+        self.assertFalse(second["complete_source_universe"])
+
+    def test_index_window_preserves_safe_cursor_with_poisoned_first_batch(self):
+        bad_root = root(871, issue=577)
+        ok_root = root(872, issue=576)
+        notice_bad = pointer_notice(bad_root, issue=577, cid=701, notice_id=871)
+        notice_ok = pointer_notice(ok_root, issue=576, cid=601, notice_id=872)
+        index = pages([
+            comment(1000 + n, notice_bad) if n == 1 else
+            comment(1000 + n, notice_ok) if n == 24 else
+            {"id": 1000 + n, "body": "ordinary",
+             "user": {"id": 79015263, "login": ACTOR}}
+            for n in range(35)
+        ])
+        fence = chr(96) * 3
+        sources = {
+            (REPO, 577): pages([
+                comment(701, bad_root),
+                {"id": 702,
+                 "body": "<!-- kaep:message:v0.2 -->\n"
+                         + fence + "json\n{}\n" + fence + "\nextra",
+                 "user": {"id": 79015263, "login": ACTOR}},
+            ]),
+            (REPO, 576): pages([comment(601, ok_root)]),
+        }
+        first, _ = compare(
+            index, sources, isolate_invalid_wrapper=True,
+            index_batches=1)
+        self.assertEqual(first["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(first["index_safe_after_id"], 1000)
+        self.assertEqual(first["index_next_diagnostic_after_id"], 1019)
+        self.assertEqual(first["isolated_invalid_wrapper_sources"], 1)
+        self.assertEqual(first["issues"], [])
+        second, _ = compare(
+            index, sources, isolate_invalid_wrapper=True,
+            index_after_id=first["index_next_diagnostic_after_id"],
+            index_batches=1)
+        self.assertEqual(second["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(second["index_after_id"], 1019)
+        self.assertTrue(second["index_scan_exhausted"])
+        self.assertIsNone(second["index_next_diagnostic_after_id"])
+        self.assertEqual(second["index_safe_after_id"], 1034)
+        self.assertEqual(len(second["issues"]), 1)
+        self.assertEqual(second["issues"][0]["roots"][0]["comparison"],
+                         "INDEXED_AND_ORIGINAL")
+        self.assertFalse(first["complete_source_universe"])
+        self.assertFalse(second["complete_source_universe"])
+
+    def test_index_windows_never_bypass_source_cap_and_refuse_invalid_args(self):
+        r1 = root(875, issue=576)
+        r2 = root(876, issue=577)
+        index = pages([
+            comment(901, pointer_notice(r1, issue=576,
+                                        cid=601, notice_id=875)),
+            comment(902, pointer_notice(r2, issue=577,
+                                        cid=701, notice_id=876)),
+        ])
+        sources = {
+            (REPO, 576): pages([comment(601, r1)]),
+            (REPO, 577): pages([comment(701, r2)]),
+        }
+        capped, fetched = compare(
+            index, sources, max_sources=1,
+            isolate_invalid_wrapper=True,
+            index_batches=1)
+        self.assertEqual(capped["status"], "BLOCKED")
+        self.assertIn("CANDIDATE_LIMIT",
+                      [b["reason_code"] for b in capped["index_blockers"]])
+        self.assertEqual(capped["issues"], [])
+        self.assertEqual(fetched, [(REPO, 576)])
+        self.assertIsNone(capped["index_next_diagnostic_after_id"])
+        for invalid in (0, 11, True, "2"):
+            with self.subTest(batches=invalid), self.assertRaisesRegex(
+                    InvalidMessage, "INVALID_INDEX_WINDOW"):
+                compare(index, sources, index_batches=invalid,
+                        isolate_invalid_wrapper=True)
+        for invalid in (-1, True, "901"):
+            with self.subTest(after_id=invalid), self.assertRaisesRegex(
+                    InvalidMessage, "INVALID_INDEX_WINDOW"):
+                compare(index, sources, index_after_id=invalid,
+                        isolate_invalid_wrapper=True)
+        with self.assertRaisesRegex(
+                InvalidMessage, "INDEX_WINDOW_REQUIRES_DIAGNOSTIC"):
+            compare(index, sources, index_batches=1)
+
+    def test_cli_index_window_rejected_before_external_get(self):
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages") as fetch,
+              redirect_stdout(io.StringIO()) as capture):
+            rc = main(["--expect-notice-actor", ACTOR,
+                       "--expect-source-actor", ACTOR,
+                       "--index-batches", "1"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(capture.getvalue())["reason_code"],
+                         "INDEX_WINDOW_REQUIRES_DIAGNOSTIC")
+        fetch.assert_not_called()
+        with (patch("tools.kaep_source_roster_shadow.fetch_gh_pages",
+                    return_value=pages([])) as fetch,
+              redirect_stdout(io.StringIO()) as capture):
+            rc = main(["--expect-notice-actor", ACTOR,
+                       "--expect-source-actor", ACTOR,
+                       "--isolate-invalid-wrapper",
+                       "--index-batches", "1"])
+        self.assertEqual(rc, 2)
+        data = json.loads(capture.getvalue())
+        self.assertEqual(data["status"], "PARTIAL_UNKNOWN")
+        self.assertTrue(data["index_window_explicit"])
+        self.assertTrue(data["index_scan_exhausted"])
+        self.assertIsNone(data["index_next_diagnostic_after_id"])
+        fetch.assert_called_once_with(REPO, 503)
 
     def test_invalid_ref_flag_without_wrapper_fails_before_get(self):
         with self.assertRaisesRegex(InvalidMessage, "INVALID_DIAGNOSTIC_MODE"):
