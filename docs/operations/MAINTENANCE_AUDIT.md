@@ -20,6 +20,8 @@ Stage-2 maintenance automation is governed by:
 
 `maintenance-audit.yml` mode `audit` is read-only.
 
+The single-repository `maintenance_audit.py repository` command uses the accepted source-first selection of already-admitted candidates: when several exist, a sole trusted terminal source is reported even if manual `Active Work` names a different ongoing Issue. It never edits the Control. Missing or ambiguous candidate sources report `NEEDS_EVIDENCE` instead of falsely reporting `NO_ACTION`. The opt-in `--m3-read-parity` comparison deliberately retains its legacy manual owner basis; the fleet-wide `portfolio` audit and scheduled job are unchanged.
+
 It performs exact-source collection, deterministic audit classification, and optional deterministic triage. It may produce:
 
 - `maintenance-audit-report.json`;
