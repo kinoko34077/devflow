@@ -218,7 +218,7 @@ def _repository(args: argparse.Namespace) -> int:
 
 def _portfolio(args: argparse.Namespace) -> int:
     token = _token_from_env(args.token_env)
-    transport = GitHubReadTransport(token)
+    transport = _SyncCheckGitHubTransport(token)
     observed_at = args.observed_at or _utc_now()
     controls = discover_controls(transport)
     observations = collect_portfolio(
@@ -226,6 +226,26 @@ def _portfolio(args: argparse.Namespace) -> int:
         controls,
         observed_at,
     )
+    # Existing default portfolio observations use the manual Active Work
+    # owner. Only already-admitted, trusted candidate-bearing Controls need
+    # the source-first rescan: do not add an extra GET for all ordinary
+    # Controls or expand work discovery to unregistered local Issues.
+    # This command is read-only; it never reaches the sync-check executor.
+    for index, observation in enumerate(observations):
+        control = observation.get("control")
+        if (
+            observation.get("source_status") != "OK"
+            or not isinstance(control, dict)
+            or control.get("candidate_present") is not True
+        ):
+            continue
+        repository = observation.get("repository")
+        control_ref = control.get("ref")
+        if not isinstance(repository, str) or not isinstance(control_ref, str):
+            continue
+        observations[index] = _sync_check_source_first_observation(
+            transport, repository, control_ref, observed_at,
+        )
     reports = [
         _classify_observation(observation)
         for observation in observations
