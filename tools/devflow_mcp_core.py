@@ -36,6 +36,7 @@ try:
         maintenance_supply,
         reconciliation_publication,
         repository_projection,
+        repository_projection_cache,
         workflow_contract,
     )
 except ImportError:  # direct script execution
@@ -67,6 +68,7 @@ except ImportError:  # direct script execution
     import maintenance_supply
     import reconciliation_publication
     import repository_projection
+    import repository_projection_cache
     import workflow_contract
 
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
@@ -826,6 +828,107 @@ class DevflowService:
             include_records=True,
         )
 
+    def _colony_local_read_admitted(
+        self, repository: str, control: dict[str, Any],
+        projection: repository_projection.RepositoryProjection,
+        observed_at: str, complete: bool,
+    ) -> bool:
+        """One exact P3 local-read cohort; never executor or Claim permission.
+
+        No second task ledger: confirm that the existing validated M2 source
+        and current original Issue projection are the SAME source generation.
+        The manual cross-repo Next Action remains independent. Any drift falls
+        back to the previous read-only manual authority without a write.
+        """
+        if (
+            repository != "kinoko34077/colony-ai"
+            or control.get("url") != "https://github.com/kinoko34077/devflow/issues/13"
+            or control.get("issue_number") != 13
+            or not complete
+            or projection.machine_task_count != 1
+            or len(projection.task_records) != 1
+        ):
+            return False
+        task = projection.task_records[0]
+        meta = task.metadata
+        if (
+            task.number != 3 or task.state != "open"
+            or task.html_url != "https://github.com/kinoko34077/colony-ai/issues/3"
+            or task.record_role != "TASK" or task.work_status != "IMPLEMENTING"
+            or meta is None or not meta.scope_ready
+            or meta.requires_user_confirmation or meta.external_wait
+            or meta.blocked_by
+        ):
+            return False
+        # This exact old Control names current #3, then separately contains
+        # closed GUI Issue #1 history. A link-set comparison would mislabel
+        # that history as a second active TASK.
+        current_manual = control["active_work"].split(
+            "Historical GUI slice complete.", 1
+        )[0]
+        if (
+            "[colony-ai #3]" not in current_manual
+            or "OPEN / P2 IMPLEMENTING" not in current_manual
+        ):
+            return False
+        try:
+            source_control = self.reader.get_issue(self.devflow_repository, 13)
+            if (
+                source_control.get("state") != "open"
+                or source_control.get("title") != "[REPO] colony-ai"
+                or source_control.get("html_url") != control["url"]
+                or not is_trusted_control_author(source_control)
+            ):
+                return False
+            body = source_control.get("body")
+            if not isinstance(body, str):
+                return False
+            actual_sections = parse_sections(body, reject_duplicates=True)
+            if (
+                actual_sections.get("Repository") != repository
+                or actual_sections.get("Active Work") != control["active_work"]
+                or actual_sections.get("Next Action") != control["next_action"]
+            ):
+                return False
+            cached = repository_projection_cache.parse_cached_projection(body, repository)
+            if cached is None:
+                return False
+            payload = cached.payload
+            if (
+                repository_projection_cache.effective_cache_freshness(
+                    payload, now=observed_at
+                ) != "CURRENT"
+                or payload["coverage"]["status"] != "COMPLETE"
+                or payload["all_state_tasks"]["status"] != "COMPLETE"
+                or payload["all_state_tasks"]["total"] != 1
+            ):
+                return False
+            records = payload["all_state_tasks"]["records"]
+            if (
+                len(records) != 1
+                or records[0].get("url") != task.html_url
+                or records[0].get("work_status") != task.work_status
+            ):
+                return False
+            # Cache and GitHub's current original source must be identical,
+            # not merely both individually labelled COMPLETE.
+            live = self._repository_projection_dict(
+                projection, include_records=True
+            )
+            recomputed = repository_projection_cache.build_cached_projection(
+                repository, live, generated_at=observed_at,
+                control_trust=payload["control_trust"],
+            )
+            if recomputed["source"]["digest"] != payload["source"]["digest"]:
+                return False
+            return True
+        except (
+            DevflowMCPError,
+            repository_projection_cache.RepositoryProjectionCacheError,
+            ValueError, TypeError, KeyError, AttributeError,
+        ):
+            return False
+
     def get_repository_work_view(self, repository: str) -> dict[str, Any]:
         """Read-only, fail-closed local-work consumer for staged M3 migration.
 
@@ -861,6 +964,9 @@ class DevflowService:
             projection.source_status == "AVAILABLE"
             and projection.source_freshness == "CURRENT"
         )
+        admitted_local_read = self._colony_local_read_admitted(
+            normalized, control, projection, observed_at, complete,
+        )
         # Display/observation may use verified known TASKs without claiming that
         # unclassified/legacy Issues contain no other work. In particular an
         # unavailable source MUST NOT masquerade as an empty task list.
@@ -874,7 +980,7 @@ class DevflowService:
             "unresolved_open_issue_count": unresolved if source_is_current else None,
             "open_issue_count": projection.open_issue_count if source_is_current else None,
             "is_complete_read": complete,
-            "can_replace_manual_active_work": False,
+            "can_replace_manual_active_work": admitted_local_read,
             "can_authorize_execution": False,
         }
         # Manual and machine results are deliberately *displayed together*.
@@ -932,7 +1038,8 @@ class DevflowService:
             "manual": {
                 "active_work": control["active_work"],
                 "next_action": control["next_action"],
-                "authority": "MANUAL_CONTROL_UNTIL_COHORT_ADMISSION",
+                "authority": ("MACHINE_LOCAL_TASK_READ_WITH_MANUAL_FALLBACK" if admitted_local_read
+                              else "MANUAL_CONTROL_UNTIL_COHORT_ADMISSION"),
             },
             "machine": {
                 "status": observed_task_view["status"],
@@ -961,7 +1068,7 @@ class DevflowService:
                 "known_machine_tasks_not_manually_referenced": machine_only_refs,
                 "semantic_equivalence_proven": False,
             },
-            "can_replace_manual_active_work": False,
+            "can_replace_manual_active_work": admitted_local_read,
             "can_authorize_execution": False,
         }
         return {
@@ -1006,7 +1113,8 @@ class DevflowService:
                 for record in projection.task_records
             ],
             "view_mode": (
-                "MACHINE_COMPLETE_SHADOW" if complete
+                "MACHINE_LOCAL_TASK_READ_AUTHORITY" if admitted_local_read
+                else "MACHINE_COMPLETE_SHADOW" if complete
                 else "MANUAL_CONTROL_FALLBACK"
             ),
             "manual_control": {
@@ -1016,7 +1124,7 @@ class DevflowService:
             },
             # This is an operator/read API, NOT the authority-cutover decision.
             # An empty but complete repository cannot prove a live task cycle.
-            "can_replace_manual_active_work": False,
+            "can_replace_manual_active_work": admitted_local_read,
         }
 
     def get_scoped_task_read(
