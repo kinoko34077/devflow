@@ -866,9 +866,26 @@ class DevflowService:
         current_manual = control["active_work"].split(
             "Historical GUI slice complete.", 1
         )[0]
-        if (
-            "[colony-ai #3]" not in current_manual
-            or "OPEN / P2 IMPLEMENTING" not in current_manual
+        current_lines = [
+            line for line in current_manual.splitlines()
+            if "[colony-ai #3]" in line
+        ]
+        if len(current_lines) != 1:
+            return False
+        # Require the *current* exact Issue bullet's status, rather than
+        # accepting a historical note like "previously OPEN / P2 IMPLEMENTING"
+        # after the current status changed to BLOCKED.
+        line = current_lines[0]
+        if not re.match(
+            r"^- \\[colony-ai #3\\]\\(https://github\\.com/kinoko34077/colony-ai/issues/3\\)"
+            r"\\s+OPEN\\s*/\\s*P2\\s+IMPLEMENTING\\b",
+            line,
+        ):
+            return False
+        if re.search(
+            r"\\b(BLOCKED|DONE|PARKED|AWAITING_REVIEW|NEEDS_REAUDIT"
+            r"|READY_FOR_IMPLEMENTATION)\\b",
+            line,
         ):
             return False
         try:
