@@ -877,14 +877,14 @@ class DevflowService:
         # after the current status changed to BLOCKED.
         line = current_lines[0]
         if not re.match(
-            r"^- \\[colony-ai #3\\]\\(https://github\\.com/kinoko34077/colony-ai/issues/3\\)"
-            r"\\s+OPEN\\s*/\\s*P2\\s+IMPLEMENTING\\b",
+            r"^- \[colony-ai #3\]\(https://github\.com/kinoko34077/colony-ai/issues/3\)"
+            r"\s+OPEN\s*/\s*P2\s+IMPLEMENTING\b",
             line,
         ):
             return False
         if re.search(
-            r"\\b(BLOCKED|DONE|PARKED|AWAITING_REVIEW|NEEDS_REAUDIT"
-            r"|READY_FOR_IMPLEMENTATION)\\b",
+            r"\b(BLOCKED|DONE|PARKED|AWAITING_REVIEW|NEEDS_REAUDIT"
+            r"|READY_FOR_IMPLEMENTATION)\b",
             line,
         ):
             return False
