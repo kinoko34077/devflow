@@ -30,6 +30,7 @@ try:
         kaep_live_delta_view,
         kaep_live_candidate_cli,
         kaep_live_union_cli,
+        kaep_route_notice,
         issue_goal_context,
         goal_plan_assessment,
         maintenance_sync_check,
@@ -62,6 +63,7 @@ except ImportError:  # direct script execution
     import kaep_live_delta_view
     import kaep_live_candidate_cli
     import kaep_live_union_cli
+    import kaep_route_notice
     import issue_goal_context
     import goal_plan_assessment
     import maintenance_sync_check
@@ -1697,6 +1699,19 @@ class DevflowService:
                     "warnings": recent["warnings"],
                     "complete_source_universe": False,
                 }
+                # The approved #789 source is a discovery *locator* Index,
+                # never a second REQUEST/Task queue. Strict B6 still verifies
+                # these comments and preserves candidate diagnostics, but
+                # they must not appear as an actionable PENDING_REPLY message.
+                successor_index_url = (
+                    "https://github.com/"
+                    f"{kaep_route_notice.DISCOVERY_REPOSITORY}/issues/"
+                    f"{kaep_route_notice.APPROVED_SUCCESSOR_ISSUE}"
+                )
+                recent_discovery["non_actionable_index_notice_rows"] = sum(
+                    row["issue_url"] == successor_index_url
+                    for row in recent["rows"]
+                )
                 extra_rows = [
                     {
                         "source_kind": "KAEP_REQUEST",
@@ -1712,6 +1727,7 @@ class DevflowService:
                         ),
                     }
                     for row in recent["rows"]
+                    if row["issue_url"] != successor_index_url
                 ]
                 known = {
                     (item["source_ref"], item["source_message_id"])
