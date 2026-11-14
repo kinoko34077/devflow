@@ -14,6 +14,27 @@ class FakeService:
     def __init__(self):
         self.calls = []
 
+    def get_portfolio_projection(self):
+        self.calls.append(("portfolio",))
+        return {
+            "repository_count": 2, "source_unavailable_count": 1,
+            "repositories": [
+                {"repository": "kinoko34077/demo", "source_status": "AVAILABLE",
+                 "machine_task_count": 2, "unclassified_count": 3},
+                {"repository": "kinoko34077/unavailable", "source_status": "UNAVAILABLE",
+                 "machine_task_count": 0, "source_error": "GITHUB_HTTP_403"},
+            ],
+        }
+
+    def get_human_portfolio(self, repository):
+        self.calls.append(("human-portfolio", repository))
+        return {
+            "repository": repository, "complete": False,
+            "source_status": "INCOMPLETE",
+            "can_authorize_execution": False,
+            "entries": [{"attention_disposition": "NEEDS_HUMAN"}],
+        }
+
     def bootstrap_repository(self, repository):
         self.calls.append(("bootstrap", repository))
         return {"repository": repository, "issue_number": 16}
@@ -90,6 +111,115 @@ class FakeService:
 
 class CloudReadCLITests(unittest.TestCase):
     REPOSITORY = "kinoko34077/devflow"
+
+    def test_human_portfolio_reuses_current_owner_service_and_unknowns(self):
+        service = FakeService()
+        out = cli.read_operation(
+            service, operation="human-portfolio", repository=self.REPOSITORY,
+        )
+        self.assertEqual(service.calls, [("human-portfolio", self.REPOSITORY)])
+        self.assertFalse(out["complete"])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertEqual(out["entries"][0]["attention_disposition"], "NEEDS_HUMAN")
+
+    def test_human_portfolio_cli_is_explicit_repository_scoped(self):
+        service = FakeService()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                code = cli.main([
+                    "human-portfolio", "--repository", self.REPOSITORY,
+                ])
+        self.assertEqual(code, 0)
+        data = json.loads(out.call_args.args[0])
+        self.assertFalse(data["complete"])
+        self.assertEqual(service.calls, [("human-portfolio", self.REPOSITORY)])
+        with patch("tools.devflow_read_cli.default_service") as no_service:
+            with patch("builtins.print") as invalid:
+                self.assertEqual(cli.main(["human-portfolio"]), 2)
+            no_service.assert_not_called()
+        self.assertEqual(json.loads(invalid.call_args.args[0])["reason_code"], "INVALID_REPOSITORY")
+
+    def test_human_portfolio_rejects_inbox_or_task_options(self):
+        service = FakeService()
+        for options in (["--recipient", "claude-code"], ["--issue-number", "3"],
+                        ["--include-recent-kaep"], ["--work-status", "BLOCKED"]):
+            with self.subTest(options=options):
+                with patch("tools.devflow_read_cli.default_service") as no_service:
+                    with patch("builtins.print") as out:
+                        self.assertEqual(cli.main([
+                            "human-portfolio", "--repository", self.REPOSITORY,
+                            *options,
+                        ]), 2)
+                    no_service.assert_not_called()
+                self.assertEqual(json.loads(out.call_args.args[0])["status"], "BLOCKED")
+        self.assertEqual(service.calls, [])
+
+    def test_portfolio_uses_existing_shared_service_without_repo_handoff(self):
+        service = FakeService()
+        result = cli.read_operation(service, operation="portfolio")
+        self.assertEqual(service.calls, [("portfolio",)])
+        self.assertEqual(result["repository_count"], 2)
+        self.assertEqual(result["source_unavailable_count"], 1)
+        self.assertEqual(result["repositories"][1]["source_status"], "UNAVAILABLE")
+
+    def test_portfolio_command_without_repo_returns_raw_unknowns(self):
+        service = FakeService()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with patch("builtins.print") as out:
+                code = cli.main(["portfolio"])
+        self.assertEqual(code, 0)
+        observed = json.loads(out.call_args.args[0])
+        self.assertEqual(observed["repository_count"], 2)
+        self.assertEqual(observed["source_unavailable_count"], 1)
+        self.assertEqual(service.calls, [("portfolio",)])
+
+    def test_portfolio_rejects_repo_arg_before_any_service_call(self):
+        service = FakeService()
+        with self.assertRaisesRegex(ValueError, "REPOSITORY_ON_PORTFOLIO_OPERATION"):
+            cli.read_operation(service, operation="portfolio", repository=self.REPOSITORY)
+        self.assertEqual(service.calls, [])
+        with patch("tools.devflow_read_cli.default_service") as get_service:
+            with patch("builtins.print") as out:
+                self.assertEqual(cli.main([
+                    "portfolio", "--repository", self.REPOSITORY,
+                ]), 2)
+            get_service.assert_not_called()
+        self.assertEqual(
+            json.loads(out.call_args.args[0])["reason_code"],
+            "REPOSITORY_ON_PORTFOLIO_OPERATION",
+        )
+
+    def test_portfolio_rejects_inbox_options_and_issue_arg_without_read(self):
+        service = FakeService()
+        with self.assertRaisesRegex(ValueError, "INBOX_OPTIONS_ON_NON_INBOX_OPERATION"):
+            cli.read_operation(service, operation="portfolio", recipient="claude-code")
+        with self.assertRaisesRegex(ValueError, "INVALID_ISSUE_NUMBER|ISSUE_NUMBER_ON_NON_ISSUE_OPERATION"):
+            cli.read_operation(service, operation="portfolio", issue_number=17)
+        self.assertEqual(service.calls, [])
+        for option in (["--recipient", "claude-code"], ["--offset", "1"],
+                       ["--include-recent-kaep"], ["--include-published-supply"]):
+            with self.subTest(option=option):
+                with patch("tools.devflow_read_cli.default_service") as get_service:
+                    with patch("builtins.print") as out:
+                        self.assertEqual(cli.main(["portfolio", *option]), 2)
+                    get_service.assert_not_called()
+                self.assertEqual(json.loads(out.call_args.args[0])["status"], "BLOCKED")
+
+    def test_other_cli_operations_still_require_a_repository(self):
+        service = FakeService()
+        with self.assertRaisesRegex(ValueError, "INVALID_REPOSITORY"):
+            cli.read_operation(service, operation="bootstrap")
+        self.assertEqual(service.calls, [])
+        for args in (["bootstrap"], ["work-view"], ["workspace"]):
+            with self.subTest(args=args):
+                with patch("tools.devflow_read_cli.default_service") as get_service:
+                    with patch("builtins.print") as out:
+                        self.assertEqual(cli.main(args), 2)
+                    get_service.assert_not_called()
+                self.assertEqual(
+                    json.loads(out.call_args.args[0])["reason_code"],
+                    "INVALID_REPOSITORY",
+                )
 
     def test_bootstrap_reuses_service_without_transforming_data(self):
         service = FakeService()

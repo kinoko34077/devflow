@@ -15,7 +15,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 
 OPERATIONS = (
-    "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
+    "portfolio", "human-portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
     "assess-issue-plan", "assess-outcome-observation",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
@@ -40,6 +40,7 @@ SAFE_READ_FAILURE_CODES = frozenset({
 })
 SAFE_ARGUMENT_FAILURE_CODES = frozenset({
     "INVALID_REPOSITORY",
+    "REPOSITORY_ON_PORTFOLIO_OPERATION",
     "INVALID_PAGINATION",
     "INBOX_OPTIONS_ON_NON_INBOX_OPERATION",
     "INVALID_RECIPIENT",
@@ -65,7 +66,7 @@ def failure_reason_code(exc: DevflowMCPError | ValueError) -> str:
 
 
 def read_operation(
-    service: Any, *, operation: str, repository: str,
+    service: Any, *, operation: str, repository: str | None = None,
     recipient: str = "codex", limit: int = 20, offset: int = 0,
     work_status: str | None = None, issue_number: int | None = None,
     plan: dict[str, Any] | None = None,
@@ -74,6 +75,14 @@ def read_operation(
     include_published_supply: bool = False,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
+    if operation == "portfolio":
+        if repository is not None:
+            raise ValueError("REPOSITORY_ON_PORTFOLIO_OPERATION")
+        if (recipient != "codex" or limit != 20 or offset != 0
+                or work_status is not None):
+            raise ValueError("INBOX_OPTIONS_ON_NON_INBOX_OPERATION")
+    elif type(repository) is not str or not repository.strip():
+        raise ValueError("INVALID_REPOSITORY")
     if plan is not None and operation != "assess-issue-plan":
         raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
     if outcome is not None and operation != "assess-outcome-observation":
@@ -91,6 +100,10 @@ def read_operation(
         raise ValueError("ISSUE_NUMBER_ON_NON_ISSUE_OPERATION")
     elif plan is not None:
         raise ValueError("PLAN_ON_NON_ASSESSMENT_OPERATION")
+    if operation == "portfolio":
+        return service.get_portfolio_projection()
+    if operation == "human-portfolio":
+        return service.get_human_portfolio(repository)
     if operation == "bootstrap":
         return service.bootstrap_repository(repository)
     if operation == "work-view":
@@ -123,7 +136,7 @@ def read_operation(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=OPERATIONS)
-    parser.add_argument("--repository", required=True)
+    parser.add_argument("--repository", default=None)
     parser.add_argument("--recipient", default="codex")
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--offset", type=int, default=0)
@@ -146,7 +159,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         plan = None
-        if not args.repository.strip():
+        if args.operation == "portfolio":
+            if args.repository is not None:
+                raise ValueError("REPOSITORY_ON_PORTFOLIO_OPERATION")
+        elif args.repository is None or not args.repository.strip():
             raise ValueError("INVALID_REPOSITORY")
         if not 1 <= args.limit <= MAX_INBOX_LIMIT or args.offset < 0:
             raise ValueError("INVALID_PAGINATION")

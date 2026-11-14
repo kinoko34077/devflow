@@ -93,6 +93,46 @@ python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
 
+### Targetless managed-repository discovery without registered MCP (portfolio)
+
+For user-authorized portfolio scope when no repository has yet been selected, the
+existing shared GET-only `get_portfolio_projection()` is exposed as
+`python -m tools.devflow_read_cli portfolio` **without** `--repository`:
+
+```sh
+python -m tools.devflow_read_cli portfolio
+```
+
+The response is the unmodified existing service report: per-repository
+source status, managed repository count, machine TASK counts, unresolved
+classification counts and `source_unavailable_count`. A failed repository
+source remains unavailable/unknown rather than a true empty work result.
+This call is **only** a managed-repository locator; it does not enumerate
+addressed KAEP roots, choose a Task, publish supply, grant Claim/Provider
+authority or prove a complete work inventory. After selecting a relevant
+repository, bootstrap its Control and use the existing scoped TASK/Workspace
+read with original Issue validation. Supplying `--repository` to portfolio
+or omitting it from the other CLI operations is rejected before any live read.
+There is no new background scan or schedule; this is the same bounded
+read-only MCP service's already-available portfolio projection.
+
+### Per-repository Human Portfolio fallback (already-owned implementation)
+
+After the target repository has been identified and its canonical Control read,
+an MCP-unavailable client may inspect its existing source-owned Human
+Portfolio with the same GET-only service:
+
+```sh
+python -m tools.devflow_read_cli human-portfolio --repository kinoko34077/devflow
+```
+
+This delegates to the accepted MCP `get_human_portfolio(repository)`
+implementation with no duplicate publication parser, source classifier or
+write operation. It preserves its original `complete`, source and
+human-attention diagnostics; it **does not** clear Human gates, authorize a
+Claim or convert publication into an Offer. The repository remains required,
+unlike the targetless `portfolio` locator.
+
 ### P2a exact TASK read without a full repository Issue inventory
 
 A selected read-only Consumer may ask the same existing Devflow source classifier

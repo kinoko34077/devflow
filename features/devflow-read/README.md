@@ -39,6 +39,17 @@ For the explicitly requested combined work/KAEP observation, use the workspace
 route. Its TASK, message, and optional published-supply sections are distinct
 read surfaces and do not replace the manual Control.
 
+## portfolio
+
+For explicitly authorized targetless managed-repository discovery, use the
+existing read-only portfolio projection through MCP or
+`python -m tools.devflow_read_cli portfolio` when MCP is not registered.
+This is repository discovery, not candidate publication, work assignment,
+full source completeness or Claim authority. After selecting a repository,
+the existing read-only Human Portfolio is available through
+`python -m tools.devflow_read_cli human-portfolio --repository <owner/repo>`
+when its MCP tool is unavailable; this only observes Human gates.
+
 ## issue_goal_context
 
 For one Issue's source-linked effective Goal Context, use the shared service
