@@ -1539,6 +1539,21 @@ class DevflowService:
             for issue in inbox["issues"]
             for request in (issue["requests"] or [])
         ] if current else None
+        # Distinguish actual unreadable selected TASK Issue mailboxes from
+        # nonfatal diagnostics such as UNTRUSTED_MARKER_COMMENT. A successfully
+        # read mailbox may be verified empty even when an outsider was ignored.
+        task_cohort_failed = current and any(
+            item["source_state"] != "AVAILABLE" for item in inbox["issues"]
+        )
+        # B6 success cannot certify missing TASK roots.
+        task_cohort_status = (
+            "SOURCE_UNAVAILABLE" if not current
+            else "PARTIAL" if task_cohort_failed else "BOUNDED_OBSERVED"
+        )
+        if task_cohort_failed and not messages:
+            # Verified empty [] + failed peer mailbox is unknown; preserve
+            # warnings but do not confuse them with source-coverage failures.
+            messages = None
         recent_discovery: dict[str, Any] | None = None
         if include_recent_kaep:
             try:
@@ -1631,7 +1646,12 @@ class DevflowService:
             "sections": {
                 "ongoing": ongoing,
                 "messages": {
-                    "status": "TASK_SOURCE_COHORT_ONLY" if current else "SOURCE_UNAVAILABLE",
+                    "status": (
+                        "SOURCE_UNAVAILABLE" if not current
+                        else "TASK_SOURCE_COHORT_PARTIAL" if task_cohort_failed
+                        else "TASK_SOURCE_COHORT_ONLY"
+                    ),
+                    "task_cohort_status": task_cohort_status,
                     "entries": messages,
                     "errors": inbox["errors"],
                     "offset": offset,
@@ -1667,7 +1687,7 @@ class DevflowService:
             result["sections"]["messages"]["entries"] = messages
             result["sections"]["messages"]["status"] = (
                 "TASK_AND_RECENT_ORIGINALS"
-                if current and not inbox["errors"] and recent_discovery["status"] in (
+                if current and not task_cohort_failed and recent_discovery["status"] in (
                     "LIVE_WINDOW_READ", "BOUNDED_UNION_READ"
                 )
                 else "RECENT_DISCOVERY_PARTIAL"
