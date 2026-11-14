@@ -244,6 +244,65 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
+    def test_workspace_excludes_successor_index_notices_from_pending_requests(self):
+        # Same real-world bug: #789 is a pointer-only index, but its wire
+        # envelope has kind=REQUEST and the strict B6 display row was PENDING.
+        # This tests Workspace presentation only; B6 original validation is
+        # independently tested by its existing suite and remains unchanged.
+        index_url = "https://github.com/kinoko34077/devflow/issues/789"
+        valid_url = f"https://github.com/{REPO}/issues/22"
+        def row(url, cid, message_id):
+            return {
+                "issue_url": url,
+                "source_url": f"{url}#issuecomment-{cid}",
+                "recipient": "claude-code",
+                "message_id": message_id,
+                "reply_observation": "PENDING_REPLY",
+                "source_validation": "STRICT_COMPLETE_FOR_CANDIDATE",
+                "issue_role": "UNCLASSIFIED",
+                "source_origin": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
+            }
+        index_notice = row(index_url, 6560536372, "msg_pointer_789")
+        actual_request = row(valid_url, 35, "msg_real_request_22")
+        recent = {
+            "status": "BOUNDED_UNION_READ",
+            "source_coverage": "BOUNDED",
+            "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
+            "searched_candidates": 2,
+            "validated_source_issues": 2,
+            "errors": [], "warnings": [],
+            "rows": [index_notice, actual_request],
+        }
+        service = devflow_mcp_core.DevflowService(fixture_reader(
+            [task(), unclassified_issue()],
+        ))
+        with patch.object(service, "_workspace_recent_kaep", return_value=recent):
+            result = service.get_agent_workspace(
+                "demo", recipient="claude-code", include_recent_kaep=True,
+            )
+        messages = result["sections"]["messages"]
+        self.assertEqual(messages["recent_discovery"]["non_actionable_index_notice_rows"], 1)
+        self.assertEqual(messages["recent_discovery"]["validated_source_issues"], 2)
+        self.assertEqual([x["source_ref"] for x in messages["entries"]],
+                         [actual_request["source_url"]])
+        self.assertEqual(messages["entries"][0]["observed_state"], "PENDING_REPLY")
+        self.assertTrue(messages["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+        # Index-only observations cannot turn into a bogus outstanding task,
+        # nor can they prove no other work exists.
+        with patch.object(service, "_workspace_recent_kaep", return_value={
+            **recent, "rows": [index_notice],
+        }):
+            second = service.get_agent_workspace(
+                "demo", recipient="claude-code", include_recent_kaep=True,
+            )
+        self.assertEqual(second["sections"]["messages"]["entries"], [])
+        self.assertEqual(
+            second["sections"]["messages"]["recent_discovery"]["non_actionable_index_notice_rows"], 1,
+        )
+        self.assertTrue(second["has_unknown_work"])
+
     def test_workspace_default_missing_task_mailbox_is_partial_not_empty(self):
         reader = self._reader_with_failed_task_comments(
             fixture_reader([task()])
