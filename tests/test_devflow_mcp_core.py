@@ -655,19 +655,21 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
                          ["can_replace_manual_active_work"])
         sources[repository].pop()
 
-        # The manual current/local comparator is a bounded admission precondition.
+        # Legacy prose can lag a task transition. It is no longer the
+        # source for an admitted read-only local status: no duplicate manual
+        # Control update is required to keep a current validated source.
         control["body"] = control["body"].replace("OPEN / P2 IMPLEMENTING",
                                                  "OPEN / P2 BLOCKED")
-        self.assertFalse(service.get_repository_work_view(repository)
-                         ["can_replace_manual_active_work"])
+        self.assertTrue(service.get_repository_work_view(repository)
+                        ["can_replace_manual_active_work"])
         control["body"] = control["body"].replace("OPEN / P2 BLOCKED",
                                                  "OPEN / P2 IMPLEMENTING")
         control["body"] = control["body"].replace(
             "OPEN / P2 IMPLEMENTING current.",
             "OPEN / P2 BLOCKED (previously OPEN / P2 IMPLEMENTING) current.",
         )
-        self.assertFalse(service.get_repository_work_view(repository)
-                         ["can_replace_manual_active_work"])
+        self.assertTrue(service.get_repository_work_view(repository)
+                        ["can_replace_manual_active_work"])
         control["body"] = control["body"].replace(
             "OPEN / P2 BLOCKED (previously OPEN / P2 IMPLEMENTING) current.",
             "OPEN / P2 IMPLEMENTING current.",
@@ -679,6 +681,98 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         )
         self.assertFalse(service.get_repository_work_view(repository)
                          ["can_replace_manual_active_work"])
+
+    def test_colony_issue_lifecycle_keeps_machine_read_without_manual_edits(self):
+        from tools import repository_projection_cache as cache
+
+        repository = "kinoko34077/colony-ai"
+        observed_at = "2026-11-15T00:00:00Z"
+        control = self._control("colony-ai", 13)
+        control["body"] += (
+            "\n## Active Work\n\n"
+            "- [colony-ai #3](https://github.com/kinoko34077/colony-ai/issues/3)"
+            " OPEN / P2 IMPLEMENTING current.\n\n"
+            "**Historical GUI slice complete.** #1 CLOSED.\n\n"
+            "## Next Action\n\nCross-repo Human review.\n"
+        )
+        # This is deliberately the *only* maintained manual state. Changes to
+        # Issue #3 never edit the legacy Active Work or independent Next Action.
+        original_manual = devflow_mcp_core.parse_sections(control["body"])["Active Work"]
+        original_next = devflow_mcp_core.parse_sections(control["body"])["Next Action"]
+        task = {
+            **self._task_issue(3),
+            "html_url": "https://github.com/kinoko34077/colony-ai/issues/3",
+        }
+        sources = {
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            repository: [task],
+        }
+        service = devflow_mcp_core.DevflowService(
+            FakeReader([], issues_by_repository=sources),
+            observed_at_factory=lambda: observed_at,
+        )
+        trust = {
+            "status": "VERIFIED", "freshness": "CURRENT",
+            "source": cache.CONTROL_TRUST_SOURCE,
+            "observed_at": observed_at, "detail": None,
+        }
+
+        for status, requires_human, blocked in (
+            ("READY_FOR_IMPLEMENTATION", False, False),
+            ("IMPLEMENTING", False, False),
+            ("AWAITING_REVIEW", False, False),
+            ("BLOCKED", True, True),
+        ):
+            with self.subTest(status=status):
+                data = {
+                    "schema_version": 1, "record_role": "TASK", "type": "BUG",
+                    "work_status": status,
+                    "scope_ready": not blocked,
+                    "requires_user_confirmation": requires_human,
+                    "external_wait": blocked,
+                    "blocked_by": (["kinoko34077/devflow#801"] if blocked else []),
+                }
+                task["body"] = repository_projection.render_issue_metadata_v1(data)
+                # A new original Issue generation invalidates the old cache
+                # first. This remains a safe temporary manual fallback.
+                if cache.CACHE_MARKER_BEGIN in control["body"]:
+                    self.assertFalse(service.get_repository_work_view(repository)
+                                     ["can_replace_manual_active_work"])
+                live = service.get_repository_projection(repository)
+                payload = cache.build_cached_projection(
+                    repository, live, generated_at=observed_at, control_trust=trust,
+                )
+                previous = control["body"]
+                if cache.CACHE_MARKER_BEGIN in previous:
+                    before, old = previous.split(cache.CACHE_MARKER_BEGIN, 1)
+                    _, after = old.split(cache.CACHE_MARKER_END, 1)
+                    control["body"] = (
+                        before + cache.render_cached_projection(payload) + after
+                    )
+                else:
+                    control["body"] += "\n" + cache.render_cached_projection(payload)
+                # No user-maintained Control status update. Independent
+                # cross-repository/Human text and closed history remain intact.
+                sections = devflow_mcp_core.parse_sections(control["body"])
+                self.assertEqual(sections["Active Work"], original_manual)
+                self.assertEqual(sections["Next Action"], original_next)
+                result = service.get_repository_work_view(repository)
+                self.assertTrue(result["can_replace_manual_active_work"])
+                self.assertEqual(result["view_mode"],
+                                 "MACHINE_LOCAL_TASK_READ_AUTHORITY")
+                self.assertEqual(len(result["task_records"]), 1)
+                record = result["task_records"][0]
+                self.assertEqual(record["work_status"], status)
+                self.assertEqual(record["requires_user_confirmation"],
+                                 requires_human)
+                self.assertEqual(record["external_wait"], blocked)
+                self.assertEqual(record["blocked_by"], data["blocked_by"])
+                self.assertFalse(result["observed_task_view"]
+                                 ["can_authorize_execution"])
+                self.assertFalse(result["parallel_read"]
+                                 ["can_authorize_execution"])
+                self.assertFalse(payload["coverage"]
+                                 ["can_replace_manual_active_work"])
 
     def test_m3_isolated_cutover_consumes_actual_mcp_work_view_and_fails_closed(self):
         from tools import repository_projection_cache as cache
