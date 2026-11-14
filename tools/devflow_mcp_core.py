@@ -835,12 +835,13 @@ class DevflowService:
         projection: repository_projection.RepositoryProjection,
         observed_at: str, complete: bool,
     ) -> bool:
-        """One exact P3 local-read cohort; never executor or Claim permission.
+        """One exact source-fenced local TASK read; no execution permission.
 
-        No second task ledger: confirm that the existing validated M2 source
-        and current original Issue projection are the SAME source generation.
-        The manual cross-repo Next Action remains independent. Any drift falls
-        back to the previous read-only manual authority without a write.
+        No second task ledger: current original Issue and validated M2 cache
+        must share an exact source digest/generation. The Control's manual
+        local status may lag a normal Issue lifecycle transition and is not a
+        precondition. Its independent cross-repo Next Action stays intact.
+        Incomplete/stale source remains non-authoritative (manual fallback).
         """
         if (
             repository != "kinoko34077/colony-ai"
@@ -856,40 +857,17 @@ class DevflowService:
         if (
             task.number != 3 or task.state != "open"
             or task.html_url != "https://github.com/kinoko34077/colony-ai/issues/3"
-            or task.record_role != "TASK" or task.work_status != "IMPLEMENTING"
-            or meta is None or not meta.scope_ready
-            or meta.requires_user_confirmation or meta.external_wait
-            or meta.blocked_by
+            or task.record_role != "TASK" or meta is None or not meta.is_task
+            or not isinstance(task.work_status, str) or not task.work_status
         ):
             return False
-        # This exact old Control names current #3, then separately contains
-        # closed GUI Issue #1 history. A link-set comparison would mislabel
-        # that history as a second active TASK.
-        current_manual = control["active_work"].split(
-            "Historical GUI slice complete.", 1
-        )[0]
-        current_lines = [
-            line for line in current_manual.splitlines()
-            if "[colony-ai #3]" in line
-        ]
-        if len(current_lines) != 1:
-            return False
-        # Require the *current* exact Issue bullet's status, rather than
-        # accepting a historical note like "previously OPEN / P2 IMPLEMENTING"
-        # after the current status changed to BLOCKED.
-        line = current_lines[0]
-        if not re.match(
-            r"^- \[colony-ai #3\]\(https://github\.com/kinoko34077/colony-ai/issues/3\)"
-            r"\s+OPEN\s*/\s*P2\s+IMPLEMENTING\b",
-            line,
-        ):
-            return False
-        if re.search(
-            r"\b(BLOCKED|DONE|PARKED|AWAITING_REVIEW|NEEDS_REAUDIT"
-            r"|READY_FOR_IMPLEMENTATION)\b",
-            line,
-        ):
-            return False
+        # Only the owning Issue + refreshed machine projection determine
+        # the local TASK status. Control Active Work is legacy prose: its
+        # history or stale state must NOT require a duplicate manual update.
+        # The strict source/cache digest below still rejects new Issue
+        # transitions until the existing automatic producer catches up.
+        # Human/external/reviewer gates remain on the live task_records;
+        # this read-only view never grants execution or Claim.
         try:
             source_control = self.reader.get_issue(self.devflow_repository, 13)
             if (
