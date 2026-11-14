@@ -568,6 +568,108 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertNotIn(26, compact_refs)
         self.assertFalse(cached["coverage"]["can_replace_manual_active_work"])
 
+    def test_colony_exact_local_read_admission_and_negative_fallbacks(self):
+        from tools import repository_projection_cache as cache
+
+        repository = "kinoko34077/colony-ai"
+        now = "2026-11-15T00:00:00Z"
+        control = self._control("colony-ai", 13)
+        control["body"] += (
+            "\n## Active Work\n\n"
+            "**CURRENT:** [colony-ai #3] OPEN / P2 IMPLEMENTING.\n\n"
+            "**Historical GUI slice complete.** #1 CLOSED.\n\n"
+            "## Next Action\n\nReview cross-repository Human gate.\n\n"
+            "## Canonical Entry Points\n\n- README.md\n"
+        )
+        task = self._task_issue(3)
+        task["html_url"] = "https://github.com/kinoko34077/colony-ai/issues/3"
+        task["body"] = task["body"].replace(
+            '"work_status": "READY_FOR_IMPLEMENTATION"',
+            '"work_status": "IMPLEMENTING"',
+        )
+        sources = {
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            repository: [task],
+        }
+        reader = FakeReader([], issues_by_repository=sources)
+        service = devflow_mcp_core.DevflowService(
+            reader, observed_at_factory=lambda: now,
+        )
+        live = service.get_repository_projection(repository)
+        payload = cache.build_cached_projection(
+            repository, live, generated_at=now,
+            control_trust={
+                "status": "VERIFIED", "freshness": "CURRENT",
+                "source": cache.CONTROL_TRUST_SOURCE,
+                "observed_at": now, "detail": None,
+            },
+        )
+        control["body"] += "\n" + cache.render_cached_projection(payload)
+        view = service.get_repository_work_view(repository)
+        self.assertEqual(view["view_mode"], "MACHINE_LOCAL_TASK_READ_AUTHORITY")
+        self.assertTrue(view["can_replace_manual_active_work"])
+        self.assertTrue(view["observed_task_view"]["can_replace_manual_active_work"])
+        self.assertTrue(view["parallel_read"]["can_replace_manual_active_work"])
+        self.assertEqual(view["parallel_read"]["manual"]["authority"],
+                         "MACHINE_LOCAL_TASK_READ_WITH_MANUAL_FALLBACK")
+        self.assertFalse(view["parallel_read"]["can_authorize_execution"])
+        self.assertFalse(view["observed_task_view"]["can_authorize_execution"])
+        self.assertEqual([t["issue_number"] for t in view["task_records"]], [3])
+        self.assertIn("Historical GUI slice complete.",
+                      view["manual_control"]["active_work"])
+        self.assertEqual(view["manual_control"]["next_action"],
+                         "Review cross-repository Human gate.")
+        self.assertFalse(service.get_scoped_task_read(repository, 3)
+                         ["can_replace_manual_active_work"])
+
+        # The old reader remains available if the cache expires.
+        service._observed_at_factory = lambda: "2026-11-17T00:00:00Z"
+        expired = service.get_repository_work_view(repository)
+        self.assertEqual(expired["view_mode"], "MACHINE_COMPLETE_SHADOW")
+        self.assertFalse(expired["can_replace_manual_active_work"])
+        service._observed_at_factory = lambda: now
+
+        # Current source no longer agrees with the cached generation.
+        task["title"] = "edited original issue after cache generation"
+        drift = service.get_repository_work_view(repository)
+        self.assertFalse(drift["can_replace_manual_active_work"])
+        task["title"] = "[BUG] task"
+
+        # Original source gates are authoritative; no permission inference.
+        task["body"] = task["body"].replace(
+            '"requires_user_confirmation": false',
+            '"requires_user_confirmation": true',
+        )
+        self.assertFalse(service.get_repository_work_view(repository)
+                         ["can_replace_manual_active_work"])
+        task["body"] = task["body"].replace(
+            '"requires_user_confirmation": true',
+            '"requires_user_confirmation": false',
+        )
+
+        # No inventory expansion: another TASK forces fallback, not admission.
+        extra = {**self._task_issue(4),
+                 "html_url": "https://github.com/kinoko34077/colony-ai/issues/4"}
+        sources[repository].append(extra)
+        self.assertFalse(service.get_repository_work_view(repository)
+                         ["can_replace_manual_active_work"])
+        sources[repository].pop()
+
+        # The manual current/local comparator is a bounded admission precondition.
+        control["body"] = control["body"].replace("OPEN / P2 IMPLEMENTING",
+                                                 "OPEN / P2 BLOCKED")
+        self.assertFalse(service.get_repository_work_view(repository)
+                         ["can_replace_manual_active_work"])
+        control["body"] = control["body"].replace("OPEN / P2 BLOCKED",
+                                                 "OPEN / P2 IMPLEMENTING")
+
+        # Malformed Control cache cannot promote machine authority.
+        control["body"] = control["body"].replace(
+            '"generation_id": "sha256:', '"generation_id": "sha256:bad',
+        )
+        self.assertFalse(service.get_repository_work_view(repository)
+                         ["can_replace_manual_active_work"])
+
     def test_m3_isolated_cutover_consumes_actual_mcp_work_view_and_fails_closed(self):
         from tools import repository_projection_cache as cache
 
