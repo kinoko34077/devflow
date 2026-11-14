@@ -183,6 +183,67 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         reader.list_issue_comments = unavailable
         return reader
 
+    def test_workspace_outsider_warning_preserves_verified_empty_task_mailbox(self):
+        reader = fixture_reader(
+            [task()],
+            comments={(REPO, 21): [
+                issue_comment(12, message(), login="outsider"),
+            ]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code",
+        )
+        section = result["sections"]["messages"]
+        self.assertEqual(section["status"], "TASK_SOURCE_COHORT_ONLY")
+        self.assertEqual(section["task_cohort_status"], "BOUNDED_OBSERVED")
+        self.assertEqual(section["entries"], [])
+        self.assertEqual(section["errors"][0]["reason_code"],
+                         "UNTRUSTED_MARKER_COMMENT")
+        self.assertTrue(section["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_outsider_warning_keeps_independent_owner_root(self):
+        reader = fixture_reader(
+            [task()],
+            comments={(REPO, 21): [
+                issue_comment(12, message(), login="outsider"),
+                issue_comment(13, message()),
+            ]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code",
+        )
+        section = result["sections"]["messages"]
+        self.assertEqual(section["status"], "TASK_SOURCE_COHORT_ONLY")
+        self.assertEqual(section["task_cohort_status"], "BOUNDED_OBSERVED")
+        self.assertEqual(len(section["entries"]), 1)
+        self.assertEqual(section["entries"][0]["subject_ref"],
+                         f"https://github.com/{REPO}/issues/21")
+        self.assertEqual(section["errors"][0]["reason_code"],
+                         "UNTRUSTED_MARKER_COMMENT")
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_outsider_warning_does_not_make_b6_partial(self):
+        reader = fixture_reader(
+            [task()],
+            comments={(REPO, 21): [
+                issue_comment(12, message(), login="outsider"),
+            ]},
+            recent_comments={REPO: []},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True,
+        )
+        section = result["sections"]["messages"]
+        self.assertEqual(section["task_cohort_status"], "BOUNDED_OBSERVED")
+        self.assertEqual(section["recent_discovery"]["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(section["status"], "TASK_AND_RECENT_ORIGINALS")
+        self.assertEqual(section["entries"], [])
+        self.assertEqual(section["errors"][0]["reason_code"],
+                         "UNTRUSTED_MARKER_COMMENT")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_default_missing_task_mailbox_is_partial_not_empty(self):
         reader = self._reader_with_failed_task_comments(
             fixture_reader([task()])

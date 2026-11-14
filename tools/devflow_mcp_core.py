@@ -1511,15 +1511,20 @@ class DevflowService:
             for issue in inbox["issues"]
             for request in (issue["requests"] or [])
         ] if current else None
-        # TASK Issue listing and its selected comment mailboxes have independent
-        # source failure boundaries. B6 success cannot certify missing TASK roots.
+        # Distinguish actual unreadable selected TASK Issue mailboxes from
+        # nonfatal diagnostics such as UNTRUSTED_MARKER_COMMENT. A successfully
+        # read mailbox may be verified empty even when an outsider was ignored.
+        task_cohort_failed = current and any(
+            item["source_state"] != "AVAILABLE" for item in inbox["issues"]
+        )
+        # B6 success cannot certify missing TASK roots.
         task_cohort_status = (
             "SOURCE_UNAVAILABLE" if not current
-            else "PARTIAL" if inbox["errors"] else "BOUNDED_OBSERVED"
+            else "PARTIAL" if task_cohort_failed else "BOUNDED_OBSERVED"
         )
-        if current and inbox["errors"] and not messages:
-            # No verified TASK recipient roots survived the failed mailbox read.
-            # Unknown is not a confirmed empty list.
+        if task_cohort_failed and not messages:
+            # Verified empty [] + failed peer mailbox is unknown; preserve
+            # warnings but do not confuse them with source-coverage failures.
             messages = None
         recent_discovery: dict[str, Any] | None = None
         if include_recent_kaep:
@@ -1615,7 +1620,7 @@ class DevflowService:
                 "messages": {
                     "status": (
                         "SOURCE_UNAVAILABLE" if not current
-                        else "TASK_SOURCE_COHORT_PARTIAL" if inbox["errors"]
+                        else "TASK_SOURCE_COHORT_PARTIAL" if task_cohort_failed
                         else "TASK_SOURCE_COHORT_ONLY"
                     ),
                     "task_cohort_status": task_cohort_status,
@@ -1654,7 +1659,7 @@ class DevflowService:
             result["sections"]["messages"]["entries"] = messages
             result["sections"]["messages"]["status"] = (
                 "TASK_AND_RECENT_ORIGINALS"
-                if current and not inbox["errors"] and recent_discovery["status"] in (
+                if current and not task_cohort_failed and recent_discovery["status"] in (
                     "LIVE_WINDOW_READ", "BOUNDED_UNION_READ"
                 )
                 else "RECENT_DISCOVERY_PARTIAL"

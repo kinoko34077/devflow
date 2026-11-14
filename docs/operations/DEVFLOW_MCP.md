@@ -55,7 +55,10 @@ selected, recipient-scoped known-TASK mailbox cohort, independently of B6:
   per-Issue comment error. This does **not** establish full KAEP history or a
   complete repository work inventory.
 - `PARTIAL`: the TASK Issue listing was current, but at least one selected
-  TASK mailbox failed. `sections.messages.errors` retains the failed source.
+  TASK mailbox could not be verified (`source_state != AVAILABLE`).
+  `sections.messages.errors` retains the failed source **and** nonfatal
+  diagnostic warnings such as `UNTRUSTED_MARKER_COMMENT`: warnings from a
+  successfully read mailbox are not primary coverage failures.
 - `SOURCE_UNAVAILABLE`: the underlying TASK Issue listing was not current.
 
 With B6 opt-out, `messages.status` is `TASK_SOURCE_COHORT_ONLY` for
@@ -63,8 +66,9 @@ With B6 opt-out, `messages.status` is `TASK_SOURCE_COHORT_ONLY` for
 `SOURCE_UNAVAILABLE`. With B6 enabled, its existing combined status remains
 independent and this `task_cohort_status` still exposes primary TASK failures.
 An empty `messages.entries=[]` denotes an observed empty *bounded* message
-set only when no selected primary mailbox failed; when no verified root can
-be retained and a primary selected mailbox failed, `entries=null` preserves
+set when all selected primary mailboxes were readable, even if an outsider
+comment generated a nonfatal warning. If no verified root can be retained
+and a selected primary mailbox actually failed, `entries=null` preserves
 the unknown source instead. Verified independent TASK/B6 roots remain visible
 even if other mailboxes fail. No status here authorizes a task Claim or proves
 the absence of historical/unclassified KAEP work.
