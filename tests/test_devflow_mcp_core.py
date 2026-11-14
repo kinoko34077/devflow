@@ -576,7 +576,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         control = self._control("colony-ai", 13)
         control["body"] += (
             "\n## Active Work\n\n"
-            "**CURRENT:** [colony-ai #3] OPEN / P2 IMPLEMENTING.\n\n"
+            "- [colony-ai #3](https://github.com/kinoko34077/colony-ai/issues/3) OPEN / P2 IMPLEMENTING current.\n\n"
             "**Historical GUI slice complete.** #1 CLOSED.\n\n"
             "## Next Action\n\nReview cross-repository Human gate.\n\n"
             "## Canonical Entry Points\n\n- README.md\n"
@@ -662,6 +662,16 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
                          ["can_replace_manual_active_work"])
         control["body"] = control["body"].replace("OPEN / P2 BLOCKED",
                                                  "OPEN / P2 IMPLEMENTING")
+        control["body"] = control["body"].replace(
+            "OPEN / P2 IMPLEMENTING current.",
+            "OPEN / P2 BLOCKED (previously OPEN / P2 IMPLEMENTING) current.",
+        )
+        self.assertFalse(service.get_repository_work_view(repository)
+                         ["can_replace_manual_active_work"])
+        control["body"] = control["body"].replace(
+            "OPEN / P2 BLOCKED (previously OPEN / P2 IMPLEMENTING) current.",
+            "OPEN / P2 IMPLEMENTING current.",
+        )
 
         # Malformed Control cache cannot promote machine authority.
         control["body"] = control["body"].replace(
