@@ -693,7 +693,8 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
             "- [colony-ai #3](https://github.com/kinoko34077/colony-ai/issues/3)"
             " OPEN / P2 IMPLEMENTING current.\n\n"
             "**Historical GUI slice complete.** #1 CLOSED.\n\n"
-            "## Next Action\n\nCross-repo Human review.\n"
+            "## Next Action\n\nCross-repo Human review.\n\n"
+            "## Control Notes\n\nCross-repo context only.\n"
         )
         # This is deliberately the *only* maintained manual state. Changes to
         # Issue #3 never edit the legacy Active Work or independent Next Action.
