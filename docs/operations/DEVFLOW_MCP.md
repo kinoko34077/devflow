@@ -89,6 +89,28 @@ are invariant. The independent manual Control and Human/security/Claim gates
 remain authoritative where required. Do not use this endpoint as an all-work
 inventory, automatic selection feed or permission to start execution.
 
+### Published candidate vs current TASK source preflight (read-only)
+
+When `--include-published-supply` is used, each *validated published Control*
+candidate now contains `task_source_alignment` and
+`task_body_sha_verified=false`. The Workspace uses the **already-read**
+current, source-classified TASK records; it never reads a second task classifier
+or converts a candidate into an authorized Claim:
+
+- `TASK_SOURCE_UNAVAILABLE`: the TASK listing is unavailable or not current.
+- `TASK_NOT_OBSERVED`: the exact candidate task URL is absent from the
+  currently observed trusted TASK cohort. This is not proof the task never exists.
+- `TASK_METADATA_DIVERGED`: the published status, scope-ready, or
+  human-confirmation fields disagree with the current trusted TASK record.
+- `TASK_METADATA_MATCH_ONLY`: those three fields match within the observed
+  cohort. The Work View does **not** contain the complete original Issue body
+  hash, so this cannot validate publication freshness or permission to execute.
+
+All these cases retain `claimability=NOT_EVALUATED` and
+`can_authorize_execution=false`. Runtime conflicts, reviewer/worker identity,
+work-source hash, and formal supply/Claim admission remain separate. These
+annotations add no HTTP calls and do not modify an existing published Control.
+
 The Workspace command combines repository TASK observations, bounded recipient KAEP discovery and published Control candidate evidence. It does not prove there are no historical requests when `has_unknown_work=true`; a published candidate is not a currently claimable Task. The additional flags are optional; for smaller checks or old clients, `work-view` and `inbox` remain valid, and the manual Control/#503 fallback remains in force. Existing operating Codex processes are not silently migrated by updating this document; the new tool must be visible to that client's own MCP registry after its normal refresh. Portfolio-wide discovery starts with existing `get_portfolio_projection()`, which does not authorize widening repository-scoped work or selecting a runnable Task.
 
 For one Issue's source-linked effective Goal Context, both client paths call the
