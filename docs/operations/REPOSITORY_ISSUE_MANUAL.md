@@ -385,28 +385,19 @@ Do not leave a closed Issue as the only place containing a still-active next act
 
 ## 6. Relationship to devflow Control
 
-The Control Issue should reference active local work concisely, for example:
+The Control Issue is a **cross-repository index and independent decision record**, not a second local-TASK status ledger. For example, `Active Work` may retain `repo#123` as a bounded routing/fallback pointer when its cross-repository meaning is still relevant. The repository-local Issue/PR is the authority for its current stage, review and completion; inspect that source when the current state matters.
 
-`Active Work: repo#123 — parser regression fix; PR #124 awaiting review`
+**Do not update the Control merely because a local task advances, finishes, closes, receives a PR/review/CI result, or its local Next Action changes.** Do not replace an old Active Work reference with a copied local completion status or a copied Next Action just to keep the prose synchronized. A historical pointer must not be interpreted as proof of current work or as a current task status. If the original source cannot be verified, treat local-work status as unknown; do not turn stale manual prose into execution/Claim authority.
 
-When the local task finishes, replace stale active references with the actual current state and Next Action. Do not copy the entire Issue body or every Session checkpoint into devflow.
+Update the Control only when **its own meaning** materially changes:
+- an independently accepted audit and its Audit SHA (not each new commit or HEAD);
+- repository-level Work Status or Repository State;
+- cross-repository Priority/Risk, readiness or a routing/owner pointer;
+- a Human, security or policy gate/decision or its independently owned Next Action;
+- canonical entry points used to find repository-local sources;
+- a meaningful manual fallback that cannot currently be derived from trusted source.
 
-Update the Control Issue when the local task changes:
-- accepted Audit SHA;
-- Work Status;
-- Repository State;
-- Priority/Risk;
-- Active Work;
-- Next Action;
-- canonical entry points;
-- cross-repository readiness.
-
-No Control update is required solely because:
-- a Session Record advanced one bounded checkpoint without changing cross-repository readiness;
-- a commit was added to the same active branch;
-- a test was rerun with the same outcome;
-- a minor implementation comment was added;
-- an internal detail changed without changing cross-repository summary.
+Required `Active Work` and `Next Action` headings remain readable for M3 P0/P1 and not-yet-admitted Consumers; their presence does **not** create a per-event local-status write requirement. Remove a stale local reference only when the Control's independent cross-repository meaning changes or a separately accepted R7 retirement proves the specific fallback unused. Preserve Human/security/policy information and follow #477's per-Consumer admission/rollback conditions.
 
 ## 7. Findings and severity
 
