@@ -179,8 +179,20 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("bootstrap_repository", source)
         self.assertIn("MACHINE_COMPLETE_SHADOW", agents)
         self.assertIn("manual Control fallback", agents)
-        self.assertIn("cannot replace Control authority or create runtime claims", mcp)
-        self.assertIn("does **not** retire manual Active Work", manual)
+        # The accepted exact Work View read cohort has changed this operator
+        # contract: complete shadow alone is not an authority grant, while the
+        # admitted local TASK read may prefer the live source without copying
+        # the task status into legacy Control text.
+        for doc in (mcp, manual):
+            self.assertIn("MACHINE_COMPLETE_SHADOW", doc)
+            self.assertIn("MACHINE_LOCAL_TASK_READ_AUTHORITY", doc)
+            self.assertIn("MANUAL_CONTROL_FALLBACK", doc)
+            self.assertIn("colony-ai#3", doc)
+        self.assertIn("no duplicate manual status update is required", manual)
+        self.assertIn("do **not** grant execution/Claim/assignment/Human/security permission", manual)
+        self.assertIn("`can_authorize_execution=false`", mcp)
+        self.assertIn("the M2 cache's global authority flag", mcp)
+        self.assertIn("manual fallback", mcp)
 
     def test_mcp_runtime_minimum_matches_pinned_coordinator_floor(self):
         mcp = (ROOT / "docs" / "operations" / "DEVFLOW_MCP.md").read_text(encoding="utf-8")
