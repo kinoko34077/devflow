@@ -83,6 +83,7 @@ USER_AGENT = "kinotch-devflow-mcp"
 HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
 COORDINATOR_STATE_REPOSITORY = "kinoko34077/execution-coordinator"
 COORDINATOR_STATE_ISSUE = 3
+MAX_PUBLISHED_CANDIDATE_SOURCE_READS = 16
 _COORDINATOR_TASK_REF = re.compile(
     r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$"
 )
@@ -1400,25 +1401,58 @@ class DevflowService:
             if task_source_current else {}
         )
 
-        def source_alignment(row: dict[str, Any]) -> str:
+        def source_alignment(row: dict[str, Any]) -> tuple[str, bool]:
             if not task_source_current:
-                return "TASK_SOURCE_UNAVAILABLE"
+                return "TASK_SOURCE_UNAVAILABLE", False
             current_task = tasks_by_ref.get(row["entry_ref"])
             if current_task is None:
-                return "TASK_NOT_OBSERVED"
+                # An accepted published TASK can predate V1 role metadata:
+                # the open-Issue classifier then correctly omits it. Verify
+                # the *exact enrolled original* rather than hiding a real
+                # publication behind an empty known_tasks list. This is only
+                # SHA-bound source observation, NOT new task classification,
+                # admission, Claim or execution permission.
+                if len(observed) > MAX_PUBLISHED_CANDIDATE_SOURCE_READS:
+                    return "TASK_NOT_OBSERVED", False
+                try:
+                    issue_number = int(row["task"].rsplit("#", 1)[1])
+                    original = self.reader.get_issue(repository, issue_number)
+                    verify_observed_issue_identity(
+                        original, repository, issue_number,
+                    )
+                except (DevflowMCPError, ValueError, TypeError, KeyError):
+                    return "TASK_SOURCE_UNAVAILABLE", False
+                if (
+                    not is_trusted_control_author(original)
+                    or original.get("html_url") != row["entry_ref"]
+                ):
+                    return "TASK_SOURCE_UNTRUSTED", False
+                if original.get("state") != "open":
+                    return "TASK_SOURCE_NOT_OPEN", False
+                body = original.get("body")
+                if not isinstance(body, str):
+                    return "TASK_SOURCE_UNAVAILABLE", False
+                if (
+                    maintenance_sync_check.canonical_body_sha256(body)
+                    != row["task_body_sha256"]
+                ):
+                    return "TASK_SOURCE_HASH_MISMATCH", False
+                return "PUBLISHED_BODY_MATCH_NOT_CLASSIFIED", True
             if (
                 current_task["work_status"] != row["task_work_status"]
                 or current_task["scope_ready"] != row["scope_ready"]
                 or current_task["requires_user_confirmation"]
                    != row["requires_user_confirmation"]
             ):
-                return "TASK_METADATA_DIVERGED"
+                return "TASK_METADATA_DIVERGED", False
             # The Work View does not carry the original Issue body hash.
             # Matching a few fields is not admission or a fresh source proof.
-            return "TASK_METADATA_MATCH_ONLY"
+            return "TASK_METADATA_MATCH_ONLY", False
 
-        entries = [
-            {
+        entries = []
+        for row in observed:
+            alignment, body_verified = source_alignment(row)
+            entries.append({
                 "source_kind": "CONTROL_PUBLISHED_CANDIDATE",
                 "source_ref": control_ref,
                 "task_ref": row["task"],
@@ -1427,12 +1461,10 @@ class DevflowService:
                     role["role"] for role in row["roles"]
                 ],
                 "publication_state": "PUBLISHED_SNAPSHOT_ONLY",
-                "task_source_alignment": source_alignment(row),
-                "task_body_sha_verified": False,
+                "task_source_alignment": alignment,
+                "task_body_sha_verified": body_verified,
                 "claimability": "NOT_EVALUATED",
-            }
-            for row in observed
-        ]
+            })
         return {
             "status": (
                 "PUBLISHED_SNAPSHOT_ONLY" if entries

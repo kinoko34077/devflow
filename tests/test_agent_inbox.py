@@ -14,7 +14,7 @@ from execution_coordinator.model import (
 from execution_coordinator.github_state import IssueBodyRead
 from execution_coordinator.query import StateReadResult
 from execution_coordinator.snapshot import render_issue_body
-from tools import agent_inbox, devflow_mcp_core, maintenance_supply, repository_projection
+from tools import agent_inbox, devflow_mcp_core, maintenance_supply, maintenance_sync_check, repository_projection
 from tools.kaep_inbox_reader import InvalidMessage
 from tools.kaep_mailbox_codec import encode_comment
 from tools.kaep_request_sender import make_request
@@ -973,16 +973,98 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(entry["task_source_alignment"], "TASK_METADATA_DIVERGED")
         self.assertEqual(entry["claimability"], "NOT_EVALUATED")
 
-    def test_workspace_published_candidate_not_seen_in_current_task_cohort(self):
-        reader = fixture_reader([task(23)])
+    def test_workspace_published_candidate_closed_original_never_becomes_task(self):
+        closed = unclassified_issue(21)
+        closed["state"] = "closed"
+        closed["repository_url"] = f"https://api.github.com/repos/{REPO}"
+        reader = fixture_reader([task(23), closed])
         reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
             supply_control_block([supply_candidate()])
         )
         entry = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
             "demo", include_published_supply=True,
         )["sections"]["published_supply"]["entries"][0]
-        self.assertEqual(entry["task_source_alignment"], "TASK_NOT_OBSERVED")
+        self.assertEqual(entry["task_source_alignment"], "TASK_SOURCE_NOT_OPEN")
         self.assertFalse(entry["task_body_sha_verified"])
+
+    def test_workspace_published_legacy_candidate_exact_original_hash(self):
+        # A genuine published candidate can exist without V1 role metadata.
+        # Read that exact enrolled original; do not classify it as a TASK or
+        # grant execution authority merely because its body SHA still matches.
+        legacy = unclassified_issue(21)
+        legacy["repository_url"] = f"https://api.github.com/repos/{REPO}"
+        legacy["body"] = (
+            "## Work Status\\n\\n`READY_FOR_IMPLEMENTATION`\\n\\n"
+            "## Type\\n\\n`TASK`\\n"
+        ).replace("\\n", "\n")
+        candidate = {
+            **supply_candidate(),
+            "task_body_sha256": maintenance_sync_check.canonical_body_sha256(
+                legacy["body"],
+            ),
+        }
+        reader = fixture_reader([legacy])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([candidate])
+        )
+        service = devflow_mcp_core.DevflowService(reader)
+        result = service.get_agent_workspace("demo", include_published_supply=True)
+        entry = result["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"],
+                         "PUBLISHED_BODY_MATCH_NOT_CLASSIFIED")
+        self.assertTrue(entry["task_body_sha_verified"])
+        self.assertEqual(entry["claimability"], "NOT_EVALUATED")
+        self.assertEqual(result["sections"]["known_tasks"]["entries"], [])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertEqual(reader.calls.count((REPO, 21)), 1)
+
+        legacy["body"] += "\npost-publication edit"
+        drift = service.get_agent_workspace("demo", include_published_supply=True)
+        changed = drift["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(changed["task_source_alignment"], "TASK_SOURCE_HASH_MISMATCH")
+        self.assertFalse(changed["task_body_sha_verified"])
+        legacy["body"] = legacy["body"].removesuffix("\npost-publication edit")
+
+        legacy["user"] = {"id": 12345, "login": "untrusted"}
+        untrusted = service.get_agent_workspace("demo", include_published_supply=True)
+        self.assertEqual(untrusted["sections"]["published_supply"]["entries"][0]
+                         ["task_source_alignment"], "TASK_SOURCE_UNTRUSTED")
+        legacy["user"] = {"id": 79015263, "login": OWNER}
+
+        prior_get_issue = reader.get_issue
+        def unavailable(repo, number):
+            if repo == REPO and number == 21:
+                raise devflow_mcp_core.DevflowMCPError("simulated unavailable")
+            return prior_get_issue(repo, number)
+        reader.get_issue = unavailable
+        down = service.get_agent_workspace("demo", include_published_supply=True)
+        self.assertEqual(down["sections"]["published_supply"]["entries"][0]
+                         ["task_source_alignment"], "TASK_SOURCE_UNAVAILABLE")
+        self.assertFalse(down["sections"]["published_supply"]["entries"][0]
+                         ["task_body_sha_verified"])
+
+    def test_workspace_published_source_read_is_bounded_by_candidate_count(self):
+        candidates = [
+            {
+                **supply_candidate(),
+                "task": f"{REPO}#{21 + i}",
+                "entry_ref": f"https://github.com/{REPO}/issues/{21 + i}",
+            }
+            for i in range(devflow_mcp_core.MAX_PUBLISHED_CANDIDATE_SOURCE_READS + 1)
+        ]
+        reader = fixture_reader([])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block(candidates)
+        )
+        observed = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )["sections"]["published_supply"]
+        self.assertEqual(len(observed["entries"]), len(candidates))
+        self.assertTrue(all(row["task_source_alignment"] == "TASK_NOT_OBSERVED"
+                            for row in observed["entries"]))
+        self.assertFalse(any(call[0] == REPO and isinstance(call[1], int)
+                             for call in reader.calls))
 
     def test_workspace_published_candidate_unknown_on_failed_task_listing(self):
         reader = fixture_reader([task()])
