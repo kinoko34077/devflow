@@ -176,22 +176,36 @@ inventory, automatic selection feed or permission to start execution.
 ### Published candidate vs current TASK source preflight (read-only)
 
 When `--include-published-supply` is used, each *validated published Control*
-candidate now contains `task_source_alignment` and
-`task_body_sha_verified=false`. The Workspace uses the **already-read**
-current, source-classified TASK records; it never reads a second task classifier
-or converts a candidate into an authorized Claim:
+candidate contains `task_source_alignment` and `task_body_sha_verified`.
+The Workspace first reuses the **already-read** current, source-classified TASK
+records; it never creates a second TASK classifier or converts a candidate
+into an authorized Claim:
 
-- `TASK_SOURCE_UNAVAILABLE`: the TASK listing is unavailable or not current.
-- `TASK_NOT_OBSERVED`: the exact candidate task URL is absent from the
-  currently observed trusted TASK cohort. This is not proof the task never exists.
+- `TASK_SOURCE_UNAVAILABLE`: the listing or an exact original-source GET
+  failed or was not current; this is **unknown**, not proof of no work.
 - `TASK_METADATA_DIVERGED`: the published status, scope-ready, or
-  human-confirmation fields disagree with the current trusted TASK record.
-- `TASK_METADATA_MATCH_ONLY`: those three fields match within the observed
-  cohort. The Work View does **not** contain the complete original Issue body
-  hash, so this cannot validate publication freshness or permission to execute.
+  human-confirmation fields disagree with a current trusted V1 TASK record.
+- `TASK_METADATA_MATCH_ONLY`: those three fields match the observed V1
+  record, but its original Issue body hash was not verified.
+- `PUBLISHED_BODY_MATCH_NOT_CLASSIFIED`: the candidate has **no current V1
+  TASK record**, but an additional exact original-Issue GET confirmed trusted
+  owner/identity, OPEN state and the canonical body SHA-256 in its existing
+  admitted publication. In this case `task_body_sha_verified=true` establishes
+  **only publication-source freshness**, not V1 role classification, task
+  assignment, execution eligibility or a complete work inventory.
+- `TASK_SOURCE_HASH_MISMATCH`, `TASK_SOURCE_UNTRUSTED`, or
+  `TASK_SOURCE_NOT_OPEN`: the direct original failed the corresponding
+  verification. These never imply admitted work or Claimability.
+- `TASK_NOT_OBSERVED`: a candidate is not in the classified cohort but the
+  optional direct source read was intentionally skipped because more than
+  **16 candidates** were published; no absent-task conclusion follows.
 
-All these cases retain `claimability=NOT_EVALUATED` and
-`can_authorize_execution=false`. Runtime conflicts, reviewer/worker identity,
+The additional direct GET is bounded to at most 16 **already published**
+candidate Issue references, only on opt-in Workspace reads when the repository
+source listing is AVAILABLE/CURRENT and the candidate has no trusted V1 TASK
+record. All statuses retain `claimability=NOT_EVALUATED` and
+`can_authorize_execution=false`; `known_tasks` and incomplete coverage remain
+unchanged. Runtime conflicts, reviewer/worker identity,
 work-source hash, and formal supply/Claim admission remain separate. These
 annotations add no HTTP calls and do not modify an existing published Control.
 
