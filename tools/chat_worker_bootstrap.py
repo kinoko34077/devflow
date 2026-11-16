@@ -628,6 +628,12 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                 reason = "REPOSITORY_NOT_ACTIVE"
             elif control.get("human_gate") is True:
                 reason = "HUMAN_GATE"
+            elif control.get("external_blocker") is True:
+                # A Control-owned global hold cannot be avoided by omitting
+                # target_repository. A separately admitted scoped Control
+                # declaration is represented as external_blocker=False by
+                # the existing coordinator evidence projection.
+                reason = "EXTERNAL_BLOCKER"
 
         if reason is None:
             if item["role"] not in ROLE_TRACKS:
