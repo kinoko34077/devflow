@@ -541,8 +541,11 @@ For KiNoTch managed repositories, before answering or acting on current state, r
 audit, implementation, review, Issue/PR/Work Order or cross-repository work, call the
 KiNoTch Devflow MCP `bootstrap_repository` for the current repository. When resolving
 local open work, use `get_repository_work_view` (if available) after bootstrap for
-all-state TASK records and explicit manual fallback. Even MACHINE_COMPLETE_SHADOW is
-read-only and cannot replace Control authority or create runtime claims. Follow the
+all-state TASK records and explicit manual fallback. MACHINE_COMPLETE_SHADOW is
+read-only and never replaces Control authority. Only a separately accepted, exact
+cohort may report MACHINE_LOCAL_TASK_READ_AUTHORITY for *local TASK status read*:
+do not copy its status into Control, but keep independent Control/Human decisions
+and fallback. Neither read mode creates runtime Claims or execution permission. Follow the
 returned Repository Control and Canonical Entry Points. Do not substitute chat history, static
 .ai-guidelines content, or GitHub Project fields for live Current State. Use Issue-first
 reporting for durable detail/evidence/handoff.
@@ -616,18 +619,21 @@ consumer of the existing live M1 Repository Projection. It returns **all**
 trusted open machine TASKs, including `AWAITING_REVIEW` and `BLOCKED`, rather
 than treating M2's first 20 READY/IMPLEMENTING summaries as a complete task list.
 
-The additive `observed_task_view` describes **read-only observation**, independently
-of the older `view_mode` (which still controls manual *authority* fallback).
+The additive `observed_task_view` describes **read-only observation**.
 For an AVAILABLE/CURRENT source: `COMPLETE_READ` means all open Issues are
 classified, and `OBSERVED_PARTIAL` means only trusted known TASKs are shown
 with `unresolved_open_issue_count` (legacy + unclassified + invalid + untrusted).
 The full `task_records` list remains available in both cases; a partial list
 must never be called all active work. On missing/stale sources the status is
-`SOURCE_UNAVAILABLE` and counts are `null`, **not zero**. In every case
-`can_replace_manual_active_work=false` and `can_authorize_execution=false`
-inside this diagnostic. This is accepted approach C under
-[the A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md), not M3.1
-activation or a second task classifier.
+`SOURCE_UNAVAILABLE` and counts are `null`, **not zero**.
+`can_authorize_execution=false` in every case. The observation's
+`can_replace_manual_active_work` is normally `false`; **only the already
+admitted exact `colony-ai#3` Work View local-read cohort** can report `true`
+while trusted Control, complete source and validated live/cache generation
+agree. This is permission to prefer the owning Issue's **local TASK status for
+this read consumer**, not M2 global authority, work assignment, runtime Claim,
+Human/security bypass or fleet-wide M3.1. See the [admission and fallback
+contract](REPOSITORY_PROJECTION_M3_MIGRATION.md) and [A–E operating model](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md).
 
 ### Parallel display / dual-read migration (A–E / #477)
 
@@ -654,23 +660,41 @@ another persisted table or secondary classifier:
   misleading zero or parity. This **does not prove semantic equivalence** and
   is **never a promotion gate**.
 
-Every `parallel_read` result is `DUAL_READ_OBSERVATION`, with manual Control
-authority retained, `can_replace_manual_active_work=false`, and
-`can_authorize_execution=false`. Only a later explicit per-repository,
-per-Consumer reviewed M3.1 cutover could alter operational read precedence;
-this method does not do so. See [P0–P3 gradual plan](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md).
+Every `parallel_read` result stays `DUAL_READ_OBSERVATION`, with
+`can_authorize_execution=false`. For ordinary/non-admitted repositories,
+`manual.authority=MANUAL_CONTROL_UNTIL_COHORT_ADMISSION` and
+`can_replace_manual_active_work=false`. For the separately accepted, exact
+`colony-ai#3` Work View local-read cohort (while all source/cache guards pass),
+`manual.authority=MACHINE_LOCAL_TASK_READ_WITH_MANUAL_FALLBACK` and the
+parallel **read-only local-status** flag may be `true`. This does not promote
+Control's independent Human/security/cross-repository meaning or remove its
+manual fallback, and never authorizes execution/Claim.
+See [P0–P3 gradual plan](REPOSITORY_PROJECTION_AE_OPERATING_MODEL.md).
 
 The response always includes a separately named `manual_control` fallback
 (`active_work`, `next_action`, `canonical_entry_points`) from the verified
-Control. `view_mode=MACHINE_COMPLETE_SHADOW` only when the live source is
-AVAILABLE/CURRENT and has no unresolved legacy, unclassified, invalid or
-untrusted open records. All other source states return
-`view_mode=MANUAL_CONTROL_FALLBACK` with explicit `coverage_status` and
-error/counts. A missing source must not be interpreted as zero work. Even when
-all records are machine-classified, `can_replace_manual_active_work=false`
-until separately admitted M3.1/M3.5/M3.6 authority migration with real
-nonempty task lifecycle and consumer proof. The view does not create or
-publish work, and cannot grant execution-coordinator claims or Human approval.
+Control. The three Work View modes are:
+- `MACHINE_LOCAL_TASK_READ_AUTHORITY`: **only** the accepted exact
+  `colony-ai#3` local TASK read cohort, with complete/current original source,
+  trusted Control and validated fresh source/cache parity. `task_records`
+  owns local work-status read precedence, without requiring a second Control
+  status update. Independent cross-repository/Human/security Control fields
+  remain authoritative, and the legacy prose stays available for fallback.
+- `MACHINE_COMPLETE_SHADOW`: live source AVAILABLE/CURRENT with no unresolved
+  open Issue roles, but **no** local-read authority admission; manual fallback
+  remains active even though the all-state list is complete.
+- `MANUAL_CONTROL_FALLBACK`: source unavailable, stale, incomplete or otherwise
+  not trusted for complete-list substitution. Explicit source errors and
+  unresolved counts still apply; unknown is never an empty task queue.
+
+Only the admitted Work View mode may set its top-level and
+`observed_task_view`/`parallel_read` local-read
+`can_replace_manual_active_work=true`; the M2 cache's global authority flag,
+the scoped-task read, Agent Inbox and Workspace remain `false`. All
+`can_authorize_execution` flags remain `false`. A changed original Issue
+first invalidates the cached generation; the admitted local-read flag returns
+to `false` until the **existing** producer's projection catches up. The view
+does not create/publish work, assign or Claim tasks, or grant Human approval.
 
 ## Relationship to `.ai-guidelines`
 
