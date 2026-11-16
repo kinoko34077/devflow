@@ -103,11 +103,28 @@ existing shared GET-only `get_portfolio_projection()` is exposed as
 python -m tools.devflow_read_cli portfolio
 ```
 
-The response is the unmodified existing service report: per-repository
-source status, managed repository count, machine TASK counts, unresolved
-classification counts and `source_unavailable_count`. A failed repository
-source remains unavailable/unknown rather than a true empty work result.
-This call is **only** a managed-repository locator; it does not enumerate
+The response is the existing read-only service report: per-repository
+source status, **currently listed** managed repository count, observed machine
+TASK counts, unresolved classification counts and `source_unavailable_count`.
+`inventory_coverage_status` explicitly qualifies the aggregate numbers:
+
+- `COMPLETE_READ`: every **currently listed** repository Issue source was
+  current and all its open Issue roles classified; this does **not** establish
+  unlisted managed repositories, historical requests or fleet-wide Claimability.
+- `OBSERVED_PARTIAL`: all listed sources were readable, but unresolved
+  open Issue roles leave the total number of TASKs unproven.
+- `SOURCE_UNAVAILABLE`: one or more listed original Issue sources were
+  unreadable/noncurrent. Reported numeric counts are **observed only**,
+  not a complete portfolio or proof of zero missing tasks.
+- `NO_LISTED_REPOSITORIES`: no current repository Controls were enumerated;
+  zero numeric counts are **not** proof of globally absent work.
+
+The existing numeric fields retain their old observed-count values for
+backward compatibility. Consumers requiring the absence of other work must
+explicitly require `inventory_coverage_status=COMPLETE_READ` **and** verify
+that the listed repository scope is the scope of their decision. A missing
+source must never become a confirmed empty repository. This call is **only**
+a managed-repository locator; it does not enumerate
 addressed KAEP roots, choose a Task, publish supply, grant Claim/Provider
 authority or prove a complete work inventory. After selecting a relevant
 repository, bootstrap its Control and use the existing scoped TASK/Workspace
