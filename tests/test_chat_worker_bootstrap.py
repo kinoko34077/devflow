@@ -264,6 +264,39 @@ class PortfolioV2ContractTests(unittest.TestCase):
             blocked["omissions"],
         )
 
+    def test_portfolio_all_globally_held_repositories_return_wait_external(self):
+        data=self._portfolio_case()
+        for control in data["evidence"]["controls"]:
+            control["external_blocker"] = True
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(("WAIT_EXTERNAL", "EXTERNAL_BLOCKER"), (result["disposition"], result["reason_code"]))
+        self.assertFalse(result["claim_required"])
+        self.assertIsNone(result["task_ref"])
+        self.assertEqual(2, len(result["omissions"]))
+
+    def test_incomplete_control_gate_evidence_fails_closed_in_both_routes(self):
+        data=self._portfolio_case()
+        for gate in ("external_blocker", "human_gate"):
+            for invalid in (None, "false", 0):
+                for portfolio in (False, True):
+                    with self.subTest(gate=gate, invalid=invalid, portfolio=portfolio):
+                        case=copy.deepcopy(data)
+                        if not portfolio:
+                            case["request"]["target_repository"] = "kinoko34077/refil-viewer"
+                        case["evidence"]["controls"][0][gate] = invalid
+                        result=cwb.classify(case["request"], case["evidence"])
+                        self.assertEqual(("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+                                         (result["disposition"], result["reason_code"]))
+                        self.assertFalse(result["claim_required"])
+            for portfolio in (False, True):
+                case=copy.deepcopy(data)
+                if not portfolio:
+                    case["request"]["target_repository"] = "kinoko34077/refil-viewer"
+                del case["evidence"]["controls"][0][gate]
+                result=cwb.classify(case["request"], case["evidence"])
+                self.assertEqual(("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+                                 (result["disposition"], result["reason_code"]))
+
     def test_portfolio_still_omits_candidate_level_external_blocker(self):
         data=self._portfolio_case()
         candidate=data["evidence"]["frontier"]["candidates"][0]
