@@ -229,7 +229,7 @@ class PortfolioV2ContractTests(unittest.TestCase):
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
         self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
 
-    def test_portfolio_does_not_apply_control_external_blocker_to_unblocked_candidate(self):
+    def test_portfolio_cannot_bypass_global_control_external_blocker(self):
         data=self._portfolio_case()
         candidate=data["evidence"]["frontier"]["candidates"][0]
         candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
@@ -237,8 +237,32 @@ class PortfolioV2ContractTests(unittest.TestCase):
 
         result=cwb.classify(data["request"], data["evidence"])
 
+        # The first original candidate is individually unblocked, but a
+        # current repository-wide hold prevents selection through portfolio.
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
+        self.assertIn(
+            {"task_ref":"kinoko34077/refil-viewer#6","role":"implementer","reason":"EXTERNAL_BLOCKER"},
+            result["omissions"],
+        )
+
+    def test_portfolio_explicit_scoped_control_evidence_preserves_candidate_gates(self):
+        data=self._portfolio_case()
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
+        # Explicitly scoped Control evidence is external_blocker=False;
+        # only the admitted coordinator source projection may assert it.
+        data["evidence"]["controls"][0]["external_blocker"] = False
+        result=cwb.classify(data["request"], data["evidence"])
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
         self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
+        candidate["external_blocker"] = True
+        blocked=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", blocked["task_ref"])
+        self.assertIn(
+            {"task_ref":"kinoko34077/refil-viewer#6","role":"implementer","reason":"EXTERNAL_BLOCKER"},
+            blocked["omissions"],
+        )
 
     def test_portfolio_still_omits_candidate_level_external_blocker(self):
         data=self._portfolio_case()
