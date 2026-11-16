@@ -455,6 +455,18 @@ def _candidate_repository(task_ref: str) -> str:
     return task_ref.rsplit("#", 1)[0]
 
 
+def _validate_control_execution_gates(control: dict[str, Any]) -> None:
+    # Both are trusted Control-derived facts, not permissive defaults.
+    # Validate only Controls in the selected scope so a broken unrelated
+    # Control does not disable a healthy exact repository request.
+    for gate in ("human_gate", "external_blocker"):
+        _require(
+            type(control.get(gate)) is bool,
+            "EVIDENCE_INVALID",
+            f"control {gate} must be a boolean",
+        )
+
+
 def _normalized_rank_key(item: dict[str, Any]) -> tuple[str, ...]:
     return tuple(
         str(part).zfill(20) if isinstance(part, int) and not isinstance(part, bool) else part
@@ -515,16 +527,6 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
             "EVIDENCE_INVALID",
             "control managed_repository missing",
         )
-        # Both gates are explicit, typed facts from the trusted Control
-        # projection. Missing/malformed evidence cannot relax an execution
-        # hold in either the targeted or portfolio route.
-        for gate in ("human_gate", "external_blocker"):
-            _require(
-                type(control.get(gate)) is bool,
-                "EVIDENCE_INVALID",
-                f"control {gate} must be a boolean",
-            )
-
     refs: list[str] = []
     repo_control: dict[str, Any] | None = None
     if not portfolio:
@@ -551,6 +553,7 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                 detail="more than one open Repository Control claims the target",
             )
         repo_control = matching[0]
+        _validate_control_execution_gates(repo_control)
         if repo_control.get("trusted") is not True:
             return _result(request, "NEEDS_EVIDENCE", "CONTROL_UNTRUSTED", source_refs=refs)
         if repo_control.get("repository_state") != "ACTIVE":
@@ -624,6 +627,7 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
                     detail=f"more than one open Repository Control claims portfolio candidate {repository}",
                 )
             control = matching[0]
+            _validate_control_execution_gates(control)
             if control.get("trusted") is not True:
                 return _result(
                     request,
