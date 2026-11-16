@@ -1402,8 +1402,10 @@ class DevflowService:
         )
 
         def source_alignment(row: dict[str, Any]) -> tuple[str, bool]:
-            if not task_source_current:
-                return "TASK_SOURCE_UNAVAILABLE", False
+            # An exact enrolled original Issue can be independently readable
+            # even when the unrelated repository-wide open-Issue LIST failed.
+            # The published candidate's original SHA check is a P2a-sized
+            # observation, not proof of the unavailable full-work inventory.
             current_task = tasks_by_ref.get(row["entry_ref"])
             if current_task is None:
                 # An accepted published TASK can predate V1 role metadata:
@@ -1413,7 +1415,10 @@ class DevflowService:
                 # SHA-bound source observation, NOT new task classification,
                 # admission, Claim or execution permission.
                 if len(observed) > MAX_PUBLISHED_CANDIDATE_SOURCE_READS:
-                    return "TASK_NOT_OBSERVED", False
+                    return (
+                        "TASK_NOT_OBSERVED" if task_source_current
+                        else "TASK_SOURCE_UNAVAILABLE"
+                    ), False
                 try:
                     issue_number = int(row["task"].rsplit("#", 1)[1])
                     original = self.reader.get_issue(repository, issue_number)
