@@ -187,12 +187,14 @@ into an authorized Claim:
   human-confirmation fields disagree with a current trusted V1 TASK record.
 - `TASK_METADATA_MATCH_ONLY`: those three fields match the observed V1
   record, but its original Issue body hash was not verified.
-- `PUBLISHED_BODY_MATCH_NOT_CLASSIFIED`: the candidate has **no current V1
-  TASK record**, but an additional exact original-Issue GET confirmed trusted
-  owner/identity, OPEN state and the canonical body SHA-256 in its existing
-  admitted publication. In this case `task_body_sha_verified=true` establishes
-  **only publication-source freshness**, not V1 role classification, task
-  assignment, execution eligibility or a complete work inventory.
+- `PUBLISHED_BODY_MATCH_NOT_CLASSIFIED`: the candidate has **no current
+  verified V1 TASK row** (including when the repository-wide Issue LIST cannot
+  be read), but an independently successful exact original-Issue GET confirmed
+  trusted owner/identity, OPEN state and the canonical body SHA-256 in its
+  existing admitted publication. In this case `task_body_sha_verified=true`
+  establishes **only exact publication-source freshness**, not V1 role
+  classification, repository-list recovery, task assignment, execution
+  eligibility or a complete work inventory.
 - `TASK_SOURCE_HASH_MISMATCH`, `TASK_SOURCE_UNTRUSTED`, or
   `TASK_SOURCE_NOT_OPEN`: the direct original failed the corresponding
   verification. These never imply admitted work or Claimability.
@@ -201,9 +203,12 @@ into an authorized Claim:
   **16 candidates** were published; no absent-task conclusion follows.
 
 The additional direct GET is bounded to at most 16 **already published**
-candidate Issue references, only on opt-in Workspace reads when the repository
-source listing is AVAILABLE/CURRENT and the candidate has no trusted V1 TASK
-record. All statuses retain `claimability=NOT_EVALUATED` and
+candidate Issue references, only on opt-in Workspace reads when the candidate
+has no trusted current V1 TASK record **or the whole-repository Issue LIST is
+unavailable**. A direct successful GET does not change a failed LIST into
+`COMPLETE`, clear `has_unknown_work`, populate `known_tasks`, or grant access
+to other Issues. If the exact GET also fails, the candidate stays
+`TASK_SOURCE_UNAVAILABLE`. All statuses retain `claimability=NOT_EVALUATED` and
 `can_authorize_execution=false`; `known_tasks` and incomplete coverage remain
 unchanged. Runtime conflicts, reviewer/worker identity,
 work-source hash, and formal supply/Claim admission remain separate. The optional direct-source preflight may add up to 16 bounded GETs but never
