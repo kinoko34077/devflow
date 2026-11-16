@@ -206,8 +206,8 @@ source listing is AVAILABLE/CURRENT and the candidate has no trusted V1 TASK
 record. All statuses retain `claimability=NOT_EVALUATED` and
 `can_authorize_execution=false`; `known_tasks` and incomplete coverage remain
 unchanged. Runtime conflicts, reviewer/worker identity,
-work-source hash, and formal supply/Claim admission remain separate. These
-annotations add no HTTP calls and do not modify an existing published Control.
+work-source hash, and formal supply/Claim admission remain separate. The optional direct-source preflight may add up to 16 bounded GETs but never
+modifies an existing published Control or Issue.
 
 The Workspace command combines repository TASK observations, bounded recipient KAEP discovery and published Control candidate evidence. It does not prove there are no historical requests when `has_unknown_work=true`; a published candidate is not a currently claimable Task. The additional flags are optional; for smaller checks or old clients, `work-view` and `inbox` remain valid, and the manual Control/#503 fallback remains in force. Existing operating Codex processes are not silently migrated by updating this document; the new tool must be visible to that client's own MCP registry after its normal refresh. Portfolio-wide discovery starts with existing `get_portfolio_projection()`, which does not authorize widening repository-scoped work or selecting a runnable Task.
 
