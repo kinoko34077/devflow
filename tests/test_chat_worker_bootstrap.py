@@ -297,6 +297,14 @@ class PortfolioV2ContractTests(unittest.TestCase):
                 self.assertEqual(("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
                                  (result["disposition"], result["reason_code"]))
 
+    def test_unrelated_malformed_control_does_not_block_exact_target(self):
+        data=self._portfolio_case()
+        data["request"]["target_repository"]="kinoko34077/refil-viewer"
+        data["evidence"]["controls"][1]["external_blocker"]="false"
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("REVIEW_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
+
     def test_portfolio_still_omits_candidate_level_external_blocker(self):
         data=self._portfolio_case()
         candidate=data["evidence"]["frontier"]["candidates"][0]
