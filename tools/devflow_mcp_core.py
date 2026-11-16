@@ -1992,9 +1992,30 @@ class DevflowService:
             )
             for projection in projections
         ]
+        # Aggregate totals are observed counts, not proof that every listed
+        # repository's issue source was readable or that every open Issue has
+        # a trusted role. An unavailable source contributes numeric zero as
+        # an internal placeholder, which MUST NOT look like an empty repository.
+        # This coverage applies only to the *listed* managed repositories,
+        # not to any unknown/out-of-scope repositories or KAEP history.
+        inventory_coverage_status = (
+            "NO_LISTED_REPOSITORIES" if not projections
+            else "SOURCE_UNAVAILABLE" if any(
+                item.source_status != "AVAILABLE"
+                or item.source_freshness != "CURRENT"
+                for item in projections
+            )
+            else "OBSERVED_PARTIAL" if any(
+                item.legacy_hint_count + item.unclassified_count
+                + item.invalid_metadata_count + item.untrusted_metadata_count
+                for item in projections
+            )
+            else "COMPLETE_READ"
+        )
         return {
             "observed_at": observed_at,
             "repository_count": len(projections),
+            "inventory_coverage_status": inventory_coverage_status,
             "source_unavailable_count": sum(
                 1
                 for projection in projections

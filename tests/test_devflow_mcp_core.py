@@ -1313,11 +1313,65 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         )
         self.assertEqual(result["repository_count"], 2)
         self.assertEqual(result["source_unavailable_count"], 1)
+        # Numeric one is only the known observed TASK; a missing repo
+        # cannot be silently treated as having zero TASKs.
+        self.assertEqual(result["inventory_coverage_status"], "SOURCE_UNAVAILABLE")
         self.assertEqual(result["open_issue_count"], 1)
         self.assertEqual(result["machine_task_count"], 1)
         self.assertEqual(result["repositories"][0]["source_status"], "AVAILABLE")
         self.assertEqual(result["repositories"][1]["source_status"], "UNAVAILABLE")
         self.assertNotIn("records", result["repositories"][0])
+
+
+    def test_portfolio_task_inventory_coverage_is_scoped_to_known_verified_sources(self):
+        controls = [self._control("alpha", 70), self._control("beta", 71)]
+        alpha_issue = {
+            **self._task_issue(1),
+            "html_url": "https://github.com/kinoko34077/alpha/issues/1",
+        }
+        beta_issue = {
+            **self._task_issue(2),
+            "html_url": "https://github.com/kinoko34077/beta/issues/2",
+        }
+        fixtures = {
+            devflow_mcp_core.DEVFLOW_REPOSITORY: controls,
+            "kinoko34077/alpha": [alpha_issue],
+            "kinoko34077/beta": [beta_issue],
+        }
+        service = devflow_mcp_core.DevflowService(
+            FakeReader([], issues_by_repository=fixtures),
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        )
+
+        # Current and fully classified known sources are complete *only
+        # within the Controls discovered by this read*. No global fleet
+        # completeness or execution Claim is implied.
+        complete = service.get_portfolio_projection()
+        self.assertEqual(complete["inventory_coverage_status"], "COMPLETE_READ")
+        self.assertEqual(complete["machine_task_count"], 2)
+        self.assertEqual(complete["source_unavailable_count"], 0)
+
+        # A currently reachable but unclassified Issue makes task totals
+        # partial even though both GitHub source listings succeeded.
+        beta_issue["body"] = "## Work Status\n\n`IMPLEMENTING`\n"
+        partial = service.get_portfolio_projection()
+        self.assertEqual(partial["inventory_coverage_status"], "OBSERVED_PARTIAL")
+        self.assertEqual(partial["machine_task_count"], 1)
+        self.assertGreater(
+            partial["legacy_hint_count"] + partial["unclassified_count"]
+            + partial["invalid_metadata_count"] + partial["untrusted_metadata_count"],
+            0,
+        )
+
+        # No discovered Controls must not be promoted into a verified
+        # zero-work portfolio.
+        empty = devflow_mcp_core.DevflowService(
+            FakeReader([]),
+            observed_at_factory=lambda: "2026-10-04T04:00:00Z",
+        ).get_portfolio_projection()
+        self.assertEqual(empty["repository_count"], 0)
+        self.assertEqual(empty["machine_task_count"], 0)
+        self.assertEqual(empty["inventory_coverage_status"], "NO_LISTED_REPOSITORIES")
 
 
 class RepositoryProjectionMCPEntrypointTests(unittest.TestCase):
