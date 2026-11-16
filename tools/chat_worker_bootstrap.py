@@ -515,6 +515,15 @@ def _classify(request: dict[str, Any], evidence: object) -> dict[str, Any]:
             "EVIDENCE_INVALID",
             "control managed_repository missing",
         )
+        # Both gates are explicit, typed facts from the trusted Control
+        # projection. Missing/malformed evidence cannot relax an execution
+        # hold in either the targeted or portfolio route.
+        for gate in ("human_gate", "external_blocker"):
+            _require(
+                type(control.get(gate)) is bool,
+                "EVIDENCE_INVALID",
+                f"control {gate} must be a boolean",
+            )
 
     refs: list[str] = []
     repo_control: dict[str, Any] | None = None
