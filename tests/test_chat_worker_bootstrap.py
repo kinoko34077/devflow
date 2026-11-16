@@ -229,7 +229,7 @@ class PortfolioV2ContractTests(unittest.TestCase):
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
         self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
 
-    def test_portfolio_does_not_apply_control_external_blocker_to_unblocked_candidate(self):
+    def test_portfolio_cannot_bypass_global_control_external_blocker(self):
         data=self._portfolio_case()
         candidate=data["evidence"]["frontier"]["candidates"][0]
         candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
@@ -237,7 +237,72 @@ class PortfolioV2ContractTests(unittest.TestCase):
 
         result=cwb.classify(data["request"], data["evidence"])
 
+        # The first original candidate is individually unblocked, but a
+        # current repository-wide hold prevents selection through portfolio.
         self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", result["task_ref"])
+        self.assertIn(
+            {"task_ref":"kinoko34077/refil-viewer#6","role":"implementer","reason":"EXTERNAL_BLOCKER"},
+            result["omissions"],
+        )
+
+    def test_portfolio_explicit_scoped_control_evidence_preserves_candidate_gates(self):
+        data=self._portfolio_case()
+        candidate=data["evidence"]["frontier"]["candidates"][0]
+        candidate.update(role="implementer", action="IMPLEMENT", rank_key=[1,0,0,1,1,""])
+        # Explicitly scoped Control evidence is external_blocker=False;
+        # only the admitted coordinator source projection may assert it.
+        data["evidence"]["controls"][0]["external_blocker"] = False
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("CLAIM_AND_WORK", result["disposition"])
+        self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
+        candidate["external_blocker"] = True
+        blocked=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("kinoko34077/kinotch-repo-monitor#30", blocked["task_ref"])
+        self.assertIn(
+            {"task_ref":"kinoko34077/refil-viewer#6","role":"implementer","reason":"EXTERNAL_BLOCKER"},
+            blocked["omissions"],
+        )
+
+    def test_portfolio_all_globally_held_repositories_return_wait_external(self):
+        data=self._portfolio_case()
+        for control in data["evidence"]["controls"]:
+            control["external_blocker"] = True
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual(("WAIT_EXTERNAL", "EXTERNAL_BLOCKER"), (result["disposition"], result["reason_code"]))
+        self.assertFalse(result["claim_required"])
+        self.assertIsNone(result["task_ref"])
+        self.assertEqual(2, len(result["omissions"]))
+
+    def test_incomplete_control_gate_evidence_fails_closed_in_both_routes(self):
+        data=self._portfolio_case()
+        for gate in ("external_blocker", "human_gate"):
+            for invalid in (None, "false", 0):
+                for portfolio in (False, True):
+                    with self.subTest(gate=gate, invalid=invalid, portfolio=portfolio):
+                        case=copy.deepcopy(data)
+                        if not portfolio:
+                            case["request"]["target_repository"] = "kinoko34077/refil-viewer"
+                        case["evidence"]["controls"][0][gate] = invalid
+                        result=cwb.classify(case["request"], case["evidence"])
+                        self.assertEqual(("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+                                         (result["disposition"], result["reason_code"]))
+                        self.assertFalse(result["claim_required"])
+            for portfolio in (False, True):
+                case=copy.deepcopy(data)
+                if not portfolio:
+                    case["request"]["target_repository"] = "kinoko34077/refil-viewer"
+                del case["evidence"]["controls"][0][gate]
+                result=cwb.classify(case["request"], case["evidence"])
+                self.assertEqual(("NEEDS_EVIDENCE", "EVIDENCE_INVALID"),
+                                 (result["disposition"], result["reason_code"]))
+
+    def test_unrelated_malformed_control_does_not_block_exact_target(self):
+        data=self._portfolio_case()
+        data["request"]["target_repository"]="kinoko34077/refil-viewer"
+        data["evidence"]["controls"][1]["external_blocker"]="false"
+        result=cwb.classify(data["request"], data["evidence"])
+        self.assertEqual("REVIEW_WORK", result["disposition"])
         self.assertEqual("kinoko34077/refil-viewer#6", result["task_ref"])
 
     def test_portfolio_still_omits_candidate_level_external_blocker(self):
