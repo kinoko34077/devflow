@@ -1066,6 +1066,50 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertFalse(any(call[0] == REPO and isinstance(call[1], int)
                              for call in reader.calls))
 
+    def test_workspace_published_candidate_exact_source_survives_list_outage(self):
+        original_issue = unclassified_issue(21)
+        original_issue["repository_url"] = f"https://api.github.com/repos/{REPO}"
+        original_issue["body"] = (
+            "## Work Status\n\n`READY_FOR_IMPLEMENTATION`\n\n"
+            "## Type\n\n`TASK`\n"
+        )
+        candidate = {
+            **supply_candidate(),
+            "task_body_sha256": maintenance_sync_check.canonical_body_sha256(
+                original_issue["body"],
+            ),
+        }
+        reader = fixture_reader([original_issue])
+        reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
+            supply_control_block([candidate])
+        )
+        original_list = reader.list_issues
+
+        def unavailable(repository, state="open"):
+            if repository == REPO:
+                raise devflow_mcp_core.DevflowMCPError(
+                    "GitHub list unavailable; exact GET remains valid",
+                    reason_code="GITHUB_HTTP_403_RATE_LIMIT",
+                )
+            return original_list(repository, state=state)
+
+        reader.list_issues = unavailable
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", include_published_supply=True,
+        )
+        self.assertEqual(result["source_status"], "UNAVAILABLE")
+        self.assertTrue(result["has_unknown_work"])
+        entry = result["sections"]["published_supply"]["entries"][0]
+        self.assertEqual(entry["task_source_alignment"],
+                         "PUBLISHED_BODY_MATCH_NOT_CLASSIFIED")
+        self.assertTrue(entry["task_body_sha_verified"])
+        self.assertEqual(entry["claimability"], "NOT_EVALUATED")
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertEqual(reader.calls.count((REPO, 21)), 1)
+        # Direct source identity is not an untrusted substitute for the
+        # unavailable full listing and must not populate known_tasks.
+        self.assertFalse(result["sections"]["known_tasks"]["entries"])
+
     def test_workspace_published_candidate_unknown_on_failed_task_listing(self):
         reader = fixture_reader([task()])
         reader.issues_by_repository["kinoko34077/devflow"][0]["body"] += (
@@ -1082,6 +1126,14 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
             return original(repository, state=state)
 
         reader.list_issues = unavailable
+        original_get = reader.get_issue
+
+        def unavailable_issue(repository, number):
+            if repository == REPO and number == 21:
+                raise devflow_mcp_core.DevflowMCPError("original also unavailable")
+            return original_get(repository, number)
+
+        reader.get_issue = unavailable_issue
         result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
             "demo", include_published_supply=True,
         )
