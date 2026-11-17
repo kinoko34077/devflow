@@ -10,6 +10,7 @@ import json
 import sys
 from typing import Any
 
+from tools.agent_inbox import MAX_INBOX_TASKS
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 
 MAX_REPOSITORIES = 5
@@ -57,8 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--recipient", default="claude-code")
     parser.add_argument("--work-status", default=None)
     parser.add_argument(
-        "--limit", type=int, default=20,
-        help="TASK Issues per page (1..20; default 20).",
+        "--limit", type=int, default=MAX_INBOX_TASKS,
+        help=f"TASK Issues per page (1..{MAX_INBOX_TASKS}; default {MAX_INBOX_TASKS}).",
     )
     parser.add_argument(
         "--offset", type=int, default=0,

@@ -126,12 +126,24 @@ class DevflowMCPToolContractTests(unittest.TestCase):
                 current[name]["inputSchema"]["properties"]["issue_number"]["minimum"], 1
             )
 
+        plan_description = (
+            current["assess_issue_plan"]["inputSchema"]["properties"]["plan"]["description"]
+        )
+        evidence_description = (
+            current["assess_outcome_observation"]["inputSchema"]["properties"]["evidence"]["description"]
+        )
+        self.assertIn("exact normalized repository#issue_number", plan_description)
+        self.assertIn("exactly match", evidence_description)
+        self.assertIn("https://github.com/kinoko34077/<repo>/issues/", evidence_description)
+
     def test_stdio_rejects_invalid_scalars_before_service_calls(self):
         invalid_calls = [
             ("get_agent_inbox", {"repository": "devflow", "limit": 0}),
             ("get_agent_inbox", {"repository": "devflow", "limit": 21}),
             ("get_agent_workspace", {"repository": "devflow", "limit": 50}),
             ("get_agent_inbox", {"repository": "devflow", "limit": True}),
+            ("get_agent_inbox", {"repository": "devflow", "limit": "14"}),
+            ("get_agent_inbox", {"repository": "devflow", "offset": 14.0}),
             ("get_agent_inbox", {"repository": "devflow", "offset": -1}),
             ("get_agent_inbox", {
                 "repository": "devflow", "recipient": "SECRET_SENTINEL_DO_NOT_ECHO",
@@ -139,13 +151,15 @@ class DevflowMCPToolContractTests(unittest.TestCase):
             ("get_agent_inbox", {"repository": "devflow", "work_status": ""}),
             ("get_issue", {"repository": "devflow", "issue_number": 0}),
             ("get_issue", {"repository": "devflow", "issue_number": True}),
+            ("get_issue", {"repository": "devflow", "issue_number": "14"}),
+            ("get_issue", {"repository": "devflow", "issue_number": 14.0}),
         ]
         calls = [*invalid_calls, ("get_sync_health", {})]
         _, _, results = stdio_exchange(calls)
         for (name, _), result in zip(invalid_calls, results[:-1]):
             with self.subTest(tool=name, error=result.is_error):
                 self.assertTrue(result.is_error)
-        recipient_error = "\n".join(block.text for block in results[5].content)
+        recipient_error = "\n".join(block.text for block in results[7].content)
         self.assertIn("recipient", recipient_error)
         self.assertIn("tools/list", recipient_error)
         self.assertNotIn("SECRET_SENTINEL_DO_NOT_ECHO", recipient_error)
@@ -227,6 +241,40 @@ class DevflowMCPToolContractTests(unittest.TestCase):
             sorted(self.baseline["call"]["structured_keys"]),
         )
         self.assertEqual(results[4].is_error, self.baseline["call"]["isError"])
+
+    def test_stdio_workspace_optins_and_recipient_validation(self):
+        calls = [
+            ("get_agent_workspace", {
+                "repository": "devflow", "recipient": "codex",
+                "include_recent_kaep": True, "include_published_supply": True,
+            }),
+            ("get_agent_workspace", {
+                "repository": "devflow", "recipient": "WORKSPACE_RECIPIENT_SENTINEL",
+            }),
+            ("get_sync_health", {}),
+        ]
+        _, _, results = stdio_exchange(calls)
+        self.assertFalse(results[0].is_error)
+        self.assertTrue(results[1].is_error)
+        invalid_text = "\n".join(block.text for block in results[1].content)
+        self.assertNotIn("WORKSPACE_RECIPIENT_SENTINEL", invalid_text)
+        self.assertIn("recipient", invalid_text)
+        self.assertFalse(results[2].is_error)
+        seen_calls = results[2].structured_content["calls"]
+        self.assertEqual(
+            [item["tool"] for item in seen_calls],
+            ["get_agent_workspace", "get_sync_health"],
+        )
+        self.assertEqual(
+            seen_calls[0]["kwargs"],
+            {
+                "limit": 20,
+                "offset": 0,
+                "work_status": None,
+                "include_recent_kaep": True,
+                "include_published_supply": True,
+            },
+        )
 
     def test_stdio_assessment_packets_keep_safe_advisory_paths(self):
         current_sha = hashlib.sha256(ISSUE_BODY.encode("utf-8")).hexdigest()

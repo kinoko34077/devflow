@@ -37,6 +37,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(SERVER_NAME)
 
+# mcp[cli]==2.2.0 wraps Pydantic argument failures in ToolError.__cause__.
+# Keep UnexpectedToolError and non-validation failures unchanged; the pinned
+# MCP runtime contract tests exercise this exception-chain dependency.
 class _SafeValidationMCPServer(MCPServer):
     """Keep caller-provided invalid values out of tool validation responses."""
 
@@ -75,7 +78,7 @@ PositiveIssueNumber = Annotated[
     Field(
         ge=1,
         strict=True,
-        description="Positive GitHub Issue number; minimum value is 1.",
+        description="Positive JSON integer GitHub Issue number; minimum value is 1.",
     ),
 ]
 InboxLimit = Annotated[
@@ -85,7 +88,7 @@ InboxLimit = Annotated[
         le=MAX_INBOX_TASKS,
         strict=True,
         description=(
-            f"TASK Issues to read in this page (1–{MAX_INBOX_TASKS}; default 20). "
+            f"TASK Issues to read in this page (1–{MAX_INBOX_TASKS}; default {MAX_INBOX_TASKS}). "
             "This is a per-call TASK Issue mailbox bound; each Issue retains the 500-comment bound."
         ),
     ),
@@ -101,7 +104,7 @@ InboxOffset = Annotated[
         ),
     ),
 ]
-_RecipientValues = Literal.__getitem__(tuple(RECIPIENT_ORDER))
+_RecipientValues = Literal[tuple(RECIPIENT_ORDER)]
 InboxRecipient = Annotated[
     _RecipientValues,
     Field(description="Exact KAEP recipient identifier."),
@@ -138,7 +141,8 @@ PlanPacket = Annotated[
     dict[str, Any],
     Field(
         description=(
-            "Exact top-level keys: schema_version=1, task_ref (owner/repo#positive_issue), "
+            "Exact top-level keys: schema_version=1, task_ref (the exact normalized repository#issue_number "
+            "passed to this call), "
             "and steps (1–64). Each step has a unique id (1–120 ASCII identifier chars), "
             "non-empty intent (up to 1000 chars), and optional declared_effects. Each effect "
             "has non-empty key and scope (up to 200 chars), plus state=set with value or "
@@ -157,9 +161,12 @@ OutcomeEvidence = Annotated[
         description=(
             "Nullable packet with exactly task_ref, issue_body_sha256, required_surface, "
             "required_target, observed_surface, observed_target, observed_result, evidence_refs. "
+            "task_ref must exactly match the normalized repository#issue_number passed to this call. "
             "Use a lower-case 64-hex SHA-256 of the current Issue body; surfaces match "
             "[A-Z][A-Z0-9_]{0,63}, targets are 1–256 printable ASCII chars, and evidence_refs "
-            "contains 1–8 unique GitHub issuecomment URLs. observed_result is SUCCESS, FAILURE, "
+            "contains 1–8 unique URLs of the form "
+            "https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<comment>. "
+            "observed_result is SUCCESS, FAILURE, "
             "VALID_NEGATIVE, UNKNOWN, or NOT_RUN. Replace the example digest with the current "
             "Issue body's SHA-256. Example: "
             '{"task_ref":"kinoko34077/devflow#14","issue_body_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
@@ -245,13 +252,14 @@ def get_scoped_task_read(
 @mcp.tool()
 def get_agent_inbox(
     repository: RepositoryName, recipient: InboxRecipient = "claude-code",
-    limit: InboxLimit = 20, offset: InboxOffset = 0,
+    limit: InboxLimit = MAX_INBOX_TASKS, offset: InboxOffset = 0,
     work_status: WorkStatusFilter = None,
 ) -> dict[str, Any]:
     """Read a bounded page of trusted TASK Issues for one exact KAEP recipient.
 
-    The requested page limit is 1–20 (default 20); returned pages may be empty. Each Issue retains
-    its existing 500-comment bound. Follow next_offset only when truncated is true. Coverage and
+    The page limit applies to TASK Issue mailboxes, not comments; its bounds and default are
+    published in the input schema. Each Issue retains its existing 500-comment bound. Follow
+    next_offset only when truncated is true. Coverage and
     filtered-zero results must be interpreted with their status fields; Inbox visibility is read-only and grants
     no execution, Claim, ACK, or delivery authority.
     """
@@ -263,7 +271,7 @@ def get_agent_inbox(
 @mcp.tool()
 def get_agent_workspace(
     repository: RepositoryName, recipient: InboxRecipient = "codex",
-    limit: InboxLimit = 20, offset: InboxOffset = 0,
+    limit: InboxLimit = MAX_INBOX_TASKS, offset: InboxOffset = 0,
     work_status: WorkStatusFilter = None,
     include_recent_kaep: IncludeRecentKaep = False,
     include_published_supply: IncludePublishedSupply = False,
@@ -335,6 +343,7 @@ def assess_issue_plan(
 ) -> dict[str, Any]:
     """Compare a declared plan packet with adopted source-linked conditions for one Issue.
 
+    `task_ref` must exactly match the normalized `repository#issue_number` passed to this call.
     Packet example: {"schema_version":1,"task_ref":"kinoko34077/devflow#14","steps":
     [{"id":"docs","intent":"Update the usage guide","declared_effects":
     [{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}.
@@ -359,9 +368,12 @@ def assess_outcome_observation(
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required_surface":"PUBLIC_BROWSER","required_target":"git:abc123",
     "observed_surface":"PUBLIC_BROWSER","observed_target":"git:abc123","observed_result":
     "SUCCESS","evidence_refs":["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}.
-    Use exactly these fields; replace the example digest with the current Issue body SHA-256.
+    Use exactly these fields; `task_ref` must exactly match the normalized
+    `repository#issue_number` passed to this call. `evidence_refs` must contain 1–8 unique
+    URLs of the form `https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<comment>`.
+    Replace the example digest with the current Issue body's SHA-256.
     Surface ids match
-    [A-Z][A-Z0-9_]{0,63}, 1–256 printable ASCII target chars, and 1–8 unique issuecomment URLs.
+    [A-Z][A-Z0-9_]{0,63} and targets use 1–256 printable ASCII chars.
     Null, partial, malformed, and stale packets can return NEEDS_EVIDENCE. DECLARED_ALIGNED means
     the declared identities match; linked comments are not fetched or authenticated, and user
     acceptance is not established. This read-only advisory cannot authorize execution.

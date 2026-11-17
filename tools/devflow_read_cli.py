@@ -67,7 +67,7 @@ def failure_reason_code(exc: DevflowMCPError | ValueError) -> str:
 
 def read_operation(
     service: Any, *, operation: str, repository: str | None = None,
-    recipient: str = "codex", limit: int = 20, offset: int = 0,
+    recipient: str = "codex", limit: int = MAX_INBOX_LIMIT, offset: int = 0,
     work_status: str | None = None, issue_number: int | None = None,
     plan: dict[str, Any] | None = None,
     outcome: dict[str, Any] | None = None,
@@ -139,8 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", default=None)
     parser.add_argument("--recipient", default="codex")
     parser.add_argument(
-        "--limit", type=int, default=20,
-        help="TASK Issues per page (1..20; default 20).",
+        "--limit", type=int, default=MAX_INBOX_LIMIT,
+        help=f"TASK Issues per page (1..{MAX_INBOX_LIMIT}; default {MAX_INBOX_LIMIT}).",
     )
     parser.add_argument(
         "--offset", type=int, default=0,
