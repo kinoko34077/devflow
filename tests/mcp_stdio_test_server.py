@@ -40,6 +40,12 @@ class RecordingService:
         self.calls: list[dict[str, Any]] = []
         self.reader = FixedReader()
         self.assessor = DevflowService(self.reader)
+        # Give plan assessment a source identity so stdio contract tests can
+        # exercise the matching and mismatch advisory branches without a live read.
+        self.assessor.get_issue_goal_context = lambda repository, issue_number: {
+            "source_contexts": [{"issue_ref": f"{repository}#{issue_number}"}],
+            "effective_specifications": [],
+        }
 
     def __getattr__(self, name: str):
         def invoke(*args: Any, **kwargs: Any) -> Any:

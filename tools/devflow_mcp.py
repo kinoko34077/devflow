@@ -89,6 +89,7 @@ InboxLimit = Annotated[
         strict=True,
         description=(
             f"TASK Issues to read in this page (1–{MAX_INBOX_TASKS}; default {MAX_INBOX_TASKS}). "
+            "Strict JSON integer; numeric strings and floats are rejected. "
             "This is a per-call TASK Issue mailbox bound; each Issue retains the 500-comment bound."
         ),
     ),
@@ -99,6 +100,7 @@ InboxOffset = Annotated[
         ge=0,
         strict=True,
         description=(
+            "Strict JSON integer; numeric strings and floats are rejected. "
             "Zero-based TASK Issue offset (default 0). Continue with next_offset "
             "only when truncated is true."
         ),
@@ -141,8 +143,8 @@ PlanPacket = Annotated[
     dict[str, Any],
     Field(
         description=(
-            "Exact top-level keys: schema_version=1, task_ref (the exact normalized repository#issue_number "
-            "passed to this call), "
+            "Exact top-level keys: schema_version=1, task_ref (the normalized repository#issue_number "
+            "passed to this call; matching is case-insensitive), "
             "and steps (1–64). Each step has a unique id (1–120 ASCII identifier chars), "
             "non-empty intent (up to 1000 chars), and optional declared_effects. Each effect "
             "has non-empty key and scope (up to 200 chars), plus state=set with value or "
@@ -161,7 +163,8 @@ OutcomeEvidence = Annotated[
         description=(
             "Nullable packet with exactly task_ref, issue_body_sha256, required_surface, "
             "required_target, observed_surface, observed_target, observed_result, evidence_refs. "
-            "task_ref must exactly match the normalized repository#issue_number passed to this call. "
+            "task_ref must exactly match (case-sensitively) the normalized repository#issue_number "
+            "passed to this call. "
             "Use a lower-case 64-hex SHA-256 of the current Issue body; surfaces match "
             "[A-Z][A-Z0-9_]{0,63}, targets are 1–256 printable ASCII chars, and evidence_refs "
             "contains 1–8 unique URLs of the form "
@@ -343,7 +346,8 @@ def assess_issue_plan(
 ) -> dict[str, Any]:
     """Compare a declared plan packet with adopted source-linked conditions for one Issue.
 
-    `task_ref` must exactly match the normalized `repository#issue_number` passed to this call.
+    `task_ref` must identify the normalized `repository#issue_number` passed to this call;
+    this comparison is case-insensitive.
     Packet example: {"schema_version":1,"task_ref":"kinoko34077/devflow#14","steps":
     [{"id":"docs","intent":"Update the usage guide","declared_effects":
     [{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}.
@@ -368,7 +372,7 @@ def assess_outcome_observation(
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required_surface":"PUBLIC_BROWSER","required_target":"git:abc123",
     "observed_surface":"PUBLIC_BROWSER","observed_target":"git:abc123","observed_result":
     "SUCCESS","evidence_refs":["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}.
-    Use exactly these fields; `task_ref` must exactly match the normalized
+    Use exactly these fields; `task_ref` must exactly match (case-sensitively) the normalized
     `repository#issue_number` passed to this call. `evidence_refs` must contain 1–8 unique
     URLs of the form `https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<comment>`.
     Replace the example digest with the current Issue body's SHA-256.
