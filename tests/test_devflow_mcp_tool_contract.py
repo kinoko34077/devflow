@@ -300,6 +300,7 @@ class DevflowMCPToolContractTests(unittest.TestCase):
         }
         stale_evidence = {**valid_evidence, "issue_body_sha256": "0" * 64}
         mismatched_evidence = {**valid_evidence, "task_ref": "kinoko34077/other#14"}
+        case_variant_evidence = {**valid_evidence, "task_ref": "KINOKO34077/DEVFLOW#14"}
         calls = [
             ("assess_issue_plan", {
                 "repository": "devflow", "issue_number": 14, "plan": {},
@@ -312,6 +313,22 @@ class DevflowMCPToolContractTests(unittest.TestCase):
                     "plan": {
                         "schema_version": 1,
                         "task_ref": "kinoko34077/devflow#14",
+                        "steps": [{
+                            "id": "inspect",
+                            "intent": "Inspect the page",
+                            "declared_effects": [],
+                        }],
+                    },
+                },
+            ),
+            (
+                "assess_issue_plan",
+                {
+                    "repository": "devflow",
+                    "issue_number": 14,
+                    "plan": {
+                        "schema_version": 1,
+                        "task_ref": "KINOKO34077/DEVFLOW#14",
                         "steps": [{
                             "id": "inspect",
                             "intent": "Inspect the page",
@@ -346,6 +363,9 @@ class DevflowMCPToolContractTests(unittest.TestCase):
                 "repository": "devflow", "issue_number": 14, "evidence": mismatched_evidence,
             }),
             ("assess_outcome_observation", {
+                "repository": "devflow", "issue_number": 14, "evidence": case_variant_evidence,
+            }),
+            ("assess_outcome_observation", {
                 "repository": "devflow", "issue_number": 14, "evidence": valid_evidence,
             }),
         ]
@@ -354,19 +374,24 @@ class DevflowMCPToolContractTests(unittest.TestCase):
             self.assertFalse(result.is_error)
         self.assertEqual(results[0].structured_content["status"], "NEEDS_EVIDENCE")
         self.assertFalse(results[1].structured_content["can_authorize_execution"])
-        self.assertEqual(results[2].structured_content["status"], "NEEDS_EVIDENCE")
-        self.assertEqual(results[2].structured_content["reason_code"], "TASK_REFERENCE_MISMATCH")
+        self.assertEqual(results[2].structured_content["reason_code"], "SOURCE_BOUND_DECLARED_EFFECTS_ONLY")
         self.assertFalse(results[2].structured_content["can_authorize_execution"])
         self.assertEqual(results[3].structured_content["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(results[3].structured_content["reason_code"], "TASK_REFERENCE_MISMATCH")
         self.assertFalse(results[3].structured_content["can_authorize_execution"])
         self.assertEqual(results[4].structured_content["status"], "NEEDS_EVIDENCE")
         self.assertEqual(results[5].structured_content["status"], "NEEDS_EVIDENCE")
-        self.assertEqual(results[5].structured_content["reason"], "TASK_REF_MISMATCH")
         self.assertFalse(results[5].structured_content["can_authorize_execution"])
-        self.assertEqual(results[6].structured_content["status"], "DECLARED_ALIGNED")
-        self.assertEqual(results[6].structured_content["source_verification"], "NOT_PERFORMED")
-        self.assertFalse(results[6].structured_content["acceptance_satisfied"])
+        self.assertEqual(results[6].structured_content["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(results[6].structured_content["reason"], "TASK_REF_MISMATCH")
         self.assertFalse(results[6].structured_content["can_authorize_execution"])
+        self.assertEqual(results[7].structured_content["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(results[7].structured_content["reason"], "TASK_REF_MISMATCH")
+        self.assertFalse(results[7].structured_content["can_authorize_execution"])
+        self.assertEqual(results[8].structured_content["status"], "DECLARED_ALIGNED")
+        self.assertEqual(results[8].structured_content["source_verification"], "NOT_PERFORMED")
+        self.assertFalse(results[8].structured_content["acceptance_satisfied"])
+        self.assertFalse(results[8].structured_content["can_authorize_execution"])
 
     def test_cli_pagination_help_describes_the_shared_contract(self):
         commands = [
