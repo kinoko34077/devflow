@@ -1,0 +1,472 @@
+{
+  "captured_by": "mcp[cli]==2.2.0 Python 3.10 local runtime; real stdio initialize/tools/list/tools/call",
+  "initialize": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "subscribe": false,
+        "listChanged": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "serverInfo": {
+      "name": "KiNoTch Devflow",
+      "version": "1.0.0"
+    },
+    "instructions": "This server provides read-only access to KiNoTch live development control state.\nUse bootstrap_repository first when resuming, auditing, planning, implementing, reviewing,\nor asking for the current state of a managed repository.\nTreat devflow as the cross-repository operational authority and the owning repository as the\ndetailed technical authority. GitHub Project is display-only.\nDo not infer current Work Status, Audit SHA, Active Work, blockers or Sync Health from chat\nhistory or static guideline files when this server is available.\nFor durable progress/evidence/handoff, follow Issue-first reporting in the returned control state.\nThis server exposes no GitHub mutation tools."
+  },
+  "tools": [
+    {
+      "name": "bootstrap_repository",
+      "description": "Return live Repository Control state plus the canonical read order for one managed repository.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "bootstrap_repositoryArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "bootstrap_repositoryDictOutput"
+      }
+    },
+    {
+      "name": "get_repository_control",
+      "description": "Return the exact open devflow `[REPO] <repository>` Control Issue as structured live state.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_repository_controlArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_repository_controlDictOutput"
+      }
+    },
+    {
+      "name": "list_managed_repositories",
+      "description": "List repositories that currently have an open devflow Repository Control Issue.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object",
+        "title": "list_managed_repositoriesArguments"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "title": "list_managed_repositoriesOutput"
+      }
+    },
+    {
+      "name": "get_repository_projection",
+      "description": "Return the live read-only repository-local Issue projection for one managed repository.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_repository_projectionArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_repository_projectionDictOutput"
+      }
+    },
+    {
+      "name": "get_repository_work_view",
+      "description": "Read current all-status owner TASKs with explicit legacy Control fallback; never grant claims.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_repository_work_viewArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_repository_work_viewDictOutput"
+      }
+    },
+    {
+      "name": "get_scoped_task_read",
+      "description": "Direct read-only verification of one exact owning TASK Issue; never assert all work or grant claims.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "repository",
+          "issue_number"
+        ],
+        "type": "object",
+        "title": "get_scoped_task_readArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_scoped_task_readDictOutput"
+      }
+    },
+    {
+      "name": "get_agent_inbox",
+      "description": "Read bounded trusted TASKs and their KAEP requests; never authorize execution.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "recipient": {
+            "default": "claude-code",
+            "title": "Recipient",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "work_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Work Status"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_agent_inboxArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_agent_inboxDictOutput"
+      }
+    },
+    {
+      "name": "get_agent_workspace",
+      "description": "Opt-in read-only unified Work/KAEP observation; unknown runtime sections remain unknown.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "recipient": {
+            "default": "codex",
+            "title": "Recipient",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "work_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Work Status"
+          },
+          "include_recent_kaep": {
+            "default": false,
+            "title": "Include Recent Kaep",
+            "type": "boolean"
+          },
+          "include_published_supply": {
+            "default": false,
+            "title": "Include Published Supply",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_agent_workspaceArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_agent_workspaceDictOutput"
+      }
+    },
+    {
+      "name": "get_portfolio_projection",
+      "description": "Return a read-only summary projection across all currently managed repositories.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object",
+        "title": "get_portfolio_projectionArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_portfolio_projectionDictOutput"
+      }
+    },
+    {
+      "name": "get_human_portfolio",
+      "description": "Return the live read-only Human Portfolio queue for one managed repository.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository"
+        ],
+        "type": "object",
+        "title": "get_human_portfolioArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_human_portfolioDictOutput"
+      }
+    },
+    {
+      "name": "get_issue",
+      "description": "Read one GitHub Issue from a repository. Private repositories require a read-capable token.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "repository",
+          "issue_number"
+        ],
+        "type": "object",
+        "title": "get_issueArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_issueDictOutput"
+      }
+    },
+    {
+      "name": "get_issue_goal_context",
+      "description": "Resolve source-linked effective Goal Context through bounded read-only Issue ancestry.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "repository",
+          "issue_number"
+        ],
+        "type": "object",
+        "title": "get_issue_goal_contextArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_issue_goal_contextDictOutput"
+      }
+    },
+    {
+      "name": "assess_issue_plan",
+      "description": "Compare declared plan effects with adopted source-linked conditions; advisory and read-only.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number",
+            "type": "integer"
+          },
+          "plan": {
+            "additionalProperties": true,
+            "title": "Plan",
+            "type": "object"
+          }
+        },
+        "required": [
+          "repository",
+          "issue_number",
+          "plan"
+        ],
+        "type": "object",
+        "title": "assess_issue_planArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "assess_issue_planDictOutput"
+      }
+    },
+    {
+      "name": "assess_outcome_observation",
+      "description": "Compare declared outcome identities to the current Issue revision; does not verify use or acceptance.",
+      "inputSchema": {
+        "properties": {
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number",
+            "type": "integer"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          }
+        },
+        "required": [
+          "repository",
+          "issue_number",
+          "evidence"
+        ],
+        "type": "object",
+        "title": "assess_outcome_observationArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "assess_outcome_observationDictOutput"
+      }
+    },
+    {
+      "name": "get_sync_health",
+      "description": "Return the machine-maintained devflow Project Sync Health record.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object",
+        "title": "get_sync_healthArguments"
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "get_sync_healthDictOutput"
+      }
+    }
+  ],
+  "call": {
+    "name": "get_issue",
+    "arguments": {
+      "repository": "devflow",
+      "issue_number": 805
+    },
+    "isError": false,
+    "content_types": [
+      "text"
+    ],
+    "structured_keys": [
+      "body",
+      "issue_number",
+      "repository",
+      "sections",
+      "state",
+      "title",
+      "updated_at",
+      "url"
+    ]
+  }
+}

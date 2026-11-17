@@ -1379,8 +1379,8 @@ class RepositoryProjectionMCPEntrypointTests(unittest.TestCase):
         source = (
             Path(__file__).resolve().parents[1] / "tools" / "devflow_mcp.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("def get_repository_projection(repository: str)", source)
-        self.assertIn("def get_repository_work_view(repository: str)", source)
+        self.assertIn("def get_repository_projection(repository: RepositoryName)", source)
+        self.assertIn("def get_repository_work_view(repository: RepositoryName)", source)
         self.assertIn("def get_portfolio_projection()", source)
         self.assertNotIn("def update_repository_projection(", source)
         self.assertNotIn("def write_repository_projection(", source)

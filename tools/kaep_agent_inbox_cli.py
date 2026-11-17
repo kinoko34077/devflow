@@ -56,8 +56,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Explicit managed repo; repeat 1–5 times (default: devflow)")
     parser.add_argument("--recipient", default="claude-code")
     parser.add_argument("--work-status", default=None)
-    parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument(
+        "--limit", type=int, default=20,
+        help="TASK Issues per page (1..20; default 20).",
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0,
+        help="Zero-based offset (>= 0); continue with next_offset only when truncated is true.",
+    )
     parser.add_argument("--pending-only", action="store_true")
     args = parser.parse_args(argv)
     try:

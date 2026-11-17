@@ -138,8 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--repository", default=None)
     parser.add_argument("--recipient", default="codex")
-    parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument(
+        "--limit", type=int, default=20,
+        help="TASK Issues per page (1..20; default 20).",
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0,
+        help="Zero-based offset (>= 0); continue with next_offset only when truncated is true.",
+    )
     parser.add_argument("--work-status", default=None)
     parser.add_argument(
         "--include-recent-kaep", action="store_true",

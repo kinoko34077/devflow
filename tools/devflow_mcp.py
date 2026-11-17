@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from pydantic import Field, ValidationError
 
 try:
-    from .devflow_mcp_core import default_service
+    from .agent_inbox import MAX_INBOX_TASKS
+    from .devflow_mcp_core import DEFAULT_OWNER, default_service
+    from .kaep_mailbox_codec import RECIPIENT_ORDER
 except ImportError:  # direct script execution
-    from devflow_mcp_core import default_service
+    from agent_inbox import MAX_INBOX_TASKS
+    from devflow_mcp_core import DEFAULT_OWNER, default_service
+    from kaep_mailbox_codec import RECIPIENT_ORDER
 
 SERVER_NAME = "KiNoTch Devflow"
 SERVER_VERSION = "1.0.0"
@@ -31,12 +37,142 @@ logging.basicConfig(
 )
 logger = logging.getLogger(SERVER_NAME)
 
-mcp = MCPServer(
+class _SafeValidationMCPServer(MCPServer):
+    """Keep caller-provided invalid values out of tool validation responses."""
+
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            if isinstance(exc, UnexpectedToolError) or not isinstance(exc.__cause__, ValidationError):
+                raise
+            fields = sorted({str(error["loc"][0]) for error in exc.__cause__.errors() if error["loc"]})
+            field_list = ", ".join(fields) if fields else "arguments"
+            raise ToolError(
+                f"Error executing tool {name}: invalid arguments for {field_list}. "
+                "Check tools/list for accepted values and input constraints."
+            ) from exc.__cause__
+
+
+mcp = _SafeValidationMCPServer(
     SERVER_NAME,
     version=SERVER_VERSION,
     instructions=SERVER_INSTRUCTIONS,
     log_level="INFO",
 )
+
+RepositoryName = Annotated[
+    str,
+    Field(
+        description=(
+            f"Repository as owner/name, or a short name under {DEFAULT_OWNER}; "
+            "outer whitespace is trimmed and spaces inside the owner or name are rejected."
+        )
+    ),
+]
+PositiveIssueNumber = Annotated[
+    int,
+    Field(
+        ge=1,
+        strict=True,
+        description="Positive GitHub Issue number; minimum value is 1.",
+    ),
+]
+InboxLimit = Annotated[
+    int,
+    Field(
+        ge=1,
+        le=MAX_INBOX_TASKS,
+        strict=True,
+        description=(
+            f"TASK Issues to read in this page (1–{MAX_INBOX_TASKS}; default 20). "
+            "This is a per-call TASK Issue mailbox bound; each Issue retains the 500-comment bound."
+        ),
+    ),
+]
+InboxOffset = Annotated[
+    int,
+    Field(
+        ge=0,
+        strict=True,
+        description=(
+            "Zero-based TASK Issue offset (default 0). Continue with next_offset "
+            "only when truncated is true."
+        ),
+    ),
+]
+_RecipientValues = Literal.__getitem__(tuple(RECIPIENT_ORDER))
+InboxRecipient = Annotated[
+    _RecipientValues,
+    Field(description="Exact KAEP recipient identifier."),
+]
+WorkStatusFilter = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description=(
+            "Optional exact Work Status filter; empty strings are rejected. "
+            "Unknown nonempty values may return a filtered zero-item page."
+        ),
+    ),
+] | None
+IncludeRecentKaep = Annotated[
+    bool,
+    Field(
+        description=(
+            "Opt in to the bounded recent KAEP source observation; defaults to false. "
+            "This does not establish complete historical coverage."
+        )
+    ),
+]
+IncludePublishedSupply = Annotated[
+    bool,
+    Field(
+        description=(
+            "Opt in to observing published supply candidates; defaults to false. "
+            "This does not establish Claim eligibility."
+        )
+    ),
+]
+PlanPacket = Annotated[
+    dict[str, Any],
+    Field(
+        description=(
+            "Exact top-level keys: schema_version=1, task_ref (owner/repo#positive_issue), "
+            "and steps (1–64). Each step has a unique id (1–120 ASCII identifier chars), "
+            "non-empty intent (up to 1000 chars), and optional declared_effects. Each effect "
+            "has non-empty key and scope (up to 200 chars), plus state=set with value or "
+            "state=removed without value; at most 128 effects total. Example: "
+            '{"schema_version":1,"task_ref":"kinoko34077/devflow#14","steps":'
+            '[{"id":"docs","intent":"Update the usage guide","declared_effects":'
+            '[{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}. '
+            "Malformed packets remain eligible for a NEEDS_EVIDENCE advisory. "
+            "See docs/spec/KAEP_AGENT_INBOX_V01.md for the canonical packet contract."
+        )
+    ),
+]
+OutcomeEvidence = Annotated[
+    dict[str, Any] | None,
+    Field(
+        description=(
+            "Nullable packet with exactly task_ref, issue_body_sha256, required_surface, "
+            "required_target, observed_surface, observed_target, observed_result, evidence_refs. "
+            "Use a lower-case 64-hex SHA-256 of the current Issue body; surfaces match "
+            "[A-Z][A-Z0-9_]{0,63}, targets are 1–256 printable ASCII chars, and evidence_refs "
+            "contains 1–8 unique GitHub issuecomment URLs. observed_result is SUCCESS, FAILURE, "
+            "VALID_NEGATIVE, UNKNOWN, or NOT_RUN. Replace the example digest with the current "
+            "Issue body's SHA-256. Example: "
+            '{"task_ref":"kinoko34077/devflow#14","issue_body_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+            '"required_surface":"PUBLIC_BROWSER","required_target":"git:abc123",'
+            '"observed_surface":"PUBLIC_BROWSER","observed_target":"git:abc123",'
+            '"observed_result":"SUCCESS","evidence_refs":'
+            '["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}. '
+            "Null or incomplete packets return NEEDS_EVIDENCE. DECLARED_ALIGNED checks "
+            "declared identities only; it does not fetch/authenticate linked comments or acceptance. "
+            "See docs/spec/KAEP_AGENT_INBOX_V01.md for the canonical packet contract."
+        )
+    ),
+]
 
 
 def _service():
@@ -44,47 +180,81 @@ def _service():
 
 
 @mcp.tool()
-def bootstrap_repository(repository: str) -> dict[str, Any]:
-    """Return live Repository Control state plus the canonical read order for one managed repository."""
+def bootstrap_repository(repository: RepositoryName) -> dict[str, Any]:
+    """Start a current-state task by reading the live Repository Control and its canonical entry order.
+
+    The result identifies the cross-repository authority and repository-local sources to read next.
+    This is a read-only routing result; it does not grant execution or mutation authority.
+    """
     return _service().bootstrap_repository(repository)
 
 
 @mcp.tool()
-def get_repository_control(repository: str) -> dict[str, Any]:
-    """Return the exact open devflow `[REPO] <repository>` Control Issue as structured live state."""
+def get_repository_control(repository: RepositoryName) -> dict[str, Any]:
+    """Read the exact open devflow `[REPO] <repository>` Control Issue for one managed repository.
+
+    Use it for the manual cross-repository Active Work, Next Action, and canonical entry points.
+    It is a control record, not a complete repository task inventory.
+    """
     return _service().get_repository_control(repository)
 
 
 @mcp.tool()
 def list_managed_repositories() -> list[str]:
-    """List repositories that currently have an open devflow Repository Control Issue."""
+    """List repository names with a currently open devflow Repository Control Issue.
+
+    Use this to discover managed repository names before reading a repository-specific source.
+    The result does not report task-level coverage or whether all work is known.
+    """
     return _service().list_managed_repositories()
 
 
 @mcp.tool()
-def get_repository_projection(repository: str) -> dict[str, Any]:
-    """Return the live read-only repository-local Issue projection for one managed repository."""
+def get_repository_projection(repository: RepositoryName) -> dict[str, Any]:
+    """Read the repository-local Issue projection and its source, freshness, and coverage fields.
+
+    Use it for a bounded view of classified repository Issues. Check the source and coverage status
+    before treating an empty projection as evidence that no work exists.
+    """
     return _service().get_repository_projection(repository)
 
 
 @mcp.tool()
-def get_repository_work_view(repository: str) -> dict[str, Any]:
-    """Read current all-status owner TASKs with explicit legacy Control fallback; never grant claims."""
+def get_repository_work_view(repository: RepositoryName) -> dict[str, Any]:
+    """Discover current all-status owner TASKs with the explicit legacy Control fallback.
+
+    Inspect coverage, unresolved counts, and each TASK record; INCOMPLETE or UNKNOWN coverage
+    does not establish an empty inventory. The returned read-only view cannot authorize execution.
+    """
     return _service().get_repository_work_view(repository)
 
 
 @mcp.tool()
-def get_scoped_task_read(repository: str, issue_number: int) -> dict[str, Any]:
-    """Direct read-only verification of one exact owning TASK Issue; never assert all work or grant claims."""
+def get_scoped_task_read(
+    repository: RepositoryName,
+    issue_number: PositiveIssueNumber,
+) -> dict[str, Any]:
+    """Verify one exact known owner TASK Issue and its current structured work metadata.
+
+    Use this for a referenced Issue after discovery. It covers that Issue only; it does not
+    establish repository-wide work coverage or authorize a claim.
+    """
     return _service().get_scoped_task_read(repository, issue_number)
 
 
 @mcp.tool()
 def get_agent_inbox(
-    repository: str, recipient: str = "claude-code",
-    limit: int = 20, offset: int = 0, work_status: str | None = None,
+    repository: RepositoryName, recipient: InboxRecipient = "claude-code",
+    limit: InboxLimit = 20, offset: InboxOffset = 0,
+    work_status: WorkStatusFilter = None,
 ) -> dict[str, Any]:
-    """Read bounded trusted TASKs and their KAEP requests; never authorize execution."""
+    """Read a bounded page of trusted TASK Issues for one exact KAEP recipient.
+
+    The requested page limit is 1–20 (default 20); returned pages may be empty. Each Issue retains
+    its existing 500-comment bound. Follow next_offset only when truncated is true. Coverage and
+    filtered-zero results must be interpreted with their status fields; Inbox visibility is read-only and grants
+    no execution, Claim, ACK, or delivery authority.
+    """
     return _service().get_agent_inbox(
         repository, recipient, limit=limit, offset=offset,
         work_status=work_status)
@@ -92,12 +262,18 @@ def get_agent_inbox(
 
 @mcp.tool()
 def get_agent_workspace(
-    repository: str, recipient: str = "codex",
-    limit: int = 20, offset: int = 0, work_status: str | None = None,
-    include_recent_kaep: bool = False,
-    include_published_supply: bool = False,
+    repository: RepositoryName, recipient: InboxRecipient = "codex",
+    limit: InboxLimit = 20, offset: InboxOffset = 0,
+    work_status: WorkStatusFilter = None,
+    include_recent_kaep: IncludeRecentKaep = False,
+    include_published_supply: IncludePublishedSupply = False,
 ) -> dict[str, Any]:
-    """Opt-in read-only unified Work/KAEP observation; unknown runtime sections remain unknown."""
+    """Read the bounded unified Work view with optional KAEP and published-supply observations.
+
+    `include_recent_kaep` and `include_published_supply` default to false and opt in to those
+    sections. Inspect source status, coverage, and unknown sections; the result does not establish
+    all-history completeness, live agent pickup, Offer/Claim eligibility, or execution authority.
+    """
     return _service().get_agent_workspace(
         repository, recipient, limit=limit, offset=offset,
         work_status=work_status, include_recent_kaep=include_recent_kaep,
@@ -107,45 +283,99 @@ def get_agent_workspace(
 
 @mcp.tool()
 def get_portfolio_projection() -> dict[str, Any]:
-    """Return a read-only summary projection across all currently managed repositories."""
+    """Read observed aggregate counts and repository summaries across managed repositories.
+
+    Check each source and coverage status before using the projection; unavailable or incomplete
+    sources remain visible. Use a repository-specific read for an exact Issue decision.
+    """
     return _service().get_portfolio_projection()
 
 
 @mcp.tool()
-def get_human_portfolio(repository: str) -> dict[str, Any]:
-    """Return the live read-only Human Portfolio queue for one managed repository."""
+def get_human_portfolio(repository: RepositoryName) -> dict[str, Any]:
+    """Read the current Human Portfolio queue for one managed repository.
+
+    Use entry dispositions and evidence freshness to identify work awaiting human attention.
+    The queue is a read-only projection and can retain incomplete or unresolved source status.
+    """
     return _service().get_human_portfolio(repository)
 
 
 @mcp.tool()
-def get_issue(repository: str, issue_number: int) -> dict[str, Any]:
-    """Read one GitHub Issue from a repository. Private repositories require a read-capable token."""
+def get_issue(
+    repository: RepositoryName,
+    issue_number: PositiveIssueNumber,
+) -> dict[str, Any]:
+    """Read one exact GitHub Issue by repository and positive Issue number.
+
+    The result contains the observed Issue identity, body, parsed sections, and update time.
+    Private repositories require an already configured read-capable token.
+    """
     return _service().get_issue(repository, issue_number)
 
 
 @mcp.tool()
-def get_issue_goal_context(repository: str, issue_number: int) -> dict[str, Any]:
-    """Resolve source-linked effective Goal Context through bounded read-only Issue ancestry."""
+def get_issue_goal_context(
+    repository: RepositoryName,
+    issue_number: PositiveIssueNumber,
+) -> dict[str, Any]:
+    """Resolve source-linked effective Goal Context for one Issue through bounded read-only ancestry.
+
+    Inspect source references and resolution status before using adopted conditions. The result
+    resolves declarations; it does not prove implementation behavior or user acceptance.
+    """
     return _service().get_issue_goal_context(repository, issue_number)
 
 
 @mcp.tool()
-def assess_issue_plan(repository: str, issue_number: int, plan: dict[str, Any]) -> dict[str, Any]:
-    """Compare declared plan effects with adopted source-linked conditions; advisory and read-only."""
+def assess_issue_plan(
+    repository: RepositoryName,
+    issue_number: PositiveIssueNumber,
+    plan: PlanPacket,
+) -> dict[str, Any]:
+    """Compare a declared plan packet with adopted source-linked conditions for one Issue.
+
+    Packet example: {"schema_version":1,"task_ref":"kinoko34077/devflow#14","steps":
+    [{"id":"docs","intent":"Update the usage guide","declared_effects":
+    [{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}.
+    Top-level keys are exact; use 1–64 steps, unique 1–120 character ASCII ids, non-empty
+    intents (up to 1000 chars), and at most 128 effects. An effect uses non-empty key/scope
+    (up to 200 chars) and either state=set plus value or state=removed without value.
+    Malformed packets return NEEDS_EVIDENCE. Results are read-only and cannot authorize or
+    block execution; detailed packet rules live in the canonical spec.
+    """
     return _service().assess_issue_plan(repository, issue_number, plan)
 
 
 @mcp.tool()
 def assess_outcome_observation(
-    repository: str, issue_number: int, evidence: dict[str, Any] | None,
+    repository: RepositoryName,
+    issue_number: PositiveIssueNumber,
+    evidence: OutcomeEvidence,
 ) -> dict[str, Any]:
-    """Compare declared outcome identities to the current Issue revision; does not verify use or acceptance."""
+    """Compare declared outcome identities with one Issue's current body revision.
+
+    A SUCCESS example is {"task_ref":"kinoko34077/devflow#14","issue_body_sha256":
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required_surface":"PUBLIC_BROWSER","required_target":"git:abc123",
+    "observed_surface":"PUBLIC_BROWSER","observed_target":"git:abc123","observed_result":
+    "SUCCESS","evidence_refs":["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}.
+    Use exactly these fields; replace the example digest with the current Issue body SHA-256.
+    Surface ids match
+    [A-Z][A-Z0-9_]{0,63}, 1–256 printable ASCII target chars, and 1–8 unique issuecomment URLs.
+    Null, partial, malformed, and stale packets can return NEEDS_EVIDENCE. DECLARED_ALIGNED means
+    the declared identities match; linked comments are not fetched or authenticated, and user
+    acceptance is not established. This read-only advisory cannot authorize execution.
+    """
     return _service().assess_outcome_observation(repository, issue_number, evidence)
 
 
 @mcp.tool()
 def get_sync_health() -> dict[str, Any]:
-    """Return the machine-maintained devflow Project Sync Health record."""
+    """Read the machine-maintained devflow Project Sync Health record.
+
+    This reports Project synchronization status and diagnostics. It does not assess technical
+    correctness, repository task completeness, or Issue acceptance.
+    """
     return _service().get_sync_health()
 
 
