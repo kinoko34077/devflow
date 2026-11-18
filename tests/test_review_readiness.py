@@ -1,4 +1,7 @@
 import unittest
+import json
+import io
+from unittest import mock
 
 from tools import review_readiness
 
@@ -292,3 +295,246 @@ class ReviewReadinessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def codex_summary(*, head=HEAD, status="completed", unresolved=False,
+                  has_findings=False, author_id=199175422,
+                  login="chatgpt-codex-connector[bot]", user_type="Bot",
+                  comment_id=801, updated_at="2026-11-18T01:00:00Z"):
+    payload = {
+        "code_review": {
+            "commit_sha": head,
+            "status": status,
+            "has_any_findings": has_findings,
+            "has_unresolved_findings": unresolved,
+        },
+        "security_review": {
+            "commit_sha": None, "status": None,
+            "has_any_findings": None, "has_unresolved_findings": None,
+        },
+    }
+    return {
+        "id": comment_id,
+        "updated_at": updated_at,
+        "user": {"id": author_id, "login": login, "type": user_type},
+        "body": ("<!-- codex-pull-request-review-summary -->\n"
+                 "<!-- codex-review-state:v1 "
+                 + json.dumps(payload, separators=(",", ":")) + " -->\n"),
+    }
+
+
+class CodexReviewEvidenceTests(unittest.TestCase):
+    # The verifier receives this set ONLY after authenticating real GitHub
+    # editor history. Fixture JSON can never provide it to the CLI.
+    def evaluate(self, *args, **kwargs):
+        return review_readiness.evaluate(
+            *args, verified_codex_ids={801, 802}, **kwargs
+        )
+
+    def test_current_head_codex_bot_independently_reviews_codex_implementation(self):
+        case = pr(different_required="yes", implementer_system="Codex",
+                  implementer_model="GPT-6")
+        outcome = self.evaluate(case, [], [codex_summary()])
+        self.assertTrue(outcome.ready, outcome.reason)
+        self.assertEqual(outcome.matched_review_id, 801)
+
+    def test_current_head_bot_is_additional_formal_review_path(self):
+        self.assertTrue(self.evaluate(pr(), [], [codex_summary()]).ready)
+        self.assertFalse(self.evaluate(pr(), []).ready)
+
+    def test_stale_or_pending_bot_evidence_fails(self):
+        for packet in [
+            codex_summary(head=OTHER),
+            codex_summary(status="pending"),
+            codex_summary(unresolved=True, has_findings=True),
+            codex_summary(has_findings=None),
+        ]:
+            with self.subTest(packet=packet):
+                self.assertFalse(self.evaluate(
+                    pr(different_required="yes"), [], [packet]
+                ).ready)
+
+    def test_forged_bot_comments_fail(self):
+        for change in (
+            {"author_id": 79015263},
+            {"login": "kinoko34077"},
+            {"user_type": "User"},
+        ):
+            packet = codex_summary(**change)
+            with self.subTest(change=change):
+                self.assertFalse(self.evaluate(pr(), [], [packet]).ready)
+        packet = codex_summary()
+        packet["body"] += packet["body"]
+        self.assertFalse(self.evaluate(pr(), [], [packet]).ready)
+
+    def test_malformed_and_summary_only_text_fails(self):
+        packet = codex_summary()
+        packet["body"] = "Codex Review: Didn't find any major issues."
+        self.assertFalse(self.evaluate(pr(), [], [packet]).ready)
+        packet["body"] = (
+            "<!-- codex-pull-request-review-summary -->\n"
+            "<!-- codex-review-state:v1 {invalid} -->"
+        )
+        self.assertFalse(self.evaluate(pr(), [], [packet]).ready)
+
+    def test_newer_stale_summary_supersedes_older_clean(self):
+        old = codex_summary()
+        newer = codex_summary(head=OTHER, comment_id=802,
+                              updated_at="2026-11-18T02:00:00Z")
+        self.assertFalse(self.evaluate(pr(), [], [old, newer]).ready)
+
+    def test_native_request_changes_cannot_be_overridden_by_bot(self):
+        native = review(state="CHANGES_REQUESTED", decision="REQUEST_CHANGES")
+        self.assertFalse(self.evaluate(
+            pr(different_required="yes"), [native], [codex_summary()]
+        ).ready)
+
+    def test_native_comment_blocking_findings_not_overridden(self):
+        blocking = review(blocking="P1: unresolved loss of data")
+        self.assertFalse(self.evaluate(pr(), [blocking], [codex_summary()]).ready)
+        # A later clean formal Review on the same head can supersede a
+        # previously declared COMMENT finding, without dismissing unrelated
+        # native REQUEST_CHANGES.
+        clear = review(review_id=202)
+        self.assertTrue(self.evaluate(
+            pr(), [blocking, clear], [codex_summary()]
+        ).ready)
+
+    def test_invalid_later_formal_cannot_clear_existing_blocker(self):
+        first = review(blocking="P1: unresolved", review_id=201)
+        for second in (
+            review(review_id=202, version="1"),
+            review(review_id=202, commit_id=OTHER),
+            review(review_id=202, state="DISMISSED"),
+        ):
+            with self.subTest(second=second):
+                result = self.evaluate(
+                    pr(), [first, second], [codex_summary()]
+                )
+                self.assertFalse(result.ready)
+
+    def test_existing_native_formal_review_remains_supported(self):
+        self.assertTrue(self.evaluate(
+            pr(), [review()], [codex_summary(head=OTHER)]
+        ).ready)
+
+    def test_bot_cannot_review_its_own_changes_as_independent(self):
+        case = pr(different_required="yes",
+                  implementer_system="chatgpt-codex-connector",
+                  implementer_model="unknown")
+        self.assertFalse(self.evaluate(
+            case, [], [codex_summary()]
+        ).ready)
+
+    def test_unverified_edited_source_cannot_pass_from_fixture_json(self):
+        self.assertFalse(review_readiness.evaluate(
+            pr(), [], [codex_summary()]
+        ).ready)
+        self.assertTrue(self.evaluate(pr(), [], [codex_summary()]).ready)
+
+    def test_live_graphql_edit_history_accepts_only_bot_edits(self):
+        comment = codex_summary()
+        comment["node_id"] = "IC_authoritative"
+        comment["user"]["node_id"] = "BOT_authoritative"
+
+        def exercise(editor_id):
+            def api(request, timeout=20):
+                path = request.full_url
+                if path.endswith("/pulls/42"):
+                    payload = {"head": {"sha": HEAD}, "body": pr_body()}
+                elif "pulls/42/reviews?" in path:
+                    payload = []
+                elif "issues/42/comments?" in path:
+                    payload = [comment]
+                elif path.endswith("/graphql"):
+                    query = json.loads(request.data.decode("utf-8"))["query"]
+                    self.assertEqual(query.count("editor { ... on Bot { id } }"), 2)
+                    self.assertNotIn("editor { id }", query)
+                    payload = {"data": {"node": {
+                        "id": "IC_authoritative", "body": comment["body"],
+                        "editor": {"id": editor_id},
+                        "lastEditedAt": "2026-11-18T01:00:00Z",
+                        "userContentEdits": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [{"editor": {"id": editor_id}}],
+                        },
+                    }}}
+                else:
+                    raise AssertionError("Unexpected API: " + path)
+                return io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+            with mock.patch.dict(review_readiness.os.environ,
+                                 {"GH_TOKEN": "fixture", "GH_API_URL": "https://api.github.com"},
+                                 clear=True):
+                with mock.patch.object(review_readiness.urllib.request,
+                                       "urlopen", side_effect=api):
+                    return review_readiness._github_review_packet(
+                        "kinoko34077/devflow", 42
+                    )
+
+        pr_source, review_source, comment_source, verified = exercise("BOT_authoritative")
+        self.assertIn(801, verified)
+        self.assertTrue(review_readiness.evaluate(
+            pr_source, review_source, comment_source,
+            verified_codex_ids=verified,
+        ).ready)
+        self.assertEqual(exercise("USER_wrong")[3], set())
+
+    def test_existing_gh_cli_is_used_without_new_credentials(self):
+        comment = codex_summary()
+        comment["node_id"] = "IC_from_gh"
+        comment["user"]["node_id"] = "BOT_from_gh"
+
+        def gh_run(command, **kwargs):
+            self.assertEqual(command[:2], ["gh", "api"])
+            resource = command[2]
+            self.assertEqual(command[3:5], ["--hostname", "github.com"])
+            if resource.endswith("/pulls/42"):
+                packet = {"head": {"sha": HEAD}, "body": pr_body()}
+            elif "pulls/42/reviews?" in resource:
+                packet = []
+            elif "issues/42/comments?" in resource:
+                packet = [comment]
+            elif resource == "graphql":
+                self.assertEqual(command[5], "-f")
+                self.assertEqual(command[6].count("editor { ... on Bot { id } }"), 2)
+                self.assertEqual(command[7:9], ["-F", "id=IC_from_gh"])
+                packet = {"data": {"node": {
+                    "id": "IC_from_gh", "body": comment["body"],
+                    "editor": {"id": "BOT_from_gh"},
+                    "lastEditedAt": "2026-11-18T02:00:00Z",
+                    "userContentEdits": {"pageInfo": {"hasNextPage": False},
+                                         "nodes": [{"editor": {"id": "BOT_from_gh"}}]},
+                }}}
+            else:
+                raise AssertionError("unexpected gh endpoint " + resource)
+            return mock.Mock(stdout=json.dumps(packet), returncode=0)
+
+        # GH_HOST must not redirect a verified github.com review lookup to an
+        # identically named private/enterprise repository.
+        with mock.patch.dict(review_readiness.os.environ,
+                             {"GH_HOST": "github.enterprise.example"}, clear=True):
+            with mock.patch.object(review_readiness.subprocess, "run",
+                                   side_effect=gh_run) as runner:
+                pr_data, review_data, comments, verified = (
+                    review_readiness._github_review_packet("kinoko34077/devflow", 42)
+                )
+        self.assertEqual(runner.call_count, 4)
+        self.assertIn(801, verified)
+        self.assertTrue(review_readiness.evaluate(
+            pr_data, review_data, comments, verified_codex_ids=verified
+        ).ready)
+
+    def test_live_read_uses_existing_auth_only_and_fails_closed(self):
+        with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
+            with mock.patch.object(review_readiness.subprocess, "run",
+                                   side_effect=FileNotFoundError("gh unavailable")):
+                with self.assertRaises(FileNotFoundError):
+                    review_readiness._github_review_packet("kinoko34077/devflow", 1057)
+        with self.assertRaisesRegex(ValueError, "owner/name"):
+            review_readiness._github_review_packet("https://bad", 1)
+        with mock.patch.dict(review_readiness.os.environ,
+                             {"GH_TOKEN": "fake", "GH_API_URL": "http://example.com"},
+                             clear=True):
+            with self.assertRaisesRegex(ValueError, "api.github.com"):
+                review_readiness._github_review_packet("kinoko34077/devflow", 1)

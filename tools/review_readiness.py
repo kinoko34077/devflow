@@ -10,9 +10,13 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
 from typing import Any
+import urllib.parse
+import urllib.request
 
 
 _STATE_TO_DECISION = {
@@ -213,7 +217,203 @@ def _managed_reviews(
     return managed
 
 
-def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResult:
+
+# GitHub API user identity for the repository-installed Codex PR review integration.
+# This is not the GitHub identity of the normal implementing Codex session.
+_CODEX_BOT_ID = 199175422
+_CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]"
+_CODEX_STATE = re.compile(
+    r"<!-- codex-review-state:v1 ([^\r\n]{1,2048}) -->"
+)
+
+
+def _verified_codex_summary(comment: dict[str, Any], head_sha: str) -> bool:
+    """Admit only the actual bot's exact-head, completed code review summary."""
+    user = comment.get("user")
+    if not isinstance(user, dict) or (
+        user.get("id") != _CODEX_BOT_ID
+        or user.get("login") != _CODEX_BOT_LOGIN
+        or user.get("type") != "Bot"
+    ):
+        return False
+    body = comment.get("body")
+    if not isinstance(body, str) or body.count(
+        "<!-- codex-pull-request-review-summary -->"
+    ) != 1:
+        return False
+    matches = _CODEX_STATE.findall(body)
+    if len(matches) != 1:
+        return False
+    try:
+        packet = json.loads(matches[0])
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(packet, dict):
+        return False
+    review = packet.get("code_review")
+    return (
+        isinstance(review, dict)
+        and review.get("commit_sha") == head_sha
+        and review.get("status") == "completed"
+        and type(review.get("has_any_findings")) is bool
+        and review.get("has_unresolved_findings") is False
+    )
+
+
+def _latest_codex_summary(comments: list[dict[str, Any]]) -> dict[str, Any] | None:
+    # A newer, pending or stale bot summary must not be overruled by an older
+    # clean review. GitHub issue_comment edits update the original summary.
+    items = [
+        c for c in comments
+        if isinstance(c, dict)
+        and isinstance(c.get("user"), dict)
+        and c["user"].get("id") == _CODEX_BOT_ID
+        and c["user"].get("login") == _CODEX_BOT_LOGIN
+        and isinstance(c.get("body"), str)
+        and "<!-- codex-pull-request-review-summary -->" in c["body"]
+    ]
+    if not items:
+        return None
+    return max(items, key=lambda c: (str(c.get("updated_at") or ""),
+                                      int(c.get("id") or 0)))
+
+
+def _github_review_packet(repository: str, pr_number: int) -> tuple[
+    dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], set[int]
+]:
+    """Read only native REST source records; reusable outside GitHub Actions."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("repository must be owner/name")
+    if type(pr_number) is not int or pr_number < 1:
+        raise ValueError("PR number must be positive")
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    use_existing_gh = not bool(token)
+    api = os.environ.get("GH_API_URL", "https://api.github.com").rstrip("/")
+    parsed = urllib.parse.urlparse(api)
+    if (parsed.scheme != "https" or parsed.hostname != "api.github.com"
+            or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError("GH_API_URL must be https://api.github.com")
+    parts = repository.split("/")
+    base = f"{api}/repos/{urllib.parse.quote(parts[0])}/{urllib.parse.quote(parts[1])}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def get_json(url: str) -> Any:
+        if use_existing_gh:
+            endpoint = urllib.parse.urlparse(url)
+            relative = endpoint.path + ("?" + endpoint.query if endpoint.query else "")
+            response = subprocess.run(
+                ["gh", "api", relative, "--hostname", "github.com"],
+                capture_output=True, text=True,
+                check=True, timeout=20,
+            )
+            return json.loads(response.stdout)
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)
+
+    def trusted_bot_edit_history(comment: dict[str, Any]) -> bool:
+        """Verify every edit via GitHub GraphQL, not only original REST author."""
+        user = comment.get("user") or {}
+        node_id = user.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            return False
+        query = """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on IssueComment {
+              id
+              body
+              editor { ... on Bot { id } }
+              lastEditedAt
+              userContentEdits(first: 100) {
+                pageInfo { hasNextPage }
+                nodes { editor { ... on Bot { id } } }
+              }
+            }
+          }
+        }
+        """
+        data = json.dumps({"query": query, "variables": {"id": comment.get("node_id")}}).encode("utf-8")
+        if not comment.get("node_id"):
+            return False
+        try:
+            if use_existing_gh:
+                response = subprocess.run(
+                    ["gh", "api", "graphql", "--hostname", "github.com",
+                     "-f", f"query={query}", "-F", f"id={comment['node_id']}"],
+                    capture_output=True, text=True, check=True, timeout=20,
+                )
+                packet = json.loads(response.stdout)
+            else:
+                request = urllib.request.Request(
+                    f"{api}/graphql", data=data,
+                    headers={**headers, "Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    packet = json.load(response)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return False
+        if not isinstance(packet, dict) or packet.get("errors"):
+            return False
+        node = (packet.get("data") or {}).get("node")
+        if not isinstance(node, dict) or node.get("id") != comment.get("node_id"):
+            return False
+        # Re-read the same rendered body through an independent GitHub API
+        # surface to guard an edit racing with the REST read.
+        if node.get("body") != comment.get("body"):
+            return False
+        history = node.get("userContentEdits")
+        if not isinstance(history, dict) or not isinstance(history.get("nodes"), list):
+            return False
+        if (history.get("pageInfo") or {}).get("hasNextPage") is not False:
+            return False
+        if node.get("lastEditedAt") is not None:
+            if not isinstance(node.get("editor"), dict) or node["editor"].get("id") != node_id:
+                return False
+            if not history["nodes"]:
+                return False
+        return all(
+            isinstance(edit, dict)
+            and isinstance(edit.get("editor"), dict)
+            and edit["editor"].get("id") == node_id
+            for edit in history["nodes"]
+        )
+
+    def pages(suffix: str) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        for page in range(1, 21):
+            query = urllib.parse.urlencode({"per_page": 100, "page": page})
+            batch = get_json(f"{base}/{suffix}?{query}")
+            if not isinstance(batch, list) or any(not isinstance(v, dict) for v in batch):
+                raise ValueError("Unexpected GitHub list response")
+            found.extend(batch)
+            if len(batch) < 100:
+                return found
+        raise ValueError("GitHub source pagination incomplete")
+
+    pr = get_json(f"{base}/pulls/{pr_number}")
+    if not isinstance(pr, dict):
+        raise ValueError("Unexpected GitHub PR response")
+    reviews = pages(f"pulls/{pr_number}/reviews")
+    comments = pages(f"issues/{pr_number}/comments")
+    verified_bot_ids: set[int] = set()
+    summary = _latest_codex_summary(comments)
+    if summary is not None and trusted_bot_edit_history(summary):
+        verified_bot_ids.add(summary["id"])
+    return pr, reviews, comments, verified_bot_ids
+
+
+def evaluate(
+    pr: dict[str, Any], reviews: list[dict[str, Any]],
+    comments: list[dict[str, Any]] | None = None,
+    *, verified_codex_ids: set[int] | None = None,
+) -> ReadinessResult:
     body = str(pr.get("body") or "")
     formal_required, valid_formal_gate = _yes_no_field(body, "Formal review required")
     different_required, valid_different_gate = _yes_no_field(
@@ -256,6 +456,50 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
     head_sha = str(head.get("sha") or "")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
         return ReadinessResult(False, "Current head SHA is missing or invalid")
+
+    if comments is not None:
+        latest_bot = _latest_codex_summary(comments)
+        # A native REQUEST_CHANGES is a separate blocking gate; even a clean
+        # bot summary must not silently override it.
+        current_head_formal = [
+            r for r in reviews
+            if _provenance_fields(str(r.get("body") or "")) is not None
+            and _commit_value(_provenance_fields(str(r.get("body") or ""))["Reviewed-Commit"]) == head_sha
+        ]
+        # A submitted COMMENT Review can block a merge. A later submission
+        # clears that state only when the *whole* formal review is valid.
+        # In particular, v1, dismissed, mismatched API commit, and malformed
+        # provenance cannot silently clear an earlier blocker.
+        formal_blocker = False
+        for candidate in current_head_formal:
+            formal_blocker = _review_rejection(
+                candidate,
+                implementer_signature=implementer_signature,
+                head_sha=head_sha,
+            ) is not None
+        has_native_blocker = formal_blocker or any(
+            str(r.get("state") or "").upper() == "CHANGES_REQUESTED"
+            for r in reviews
+        )
+        has_malformed_native = any(
+            _PROVENANCE_HEADING.search(str(r.get("body") or ""))
+            and _provenance_fields(str(r.get("body") or "")) is None
+            for r in reviews
+        )
+        if (
+            latest_bot is not None
+            and latest_bot.get("id") in (verified_codex_ids or set())
+            and _verified_codex_summary(latest_bot, head_sha)
+            and not has_native_blocker
+            and not has_malformed_native
+            and independence_signature[0]
+            not in {"chatgpt-codex-connector", "chatgpt-codex-connector[bot]"}
+        ):
+            return ReadinessResult(
+                True,
+                "Current-head verified GitHub Codex Code Review completed with no unresolved findings",
+                latest_bot.get("id"),
+            )
 
     managed = _managed_reviews(reviews)
     if not managed:
@@ -327,16 +571,41 @@ def evaluate(pr: dict[str, Any], reviews: list[dict[str, Any]]) -> ReadinessResu
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pr-json", required=True, type=Path)
-    parser.add_argument("--reviews-json", required=True, type=Path)
+    parser.add_argument("--pr-json", type=Path)
+    parser.add_argument("--reviews-json", type=Path)
+    parser.add_argument("--comments-json", type=Path)
+    parser.add_argument("--repository", help="GitHub owner/name for authenticated read-only REST mode")
+    parser.add_argument("--pr-number", type=int, help="PR number for REST mode")
     args = parser.parse_args()
 
-    pr = json.loads(args.pr_json.read_text(encoding="utf-8"))
-    reviews = json.loads(args.reviews_json.read_text(encoding="utf-8"))
-    if not isinstance(pr, dict) or not isinstance(reviews, list):
-        raise SystemExit("PR JSON must be an object and reviews JSON must be a list")
-
-    result = evaluate(pr, reviews)
+    try:
+        if args.repository is not None or args.pr_number is not None:
+            if (args.repository is None or args.pr_number is None
+                    or args.pr_json or args.reviews_json or args.comments_json):
+                parser.error("live mode requires --repository and --pr-number only")
+            pr, reviews, comments, verified_bot_ids = _github_review_packet(args.repository, args.pr_number)
+            summary = _latest_codex_summary(comments)
+            evidence_state = (
+                "absent" if summary is None else
+                "editor-history-verified" if summary.get("id") in verified_bot_ids else
+                "editor-history-unverified"
+            )
+            print(f"review-readiness-source: codex-summary={evidence_state}")
+        else:
+            if args.pr_json is None or args.reviews_json is None:
+                parser.error("offline mode requires --pr-json and --reviews-json")
+            pr = json.loads(args.pr_json.read_text(encoding="utf-8"))
+            reviews = json.loads(args.reviews_json.read_text(encoding="utf-8"))
+            comments = (json.loads(args.comments_json.read_text(encoding="utf-8"))
+                        if args.comments_json else None)
+            verified_bot_ids = set()  # Fixture JSON is not authenticated GitHub evidence.
+        if (not isinstance(pr, dict) or not isinstance(reviews, list)
+                or (comments is not None and not isinstance(comments, list))):
+            raise ValueError("PR/reviews/comments source JSON has invalid structure")
+        result = evaluate(pr, reviews, comments, verified_codex_ids=verified_bot_ids)
+    except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        print(f"review-readiness: FAIL — source unavailable or invalid: {type(exc).__name__}")
+        return 1
     status = "PASS" if result.ready else "FAIL"
     matched = f" review_id={result.matched_review_id}" if result.matched_review_id else ""
     print(f"review-readiness: {status}{matched} — {result.reason}")
