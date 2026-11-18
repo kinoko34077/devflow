@@ -71,8 +71,16 @@ turn incomplete output into a conclusion that no work exists.
 
 ## Boundaries
 
-- Read `docs/operations/DEVFLOW_MCP.md` before relying on an argument, value,
-  error code, source-status field, or safety condition.
+- With a registered current MCP, inspect live `tools/list` first for basic call
+  syntax and input bounds. It is generated from function docstrings and shared
+  argument metadata in `tools/devflow_mcp.py`; the accepted implementation is
+  [PR #1049](https://github.com/kinoko34077/devflow/pull/1049) /
+  [#1052](https://github.com/kinoko34077/devflow/issues/1052).
+- For error codes, source status, completeness, trust and safety decisions,
+  read `docs/operations/DEVFLOW_MCP.md` and applicable canonical specifications.
+  `tools/list` metadata does not establish work absence or execution authority.
+  Future client/version redesign remains deferred in
+  [#805](https://github.com/kinoko34077/devflow/issues/805).
 - Static route metadata never substitutes for live Control, Issue, PR, CI, or
   current-head reads.
 - The route is valid only while each indexed source path exists. Physical code
