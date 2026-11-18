@@ -261,6 +261,61 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("validation_error=required_status_checks.checks:custom", result)
         self.assertNotIn(secret, result)
 
+    def test_validation_diagnostics_normalize_indexed_check_fields(self):
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "field": "required_status_checks.checks[0].app_id",
+                "code": "invalid",
+                "message": "sensitive detail",
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn(
+            "validation_error=required_status_checks.checks.app_id:invalid",
+            result,
+        )
+        self.assertNotIn("sensitive detail", result)
+
+    def test_validation_diagnostics_classify_unknown_codes_without_echoing_them(self):
+        secret = "private-code-value"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "field": "required_status_checks.checks.app_id",
+                "code": secret,
+                "message": "private message",
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn(
+            "validation_error=required_status_checks.checks.app_id:unclassified_code",
+            result,
+        )
+        self.assertNotIn(secret, result)
+        self.assertNotIn("private message", result)
+
+    def test_validation_diagnostics_classify_unknown_fields_without_echoing_them(self):
+        secret = "private-field-value"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "field": secret,
+                "code": "invalid",
+                "message": "private message",
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_error=unclassified_field:invalid", result)
+        self.assertNotIn(secret, result)
+        self.assertNotIn("private message", result)
+
     def test_validation_diagnostics_classify_known_one_of_failure(self):
         result = self.classify(
             422,
@@ -317,7 +372,8 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
 
         self.assertEqual(
             result,
-            "category=validation_failed validation_errors=unclassified",
+            "category=validation_failed validation_errors=unclassified "
+            "validation_error=unclassified_field:unclassified_code",
         )
         self.assertNotIn(secret, result)
 

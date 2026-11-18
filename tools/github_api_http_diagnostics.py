@@ -40,6 +40,23 @@ _VALIDATION_CODES = frozenset({
 })
 
 
+def _safe_validation_field(value: Any) -> str | None:
+    """Return a known field after removing only numeric array indexes."""
+    if not isinstance(value, str):
+        return None
+    normalized = re.sub(r"\[\d+\]", "", value.strip())
+    normalized = re.sub(r"\.(\d+)\.", ".", normalized)
+    return normalized if normalized in _VALIDATION_FIELDS else None
+
+
+def _safe_validation_code(value: Any) -> str | None:
+    """Return a known GitHub validation code; never echo unknown values."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().casefold()
+    return normalized if normalized in _VALIDATION_CODES else None
+
+
 def _header(headers: Any, name: str) -> str | None:
     """Read only named headers; never serialize the header collection."""
     if headers is None:
@@ -165,15 +182,10 @@ def _validation_details(response_body: bytes) -> list[str]:
     for error in errors:
         if not isinstance(error, dict):
             continue
-        field = error.get("field")
-        code = error.get("code")
-        if (
-            isinstance(field, str)
-            and field in _VALIDATION_FIELDS
-            and isinstance(code, str)
-            and code.casefold() in _VALIDATION_CODES
-        ):
-            details.append(f"validation_error={field}:{code.casefold()}")
+        field = _safe_validation_field(error.get("field"))
+        code = _safe_validation_code(error.get("code"))
+        if field is not None and code is not None:
+            details.append(f"validation_error={field}:{code}")
             break
     if not any(item.startswith("validation_error=") for item in details):
         details.append(f"validation_errors={error_shape}")
@@ -195,6 +207,18 @@ def _validation_details(response_body: bytes) -> list[str]:
             ):
                 details.append(f"validation_field={field}")
                 break
+    if not any(item.startswith("validation_error=") for item in details):
+        for error in errors:
+            if not isinstance(error, dict):
+                continue
+            field = _safe_validation_field(error.get("field"))
+            code = _safe_validation_code(error.get("code"))
+            details.append(
+                "validation_error="
+                f"{field or 'unclassified_field'}:"
+                f"{code or 'unclassified_code'}"
+            )
+            break
     return details
 
 
