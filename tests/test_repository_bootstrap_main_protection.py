@@ -13,7 +13,7 @@ POLICY = "public-only-v1"
 BASELINE = {
     "required_status_checks": {
         "strict": False,
-        "checks": [{"context": "verify", "app_id": 15368}],
+        "contexts": ["verify"],
     },
     "enforce_admins": True,
     "required_pull_request_reviews": {
@@ -40,8 +40,11 @@ def protection_readback(baseline=BASELINE):
     result = {
         "required_status_checks": {
             "strict": baseline["required_status_checks"]["strict"],
-            "contexts": [item["context"] for item in baseline["required_status_checks"]["checks"]],
-            "checks": copy.deepcopy(baseline["required_status_checks"]["checks"]),
+            "contexts": copy.deepcopy(baseline["required_status_checks"]["contexts"]),
+            "checks": [
+                {"context": item, "app_id": 15368}
+                for item in baseline["required_status_checks"]["contexts"]
+            ],
         },
         "enforce_admins": {"enabled": baseline["enforce_admins"]},
         "required_pull_request_reviews": {
@@ -114,6 +117,15 @@ class ProtectionApi(FakeApi):
 
 
 class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
+    def test_public_protection_put_uses_the_documented_status_check_request_shape(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        status_checks = repository.protection_payloads[0]["required_status_checks"]
+        self.assertEqual(["verify"], status_checks.get("contexts"))
+        self.assertNotIn("checks", status_checks)
+
     def test_public_bootstrap_applies_and_reads_back_the_accepted_baseline(self):
         repository, devflow = ProtectionApi(), FakeApi()
 
@@ -373,7 +385,8 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual("PUT", call.call_args_list[1].args[0])
         self.assertIn("/branches/main/protection", call.call_args_list[1].args[1])
         self.assertEqual(BASELINE, call.call_args_list[1].args[2])
-        self.assertNotIn("contexts", call.call_args_list[1].args[2]["required_status_checks"])
+        self.assertIn("contexts", call.call_args_list[1].args[2]["required_status_checks"])
+        self.assertNotIn("checks", call.call_args_list[1].args[2]["required_status_checks"])
 
 
 if __name__ == "__main__":

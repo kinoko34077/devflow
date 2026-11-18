@@ -293,8 +293,10 @@ overwritten; setup fails closed at `SEED` for human review. Private repositories
 do not receive this Actions workflow. Historical requests without the
 protection marker do not gain the workflow on retry.
 
-The app-bound required-check PUT sends only `checks` with `app_id: 15368`;
-`contexts` is validated in the GET readback and is not copied into the PUT body.
+The branch-protection PUT sends `contexts: ["verify"]` after the seeded
+workflow emits the check. Verify that the GET readback binds it to GitHub
+Actions app `15368` in `checks`; stop if the provider binding is absent or
+differs.
 
 Private repositories explicitly report
 `NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and

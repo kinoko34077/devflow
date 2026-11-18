@@ -660,7 +660,7 @@ class BootstrapExecutor:
         baseline = {
             "required_status_checks": {
                 "strict": False,
-                "checks": [{"context": "verify", "app_id": 15368}],
+                "contexts": ["verify"],
             },
             "enforce_admins": True,
             "required_pull_request_reviews": {

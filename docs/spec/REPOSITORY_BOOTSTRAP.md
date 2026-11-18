@@ -243,12 +243,13 @@ current policy already matches, Bootstrap verifies it without writing. A
 divergent policy, unexpected repository identity/visibility, or non-`main`
 default branch fails closed and is not overwritten.
 
-For the app-bound required check, the protection PUT sends `checks` (with
-`app_id: 15368`) and omits the legacy `contexts` request field. The GET
-readback is expected to expose both `contexts: ["verify"]` and the matching
-app-bound `checks` entry; compare the readback form rather than copying it into
-the PUT payload. GitHub documents `checks` as the fine-grained form of this
-setting: https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28.
+For the required check, the protection PUT sends `contexts: ["verify"]` after
+the seeded workflow has emitted that check. GitHub binds a context to the
+GitHub App that recently provided it; Bootstrap then requires the GET readback
+to contain both `contexts: ["verify"]` and `checks: [{"context":"verify",
+"app_id":15368}]`. This keeps the accepted app-bound check while using the
+required request field for the full branch-protection endpoint. See GitHub's
+[Update branch protection API](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection).
 
 The optional push `restrictions` field is owner-type aware. GitHub only
 supports user, app, and team push restrictions for organization-owned
