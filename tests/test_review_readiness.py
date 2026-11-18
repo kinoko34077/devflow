@@ -1,5 +1,6 @@
 import unittest
 import json
+import io
 from unittest import mock
 
 from tools import review_readiness
@@ -417,6 +418,51 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             pr(), [], [codex_summary()]
         ).ready)
         self.assertTrue(self.evaluate(pr(), [], [codex_summary()]).ready)
+
+    def test_live_graphql_edit_history_accepts_only_bot_edits(self):
+        comment = codex_summary()
+        comment["node_id"] = "IC_authoritative"
+        comment["user"]["node_id"] = "BOT_authoritative"
+
+        def exercise(editor_id):
+            def api(request, timeout=20):
+                path = request.full_url
+                if path.endswith("/pulls/42"):
+                    payload = {"head": {"sha": HEAD}}
+                elif "pulls/42/reviews?" in path:
+                    payload = []
+                elif "issues/42/comments?" in path:
+                    payload = [comment]
+                elif path.endswith("/graphql"):
+                    payload = {"data": {"node": {
+                        "id": "IC_authoritative", "body": comment["body"],
+                        "editor": {"id": editor_id},
+                        "lastEditedAt": "2026-11-18T01:00:00Z",
+                        "userContentEdits": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [{"editor": {"id": editor_id}}],
+                        },
+                    }}}
+                else:
+                    raise AssertionError("Unexpected API: " + path)
+                return io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+            with mock.patch.dict(review_readiness.os.environ,
+                                 {"GH_TOKEN": "fixture", "GH_API_URL": "https://api.github.com"},
+                                 clear=True):
+                with mock.patch.object(review_readiness.urllib.request,
+                                       "urlopen", side_effect=api):
+                    return review_readiness._github_review_packet(
+                        "kinoko34077/devflow", 42
+                    )
+
+        pr_source, review_source, comment_source, verified = exercise("BOT_authoritative")
+        self.assertIn(801, verified)
+        self.assertTrue(review_readiness.evaluate(
+            pr_source, review_source, comment_source,
+            verified_codex_ids=verified,
+        ).ready)
+        self.assertEqual(exercise("USER_wrong")[3], set())
 
     def test_live_read_uses_existing_auth_only_and_fails_closed(self):
         with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
