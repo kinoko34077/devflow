@@ -218,6 +218,23 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("validation_error=required_status_checks:invalid", result)
         self.assertNotIn(secret, result)
 
+    def test_validation_diagnostics_allowlist_nested_protection_field(self):
+        secret = "sensitive API detail"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "resource": "ProtectedBranch",
+                "field": "required_status_checks.checks",
+                "code": "custom",
+                "message": secret,
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_error=required_status_checks.checks:custom", result)
+        self.assertNotIn(secret, result)
+
     def test_validation_diagnostics_classify_known_one_of_failure(self):
         result = self.classify(
             422,
@@ -239,7 +256,8 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
     def test_validation_diagnostics_do_not_match_longer_schema_field(self):
         result = self.classify(422, "Invalid request for properties/checks_token")
 
-        self.assertEqual("category=validation_failed", result)
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_errors=absent", result)
 
     def test_validation_diagnostics_do_not_match_longer_one_of_phrase(self):
         result = self.classify(
@@ -247,7 +265,8 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             "Invalid request. More than one subschema in oneOf matched_extra.",
         )
 
-        self.assertEqual("category=validation_failed", result)
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_errors=absent", result)
 
     def test_validation_diagnostics_ignore_unrecognized_error_values(self):
         secret = "private-field-and-code"
@@ -258,8 +277,32 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
 
         result = diagnostics.summarize_github_http_error(422, None, body)
 
-        self.assertEqual(result, "category=validation_failed")
+        self.assertEqual(
+            result,
+            "category=validation_failed validation_errors=unclassified",
+        )
         self.assertNotIn(secret, result)
+
+    def test_validation_diagnostics_report_absent_errors_without_echoing_body(self):
+        result = self.classify(422, "Validation Failed")
+
+        self.assertIn("validation_errors=absent", result)
+
+    def test_validation_diagnostics_report_malformed_or_oversize_body_shape(self):
+        malformed = diagnostics.summarize_github_http_error(422, None, b"not-json-secret")
+        oversized = diagnostics.summarize_github_http_error(
+            422, None, b'{"message":"Validation Failed"}' + b"x" * diagnostics.MAX_ERROR_BODY_BYTES
+        )
+
+        self.assertEqual(
+            malformed,
+            "category=validation_failed validation_errors=malformed",
+        )
+        self.assertEqual(
+            oversized,
+            "category=validation_failed validation_errors=oversize",
+        )
+        self.assertNotIn("not-json-secret", malformed)
 
 
 if __name__ == "__main__":
