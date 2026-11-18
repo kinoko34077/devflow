@@ -1,6 +1,9 @@
 name: verify
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -17,8 +20,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
+      - name: Fetch pull request base commit
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
       - name: Check pull request diff formatting
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: git diff --check "$BASE_SHA" "$HEAD_SHA"
+      - name: Check pushed commit formatting
+        if: github.event_name == 'push'
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: git diff --check "$HEAD_SHA^" "$HEAD_SHA"

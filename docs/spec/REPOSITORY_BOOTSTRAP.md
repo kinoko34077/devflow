@@ -222,10 +222,13 @@ Public repository is eligible only when the verified default branch is exactly
 
 After verifying that the repository is Public with default branch `main` and
 before protection is applied, Bootstrap seeds the trusted
-`.github/workflows/verify.yml` workflow. It emits a job named `verify` for every
-pull request targeting `main` (without path filters), requests only
-`contents:read`, and runs `git diff --check` against the event's base and head
-SHAs without executing repository scripts. A conflicting existing workflow is
+`.github/workflows/verify.yml` workflow. It emits a job named `verify` for
+pushes to `main` and every pull request targeting `main` (without path
+filters), requests only `contents:read`, and runs `git diff --check` without
+executing repository scripts. The seed push emits the required `verify` check
+before Bootstrap configures branch protection. On pull requests, the workflow
+fetches the event's base SHA explicitly so its shallow checkout can compare
+branches whose histories have diverged. A conflicting existing workflow is
 left untouched and fails closed. Private repositories do not receive this
 workflow. Historical requests without the protection marker do not gain this
 workflow on retry.
@@ -257,6 +260,12 @@ readback. An unknown owner type fails closed before the protection mutation.
 This preserves the #78 baseline without sending an unsupported field to a
 personal repository. See GitHub's
 [protected-branches API documentation](https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28).
+
+GitHub can briefly reject the first protection PUT before the newly seeded
+`verify` push check is registered. Bootstrap waits 15 seconds and retries that
+PUT once after an HTTP 422; every other failure and any persistent 422 fails
+closed without changing credentials, permissions, or an existing protection
+policy.
 
 The branch-protection API requires an already-authorized credential with
 administration write access for the target repository. Confirm that the
