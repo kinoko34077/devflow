@@ -9,6 +9,7 @@ class RepositoryBootstrapPolicyTests(unittest.TestCase):
     def test_agents_routes_explicit_new_repository_requests_through_v1_contract(self):
         text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("repository-bootstrap.v1", text)
+        self.assertIn('bootstrap.main_protection: "public-only-v1"', text)
         self.assertIn("[REPO CREATE] <repository-name>", text)
         self.assertIn("docs/operations/REPOSITORY_BOOTSTRAP.md", text)
         self.assertIn("docs/spec/REPOSITORY_BOOTSTRAP.md", text)
@@ -27,6 +28,7 @@ class RepositoryBootstrapPolicyTests(unittest.TestCase):
         self.assertIn("[REPO CREATE] <repository-name>", text)
         self.assertIn("[REPO] <repository-name>", text)
         self.assertIn("repository-bootstrap.v1", text)
+        self.assertIn('bootstrap.main_protection: "public-only-v1"', text)
 
     def test_canonical_spec_and_operations_manual_define_the_same_freshness_fence(self):
         spec = (ROOT / "docs" / "spec" / "REPOSITORY_BOOTSTRAP.md").read_text(encoding="utf-8")

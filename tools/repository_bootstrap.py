@@ -47,11 +47,13 @@ WORK_STATES = WORKFLOW_CONTRACT.work_states
 REPOSITORY_STATES = WORKFLOW_CONTRACT.repository_states
 TEMPLATES = frozenset({"minimal"})
 STANDARD_FEATURES = frozenset({"repo_native_dispatch", "generated-artifact-writeback"})
+MAIN_PROTECTION_POLICY = "public-only-v1"
 REQUIRED_MANAGED_STANDARD_FEATURES = frozenset(
     {"repo_native_dispatch", "generated-artifact-writeback"}
 )
 STANDARD_FEATURE_MANIFEST_PATH = ".devflow/standard-features.json"
 STANDARD_ROLLOUT_CALLER_PATH = ".github/workflows/verified-artifacts-rollout.yml"
+VERIFY_WORKFLOW_PATH = ".github/workflows/verify.yml"
 LEGACY_REPO_NATIVE_DISPATCH_SHA256 = "8f5fb94577be6d03f14faed8a39ee35bcc65058a93ec2a60df51c0678ec460f0"
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 REPOSITORY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -64,6 +66,10 @@ class BootstrapError(ValueError):
 
 class GitHubApiError(RuntimeError):
     """Bounded GitHub transport/API error that never embeds credentials."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class BootstrapFailure(BootstrapError):
@@ -112,6 +118,7 @@ class BootstrapRequest:
     devflow_managed: bool
     repo_native_dispatch: bool
     generated_artifact_writeback: bool
+    main_protection: str | None
     standard_features: tuple[str, ...]
     standard_features_declared: bool
     readme: str
@@ -248,7 +255,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
     _reject_unknown_keys(
         bootstrap, "bootstrap",
-        {"template", "devflow_managed", "repo_native_dispatch", "standard_features"},
+        {"template", "devflow_managed", "repo_native_dispatch", "standard_features", "main_protection"},
     )
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
@@ -301,6 +308,15 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         raise BootstrapError("bootstrap.standard_features requires devflow_managed=true")
     if repo_native_dispatch and not devflow_managed:
         raise BootstrapError("bootstrap.repo_native_dispatch requires devflow_managed=true")
+    main_protection = None
+    if "main_protection" in bootstrap:
+        main_protection = _enum(
+            bootstrap["main_protection"],
+            "bootstrap.main_protection",
+            {MAIN_PROTECTION_POLICY},
+        )
+        if not devflow_managed:
+            raise BootstrapError("bootstrap.main_protection requires devflow_managed=true")
 
     initial = _mapping(raw.get("initial_content", {}), "initial_content")
     _reject_unknown_keys(initial, "initial_content", {"readme", "specification", "license"})
@@ -356,6 +372,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         devflow_managed=devflow_managed,
         repo_native_dispatch=repo_native_dispatch,
         generated_artifact_writeback=generated_artifact_writeback,
+        main_protection=main_protection,
         standard_features=standard_features,
         standard_features_declared=standard_features_declared,
         readme=readme,
@@ -637,6 +654,206 @@ class BootstrapExecutor:
             )
 
     @staticmethod
+    def _main_protection_baseline() -> dict[str, Any]:
+        return {
+            "required_status_checks": {
+                "strict": False,
+                "checks": [{"context": "verify", "app_id": 15368}],
+            },
+            "enforce_admins": True,
+            "required_pull_request_reviews": {
+                "required_approving_review_count": 0,
+                "bypass_pull_request_allowances": {
+                    "users": [],
+                    "teams": [],
+                    "apps": [],
+                },
+            },
+            "required_conversation_resolution": True,
+            "allow_force_pushes": False,
+            "allow_deletions": False,
+            "restrictions": None,
+        }
+
+    @staticmethod
+    def _protection_enabled(value: Any) -> Any:
+        return value.get("enabled") if isinstance(value, dict) else value
+
+    @classmethod
+    def _main_protection_matches(cls, observed: Any) -> bool:
+        if not isinstance(observed, dict):
+            return False
+        checks = observed.get("required_status_checks")
+        if not isinstance(checks, dict) or checks.get("strict") is not False:
+            return False
+        contexts = checks.get("contexts")
+        observed_checks = checks.get("checks")
+        if contexts != ["verify"] or observed_checks != [{"context": "verify", "app_id": 15368}]:
+            return False
+
+        reviews = observed.get("required_pull_request_reviews")
+        bypass = reviews.get("bypass_pull_request_allowances") if isinstance(reviews, dict) else None
+        if not isinstance(reviews, dict) or reviews.get("required_approving_review_count") != 0:
+            return False
+        if not isinstance(bypass, dict) or any(bypass.get(key) != [] for key in ("users", "teams", "apps")):
+            return False
+        # The accepted payload sets restrictions=null; require an explicit
+        # null readback so a pre-existing push restriction is not accepted as
+        # the same bootstrap policy.
+        if "restrictions" not in observed or observed["restrictions"] is not None:
+            return False
+
+        return (
+            cls._protection_enabled(observed.get("enforce_admins")) is True
+            and cls._protection_enabled(observed.get("required_conversation_resolution")) is True
+            and cls._protection_enabled(observed.get("allow_force_pushes")) is False
+            and cls._protection_enabled(observed.get("allow_deletions")) is False
+        )
+
+    def _call_main_protection(
+        self,
+        context: BootstrapContext,
+        resources: list[str],
+        operation: Any,
+    ) -> Any:
+        try:
+            return operation()
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            needs_human = (
+                type(status_code) is int
+                and 400 <= status_code < 500
+                and status_code not in {408, 429}
+            )
+            self._raise_failure(
+                context,
+                "MAIN_PROTECTION",
+                f"{type(exc).__name__}: {exc}",
+                safe_retry="after-human-decision" if needs_human else "yes",
+                resources=resources,
+            )
+
+    def _ensure_verify_workflow(
+        self,
+        context: BootstrapContext,
+        full_name: str,
+        resources: list[str],
+    ) -> None:
+        verify_workflow_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verify.yml"
+        content = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: verify_workflow_path.read_text(encoding="utf-8"),
+        )
+        existing = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: self.repository_api.get_file(full_name, VERIFY_WORKFLOW_PATH),
+        )
+        if existing is None:
+            self._call(
+                context,
+                "SEED",
+                resources,
+                lambda: self.repository_api.create_file(
+                    full_name,
+                    VERIFY_WORKFLOW_PATH,
+                    content,
+                    f"chore: add bootstrap verify workflow ({context.request_ref})",
+                ),
+                safe_retry="after-human-decision",
+            )
+        elif existing.get("content") != content:
+            self._raise_failure(
+                context,
+                "SEED",
+                "existing verify workflow differs from trusted bootstrap template; never overwrite",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+        resources.append(f"file:{VERIFY_WORKFLOW_PATH}")
+
+    def _ensure_main_protection(
+        self,
+        request: BootstrapRequest,
+        context: BootstrapContext,
+        full_name: str,
+        default_branch: str,
+        resources: list[str],
+    ) -> str:
+        if request.main_protection is None:
+            return "NOT_APPLICABLE/LEGACY_V1_REQUEST"
+
+        observed_repo = self._call_main_protection(
+            context,
+            resources,
+            lambda: self.repository_api.get_repository(full_name),
+        )
+        observed_full_name = observed_repo.get("full_name") if isinstance(observed_repo, dict) else None
+        observed_visibility = observed_repo.get("visibility") if isinstance(observed_repo, dict) else None
+        if (
+            observed_full_name is None
+            or observed_full_name.lower() != full_name.lower()
+            or observed_visibility != request.repository.visibility
+        ):
+            self._raise_failure(
+                context,
+                "MAIN_PROTECTION",
+                "repository identity or visibility readback does not match the Bootstrap request",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+
+        if observed_visibility == "private":
+            resources.append("main-protection:not-applicable:private-repository")
+            return "NOT_APPLICABLE/PRIVATE_REPOSITORY"
+
+        if observed_visibility != "public" or default_branch != "main":
+            self._raise_failure(
+                context,
+                "MAIN_PROTECTION",
+                "public main protection requires the verified default branch to be exactly main",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+
+        # Install the exact status check before making it a branch-protection
+        # requirement. Private Free repositories never need or receive this
+        # Actions workflow.
+        self._ensure_verify_workflow(context, full_name, resources)
+
+        baseline = self._main_protection_baseline()
+        protection = self._call_main_protection(
+            context,
+            resources,
+            lambda: self.repository_api.get_branch_protection(full_name, "main"),
+        )
+        if protection is None:
+            self._call_main_protection(
+                context,
+                resources,
+                lambda: self.repository_api.set_branch_protection(full_name, "main", baseline),
+            )
+            protection = self._call_main_protection(
+                context,
+                resources,
+                lambda: self.repository_api.get_branch_protection(full_name, "main"),
+            )
+
+        if not self._main_protection_matches(protection):
+            self._raise_failure(
+                context,
+                "MAIN_PROTECTION",
+                "main branch protection readback differs from the accepted Bootstrap baseline; existing settings were not overwritten",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+        resources.append("main-protection:main:verified")
+        return "VERIFIED/PROTECTED"
+
+    @staticmethod
     def _find_exact_title(api: Any, full_name: str, title: str) -> list[dict[str, Any]]:
         # Control identity is safety-critical. Use the authoritative Issues listing
         # rather than the eventually-consistent Search index.
@@ -861,17 +1078,27 @@ class BootstrapExecutor:
                 )
             resources.append(f"file:{STANDARD_FEATURE_MANIFEST_PATH}")
 
-        head_sha = self._call(
-            context,
-            "SEED",
-            resources,
-            lambda: self.repository_api.get_default_branch_head(full_name),
-        )
         audit_ref = self._call(
             context,
             "SEED",
             resources,
             lambda: self.repository_api.get_default_branch_name(full_name),
+        )
+        main_protection_status = self._ensure_main_protection(
+            request,
+            context,
+            full_name,
+            audit_ref,
+            resources,
+        )
+        # Protection setup can seed the required verify workflow on a new
+        # Public repository. Capture the accepted head only after every
+        # bootstrap-owned file write is complete.
+        head_sha = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: self.repository_api.get_default_branch_head(full_name),
         )
         resources.append(f"head:{head_sha}")
 
@@ -999,6 +1226,7 @@ class BootstrapExecutor:
             "Repository-Bootstrap-State: DONE",
             f"Repository: {repository_url}",
             f"Initial-Accepted-SHA: `{head_sha}`",
+            f"Main-Protection: {main_protection_status}",
             *(f"Initial-Issue: {url}" for url in issue_urls),
         ]
         if request.generated_artifact_writeback:
@@ -1081,7 +1309,8 @@ class GitHubApi:
             diagnostic = summarize_github_http_error(code, exc.headers, error_body)
             # Do not chain the raw HTTPError: it may retain the request/headers.
             raise GitHubApiError(
-                f"{method} {path} failed with HTTP {code} ({diagnostic})"
+                f"{method} {path} failed with HTTP {code} ({diagnostic})",
+                status_code=code,
             ) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise GitHubApiError(f"{method} {path} transport failed: {type(exc).__name__}") from exc
@@ -1207,6 +1436,39 @@ class GitHubApi:
         if not isinstance(sha, str) or not sha:
             raise GitHubApiError("branch response has invalid commit SHA")
         return sha
+
+    def get_branch_protection(self, full_name: str, branch: str) -> dict[str, Any] | None:
+        if not isinstance(branch, str) or not branch:
+            raise BootstrapError("branch name must be a non-empty string")
+        encoded_branch = urllib.parse.quote(branch, safe="")
+        result = self._request(
+            "GET",
+            f"/repos/{self._repo_path(full_name)}/branches/{encoded_branch}/protection",
+            allow_404=True,
+        )
+        if result is not None and not isinstance(result, dict):
+            raise GitHubApiError("branch protection response is malformed")
+        return result
+
+    def set_branch_protection(
+        self,
+        full_name: str,
+        branch: str,
+        protection: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(branch, str) or not branch:
+            raise BootstrapError("branch name must be a non-empty string")
+        if not isinstance(protection, Mapping):
+            raise BootstrapError("branch protection must be an object")
+        encoded_branch = urllib.parse.quote(branch, safe="")
+        result = self._request(
+            "PUT",
+            f"/repos/{self._repo_path(full_name)}/branches/{encoded_branch}/protection",
+            protection,
+        )
+        if not isinstance(result, dict):
+            raise GitHubApiError("set branch protection returned a malformed response")
+        return result
 
     def list_issues(self, full_name: str, state: str = "all") -> list[dict[str, Any]]:
         if state not in {"open", "closed", "all"}:

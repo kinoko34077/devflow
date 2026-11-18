@@ -69,7 +69,8 @@ Include human-readable source/context, then exactly one payload block:
     "standard_features": [
       "repo_native_dispatch",
       "generated-artifact-writeback"
-    ]
+    ],
+    "main_protection": "public-only-v1"
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -261,14 +262,52 @@ separately reviewed exact-recipe caller and explicit Human/security approval
 for any required job permission or credential change.
 
 **Compatibility:** original requests without `standard_features` retain old
-behavior, including retry behavior; the legacy `repo_native_dispatch` field
-remains accepted. Existing repositories require a separately reviewed migration PR. If the
+behavior, including retry behavior; requests without `main_protection` do not
+gain branch-protection changes on retry. The legacy `repo_native_dispatch`
+field remains accepted. Existing repositories require a separately reviewed migration PR. If the
 template workflow already exists but differs, fail closed rather than
 overwriting user changes. If the user creates a repository directly through
 GitHub's standard web form, the devflow bootstrap executor was not invoked
 and cannot claim that receiver was automatically installed. For full coverage
 of those out-of-band creations, a separate one-time authorized event source
 or template-based creation path would be needed.
+
+## Public-only main protection (#1058)
+
+New managed-repository requests also declare
+`bootstrap.main_protection: "public-only-v1"`. On a new Public repository,
+Bootstrap verifies identity, visibility and default branch `main`, then applies
+the #78 classic protection baseline only when no protection exists. It reads
+the settings back before reporting `DONE`; a matching existing policy is
+read-only, and a divergent policy is left untouched and fails closed. The
+baseline requires PRs and the stable `verify` check, has zero required native
+approvals, requires resolved review conversations, enforces admins, has no
+bypass actors, and blocks force-push and deletion.
+
+After confirming the target is Public with default branch `main`, and before
+applying protection, Bootstrap seeds `.github/workflows/verify.yml`. The
+`verify` job runs for every pull request targeting `main`, has no path filters,
+uses only `contents:read`, and checks patch whitespace with `git diff --check`
+without executing repository scripts. A divergent existing workflow is never
+overwritten; setup fails closed at `SEED` for human review. Private repositories
+do not receive this Actions workflow. Historical requests without the
+protection marker do not gain the workflow on retry.
+
+The app-bound required-check PUT sends only `checks` with `app_id: 15368`;
+`contexts` is validated in the GET readback and is not copied into the PUT body.
+
+Private repositories explicitly report
+`NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and
+protected main is not a completion condition. A historical v1 request with no
+policy marker retains its original retry behavior.
+
+Applying protection requires `Administration:write` on the existing
+`REPOSITORY_BOOTSTRAP_TOKEN` for the future Public repository. This is a
+separate Human/security gate. Do not change token scopes, secrets, Apps, Actions
+permissions or repository permissions from Bootstrap. Missing authorization
+stops at `MAIN_PROTECTION` with `Safe-Retry: after-human-decision`; resolve and
+verify the credential boundary before retrying. No Public fixture is created
+by the implementation PR.
 
 Docs: https://docs.github.com/en/actions/concepts/security/github_token
 and https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows

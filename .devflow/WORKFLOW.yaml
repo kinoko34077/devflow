@@ -505,6 +505,20 @@ repository_bootstrap:
     manifest_schema: devflow-standard-features.v1
     read_only_dry_run_caller: .github/workflows/verified-artifacts-rollout.yml
     caller_pins_bootstrap_executor_sha: true
+  new_managed_main_protection:
+    request_field: bootstrap.main_protection
+    policy: public-only-v1
+    required_for_new_managed_repositories: true
+    public_repository_action: apply_and_read_back_classic_main_protection
+    private_repository_action: NOT_APPLICABLE_NO_PROTECTION_API_CALL
+    required_stable_check: verify
+    required_check_workflow: .github/workflows/verify.yml
+    required_check_triggers: every_pull_request_targeting_main
+    required_check_path_filters: none
+    required_check_permission: contents:read
+    private_repository_workflow_action: NOT_APPLICABLE_DO_NOT_SEED
+    required_permission: Administration:write
+    legacy_absent_field_action: preserve_historical_request_retry_behavior
   generated_artifact_writeback:
     recipe_registry: tools.generated_artifact_rollout.select_fixed_recipe
     writer_core: tools.generated_artifact_writer.verified_writeback

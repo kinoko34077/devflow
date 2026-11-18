@@ -46,6 +46,7 @@
       ],
       "tests": [
         "tests/test_repository_bootstrap_executor.py",
+        "tests/test_repository_bootstrap_main_protection.py",
         "tests/test_repository_bootstrap_repo_native_dispatch.py",
         "tests/test_repository_bootstrap_standard_features.py",
         "tests/test_generated_artifact_rollout_admission.py",
