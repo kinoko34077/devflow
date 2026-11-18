@@ -134,9 +134,35 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         with mock.patch("tools.repository_bootstrap.urllib.request.urlopen", side_effect=exception):
             with self.assertRaises(bootstrap.GitHubApiError) as caught:
                 bootstrap.GitHubApi("dummy-token").get_repository("kinoko34077/fixture")
-        self.assertEqual(buffer.read_sizes, [diagnostics.MAX_ERROR_BODY_BYTES])
+        self.assertEqual(buffer.read_sizes, [diagnostics.MAX_ERROR_BODY_BYTES + 1])
         self.assertIn("category=forbidden_unclassified", str(caught.exception))
         self.assertNotIn("secret", str(caught.exception))
+
+    def test_adapter_preserves_oversize_validation_shape_without_logging_body(self):
+        secret = "response-tail-secret"
+        content = (
+            b'{"message":"Validation Failed","errors":[]}'
+            + b"x" * (diagnostics.MAX_ERROR_BODY_BYTES + 100)
+            + secret.encode("ascii")
+        )
+        buffer = io.BytesIO(content)
+        exception = urllib.error.HTTPError(
+            "https://api.github.com/repos/kinoko34077/fixture/contents/example",
+            422,
+            "error",
+            Message(),
+            buffer,
+        )
+
+        with mock.patch("tools.repository_bootstrap.urllib.request.urlopen", side_effect=exception):
+            with self.assertRaises(bootstrap.GitHubApiError) as caught:
+                bootstrap.GitHubApi("dummy-token").get_repository("kinoko34077/fixture")
+
+        message = str(caught.exception)
+        self.assertIn("category=validation_failed", message)
+        self.assertIn("validation_errors=oversize", message)
+        self.assertNotIn(secret, message)
+        self.assertNotIn("dummy-token", message)
 
     def test_never_echo_arbitrary_github_response(self):
         secret = "ghp_EXAMPLE_SECRET_DO_NOT_PRINT"
