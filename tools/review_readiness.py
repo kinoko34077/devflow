@@ -307,7 +307,8 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
             endpoint = urllib.parse.urlparse(url)
             relative = endpoint.path + ("?" + endpoint.query if endpoint.query else "")
             response = subprocess.run(
-                ["gh", "api", relative], capture_output=True, text=True,
+                ["gh", "api", relative, "--hostname", "github.com"],
+                capture_output=True, text=True,
                 check=True, timeout=20,
             )
             return json.loads(response.stdout)
@@ -343,8 +344,8 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
         try:
             if use_existing_gh:
                 response = subprocess.run(
-                    ["gh", "api", "graphql", "-f", f"query={query}",
-                     "-F", f"id={comment['node_id']}"],
+                    ["gh", "api", "graphql", "--hostname", "github.com",
+                     "-f", f"query={query}", "-F", f"id={comment['node_id']}"],
                     capture_output=True, text=True, check=True, timeout=20,
                 )
                 packet = json.loads(response.stdout)
