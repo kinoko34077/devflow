@@ -488,6 +488,7 @@ class CodexReviewEvidenceTests(unittest.TestCase):
         def gh_run(command, **kwargs):
             self.assertEqual(command[:2], ["gh", "api"])
             resource = command[2]
+            self.assertEqual(command[3:5], ["--hostname", "github.com"])
             if resource.endswith("/pulls/42"):
                 packet = {"head": {"sha": HEAD}, "body": pr_body()}
             elif "pulls/42/reviews?" in resource:
@@ -495,9 +496,9 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             elif "issues/42/comments?" in resource:
                 packet = [comment]
             elif resource == "graphql":
-                self.assertEqual(command[3], "-f")
-                self.assertEqual(command[4].count("editor { ... on Bot { id } }"), 2)
-                self.assertEqual(command[5:7], ["-F", "id=IC_from_gh"])
+                self.assertEqual(command[5], "-f")
+                self.assertEqual(command[6].count("editor { ... on Bot { id } }"), 2)
+                self.assertEqual(command[7:9], ["-F", "id=IC_from_gh"])
                 packet = {"data": {"node": {
                     "id": "IC_from_gh", "body": comment["body"],
                     "editor": {"id": "BOT_from_gh"},
@@ -509,7 +510,10 @@ class CodexReviewEvidenceTests(unittest.TestCase):
                 raise AssertionError("unexpected gh endpoint " + resource)
             return mock.Mock(stdout=json.dumps(packet), returncode=0)
 
-        with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
+        # GH_HOST must not redirect a verified github.com review lookup to an
+        # identically named private/enterprise repository.
+        with mock.patch.dict(review_readiness.os.environ,
+                             {"GH_HOST": "github.enterprise.example"}, clear=True):
             with mock.patch.object(review_readiness.subprocess, "run",
                                    side_effect=gh_run) as runner:
                 pr_data, review_data, comments, verified = (
