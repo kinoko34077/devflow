@@ -346,6 +346,23 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         )
         self.assertNotIn(secret, result)
 
+    def test_validation_diagnostics_report_known_field_without_known_code_in_string_items(self):
+        secret = "response-tail-secret"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [
+                "required_status_checks.checks[0].app_id: unsupported " + secret
+            ],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn(
+            "validation_field=required_status_checks.checks.app_id",
+            result,
+        )
+        self.assertNotIn(secret, result)
+
     def test_validation_diagnostics_normalize_dotted_index_in_string_items(self):
         secret = "response-tail-secret"
         body = json.dumps({

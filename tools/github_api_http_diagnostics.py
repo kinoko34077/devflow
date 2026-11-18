@@ -274,6 +274,17 @@ def _validation_details(response_body: bytes) -> list[str]:
             ):
                 details.append(f"validation_field={field}")
                 break
+    if not any(
+        item.startswith(("validation_error=", "validation_field="))
+        for item in details
+    ):
+        for error in errors:
+            if not isinstance(error, str):
+                continue
+            field, _code = _safe_validation_error_from_text(error)
+            if field is not None:
+                details.append(f"validation_field={field}")
+                break
     if not any(item.startswith("validation_error=") for item in details):
         for error in errors:
             if not isinstance(error, dict):
