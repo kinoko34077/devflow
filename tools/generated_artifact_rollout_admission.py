@@ -23,6 +23,9 @@ STANDARD_TEMPLATE = pathlib.Path(__file__).resolve().parents[1] / "templates/boo
 _TEMPLATES = {
     "kinoko34077/IDS-Composit": TEMPLATE,
     "kinoko34077/testapp": _TEMPLATE_ROOT / "verified-artifacts-rollout-testapp.yml",
+    "kinoko34077/devflow-writeback-bootstrap-e2e-20261118": (
+        _TEMPLATE_ROOT / "verified-artifacts-rollout-bootstrap-e2e.yml"
+    ),
 }
 PLACEHOLDER = "<DEVFLOW_SHA>"
 MAX_CALLER_BYTES = 16384
@@ -66,7 +69,7 @@ def attest_authenticated_readonly(
     pinned target repository; archive content and producer input cannot supply
     run/workflow/caller observations.
     """
-    select_fixed_recipe(repository, recipe_id)
+    recipe = select_fixed_recipe(repository, recipe_id)
     if getattr(api, "repository", None) != repository:
         raise ArtifactRejected("independent API reader repository mismatch")
     runner = _required_runner(env)
@@ -102,24 +105,24 @@ def attest_authenticated_readonly(
         or run.get("status") != "in_progress"
         or run.get("head_sha") != expected_workflow_sha
         or run.get("head_branch") != "main"
-        or run.get("path") != CALLER_PATH
+        or run.get("path") != recipe.caller_path
         or not isinstance(run.get("actor"), dict)
         or run["actor"].get("id") != 79015263
         or run["actor"].get("login") != actor
         or not isinstance(run.get("repository"), dict)
         or run["repository"].get("full_name") != repository
         or run.get("workflow_id") != workflow.get("id")
-        or workflow.get("path") != CALLER_PATH
+        or workflow.get("path") != recipe.caller_path
     ):
         raise ArtifactRejected("independent GitHub producer metadata mismatch")
     t = run.get("triggering_actor")
     if not isinstance(t, dict) or t.get("id") != 79015263 or t.get("login") != actor:
         raise ArtifactRejected("missing or different-actor GitHub REST rerun rejected")
-    raw = api.get(f"/contents/{CALLER_PATH}?ref={expected_workflow_sha}")
+    raw = api.get(f"/contents/{recipe.caller_path}?ref={expected_workflow_sha}")
     if (
         not isinstance(raw, dict)
         or raw.get("type") != "file"
-        or raw.get("path") != CALLER_PATH
+        or raw.get("path") != recipe.caller_path
         or raw.get("encoding") != "base64"
         or not isinstance(raw.get("content"), str)
     ):

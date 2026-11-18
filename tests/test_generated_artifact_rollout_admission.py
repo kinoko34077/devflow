@@ -127,7 +127,9 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
     def test_shared_workflow_allows_only_fixed_recipe_branch_shapes_before_admission(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/generated-artifact-rollout.yml").read_text(encoding="utf-8")
         self.assertIn("artifact/writeback-[A-Za-z0-9]", workflow)
-        self.assertIn("if: ${{ inputs.mode == 'write' && github.repository == 'kinoko34077/testapp' }}", workflow)
+        self.assertIn("inputs.mode == 'write'", workflow)
+        self.assertIn("github.repository == 'kinoko34077/testapp' && inputs.recipe_id == 'testapp-public-fixture-v1'", workflow)
+        self.assertIn("github.repository == 'kinoko34077/devflow-writeback-bootstrap-e2e-20261118' && inputs.recipe_id == 'bootstrap-writeback-e2e-v1'", workflow)
 
     def test_ids_reviewed_template_is_dryrun_only_without_write_grant(self):
         self.assertIn("options: [dry-run]", TEMPLATE)
