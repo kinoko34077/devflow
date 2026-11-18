@@ -242,7 +242,7 @@ class HumanPortfolioMCPTests(unittest.TestCase):
         source = (
             Path(__file__).resolve().parents[1] / "tools" / "devflow_mcp.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("def get_human_portfolio(repository: str)", source)
+        self.assertIn("def get_human_portfolio(repository: RepositoryName)", source)
         self.assertNotIn("def update_human_portfolio(", source)
         self.assertNotIn("def publish_human_portfolio(", source)
 
