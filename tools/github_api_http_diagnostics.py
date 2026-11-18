@@ -57,6 +57,29 @@ def _safe_validation_code(value: Any) -> str | None:
     return normalized if normalized in _VALIDATION_CODES else None
 
 
+def _validation_error_item_shape(errors: list[Any]) -> str:
+    """Return a fixed JSON-type label for non-object error array entries."""
+    kinds: set[str] = set()
+    for error in errors[:16]:
+        if isinstance(error, dict):
+            kinds.add("object")
+        elif isinstance(error, list):
+            kinds.add("array")
+        elif error is None:
+            kinds.add("null")
+        elif isinstance(error, bool):
+            kinds.add("boolean")
+        elif isinstance(error, (int, float)):
+            kinds.add("number")
+        elif isinstance(error, str):
+            kinds.add("string")
+        else:
+            kinds.add("other")
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    return "mixed"
+
+
 def _header(headers: Any, name: str) -> str | None:
     """Read only named headers; never serialize the header collection."""
     if headers is None:
@@ -219,6 +242,8 @@ def _validation_details(response_body: bytes) -> list[str]:
                 f"{code or 'unclassified_code'}"
             )
             break
+    if errors and any(not isinstance(error, dict) for error in errors):
+        details.append(f"validation_error_items={_validation_error_item_shape(errors)}")
     return details
 
 
