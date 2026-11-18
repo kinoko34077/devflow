@@ -465,17 +465,17 @@ def evaluate(
             if _provenance_fields(str(r.get("body") or "")) is not None
             and _commit_value(_provenance_fields(str(r.get("body") or ""))["Reviewed-Commit"]) == head_sha
         ]
-        latest_current_formal = current_head_formal[-1] if current_head_formal else None
-        # A submitted COMMENT Review can express a blocking finding even when
-        # GitHub native REQUEST_CHANGES is unavailable to the reviewer.
-        # Only a later clean formal Review on the same head may supersede it.
-        formal_blocker = (
-            latest_current_formal is not None
-            and (
-                (_blocking_findings(str(latest_current_formal.get("body") or "")) or "").casefold()
-                != "none"
-            )
-        )
+        # A submitted COMMENT Review can block a merge. A later submission
+        # clears that state only when the *whole* formal review is valid.
+        # In particular, v1, dismissed, mismatched API commit, and malformed
+        # provenance cannot silently clear an earlier blocker.
+        formal_blocker = False
+        for candidate in current_head_formal:
+            formal_blocker = _review_rejection(
+                candidate,
+                implementer_signature=implementer_signature,
+                head_sha=head_sha,
+            ) is not None
         has_native_blocker = formal_blocker or any(
             str(r.get("state") or "").upper() == "CHANGES_REQUESTED"
             for r in reviews
