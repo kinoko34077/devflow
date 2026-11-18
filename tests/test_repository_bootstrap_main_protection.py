@@ -22,8 +22,8 @@ BASELINE = {
     "required_conversation_resolution": True,
     "allow_force_pushes": False,
     "allow_deletions": False,
-    "restrictions": None,
 }
+ORGANIZATION_BASELINE = {**BASELINE, "restrictions": None}
 
 
 def request(visibility="public", *, with_policy=True):
@@ -36,7 +36,7 @@ def request(visibility="public", *, with_policy=True):
 
 def protection_readback(baseline=BASELINE):
     """Shape returned by GET /branches/main/protection."""
-    return {
+    result = {
         "required_status_checks": {
             "strict": baseline["required_status_checks"]["strict"],
             "contexts": [item["context"] for item in baseline["required_status_checks"]["checks"]],
@@ -51,8 +51,10 @@ def protection_readback(baseline=BASELINE):
         },
         "allow_force_pushes": {"enabled": baseline["allow_force_pushes"]},
         "allow_deletions": {"enabled": baseline["allow_deletions"]},
-        "restrictions": copy.deepcopy(baseline["restrictions"]),
     }
+    if "restrictions" in baseline:
+        result["restrictions"] = copy.deepcopy(baseline["restrictions"])
+    return result
 
 
 class ProtectionApi(FakeApi):
@@ -64,6 +66,15 @@ class ProtectionApi(FakeApi):
         self.events = []
         self.fail_put_status = None
         self.fail_second_get_status = None
+        self.owner_type = "User"
+
+    def get_repository(self, full_name):
+        repository = super().get_repository(full_name)
+        if repository is None:
+            return None
+        repository = copy.deepcopy(repository)
+        repository["owner"] = {"type": self.owner_type}
+        return repository
 
     def create_file(self, full_name, path, content, message):
         self.events.append(("create_file", path))
@@ -85,7 +96,14 @@ class ProtectionApi(FakeApi):
         self.protection_payloads.append(copy.deepcopy(protection))
         if self.fail_put_status is not None:
             raise rb.GitHubApiError("PUT protection failed", status_code=self.fail_put_status)
+        if self.owner_type == "User" and "restrictions" in protection:
+            raise rb.GitHubApiError(
+                "personal repositories do not accept push restrictions",
+                status_code=422,
+            )
         self.protections[(full_name, branch)] = protection_readback(protection)
+        if self.owner_type == "User":
+            self.protections[(full_name, branch)].pop("restrictions", None)
         return self.protections[(full_name, branch)]
 
 
@@ -148,6 +166,45 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
 
         self.assertEqual([("GET", FULL_NAME, "main")], repository.protection_calls)
         self.assertEqual([], repository.protection_payloads)
+
+    def test_user_owned_public_repo_omits_unavailable_push_restrictions(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("User", repository.get_repository(FULL_NAME)["owner"]["type"])
+        self.assertNotIn("restrictions", repository.protection_payloads[0])
+        self.assertNotIn("restrictions", repository.protections[(FULL_NAME, "main")])
+
+    def test_organization_owned_public_repo_explicitly_disables_push_restrictions(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.owner_type = "Organization"
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertIsNone(repository.protection_payloads[0]["restrictions"])
+        self.assertIsNone(repository.protections[(FULL_NAME, "main")]["restrictions"])
+
+    def test_organization_readback_requires_explicit_absence_of_push_restrictions(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.owner_type = "Organization"
+        repository.protections[(FULL_NAME, "main")] = protection_readback()
+
+        with self.assertRaises(rb.BootstrapFailure) as caught:
+            rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual([], repository.protection_payloads)
+
+    def test_public_bootstrap_fails_closed_for_unknown_repository_owner_type(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.owner_type = "Unknown"
+
+        with self.assertRaises(rb.BootstrapFailure) as caught:
+            rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual([], repository.protection_calls)
 
     def test_private_bootstrap_marks_protection_not_applicable_without_api_calls(self):
         repository, devflow = ProtectionApi(), FakeApi()
