@@ -316,6 +316,19 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertNotIn(secret, result)
         self.assertNotIn("private message", result)
 
+    def test_validation_diagnostics_report_non_object_error_items_without_echoing_them(self):
+        secret = "private-error-item"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [secret],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_errors=unclassified", result)
+        self.assertIn("validation_error_items=string", result)
+        self.assertNotIn(secret, result)
+
     def test_validation_diagnostics_classify_known_one_of_failure(self):
         result = self.classify(
             422,
