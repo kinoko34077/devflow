@@ -65,7 +65,11 @@ Include human-readable source/context, then exactly one payload block:
   },
   "bootstrap": {
     "template": "minimal",
-    "devflow_managed": true
+    "devflow_managed": true,
+    "standard_features": [
+      "repo_native_dispatch",
+      "generated-artifact-writeback"
+    ]
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -221,10 +225,15 @@ If these disagree, fail closed and reconcile observed identity before further mu
 ## Automatic repository-local Actions receiver (devflow#395)
 
 On new **devflow-managed** repository creation, the agent automatically emits
-`bootstrap.repo_native_dispatch=true` in the already-required structured
-Bootstrap Request. The existing trusted bootstrap executor seeds a fixed,
-read-only `.github/workflows/kinotch-repo-command.yml` with no extra App,
-secret or **per-repository** settings. **One-time setup is required before
+`bootstrap.standard_features` with the supported defaults
+`repo_native_dispatch` and `generated-artifact-writeback` in the already-required
+structured Bootstrap Request. The existing trusted bootstrap executor seeds a
+fixed, read-only `.github/workflows/kinotch-repo-command.yml`, strict
+`.devflow/standard-features.json` capability record, and a pinned,
+dry-run-only `.github/workflows/verified-artifacts-rollout.yml` Caller. These
+reuse the existing shared rollout workflow and need no extra App, secret or
+**per-repository** setting beyond the existing workflow-file credential gate.
+**One-time setup is required before
 real new-repo auto-seeding:** `REPOSITORY_BOOTSTRAP_TOKEN` must be authorized
 for workflow-file creation. GitHub requires classic PAT `repo` + `workflow`
 or fine-grained `Contents: write` + `Workflows: write`; the latter must
@@ -240,8 +249,20 @@ The initial safe command is exactly
 Newly created default-branch workflow is only a command entrypoint; it does not
 authorize arbitrary existing workflows, deploy, or execute untrusted user text.
 
-**Compatibility:** original requests with no flag retain old minimal behavior;
-existing repositories require a separately reviewed migration PR. If the
+The generated-artifact capability record is installed without granting
+`contents:write`. The native read-only receiver displays the record, and the
+pinned read-only `workflow_dispatch` Caller uses the existing shared producer
+and verifier in `dry-run` mode only. The manifest identifies the existing
+fixed-recipe admission and shared writer. No generated output returns
+`NOT_APPLICABLE/NO_GENERATED_OUTPUT`; unregistered recipes or mismatched
+caller/branch/head fail closed. The generic writer's activation and
+per-repository recipe registry remain unchanged. A real write still requires a
+separately reviewed exact-recipe caller and explicit Human/security approval
+for any required job permission or credential change.
+
+**Compatibility:** original requests without `standard_features` retain old
+behavior, including retry behavior; the legacy `repo_native_dispatch` field
+remains accepted. Existing repositories require a separately reviewed migration PR. If the
 template workflow already exists but differs, fail closed rather than
 overwriting user changes. If the user creates a repository directly through
 GitHub's standard web form, the devflow bootstrap executor was not invoked

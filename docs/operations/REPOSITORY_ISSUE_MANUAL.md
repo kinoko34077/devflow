@@ -137,6 +137,26 @@ Use the repository's own template when present. Otherwise include, at minimum:
 
 Repository-local naming does not have to be exactly `Work Order:`. Information ownership matters more than identical labels.
 
+### Generic mechanism development and existing-repository rollout
+
+For a reusable mechanism intended to serve multiple managed repositories, its
+development Work Order has a finite completion condition: accepted behavior is
+preserved, new managed repositories receive the standard path automatically,
+and representative use plus its refusal/safety cases are verified and reviewed.
+The owning specification and Work Order must state which features are installed,
+which repositories or outputs are applicable, what permission is required, and
+how refusal or `NOT_APPLICABLE` is reported.
+
+Applying that mechanism to repositories that existed before the standard path
+was accepted is separate rollout work. Track it in a distinct rollout Issue
+with a fixed cohort, evidence-based `APPLY` / `NOT_APPLICABLE` / `EQUIVALENT` /
+`HUMAN_GATE` dispositions, and finite reviewable waves. Close the mechanism's
+development Issue when its own acceptance is met; do not keep it open for
+remaining legacy repositories or require a fleet-wide adoption percentage.
+Permission, credential, publication, and destructive-operation gates remain
+independent. See the cross-repository lifecycle rule in
+`docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
+
 ### Issue authoring language standard (2026-11-04 user direction)
 
 Write every newly created Issue (including Work Orders, audits, specifications, minutes and handoffs) **簡潔・平易・明瞭に。冗長な表現を避け、意味や情報量を保ちつつ圧縮的に記述する。** Remove redundant phrasing, repeated explanations and unnecessary preambles; link the authoritative specification/evidence instead of reproducing it wholesale. Preserve the actual user request, higher goal, constraints, definitions, numeric values, causal relationships, exception cases, permissions/Human Gates, acceptance criteria, verification references and actionable next step. Never substitute a shorter but less precise summary for an operative condition or machine-readable marker. Length reduction is **not** an independent acceptance criterion; if faithful compression is not possible, keep the necessary text.

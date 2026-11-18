@@ -4,6 +4,17 @@ This is an index-only route for the verified generated-artifact contract, the
 accepted single-repository Japanese Orthography pilot, and separately bounded
 writer/admission code. It does not enable a general rollout or add a write path.
 
+New managed repositories can receive the standard capability record through
+Repository Bootstrap (#1050). That record points to the existing fixed-recipe
+admission and shared writer. It does not grant `contents:write`, admit a new
+repository/recipe, or activate the dormant rollout writer. The native
+read-only receiver displays the capability record, and a pinned dry-run-only
+Caller routes eligible registered recipes through the existing shared
+producer and read-only verifier. It grants no `contents:write`. No generated
+output is `NOT_APPLICABLE/NO_GENERATED_OUTPUT`; effectful writes still require
+the reviewed, exact-recipe caller and per-repository Human/security gates.
+Existing repository adoption remains the separate finite rollout in #386.
+
 ## contract
 
 Use the contract and packager owners when artifact identity, recipe, digest,

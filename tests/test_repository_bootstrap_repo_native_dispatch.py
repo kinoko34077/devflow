@@ -29,10 +29,52 @@ class RepoNativeBootstrapTests(unittest.TestCase):
         self.assertIn("github.event.issue.user.id == 79015263", seeded)
         self.assertIn("github.event.issue.pull_request == null", seeded)
         self.assertIn("permissions: {}", seeded)
+        self.assertIn(".devflow/standard-features.json", seeded)
+        self.assertIn("UNKNOWN_OR_NOT_INSTALLED", seeded)
         self.assertNotIn("actions: read", seeded)
         self.assertNotIn("actions: write", seeded)
+        self.assertNotIn("contents: write", seeded)
         self.assertNotIn("${{ github.event.comment.body }}", seeded)
         self.assertIn(f"file:{PATH}", result.resources)
+
+    def test_legacy_receiver_retry_is_preserved_without_rewrite(self):
+        payload = rb.parse_request_body(issue_body())
+        payload["bootstrap"]["repo_native_dispatch"] = True
+        req = rb.normalize_request(payload, "[REPO CREATE] example-repo")
+        legacy = (ROOT / "tests/fixtures/kinotch-repo-command.legacy.yml").read_text(
+            encoding="utf-8"
+        )
+        repository = FakeApi()
+        repository.files[("kinoko34077/example-repo", PATH)] = legacy
+
+        result = rb.BootstrapExecutor(repository, FakeApi()).execute(req, context())
+
+        self.assertEqual(repository.files[("kinoko34077/example-repo", PATH)], legacy)
+        self.assertIn(f"file:{PATH}", result.resources)
+        self.assertNotIn(("kinoko34077/example-repo", rb.STANDARD_FEATURE_MANIFEST_PATH), repository.files)
+
+    def test_standard_feature_request_does_not_silently_upgrade_legacy_receiver(self):
+        req = rb.normalize_request(
+            {
+                **rb.parse_request_body(issue_body()),
+                "bootstrap": {
+                    "template": "minimal",
+                    "devflow_managed": True,
+                    "standard_features": ["repo_native_dispatch", "generated-artifact-writeback"],
+                },
+            },
+            "[REPO CREATE] example-repo",
+        )
+        legacy = (ROOT / "tests/fixtures/kinotch-repo-command.legacy.yml").read_text(
+            encoding="utf-8"
+        )
+        repository, devflow = FakeApi(), FakeApi()
+        repository.files[("kinoko34077/example-repo", PATH)] = legacy
+        with self.assertRaises(rb.BootstrapFailure) as caught:
+            rb.BootstrapExecutor(repository, devflow).execute(req, context())
+        self.assertEqual(caught.exception.stage, "SEED")
+        self.assertEqual(repository.files[("kinoko34077/example-repo", PATH)], legacy)
+        self.assertNotIn(("kinoko34077/example-repo", rb.STANDARD_FEATURE_MANIFEST_PATH), repository.files)
 
     def test_legacy_request_retains_minimal_seed(self):
         repository = FakeApi()

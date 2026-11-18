@@ -4,8 +4,12 @@ Only GET fakes. No GitHub token, workflow dispatch or writeback execution.
 """
 import base64
 import copy
+from dataclasses import replace
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
+from tools import generated_artifact_rollout as rollout
 from tools import generated_artifact_rollout_admission as auth
 from tools.generated_artifact_contract import ArtifactRejected
 from tests.test_generated_artifact_rollout import (
@@ -81,6 +85,49 @@ class TrustedCallerAndApiAdmissionTests(unittest.TestCase):
             "/actions/workflows/89",
             f"/contents/{auth.CALLER_PATH}?ref={CALLER_SHA}",
         ])
+
+    def test_new_recipe_can_reuse_standard_bootstrap_caller_for_read_only_preview(self):
+        repository = "kinoko34077/example-repo"
+        recipe_id = "example-json-v1"
+        branch = "artifact/writeback-example/pilot-1"
+        generic_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verified-artifacts-rollout.yml"
+        generic_template = generic_path.read_text(encoding="utf-8")
+        api = FakeGitHubReader()
+        api.repository = repository
+        api.run["repository"]["full_name"] = repository
+        api.caller = auth.exact_caller_text(generic_template, SHA)
+        environment = env(
+            GITHUB_REPOSITORY=repository,
+            GITHUB_WORKFLOW_REF=f"{repository}/{auth.CALLER_PATH}@refs/heads/main",
+        )
+        recipe = replace(
+            rollout._IDS,
+            repository=repository,
+            recipe_id=recipe_id,
+            branch_prefix="artifact/writeback-example/",
+        )
+
+        with patch.object(rollout, "_RECIPES", (*rollout._RECIPES, recipe)):
+            result = auth.attest_authenticated_readonly(
+                api,
+                environment,
+                repository=repository,
+                recipe_id=recipe_id,
+                target_branch=branch,
+                expected_head=SHA,
+                source_head=SHA,
+                devflow_sha=SHA,
+                devflow_checkout_sha=SHA,
+            )
+
+        self.assertEqual(result["status"], "AUTHENTICATED_READ_ONLY")
+        self.assertEqual(result["admission"]["recipe_id"], recipe_id)
+        self.assertFalse(result["writer_authorized"])
+
+    def test_shared_workflow_allows_only_fixed_recipe_branch_shapes_before_admission(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/generated-artifact-rollout.yml").read_text(encoding="utf-8")
+        self.assertIn("artifact/writeback-[A-Za-z0-9]", workflow)
+        self.assertIn("if: ${{ inputs.mode == 'write' && github.repository == 'kinoko34077/testapp' }}", workflow)
 
     def test_ids_reviewed_template_is_dryrun_only_without_write_grant(self):
         self.assertIn("options: [dry-run]", TEMPLATE)

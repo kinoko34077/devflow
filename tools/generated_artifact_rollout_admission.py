@@ -19,6 +19,7 @@ from tools.generated_artifact_rollout import (
 
 _TEMPLATE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "docs/operations/templates"
 TEMPLATE = _TEMPLATE_ROOT / "verified-artifacts-rollout-ids.yml"
+STANDARD_TEMPLATE = pathlib.Path(__file__).resolve().parents[1] / "templates/bootstrap/verified-artifacts-rollout.yml"
 _TEMPLATES = {
     "kinoko34077/IDS-Composit": TEMPLATE,
     "kinoko34077/testapp": _TEMPLATE_ROOT / "verified-artifacts-rollout-testapp.yml",
@@ -130,9 +131,10 @@ def attest_authenticated_readonly(
         caller_text = decoded.decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
         raise ArtifactRejected("GitHub caller is not strict UTF-8/base64") from exc
-    template_path = _TEMPLATES.get(repository)
-    if template_path is None:
-        raise ArtifactRejected("registered repository lacks trusted caller template")
+    # Existing special-purpose callers retain their exact historical templates.
+    # Newly registered recipes can use the Bootstrap-seeded generic read-only
+    # caller; write permission still requires a separate target-specific gate.
+    template_path = _TEMPLATES.get(repository, STANDARD_TEMPLATE)
     template = trusted_template if trusted_template is not None else template_path.read_text("utf-8")
     verify_exact_caller(caller_text, template, devflow_sha)
     return {

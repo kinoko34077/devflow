@@ -51,6 +51,13 @@ Human Gate requirements; this index does not grant any of them.
 - Tests: `tests/test_repository_bootstrap_executor.py`,
   `tests/test_repository_bootstrap_repo_native_dispatch.py`
 
+New managed-repository requests also declare the opt-in `standard_features`
+set. Generated-artifact writeback seeds an integrity-checked capability
+manifest, retains the native read-only status receiver, and adds a pinned
+dry-run-only caller for the existing shared rollout workflow. Bootstrap grants
+no writer permission. See the #1050 acceptance boundary in
+`docs/spec/REPOSITORY_BOOTSTRAP.md`.
+
 ## control-trust
 
 Use when reading bootstrap-derived Repository Control or deciding whether

@@ -1,0 +1,45 @@
+# Standard managed-repository caller for the existing devflow#465 shared route.
+# This caller is deliberately dry-run-only and has no write permission.
+# The shared source commit is pinned twice and verified by the independent reader.
+name: Verified artifacts (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipe_id:
+        description: Source-controlled recipe admitted for this exact repository
+        type: string
+        required: true
+      target_branch:
+        description: Existing same-repository scratch PR branch allowed by that recipe
+        type: string
+        required: true
+      expected_head:
+        description: Exact current head SHA for target_branch
+        type: string
+        required: true
+      mode:
+        type: choice
+        options: [dry-run]
+        default: dry-run
+
+permissions: {}
+
+concurrency:
+  group: verified-artifacts-${{ inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: ${{ inputs.mode == 'dry-run' }}
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: kinoko34077/devflow/.github/workflows/generated-artifact-rollout.yml@<DEVFLOW_SHA>
+    with:
+      devflow_sha: <DEVFLOW_SHA>
+      recipe_id: ${{ inputs.recipe_id }}
+      target_branch: ${{ inputs.target_branch }}
+      expected_head: ${{ inputs.expected_head }}
+      mode: ${{ inputs.mode }}

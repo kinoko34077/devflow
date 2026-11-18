@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinoko34077/devflow/schemas/devflow-standard-features.v1.schema.json",
+  "title": "devflow-standard-features.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "standard_features", "features"],
+  "properties": {
+    "schema": { "const": "devflow-standard-features.v1" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "standard_features": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 2,
+      "allOf": [
+        { "contains": { "const": "repo_native_dispatch" } },
+        { "contains": { "const": "generated-artifact-writeback" } }
+      ],
+      "items": { "enum": ["repo_native_dispatch", "generated-artifact-writeback"] }
+    },
+    "features": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/feature" }
+    }
+  },
+  "$defs": {
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "entrypoint", "dry_run_caller", "recipe_registry", "writer", "no_output", "effectful_write"],
+      "properties": {
+        "id": { "const": "generated-artifact-writeback" },
+        "status": { "const": "INSTALLED" },
+        "entrypoint": { "const": ".github/workflows/kinotch-repo-command.yml" },
+        "dry_run_caller": { "const": ".github/workflows/verified-artifacts-rollout.yml" },
+        "recipe_registry": { "const": "tools.generated_artifact_rollout.select_fixed_recipe" },
+        "writer": { "const": "tools.generated_artifact_writer.verified_writeback" },
+        "no_output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "NOT_APPLICABLE" },
+            "reason": { "const": "NO_GENERATED_OUTPUT" }
+          }
+        },
+        "effectful_write": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled_by_bootstrap", "dry_run_enabled_by_bootstrap", "human_gate_required", "required_job_permissions"],
+          "properties": {
+            "enabled_by_bootstrap": { "const": false },
+            "dry_run_enabled_by_bootstrap": { "const": true },
+            "human_gate_required": { "const": true },
+            "required_job_permissions": {
+              "type": "array",
+              "const": ["contents:write", "actions:read", "pull-requests:read"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

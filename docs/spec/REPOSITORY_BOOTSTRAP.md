@@ -74,7 +74,11 @@ The request Issue contains exactly one machine-readable block:
   },
   "bootstrap": {
     "template": "minimal",
-    "devflow_managed": true
+    "devflow_managed": true,
+    "standard_features": [
+      "repo_native_dispatch",
+      "generated-artifact-writeback"
+    ]
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -122,7 +126,7 @@ Other V1 defaults that do not invent semantic/project policy are:
 - missing `initial_content.license` -> null;
 - Repository Base adoption is never implied by `minimal`;
 - no release, deployment, publication, repository deletion, shared-history rewrite, credential change or permission expansion is part of bootstrap.
-- for **new** managed repositories, request emitters MUST include `bootstrap.repo_native_dispatch=true` without asking the user to visit each repository's settings. Omitted for legacy v1 bootstrap requests retains the historical minimal behavior, including safe retries.
+- for **new** managed repositories, request emitters MUST include `bootstrap.standard_features` with the supported default IDs `repo_native_dispatch` and `generated-artifact-writeback`, without asking the user to visit repository settings. The older `bootstrap.repo_native_dispatch` field remains a compatibility alias. An absent `standard_features` field preserves historical v1 request replay behavior and does not seed new files.
 
 V1 does not automatically generate licence text. A non-null licence request is unsupported until a later version defines exact licence material and attribution inputs; it MUST fail validation rather than be silently ignored or guessed.
 
@@ -138,7 +142,8 @@ Template taxonomy MUST NOT be expanded merely for cosmetic uniformity.
 
 ### 5.1 Optional repository-local Actions command receiver (#395)
 
-`bootstrap.repo_native_dispatch=true` (valid only for `devflow_managed=true`)
+`bootstrap.standard_features` including `repo_native_dispatch` (valid only for
+`devflow_managed=true`)
 automatically seeds `.github/workflows/kinotch-repo-command.yml` from the
 version-controlled `templates/bootstrap/kinotch-repo-command.yml`.
 No new secret, App installation, **per-repository** manual permission setting,
@@ -164,13 +169,46 @@ unknown actor, deploy/release, secrets or write permission is rejected.
 A later approved repo-specific operation requires normal reviewed code, **not**
 manual repository authorization by the owner.
 
-Historical Bootstrap Requests without this explicit field still use the
-original `minimal` contract and do not auto-mutate repositories on replay.
-This is essential for idempotent recovery. New agents generating managed-repo
-Bootstrap Requests must add the field automatically; no user checkbox.
+Historical Bootstrap Requests without `bootstrap.standard_features` still use
+their original contract and do not gain new files or feature mutations on
+replay. This is essential for idempotent recovery. New agents generating
+managed-repo Bootstrap Requests must add the standard feature list
+automatically; no user checkbox. For generated-artifact writeback, the
+executor also records the installed capability under `.devflow/` as described
+in section 5.2.
 Repositories created directly in the GitHub UI are outside this automatic
 bootstrap path unless a separate user-approved external creation hook or
 template path exists. Do not claim zero-touch setup for every GitHub creation route.
+
+### 5.2 Standard generated-artifact writeback capability (#1050)
+
+When `bootstrap.standard_features` includes `generated-artifact-writeback`,
+Bootstrap seeds `.devflow/standard-features.json` using the strict
+`devflow-standard-features.v1` contract and installs the native read-only
+status receiver plus a pinned read-only Caller at
+`.github/workflows/verified-artifacts-rollout.yml`. The Caller invokes the
+existing reusable `.github/workflows/generated-artifact-rollout.yml` at the
+exact `GITHUB_SHA` of the Bootstrap executor. It accepts only `dry-run` and
+grants `contents:read`, `actions:read`, and `pull-requests:read`. The manifest
+is an installed-capability record, not an eligibility or authorization claim.
+
+The manifest identifies the existing fixed-recipe admission and shared writer
+(`tools.generated_artifact_rollout.select_fixed_recipe` and
+`tools.generated_artifact_writer.verified_writeback`). The native receiver
+displays the manifest. The Caller reaches the existing unprivileged producer
+and independently authenticated read-only verifier/planner; recipe commands
+run only in the contents-read, secret-free producer job. If there is no
+generated output at Bootstrap time, the normal result is
+`NOT_APPLICABLE/NO_GENERATED_OUTPUT`. An output without an exact admitted
+repository/recipe/caller fails closed. Installing the capability does not add
+a recipe or activate the disabled generic writer. Effectful writing still
+requires a separately reviewed exact-recipe Caller and narrowly scoped
+`contents:write` permission. Recipe admission, permission, and credential
+changes remain separate Human/security gates.
+
+The feature manifest is ensured without overwriting existing files. A
+mismatch fails at `SEED` with `Safe-Retry: after-human-decision`. A historical
+request without `standard_features` does not gain this manifest during retry.
 
 ## 6. Trust boundary
 

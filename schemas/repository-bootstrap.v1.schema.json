@@ -75,6 +75,24 @@
     "bootstrap": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["standard_features"]
+          },
+          "then": {
+            "properties": {
+              "standard_features": {
+                "minItems": 2,
+                "allOf": [
+                  { "contains": { "const": "repo_native_dispatch" } },
+                  { "contains": { "const": "generated-artifact-writeback" } }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "template": {
           "const": "minimal",
@@ -88,6 +106,17 @@
           "type": "boolean",
           "default": false,
           "description": "Explicit future managed-repo auto-seed of least-privileged repository-local Actions command receiver; absent legacy v1 requests remain unchanged."
+        },
+        "standard_features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "repo_native_dispatch",
+              "generated-artifact-writeback"
+            ]
+          },
+          "description": "Opt-in list of known standard capabilities for new managed repositories. Absence preserves legacy repository-bootstrap.v1 retry behavior. generated-artifact-writeback requires repo_native_dispatch; Bootstrap seeds a pinned dry-run-only Caller and status manifest but grants no contents:write permission."
         }
       }
     },
