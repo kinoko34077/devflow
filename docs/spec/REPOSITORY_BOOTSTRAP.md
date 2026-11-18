@@ -220,6 +220,16 @@ re-reads the repository identity and visibility plus its default branch. A
 Public repository is eligible only when the verified default branch is exactly
 `main`.
 
+After verifying that the repository is Public with default branch `main` and
+before protection is applied, Bootstrap seeds the trusted
+`.github/workflows/verify.yml` workflow. It emits a job named `verify` for every
+pull request targeting `main` (without path filters), requests only
+`contents:read`, and runs `git diff --check` against the event's base and head
+SHAs without executing repository scripts. A conflicting existing workflow is
+left untouched and fails closed. Private repositories do not receive this
+workflow. Historical requests without the protection marker do not gain this
+workflow on retry.
+
 Bootstrap first reads classic branch protection. If it is absent, the existing
 `REPOSITORY_BOOTSTRAP_TOKEN` is used to apply the accepted #78 baseline: require
 a pull request, require the stable `verify` Actions check, allow zero native

@@ -53,6 +53,7 @@ REQUIRED_MANAGED_STANDARD_FEATURES = frozenset(
 )
 STANDARD_FEATURE_MANIFEST_PATH = ".devflow/standard-features.json"
 STANDARD_ROLLOUT_CALLER_PATH = ".github/workflows/verified-artifacts-rollout.yml"
+VERIFY_WORKFLOW_PATH = ".github/workflows/verify.yml"
 LEGACY_REPO_NATIVE_DISPATCH_SHA256 = "8f5fb94577be6d03f14faed8a39ee35bcc65058a93ec2a60df51c0678ec460f0"
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 REPOSITORY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -732,6 +733,48 @@ class BootstrapExecutor:
                 resources=resources,
             )
 
+    def _ensure_verify_workflow(
+        self,
+        context: BootstrapContext,
+        full_name: str,
+        resources: list[str],
+    ) -> None:
+        verify_workflow_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verify.yml"
+        content = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: verify_workflow_path.read_text(encoding="utf-8"),
+        )
+        existing = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: self.repository_api.get_file(full_name, VERIFY_WORKFLOW_PATH),
+        )
+        if existing is None:
+            self._call(
+                context,
+                "SEED",
+                resources,
+                lambda: self.repository_api.create_file(
+                    full_name,
+                    VERIFY_WORKFLOW_PATH,
+                    content,
+                    f"chore: add bootstrap verify workflow ({context.request_ref})",
+                ),
+                safe_retry="after-human-decision",
+            )
+        elif existing.get("content") != content:
+            self._raise_failure(
+                context,
+                "SEED",
+                "existing verify workflow differs from trusted bootstrap template; never overwrite",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+        resources.append(f"file:{VERIFY_WORKFLOW_PATH}")
+
     def _ensure_main_protection(
         self,
         request: BootstrapRequest,
@@ -775,6 +818,11 @@ class BootstrapExecutor:
                 safe_retry="after-human-decision",
                 resources=resources,
             )
+
+        # Install the exact status check before making it a branch-protection
+        # requirement. Private Free repositories never need or receive this
+        # Actions workflow.
+        self._ensure_verify_workflow(context, full_name, resources)
 
         baseline = self._main_protection_baseline()
         protection = self._call_main_protection(

@@ -61,8 +61,13 @@ class ProtectionApi(FakeApi):
         self.protections = {}
         self.protection_calls = []
         self.protection_payloads = []
+        self.events = []
         self.fail_put_status = None
         self.fail_second_get_status = None
+
+    def create_file(self, full_name, path, content, message):
+        self.events.append(("create_file", path))
+        return super().create_file(full_name, path, content, message)
 
     def get_branch_protection(self, full_name, branch):
         self.protection_calls.append(("GET", full_name, branch))
@@ -75,6 +80,7 @@ class ProtectionApi(FakeApi):
         return copy.deepcopy(value)
 
     def set_branch_protection(self, full_name, branch, protection):
+        self.events.append(("set_branch_protection", branch))
         self.protection_calls.append(("PUT", full_name, branch))
         self.protection_payloads.append(copy.deepcopy(protection))
         if self.fail_put_status is not None:
@@ -99,6 +105,27 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual(1, len(done))
         self.assertIn("Main-Protection: VERIFIED/PROTECTED", done[0])
 
+    def test_public_bootstrap_seeds_read_only_verify_check_before_protection(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        verify_path = ".github/workflows/verify.yml"
+        workflow = repository.files[(FULL_NAME, verify_path)]
+        self.assertIn("name: verify", workflow)
+        self.assertIn("  pull_request:\n    branches:\n      - main", workflow)
+        self.assertIn("jobs:\n  verify:", workflow)
+        self.assertIn("permissions: {}", workflow)
+        self.assertIn("      contents: read", workflow)
+        self.assertIn("git diff --check \"$BASE_SHA\" \"$HEAD_SHA\"", workflow)
+        self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertNotIn("paths:", workflow)
+        self.assertLess(
+            repository.events.index(("create_file", verify_path)),
+            repository.events.index(("set_branch_protection", "main")),
+        )
+
     def test_matching_existing_protection_is_verified_without_rewriting(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.protections[(FULL_NAME, "main")] = protection_readback()
@@ -114,6 +141,7 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         rb.BootstrapExecutor(repository, devflow).execute(request("private"), context())
 
         self.assertEqual([], repository.protection_calls)
+        self.assertNotIn((FULL_NAME, ".github/workflows/verify.yml"), repository.files)
         done = [body for _, _, body in devflow.comments if "State: DONE" in body]
         self.assertEqual(1, len(done))
         self.assertIn("Main-Protection: NOT_APPLICABLE/PRIVATE_REPOSITORY", done[0])
@@ -127,6 +155,18 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         done = [body for _, _, body in devflow.comments if "State: DONE" in body]
         self.assertEqual(1, len(done))
         self.assertIn("Main-Protection: NOT_APPLICABLE/LEGACY_V1_REQUEST", done[0])
+        self.assertNotIn((FULL_NAME, ".github/workflows/verify.yml"), repository.files)
+
+    def test_existing_conflicting_verify_workflow_fails_closed(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.files[(FULL_NAME, ".github/workflows/verify.yml")] = "name: user workflow\n"
+
+        with self.assertRaises(rb.BootstrapFailure) as caught:
+            rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("SEED", caught.exception.stage)
+        self.assertEqual([], repository.protection_payloads)
+        self.assertEqual("name: user workflow\n", repository.files[(FULL_NAME, ".github/workflows/verify.yml")])
 
     def test_divergent_existing_policy_fails_closed_without_overwrite(self):
         repository, devflow = ProtectionApi(), FakeApi()

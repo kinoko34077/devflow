@@ -284,6 +284,15 @@ baseline requires PRs and the stable `verify` check, has zero required native
 approvals, requires resolved review conversations, enforces admins, has no
 bypass actors, and blocks force-push and deletion.
 
+After confirming the target is Public with default branch `main`, and before
+applying protection, Bootstrap seeds `.github/workflows/verify.yml`. The
+`verify` job runs for every pull request targeting `main`, has no path filters,
+uses only `contents:read`, and checks patch whitespace with `git diff --check`
+without executing repository scripts. A divergent existing workflow is never
+overwritten; setup fails closed at `SEED` for human review. Private repositories
+do not receive this Actions workflow. Historical requests without the
+protection marker do not gain the workflow on retry.
+
 The app-bound required-check PUT sends only `checks` with `app_id: 15368`;
 `contexts` is validated in the GET readback and is not copied into the PUT body.
 
