@@ -247,6 +247,17 @@ app-bound `checks` entry; compare the readback form rather than copying it into
 the PUT payload. GitHub documents `checks` as the fine-grained form of this
 setting: https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28.
 
+The optional push `restrictions` field is owner-type aware. GitHub only
+supports user, app, and team push restrictions for organization-owned
+repositories. For a personal (`User`) repository, Bootstrap omits this field
+from the PUT and treats an absent or `null` readback as no push restriction; a
+non-null value is divergent and fails closed. For an organization-owned
+repository, Bootstrap sends `restrictions: null` and requires an explicit null
+readback. An unknown owner type fails closed before the protection mutation.
+This preserves the #78 baseline without sending an unsupported field to a
+personal repository. See GitHub's
+[protected-branches API documentation](https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28).
+
 The branch-protection API requires an already-authorized credential with
 administration write access for the target repository. Confirm that the
 existing bootstrap credential covers future Public repositories before live
