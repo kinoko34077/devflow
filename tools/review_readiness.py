@@ -278,7 +278,7 @@ def _latest_codex_summary(comments: list[dict[str, Any]]) -> dict[str, Any] | No
 
 
 def _github_review_packet(repository: str, pr_number: int) -> tuple[
-    dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]
+    dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], set[int]
 ]:
     """Read only native REST source records; reusable outside GitHub Actions."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
@@ -305,6 +305,67 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.load(response)
 
+    def trusted_bot_edit_history(comment: dict[str, Any]) -> bool:
+        """Verify every edit via GitHub GraphQL, not only original REST author."""
+        user = comment.get("user") or {}
+        node_id = user.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            return False
+        query = """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on IssueComment {
+              id
+              body
+              editor { id }
+              lastEditedAt
+              userContentEdits(first: 100) {
+                pageInfo { hasNextPage }
+                nodes { editor { id } }
+              }
+            }
+          }
+        }
+        """
+        data = json.dumps({"query": query, "variables": {"id": comment.get("node_id")}}).encode("utf-8")
+        if not comment.get("node_id"):
+            return False
+        request = urllib.request.Request(
+            f"{api}/graphql", data=data,
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                packet = json.load(response)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(packet, dict) or packet.get("errors"):
+            return False
+        node = (packet.get("data") or {}).get("node")
+        if not isinstance(node, dict) or node.get("id") != comment.get("node_id"):
+            return False
+        # Re-read the same rendered body through an independent GitHub API
+        # surface to guard an edit racing with the REST read.
+        if node.get("body") != comment.get("body"):
+            return False
+        history = node.get("userContentEdits")
+        if not isinstance(history, dict) or not isinstance(history.get("nodes"), list):
+            return False
+        if (history.get("pageInfo") or {}).get("hasNextPage") is not False:
+            return False
+        if node.get("lastEditedAt") is not None:
+            if not isinstance(node.get("editor"), dict) or node["editor"].get("id") != node_id:
+                return False
+            if not history["nodes"]:
+                return False
+        return all(
+            isinstance(edit, dict)
+            and isinstance(edit.get("editor"), dict)
+            and edit["editor"].get("id") == node_id
+            for edit in history["nodes"]
+        )
+
     def pages(suffix: str) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
         for page in range(1, 21):
@@ -322,12 +383,17 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
         raise ValueError("Unexpected GitHub PR response")
     reviews = pages(f"pulls/{pr_number}/reviews")
     comments = pages(f"issues/{pr_number}/comments")
-    return pr, reviews, comments
+    verified_bot_ids: set[int] = set()
+    summary = _latest_codex_summary(comments)
+    if summary is not None and trusted_bot_edit_history(summary):
+        verified_bot_ids.add(summary["id"])
+    return pr, reviews, comments, verified_bot_ids
 
 
 def evaluate(
     pr: dict[str, Any], reviews: list[dict[str, Any]],
     comments: list[dict[str, Any]] | None = None,
+    *, verified_codex_ids: set[int] | None = None,
 ) -> ReadinessResult:
     body = str(pr.get("body") or "")
     formal_required, valid_formal_gate = _yes_no_field(body, "Formal review required")
@@ -403,6 +469,7 @@ def evaluate(
         )
         if (
             latest_bot is not None
+            and latest_bot.get("id") in (verified_codex_ids or set())
             and _verified_codex_summary(latest_bot, head_sha)
             and not has_native_blocker
             and not has_malformed_native
@@ -497,7 +564,7 @@ def main() -> int:
             if (args.repository is None or args.pr_number is None
                     or args.pr_json or args.reviews_json or args.comments_json):
                 parser.error("live mode requires --repository and --pr-number only")
-            pr, reviews, comments = _github_review_packet(args.repository, args.pr_number)
+            pr, reviews, comments, verified_bot_ids = _github_review_packet(args.repository, args.pr_number)
         else:
             if args.pr_json is None or args.reviews_json is None:
                 parser.error("offline mode requires --pr-json and --reviews-json")
@@ -505,10 +572,11 @@ def main() -> int:
             reviews = json.loads(args.reviews_json.read_text(encoding="utf-8"))
             comments = (json.loads(args.comments_json.read_text(encoding="utf-8"))
                         if args.comments_json else None)
+            verified_bot_ids = set()  # Fixture JSON is not authenticated GitHub evidence.
         if (not isinstance(pr, dict) or not isinstance(reviews, list)
                 or (comments is not None and not isinstance(comments, list))):
             raise ValueError("PR/reviews/comments source JSON has invalid structure")
-        result = evaluate(pr, reviews, comments)
+        result = evaluate(pr, reviews, comments, verified_codex_ids=verified_bot_ids)
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"review-readiness: FAIL — source unavailable or invalid: {type(exc).__name__}")
         return 1
