@@ -400,6 +400,19 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             pr(), [blocking, clear], [codex_summary()]
         ).ready)
 
+    def test_invalid_later_formal_cannot_clear_existing_blocker(self):
+        first = review(blocking="P1: unresolved", review_id=201)
+        for second in (
+            review(review_id=202, version="1"),
+            review(review_id=202, commit_id=OTHER),
+            review(review_id=202, state="DISMISSED"),
+        ):
+            with self.subTest(second=second):
+                result = self.evaluate(
+                    pr(), [first, second], [codex_summary()]
+                )
+                self.assertFalse(result.ready)
+
     def test_existing_native_formal_review_remains_supported(self):
         self.assertTrue(self.evaluate(
             pr(), [review()], [codex_summary(head=OTHER)]
@@ -513,5 +526,5 @@ class CodexReviewEvidenceTests(unittest.TestCase):
         with mock.patch.dict(review_readiness.os.environ,
                              {"GH_TOKEN": "fake", "GH_API_URL": "http://example.com"},
                              clear=True):
-            with self.assertRaisesRegex(ValueError, "HTTPS"):
+            with self.assertRaisesRegex(ValueError, "api.github.com"):
                 review_readiness._github_review_packet("kinoko34077/devflow", 1)
