@@ -583,6 +583,13 @@ def main() -> int:
                     or args.pr_json or args.reviews_json or args.comments_json):
                 parser.error("live mode requires --repository and --pr-number only")
             pr, reviews, comments, verified_bot_ids = _github_review_packet(args.repository, args.pr_number)
+            summary = _latest_codex_summary(comments)
+            evidence_state = (
+                "absent" if summary is None else
+                "editor-history-verified" if summary.get("id") in verified_bot_ids else
+                "editor-history-unverified"
+            )
+            print(f"review-readiness-source: codex-summary={evidence_state}")
         else:
             if args.pr_json is None or args.reviews_json is None:
                 parser.error("offline mode requires --pr-json and --reviews-json")
