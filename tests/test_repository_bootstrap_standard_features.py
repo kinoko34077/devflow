@@ -186,6 +186,10 @@ class BootstrapStandardFeatureTests(unittest.TestCase):
             bootstrap_schema["properties"]["bootstrap"]["properties"]["standard_features"]["items"]["enum"],
             ["repo_native_dispatch", "generated-artifact-writeback"],
         )
+        self.assertEqual(
+            bootstrap_schema["properties"]["bootstrap"]["properties"]["main_protection"]["const"],
+            "public-only-v1",
+        )
         feature_properties = manifest_schema["$defs"]["feature"]["properties"]
         self.assertEqual(feature_properties["dry_run_caller"]["const"], ROLLOUT_CALLER_PATH)
         self.assertIs(feature_properties["effectful_write"]["properties"]["dry_run_enabled_by_bootstrap"]["const"], True)
@@ -204,7 +208,12 @@ class BootstrapStandardFeatureTests(unittest.TestCase):
         self.assertIn("separate rollout Issue", cross_spec)
         self.assertIn("finite reviewable waves", cross_spec)
         self.assertIn("bootstrap.standard_features", bootstrap_spec)
+        self.assertIn('bootstrap.main_protection: "public-only-v1"', bootstrap_spec)
         self.assertIn("NOT_APPLICABLE/NO_GENERATED_OUTPUT", bootstrap_spec)
+        operations = (root / "docs/operations/REPOSITORY_BOOTSTRAP.md").read_text(encoding="utf-8")
+        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn('bootstrap.main_protection: "public-only-v1"', operations)
+        self.assertIn('bootstrap.main_protection: "public-only-v1"', agents)
 
 
 if __name__ == "__main__":

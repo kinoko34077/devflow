@@ -78,7 +78,8 @@ The request Issue contains exactly one machine-readable block:
     "standard_features": [
       "repo_native_dispatch",
       "generated-artifact-writeback"
-    ]
+    ],
+    "main_protection": "public-only-v1"
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -127,6 +128,7 @@ Other V1 defaults that do not invent semantic/project policy are:
 - Repository Base adoption is never implied by `minimal`;
 - no release, deployment, publication, repository deletion, shared-history rewrite, credential change or permission expansion is part of bootstrap.
 - for **new** managed repositories, request emitters MUST include `bootstrap.standard_features` with the supported default IDs `repo_native_dispatch` and `generated-artifact-writeback`, without asking the user to visit repository settings. The older `bootstrap.repo_native_dispatch` field remains a compatibility alias. An absent `standard_features` field preserves historical v1 request replay behavior and does not seed new files.
+- for **new** managed repositories, request emitters MUST include `bootstrap.main_protection: "public-only-v1"`. Bootstrap applies and verifies the accepted `main` protection only for a new Public repository. Private repositories report `NOT_APPLICABLE/PRIVATE_REPOSITORY` and do not call the protection API. An absent field preserves historical v1 replay behavior and does not change branch protection.
 
 V1 does not automatically generate licence text. A non-null licence request is unsupported until a later version defines exact licence material and attribution inputs; it MUST fail validation rather than be silently ignored or guessed.
 
@@ -209,6 +211,39 @@ changes remain separate Human/security gates.
 The feature manifest is ensured without overwriting existing files. A
 mismatch fails at `SEED` with `Safe-Retry: after-human-decision`. A historical
 request without `standard_features` does not gain this manifest during retry.
+
+### 5.3 Public-only main protection (#1058)
+
+For a new managed-repository request, `bootstrap.main_protection` is the
+explicit default policy marker. After seed files are ensured, Bootstrap
+re-reads the repository identity and visibility plus its default branch. A
+Public repository is eligible only when the verified default branch is exactly
+`main`.
+
+Bootstrap first reads classic branch protection. If it is absent, the existing
+`REPOSITORY_BOOTSTRAP_TOKEN` is used to apply the accepted #78 baseline: require
+a pull request, require the stable `verify` Actions check, allow zero native
+approvals, require resolved review conversations, enforce the rule for admins,
+allow no bypass actors, block force-pushes, and block branch deletion. The
+policy is then read back and checked before Bootstrap records `DONE`. If the
+current policy already matches, Bootstrap verifies it without writing. A
+divergent policy, unexpected repository identity/visibility, or non-`main`
+default branch fails closed and is not overwritten.
+
+The branch-protection API requires an already-authorized credential with
+administration write access for the target repository. Confirm that the
+existing bootstrap credential covers future Public repositories before live
+provisioning. Missing permission is recorded at `MAIN_PROTECTION` with
+`Safe-Retry: after-human-decision`; Bootstrap never expands credential scopes,
+changes secrets, or widens workflow permissions. A protection failure leaves
+the created repository and seed files available for identity-safe recovery and
+does not proceed to new owner Issues or the Repository Control.
+
+Private repositories report `NOT_APPLICABLE/PRIVATE_REPOSITORY`, do not call
+branch-protection APIs, and do not require `main.protected=true`. Requests
+without `main_protection` report the legacy policy as not applicable and do not
+gain protection changes on historical v1 retry. This policy is never applied
+to an existing-repository batch; that rollout has a separate owner.
 
 ## 6. Trust boundary
 

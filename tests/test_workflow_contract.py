@@ -153,6 +153,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("interactive_unspecified_action: ask_user_before_request", workflow)
         self.assertIn("noninteractive_or_delegated_unspecified_fallback: private", workflow)
         self.assertIn("infer_public_from_prose: forbidden", workflow)
+        self.assertIn("new_managed_main_protection:", workflow)
+        self.assertIn("private_repository_action: NOT_APPLICABLE_NO_PROTECTION_API_CALL", workflow)
 
         for document in (agent_entry, operations, spec):
             self.assertIn("private", document)
