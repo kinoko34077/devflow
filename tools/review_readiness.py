@@ -376,7 +376,23 @@ def evaluate(
         latest_bot = _latest_codex_summary(comments)
         # A native REQUEST_CHANGES is a separate blocking gate; even a clean
         # bot summary must not silently override it.
-        has_native_blocker = any(
+        current_head_formal = [
+            r for r in reviews
+            if _provenance_fields(str(r.get("body") or "")) is not None
+            and _commit_value(_provenance_fields(str(r.get("body") or ""))["Reviewed-Commit"]) == head_sha
+        ]
+        latest_current_formal = current_head_formal[-1] if current_head_formal else None
+        # A submitted COMMENT Review can express a blocking finding even when
+        # GitHub native REQUEST_CHANGES is unavailable to the reviewer.
+        # Only a later clean formal Review on the same head may supersede it.
+        formal_blocker = (
+            latest_current_formal is not None
+            and (
+                (_blocking_findings(str(latest_current_formal.get("body") or "")) or "").casefold()
+                != "none"
+            )
+        )
+        has_native_blocker = formal_blocker or any(
             str(r.get("state") or "").upper() == "CHANGES_REQUESTED"
             for r in reviews
         )
