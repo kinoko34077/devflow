@@ -40,12 +40,17 @@ _VALIDATION_CODES = frozenset({
 })
 
 
+def _normalize_validation_field(value: str) -> str:
+    """Normalize only numeric array indexes in a GitHub field path."""
+    normalized = re.sub(r"\[\d+\]", "", value)
+    return re.sub(r"\.(\d+)\.", ".", normalized)
+
+
 def _safe_validation_field(value: Any) -> str | None:
     """Return a known field after removing only numeric array indexes."""
     if not isinstance(value, str):
         return None
-    normalized = re.sub(r"\[\d+\]", "", value.strip())
-    normalized = re.sub(r"\.(\d+)\.", ".", normalized)
+    normalized = _normalize_validation_field(value.strip())
     return normalized if normalized in _VALIDATION_FIELDS else None
 
 
@@ -59,9 +64,7 @@ def _safe_validation_code(value: Any) -> str | None:
 
 def _safe_validation_error_from_text(value: str) -> tuple[str | None, str | None]:
     """Extract only a known field and code from a GitHub string error item."""
-    normalized = value[:MAX_ERROR_BODY_BYTES].casefold()
-    normalized = re.sub(r"\[\d+\]", "", normalized)
-    normalized = re.sub(r"\.(\d+)(?=\.|:|$)", ".", normalized)
+    normalized = _normalize_validation_field(value[:MAX_ERROR_BODY_BYTES].casefold())
 
     for field in sorted(_VALIDATION_FIELDS, key=len, reverse=True):
         field_pattern = re.compile(
