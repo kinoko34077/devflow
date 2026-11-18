@@ -1,4 +1,6 @@
 import unittest
+import json
+from unittest import mock
 
 from tools import review_readiness
 
@@ -292,3 +294,114 @@ class ReviewReadinessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def codex_summary(*, head=HEAD, status="completed", unresolved=False,
+                  has_findings=False, author_id=199175422,
+                  login="chatgpt-codex-connector[bot]", user_type="Bot",
+                  comment_id=801, updated_at="2026-11-18T01:00:00Z"):
+    payload = {
+        "code_review": {
+            "commit_sha": head,
+            "status": status,
+            "has_any_findings": has_findings,
+            "has_unresolved_findings": unresolved,
+        },
+        "security_review": {
+            "commit_sha": None, "status": None,
+            "has_any_findings": None, "has_unresolved_findings": None,
+        },
+    }
+    return {
+        "id": comment_id,
+        "updated_at": updated_at,
+        "user": {"id": author_id, "login": login, "type": user_type},
+        "body": ("<!-- codex-pull-request-review-summary -->\n"
+                 "<!-- codex-review-state:v1 "
+                 + json.dumps(payload, separators=(",", ":")) + " -->\n"),
+    }
+
+
+class CodexReviewEvidenceTests(unittest.TestCase):
+    def test_current_head_codex_bot_independently_reviews_codex_implementation(self):
+        case = pr(different_required="yes", implementer_system="Codex",
+                  implementer_model="GPT-6")
+        outcome = review_readiness.evaluate(case, [], [codex_summary()])
+        self.assertTrue(outcome.ready, outcome.reason)
+        self.assertEqual(outcome.matched_review_id, 801)
+
+    def test_current_head_bot_is_additional_formal_review_path(self):
+        self.assertTrue(review_readiness.evaluate(pr(), [], [codex_summary()]).ready)
+        self.assertFalse(review_readiness.evaluate(pr(), []).ready)
+
+    def test_stale_or_pending_bot_evidence_fails(self):
+        for packet in [
+            codex_summary(head=OTHER),
+            codex_summary(status="pending"),
+            codex_summary(unresolved=True, has_findings=True),
+            codex_summary(has_findings=None),
+        ]:
+            with self.subTest(packet=packet):
+                self.assertFalse(review_readiness.evaluate(
+                    pr(different_required="yes"), [], [packet]
+                ).ready)
+
+    def test_forged_bot_comments_fail(self):
+        for change in (
+            {"author_id": 79015263},
+            {"login": "kinoko34077"},
+            {"user_type": "User"},
+        ):
+            packet = codex_summary(**change)
+            with self.subTest(change=change):
+                self.assertFalse(review_readiness.evaluate(pr(), [], [packet]).ready)
+        packet = codex_summary()
+        packet["body"] += packet["body"]
+        self.assertFalse(review_readiness.evaluate(pr(), [], [packet]).ready)
+
+    def test_malformed_and_summary_only_text_fails(self):
+        packet = codex_summary()
+        packet["body"] = "Codex Review: Didn't find any major issues."
+        self.assertFalse(review_readiness.evaluate(pr(), [], [packet]).ready)
+        packet["body"] = (
+            "<!-- codex-pull-request-review-summary -->\n"
+            "<!-- codex-review-state:v1 {invalid} -->"
+        )
+        self.assertFalse(review_readiness.evaluate(pr(), [], [packet]).ready)
+
+    def test_newer_stale_summary_supersedes_older_clean(self):
+        old = codex_summary()
+        newer = codex_summary(head=OTHER, comment_id=802,
+                              updated_at="2026-11-18T02:00:00Z")
+        self.assertFalse(review_readiness.evaluate(pr(), [], [old, newer]).ready)
+
+    def test_native_request_changes_cannot_be_overridden_by_bot(self):
+        native = review(state="CHANGES_REQUESTED", decision="REQUEST_CHANGES")
+        self.assertFalse(review_readiness.evaluate(
+            pr(different_required="yes"), [native], [codex_summary()]
+        ).ready)
+
+    def test_existing_native_formal_review_remains_supported(self):
+        self.assertTrue(review_readiness.evaluate(
+            pr(), [review()], [codex_summary(head=OTHER)]
+        ).ready)
+
+    def test_bot_cannot_review_its_own_changes_as_independent(self):
+        case = pr(different_required="yes",
+                  implementer_system="chatgpt-codex-connector",
+                  implementer_model="unknown")
+        self.assertFalse(review_readiness.evaluate(
+            case, [], [codex_summary()]
+        ).ready)
+
+    def test_live_read_uses_existing_auth_only_and_fails_closed(self):
+        with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "GH_TOKEN"):
+                review_readiness._github_review_packet("kinoko34077/devflow", 1057)
+        with self.assertRaisesRegex(ValueError, "owner/name"):
+            review_readiness._github_review_packet("https://bad", 1)
+        with mock.patch.dict(review_readiness.os.environ,
+                             {"GH_TOKEN": "fake", "GH_API_URL": "http://example.com"},
+                             clear=True):
+            with self.assertRaisesRegex(ValueError, "HTTPS"):
+                review_readiness._github_review_packet("kinoko34077/devflow", 1)
