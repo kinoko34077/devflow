@@ -230,6 +230,13 @@ current policy already matches, Bootstrap verifies it without writing. A
 divergent policy, unexpected repository identity/visibility, or non-`main`
 default branch fails closed and is not overwritten.
 
+For the app-bound required check, the protection PUT sends `checks` (with
+`app_id: 15368`) and omits the legacy `contexts` request field. The GET
+readback is expected to expose both `contexts: ["verify"]` and the matching
+app-bound `checks` entry; compare the readback form rather than copying it into
+the PUT payload. GitHub documents `checks` as the fine-grained form of this
+setting: https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28.
+
 The branch-protection API requires an already-authorized credential with
 administration write access for the target repository. Confirm that the
 existing bootstrap credential covers future Public repositories before live

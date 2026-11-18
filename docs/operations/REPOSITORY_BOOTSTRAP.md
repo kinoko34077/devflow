@@ -284,6 +284,9 @@ baseline requires PRs and the stable `verify` check, has zero required native
 approvals, requires resolved review conversations, enforces admins, has no
 bypass actors, and blocks force-push and deletion.
 
+The app-bound required-check PUT sends only `checks` with `app_id: 15368`;
+`contexts` is validated in the GET readback and is not copied into the PUT body.
+
 Private repositories explicitly report
 `NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and
 protected main is not a completion condition. A historical v1 request with no

@@ -12,7 +12,6 @@ POLICY = "public-only-v1"
 BASELINE = {
     "required_status_checks": {
         "strict": False,
-        "contexts": ["verify"],
         "checks": [{"context": "verify", "app_id": 15368}],
     },
     "enforce_admins": True,
@@ -225,6 +224,7 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual("PUT", call.call_args_list[1].args[0])
         self.assertIn("/branches/main/protection", call.call_args_list[1].args[1])
         self.assertEqual(BASELINE, call.call_args_list[1].args[2])
+        self.assertNotIn("contexts", call.call_args_list[1].args[2]["required_status_checks"])
 
 
 if __name__ == "__main__":
