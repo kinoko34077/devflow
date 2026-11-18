@@ -23,6 +23,17 @@ _VALIDATION_FIELDS = frozenset({
     "required_status_checks", "required_pull_request_reviews", "enforce_admins",
     "restrictions", "allow_force_pushes", "allow_deletions",
     "required_conversation_resolution", "contexts", "checks", "strict", "app_id",
+    "required_status_checks.contexts", "required_status_checks.checks",
+    "required_status_checks.checks.context", "required_status_checks.checks.app_id",
+    "required_status_checks.strict",
+    "required_pull_request_reviews.required_approving_review_count",
+    "required_pull_request_reviews.bypass_pull_request_allowances",
+    "required_pull_request_reviews.bypass_pull_request_allowances.users",
+    "required_pull_request_reviews.bypass_pull_request_allowances.teams",
+    "required_pull_request_reviews.bypass_pull_request_allowances.apps",
+    "required_pull_request_reviews.dismiss_stale_reviews",
+    "required_pull_request_reviews.require_code_owner_reviews",
+    "required_pull_request_reviews.require_last_push_approval",
 })
 _VALIDATION_CODES = frozenset({
     "already_exists", "custom", "invalid", "missing", "missing_field", "unprocessable",
@@ -105,14 +116,18 @@ def _message_kind(response_body: bytes) -> str:
 
 def _validation_details(response_body: bytes) -> list[str]:
     """Expose only fixed schema hints and allowlisted field/code pairs."""
-    if not isinstance(response_body, bytes) or len(response_body) > MAX_ERROR_BODY_BYTES:
-        return []
+    if not isinstance(response_body, bytes):
+        return ["validation_errors=unavailable"]
+    if len(response_body) > MAX_ERROR_BODY_BYTES:
+        return ["validation_errors=oversize"]
+    if not response_body:
+        return ["validation_errors=empty_body"]
     try:
         parsed = json.loads(response_body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-        return []
+        return ["validation_errors=malformed"]
     if not isinstance(parsed, dict):
-        return []
+        return ["validation_errors=unexpected_root"]
 
     messages: list[str] = []
     top_message = parsed.get("message")
@@ -121,6 +136,14 @@ def _validation_details(response_body: bytes) -> list[str]:
 
     raw_errors = parsed.get("errors")
     errors = raw_errors[:16] if isinstance(raw_errors, list) else []
+    if "errors" not in parsed:
+        error_shape = "absent"
+    elif not isinstance(raw_errors, list):
+        error_shape = "unexpected_shape"
+    elif not raw_errors:
+        error_shape = "empty"
+    else:
+        error_shape = "unclassified"
     for error in errors:
         if isinstance(error, dict):
             error_message = error.get("message")
@@ -153,9 +176,21 @@ def _validation_details(response_body: bytes) -> list[str]:
             details.append(f"validation_error={field}:{code.casefold()}")
             break
     if not any(item.startswith("validation_error=") for item in details):
-        for field in sorted(_VALIDATION_FIELDS):
+        details.append(f"validation_errors={error_shape}")
+    if not any(item.startswith("validation_error=") for item in details):
+        for field in sorted(_VALIDATION_FIELDS, key=len, reverse=True):
+            schema_paths = ["properties/" + "/properties/".join(
+                re.escape(segment) for segment in field.split(".")
+            )]
+            if field.startswith("required_status_checks.checks."):
+                leaf = re.escape(field.rsplit(".", 1)[1])
+                schema_paths.append(
+                    "properties/required_status_checks/properties/checks/items/properties/"
+                    + leaf
+                )
             if any(
-                re.search(rf"properties/{re.escape(field)}(?![a-z0-9_])", item)
+                re.search(rf"{schema_path}(?![a-z0-9_])", item)
+                for schema_path in schema_paths
                 for item in messages
             ):
                 details.append(f"validation_field={field}")

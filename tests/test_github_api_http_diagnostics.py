@@ -134,9 +134,35 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         with mock.patch("tools.repository_bootstrap.urllib.request.urlopen", side_effect=exception):
             with self.assertRaises(bootstrap.GitHubApiError) as caught:
                 bootstrap.GitHubApi("dummy-token").get_repository("kinoko34077/fixture")
-        self.assertEqual(buffer.read_sizes, [diagnostics.MAX_ERROR_BODY_BYTES])
+        self.assertEqual(buffer.read_sizes, [diagnostics.MAX_ERROR_BODY_BYTES + 1])
         self.assertIn("category=forbidden_unclassified", str(caught.exception))
         self.assertNotIn("secret", str(caught.exception))
+
+    def test_adapter_preserves_oversize_validation_shape_without_logging_body(self):
+        secret = "response-tail-secret"
+        content = (
+            b'{"message":"Validation Failed","errors":[]}'
+            + b"x" * (diagnostics.MAX_ERROR_BODY_BYTES + 100)
+            + secret.encode("ascii")
+        )
+        buffer = io.BytesIO(content)
+        exception = urllib.error.HTTPError(
+            "https://api.github.com/repos/kinoko34077/fixture/contents/example",
+            422,
+            "error",
+            Message(),
+            buffer,
+        )
+
+        with mock.patch("tools.repository_bootstrap.urllib.request.urlopen", side_effect=exception):
+            with self.assertRaises(bootstrap.GitHubApiError) as caught:
+                bootstrap.GitHubApi("dummy-token").get_repository("kinoko34077/fixture")
+
+        message = str(caught.exception)
+        self.assertIn("category=validation_failed", message)
+        self.assertIn("validation_errors=oversize", message)
+        self.assertNotIn(secret, message)
+        self.assertNotIn("dummy-token", message)
 
     def test_never_echo_arbitrary_github_response(self):
         secret = "ghp_EXAMPLE_SECRET_DO_NOT_PRINT"
@@ -218,6 +244,23 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("validation_error=required_status_checks:invalid", result)
         self.assertNotIn(secret, result)
 
+    def test_validation_diagnostics_allowlist_nested_protection_field(self):
+        secret = "sensitive API detail"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "resource": "ProtectedBranch",
+                "field": "required_status_checks.checks",
+                "code": "custom",
+                "message": secret,
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_error=required_status_checks.checks:custom", result)
+        self.assertNotIn(secret, result)
+
     def test_validation_diagnostics_classify_known_one_of_failure(self):
         result = self.classify(
             422,
@@ -236,10 +279,23 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("validation_field=required_status_checks", result)
         self.assertNotIn("must-not-appear", result)
 
+    def test_validation_diagnostics_classify_nested_array_schema_path(self):
+        result = self.classify(
+            422,
+            "Invalid request for "
+            "properties/required_status_checks/properties/checks/items/properties/app_id",
+        )
+
+        self.assertIn(
+            "validation_field=required_status_checks.checks.app_id",
+            result,
+        )
+
     def test_validation_diagnostics_do_not_match_longer_schema_field(self):
         result = self.classify(422, "Invalid request for properties/checks_token")
 
-        self.assertEqual("category=validation_failed", result)
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_errors=absent", result)
 
     def test_validation_diagnostics_do_not_match_longer_one_of_phrase(self):
         result = self.classify(
@@ -247,7 +303,8 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             "Invalid request. More than one subschema in oneOf matched_extra.",
         )
 
-        self.assertEqual("category=validation_failed", result)
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_errors=absent", result)
 
     def test_validation_diagnostics_ignore_unrecognized_error_values(self):
         secret = "private-field-and-code"
@@ -258,8 +315,47 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
 
         result = diagnostics.summarize_github_http_error(422, None, body)
 
-        self.assertEqual(result, "category=validation_failed")
+        self.assertEqual(
+            result,
+            "category=validation_failed validation_errors=unclassified",
+        )
         self.assertNotIn(secret, result)
+
+    def test_validation_diagnostics_report_absent_errors_without_echoing_body(self):
+        result = self.classify(422, "Validation Failed")
+
+        self.assertIn("validation_errors=absent", result)
+
+    def test_validation_diagnostics_report_malformed_or_oversize_body_shape(self):
+        malformed = diagnostics.summarize_github_http_error(422, None, b"not-json-secret")
+        oversized = diagnostics.summarize_github_http_error(
+            422, None, b'{"message":"Validation Failed"}' + b"x" * diagnostics.MAX_ERROR_BODY_BYTES
+        )
+
+        self.assertEqual(
+            malformed,
+            "category=validation_failed validation_errors=malformed",
+        )
+        self.assertEqual(
+            oversized,
+            "category=validation_failed validation_errors=oversize",
+        )
+        self.assertNotIn("not-json-secret", malformed)
+
+    def test_validation_diagnostics_response_shape_labels_are_stable(self):
+        cases = [
+            (None, "validation_errors=unavailable"),
+            (b"", "validation_errors=empty_body"),
+            (b"[]", "validation_errors=unexpected_root"),
+            (json.dumps({"errors": "secret-value"}).encode(), "validation_errors=unexpected_shape"),
+            (json.dumps({"errors": []}).encode(), "validation_errors=empty"),
+        ]
+
+        for body, expected in cases:
+            with self.subTest(expected=expected):
+                result = diagnostics.summarize_github_http_error(422, None, body)
+                self.assertEqual(result, f"category=validation_failed {expected}")
+                self.assertNotIn("secret-value", result)
 
 
 if __name__ == "__main__":

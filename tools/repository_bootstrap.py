@@ -1301,7 +1301,9 @@ class GitHubApi:
             try:
                 # HTTPError is a readable response. Bound the read and never
                 # expose arbitrary response text or headers in exceptions.
-                error_body = exc.read(MAX_ERROR_BODY_BYTES)
+                # Read one extra byte so diagnostics can distinguish an oversized
+                # response from malformed JSON truncated at the safety limit.
+                error_body = exc.read(MAX_ERROR_BODY_BYTES + 1)
             except (OSError, ValueError):
                 error_body = b""
             finally:
