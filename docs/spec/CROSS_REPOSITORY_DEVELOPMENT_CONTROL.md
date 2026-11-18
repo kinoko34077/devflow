@@ -232,6 +232,21 @@ On public repositories, a human-authored Issue / Work Order comment may be treat
 
 Detailed procedure and storage rules are defined in `docs/operations/AGENT_OPERATING_MANUAL.md` and `docs/operations/REPOSITORY_ISSUE_MANUAL.md`.
 
+### 4.5 Generic mechanism development and rollout
+
+A cross-repository generic mechanism is complete when its accepted standard
+path is available to new managed repositories and representative behavior,
+refusal cases, permissions and recovery are verified. Its development Work
+Order must not stay open until every previously existing repository adopts it.
+Manage existing-repository evaluation and migration in a separate rollout Issue
+with a fixed cohort, evidence-based applicability/security dispositions and
+finite reviewable waves. `APPLY`, `NOT_APPLICABLE`, `EQUIVALENT` and
+`HUMAN_GATE` are valid outcomes; do not create work or grant permissions just
+to reach a fleet percentage. Keep credential, permission, publication and
+destructive-action Human gates independent from standard installation.
+Detailed Issue authoring and close criteria are in
+`docs/operations/REPOSITORY_ISSUE_MANUAL.md`.
+
 ## 5. State vocabulary
 
 ### 5.1 Work Status

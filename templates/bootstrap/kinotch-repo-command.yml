@@ -18,8 +18,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Read repository metadata without execution of untrusted input
+      - name: Read repository metadata and installed standard capabilities
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY" --jq '{repository: .full_name, default_branch: .default_branch, private: .private}'
+          if features_base64="$(gh api "repos/$GITHUB_REPOSITORY/contents/.devflow/standard-features.json" --jq '.content' 2>/dev/null)"; then
+            printf '%s' "$features_base64" | base64 --decode | jq '{schema, repository, standard_features, features}'
+          else
+            echo 'standard_features=UNKNOWN_OR_NOT_INSTALLED'
+          fi

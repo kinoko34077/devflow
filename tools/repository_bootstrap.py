@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -44,6 +46,14 @@ RISKS = WORKFLOW_CONTRACT.risks
 WORK_STATES = WORKFLOW_CONTRACT.work_states
 REPOSITORY_STATES = WORKFLOW_CONTRACT.repository_states
 TEMPLATES = frozenset({"minimal"})
+STANDARD_FEATURES = frozenset({"repo_native_dispatch", "generated-artifact-writeback"})
+REQUIRED_MANAGED_STANDARD_FEATURES = frozenset(
+    {"repo_native_dispatch", "generated-artifact-writeback"}
+)
+STANDARD_FEATURE_MANIFEST_PATH = ".devflow/standard-features.json"
+STANDARD_ROLLOUT_CALLER_PATH = ".github/workflows/verified-artifacts-rollout.yml"
+LEGACY_REPO_NATIVE_DISPATCH_SHA256 = "8f5fb94577be6d03f14faed8a39ee35bcc65058a93ec2a60df51c0678ec460f0"
+SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 REPOSITORY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
@@ -101,6 +111,9 @@ class BootstrapRequest:
     template: str
     devflow_managed: bool
     repo_native_dispatch: bool
+    generated_artifact_writeback: bool
+    standard_features: tuple[str, ...]
+    standard_features_declared: bool
     readme: str
     specification: str | None
     license: None
@@ -120,6 +133,7 @@ class BootstrapContext:
     request_title: str
     author_association: str
     author: Mapping[str, Any]
+    devflow_sha: str
 
 
 @dataclass(frozen=True)
@@ -232,7 +246,10 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     risk = _enum(classification.get("risk"), "classification.risk", RISKS)
 
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
-    _reject_unknown_keys(bootstrap, "bootstrap", {"template", "devflow_managed", "repo_native_dispatch"})
+    _reject_unknown_keys(
+        bootstrap, "bootstrap",
+        {"template", "devflow_managed", "repo_native_dispatch", "standard_features"},
+    )
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
         devflow_managed = _boolean(bootstrap.get("devflow_managed"), "bootstrap.devflow_managed")
@@ -240,12 +257,48 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         devflow_managed = name not in EXCLUDED_REPOSITORIES
     if name in EXCLUDED_REPOSITORIES and devflow_managed:
         raise BootstrapError(f"repository {name!r} is excluded from devflow management")
-    # Absent means legacy v1 minimal behavior: retries of old requests do not
-    # suddenly inject a new workflow. Future managed-repo request emitters
-    # explicitly set this true automatically; users need no GitHub UI setup.
-    repo_native_dispatch = _boolean(
-        bootstrap.get("repo_native_dispatch", False), "bootstrap.repo_native_dispatch"
-    )
+    # The optional feature list is absent from historical v1 Issues. Keep those
+    # requests replay-compatible; current emitters opt into the standard set.
+    standard_features_declared = "standard_features" in bootstrap
+    if standard_features_declared:
+        raw_features = bootstrap["standard_features"]
+        if not isinstance(raw_features, list) or any(not isinstance(item, str) for item in raw_features):
+            raise BootstrapError("bootstrap.standard_features must be an array of feature IDs")
+        if len(raw_features) != len(set(raw_features)):
+            raise BootstrapError("bootstrap.standard_features contains duplicate feature IDs")
+        unknown_features = sorted(set(raw_features) - STANDARD_FEATURES)
+        if unknown_features:
+            raise BootstrapError(
+                "bootstrap.standard_features contains unsupported feature(s): "
+                + ", ".join(unknown_features)
+            )
+        standard_features = tuple(sorted(raw_features))
+        repo_native_dispatch = "repo_native_dispatch" in standard_features
+        if "repo_native_dispatch" in bootstrap and _boolean(
+            bootstrap["repo_native_dispatch"], "bootstrap.repo_native_dispatch"
+        ) != repo_native_dispatch:
+            raise BootstrapError("bootstrap.repo_native_dispatch conflicts with standard_features")
+    else:
+        # Absent means legacy v1 minimal behavior: retries do not add the new
+        # feature manifest or mutate the historical receiver.
+        repo_native_dispatch = _boolean(
+            bootstrap.get("repo_native_dispatch", False), "bootstrap.repo_native_dispatch"
+        )
+        standard_features = ("repo_native_dispatch",) if repo_native_dispatch else ()
+    generated_artifact_writeback = "generated-artifact-writeback" in standard_features
+    if (
+        standard_features_declared
+        and devflow_managed
+        and not REQUIRED_MANAGED_STANDARD_FEATURES.issubset(standard_features)
+    ):
+        raise BootstrapError(
+            "managed bootstrap.standard_features must include the standard defaults: "
+            + ", ".join(sorted(REQUIRED_MANAGED_STANDARD_FEATURES))
+        )
+    if generated_artifact_writeback and not repo_native_dispatch:
+        raise BootstrapError("generated-artifact-writeback requires repo_native_dispatch")
+    if standard_features and not devflow_managed:
+        raise BootstrapError("bootstrap.standard_features requires devflow_managed=true")
     if repo_native_dispatch and not devflow_managed:
         raise BootstrapError("bootstrap.repo_native_dispatch requires devflow_managed=true")
 
@@ -302,6 +355,9 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         template=template,
         devflow_managed=devflow_managed,
         repo_native_dispatch=repo_native_dispatch,
+        generated_artifact_writeback=generated_artifact_writeback,
+        standard_features=standard_features,
+        standard_features_declared=standard_features_declared,
         readme=readme,
         specification=specification,
         license=None,
@@ -310,6 +366,73 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         work_status=work_status,
         repository_state=repository_state,
         next_action=next_action,
+    )
+
+
+def standard_feature_manifest(request: BootstrapRequest) -> dict[str, Any]:
+    """Describe installed capabilities without granting effectful authority."""
+    features: list[dict[str, Any]] = []
+    if request.generated_artifact_writeback:
+        features.append({
+            "id": "generated-artifact-writeback",
+            "status": "INSTALLED",
+            "entrypoint": ".github/workflows/kinotch-repo-command.yml",
+            "dry_run_caller": STANDARD_ROLLOUT_CALLER_PATH,
+            "recipe_registry": "tools.generated_artifact_rollout.select_fixed_recipe",
+            "writer": "tools.generated_artifact_writer.verified_writeback",
+            "no_output": {
+                "status": "NOT_APPLICABLE",
+                "reason": "NO_GENERATED_OUTPUT",
+            },
+            "effectful_write": {
+                "enabled_by_bootstrap": False,
+                "dry_run_enabled_by_bootstrap": True,
+                "human_gate_required": True,
+                "required_job_permissions": [
+                    "contents:write",
+                    "actions:read",
+                    "pull-requests:read",
+                ],
+            },
+        })
+    return {
+        "schema": "devflow-standard-features.v1",
+        "repository": request.repository.full_name,
+        "standard_features": list(request.standard_features),
+        "features": features,
+    }
+
+
+def render_standard_rollout_caller(devflow_sha: str) -> str:
+    """Render the shared dry-run caller pinned to the exact Bootstrap source SHA."""
+    if not isinstance(devflow_sha, str) or not SHA_RE.fullmatch(devflow_sha):
+        raise BootstrapError("GITHUB_SHA must be a 40-character lowercase commit SHA")
+    path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verified-artifacts-rollout.yml"
+    template = path.read_text(encoding="utf-8")
+    if template.count("<DEVFLOW_SHA>") != 2:
+        raise BootstrapError("trusted generated-artifact caller template must contain exactly two SHA pins")
+    return template.replace("<DEVFLOW_SHA>", devflow_sha)
+
+
+def is_standard_rollout_caller(content: Any) -> bool:
+    """Recognize the exact current read-only caller at any prior immutable SHA pin."""
+    if not isinstance(content, str):
+        return False
+    try:
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "templates/bootstrap/verified-artifacts-rollout.yml"
+        ).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    match = re.search(r"(?m)^      devflow_sha: ([0-9a-f]{40})$", content)
+    if match is None:
+        return False
+    sha = match.group(1)
+    return (
+        content.count(sha) == 2
+        and template.count("<DEVFLOW_SHA>") == 2
+        and content.replace(sha, "<DEVFLOW_SHA>") == template
     )
 
 
@@ -525,6 +648,8 @@ class BootstrapExecutor:
 
     def execute(self, request: BootstrapRequest, context: BootstrapContext) -> BootstrapResult:
         resources: list[str] = []
+        if request.generated_artifact_writeback and not SHA_RE.fullmatch(context.devflow_sha):
+            raise BootstrapError("generated-artifact Bootstrap requires the exact GITHUB_SHA")
         if not is_trusted_issue_author({"user": context.author}):
             self._raise_failure(
                 context,
@@ -643,6 +768,11 @@ class BootstrapExecutor:
                 lambda: workflow_path.read_text(encoding="utf-8"),
             )
             seed_files.append((".github/workflows/kinotch-repo-command.yml", command_workflow))
+        if request.generated_artifact_writeback:
+            seed_files.append((
+                STANDARD_ROLLOUT_CALLER_PATH,
+                render_standard_rollout_caller(context.devflow_sha),
+            ))
         for path, content in seed_files:
             existing = self._call(
                 context,
@@ -666,17 +796,70 @@ class BootstrapExecutor:
                     # never auto-retry with a broader credential.
                     safe_retry=(
                         "after-human-decision"
-                        if path == ".github/workflows/kinotch-repo-command.yml"
+                        if path in {
+                            ".github/workflows/kinotch-repo-command.yml",
+                            STANDARD_ROLLOUT_CALLER_PATH,
+                        }
                         else "yes"
                     ),
                 )
             elif path == ".github/workflows/kinotch-repo-command.yml" and existing.get("content") != content:
-                self._raise_failure(
-                    context, "SEED",
-                    "existing native-dispatch workflow differs from trusted template; never overwrite",
-                    safe_retry="after-human-decision", resources=resources,
+                existing_content = existing.get("content")
+                legacy_receiver = (
+                    not request.standard_features_declared
+                    and isinstance(existing_content, str)
+                    and hashlib.sha256(existing_content.encode("utf-8")).hexdigest()
+                    == LEGACY_REPO_NATIVE_DISPATCH_SHA256
                 )
+                if not legacy_receiver:
+                    self._raise_failure(
+                        context, "SEED",
+                        "existing native-dispatch workflow differs from trusted template; never overwrite",
+                        safe_retry="after-human-decision", resources=resources,
+                    )
+            elif path == STANDARD_ROLLOUT_CALLER_PATH and existing.get("content") != content:
+                if not is_standard_rollout_caller(existing.get("content")):
+                    self._raise_failure(
+                        context, "SEED",
+                        "existing generated-artifact caller differs from trusted read-only template; never overwrite",
+                        safe_retry="after-human-decision", resources=resources,
+                    )
             resources.append(f"file:{path}")
+
+        if request.standard_features_declared:
+            manifest = json.dumps(
+                standard_feature_manifest(request),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ) + "\n"
+            existing = self._call(
+                context,
+                "SEED",
+                resources,
+                lambda: self.repository_api.get_file(full_name, STANDARD_FEATURE_MANIFEST_PATH),
+            )
+            if existing is None:
+                self._call(
+                    context,
+                    "SEED",
+                    resources,
+                    lambda: self.repository_api.create_file(
+                        full_name,
+                        STANDARD_FEATURE_MANIFEST_PATH,
+                        manifest,
+                        f"chore: record standard repository features ({context.request_ref})",
+                    ),
+                )
+            elif existing.get("content") != manifest:
+                self._raise_failure(
+                    context,
+                    "SEED",
+                    "existing standard-feature manifest differs from trusted Bootstrap request; never overwrite",
+                    safe_retry="after-human-decision",
+                    resources=resources,
+                )
+            resources.append(f"file:{STANDARD_FEATURE_MANIFEST_PATH}")
 
         head_sha = self._call(
             context,
@@ -776,6 +959,8 @@ class BootstrapExecutor:
                 entry_points = ["- `README.md`"]
                 if request.specification is not None:
                     entry_points.append("- `docs/SPECIFICATION.md`")
+                if request.standard_features_declared:
+                    entry_points.append(f"- `{STANDARD_FEATURE_MANIFEST_PATH}`")
                 entry_points.extend(issue_refs)
                 control_body = (
                     f"## Repository\n\n`{full_name}`\n\n"
@@ -816,6 +1001,10 @@ class BootstrapExecutor:
             f"Initial-Accepted-SHA: `{head_sha}`",
             *(f"Initial-Issue: {url}" for url in issue_urls),
         ]
+        if request.generated_artifact_writeback:
+            done_lines.append(
+                "Generated-Artifact-Writeback: NOT_APPLICABLE/NO_GENERATED_OUTPUT"
+            )
         if control_url:
             done_lines.append(f"Repository-Control: {control_url}")
         self._call(

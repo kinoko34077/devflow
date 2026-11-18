@@ -495,6 +495,26 @@ repository_bootstrap:
   executor_semantics: deterministic_no_llm
   idempotency: ensure_or_fail_closed
   required_template_v1: minimal
+  new_managed_standard_features:
+    request_field: bootstrap.standard_features
+    required_defaults:
+      - repo_native_dispatch
+      - generated-artifact-writeback
+    legacy_absent_field_action: preserve_historical_request_retry_behavior
+    manifest_file: .devflow/standard-features.json
+    manifest_schema: devflow-standard-features.v1
+    read_only_dry_run_caller: .github/workflows/verified-artifacts-rollout.yml
+    caller_pins_bootstrap_executor_sha: true
+  generated_artifact_writeback:
+    recipe_registry: tools.generated_artifact_rollout.select_fixed_recipe
+    writer_core: tools.generated_artifact_writer.verified_writeback
+    no_output_result: NOT_APPLICABLE/NO_GENERATED_OUTPUT
+    bootstrap_grants_contents_write: false
+    bootstrap_enables_effectful_write: false
+    bootstrap_enables_dry_run_preview: true
+    unadmitted_recipe_action: fail_closed
+    per_repository_writer_permission: explicit_human_gate
+    existing_repository_rollout_owner: devflow#386
   safe_defaults:
     visibility: private
     devflow_managed_unless_excluded: true

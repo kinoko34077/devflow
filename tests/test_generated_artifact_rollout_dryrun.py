@@ -3,12 +3,14 @@ import json
 import pathlib
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from tests.test_generated_artifact_rollout import (
     REPO, RECIPE, SHA, BRANCH, runner, params,
 )
 from tests.test_generated_artifact_rollout_admission import FakeGitHubReader, TEMPLATE
+from tools import generated_artifact_rollout_admission as auth
 from tools import generated_artifact_rollout as rollout
 from tools import generated_artifact_rollout_dryrun as dryrun
 from tools.generated_artifact_contract import ArtifactRejected
@@ -71,6 +73,73 @@ class RolloutDryRunTests(unittest.TestCase):
             self.assertFalse(result["writer_authorized"])
             self.assertFalse(result["ci_verified"])
             self.assertEqual(len(api.calls), 3)
+
+    def test_bootstrap_generic_caller_reaches_existing_read_only_planner(self):
+        repository = "kinoko34077/example-repo"
+        recipe_id = "example-json-v1"
+        branch = "artifact/writeback-example/pilot-1"
+        recipe = replace(
+            rollout._IDS,
+            repository=repository,
+            recipe_id=recipe_id,
+            branch_prefix="artifact/writeback-example/",
+            outputs=("data/example/generated.json",),
+            max_file_bytes=1024,
+            max_total_bytes=1024,
+            max_archive_bytes=4096,
+        )
+        generic_template = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "templates/bootstrap/verified-artifacts-rollout.yml"
+        ).read_text(encoding="utf-8")
+        environment = runner(
+            GITHUB_REPOSITORY=repository,
+            GITHUB_WORKFLOW_REF=f"{repository}/{auth.CALLER_PATH}@refs/heads/main",
+        )
+        api = FakeGitHubReader(caller=auth.exact_caller_text(generic_template, SHA))
+        api.repository = repository
+        api.run["repository"]["full_name"] = repository
+
+        with patch.object(rollout, "_RECIPES", (*rollout._RECIPES, recipe)):
+            with tempfile.TemporaryDirectory() as tmp:
+                source = pathlib.Path(tmp) / "source"
+                generated = source / recipe.outputs[0]
+                generated.parent.mkdir(parents=True)
+                generated.write_text('{"ready":true}\n', encoding="utf-8")
+                artifact = pathlib.Path(tmp) / "artifact"
+                rollout.package_from_fixed_source(
+                    repository, recipe_id, environment, source, artifact,
+                    target_branch=branch, expected_head=SHA, source_head=SHA,
+                    devflow_sha=SHA, devflow_checkout_sha=SHA,
+                )
+                params = {
+                    "api": api,
+                    "env": {**environment, "MODE": "dry-run"},
+                    "artifact_dir": artifact,
+                    "repository": repository,
+                    "recipe_id": recipe_id,
+                    "target_branch": branch,
+                    "expected_head": SHA,
+                    "source_head": SHA,
+                    "devflow_sha": SHA,
+                    "devflow_checkout_sha": SHA,
+                    "trusted_template": generic_template,
+                }
+                with (
+                    patch("tools.generated_artifact_writer._read_target", return_value={
+                        "head": SHA, "tree_sha": "c" * 40, "pr_number": 11,
+                    }),
+                    patch("tools.generated_artifact_writer._read_files", return_value={
+                        recipe.outputs[0]: b"old",
+                    }),
+                ):
+                    result = dryrun.preview_authenticated(**params)
+
+        self.assertEqual(result["status"], "DRY_RUN")
+        self.assertEqual(len(result["changes"]), 1)
+        self.assertFalse(result["writes_performed"])
+        self.assertFalse(result["writer_authorized"])
+        self.assertEqual(len(api.calls), 3)
 
     def test_existing_identical_bytes_only_noop(self):
         with tempfile.TemporaryDirectory() as tmp:

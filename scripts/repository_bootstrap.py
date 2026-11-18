@@ -357,6 +357,7 @@ def execute_event(event_path: Path) -> int:
         request_title=title,
         author_association=str(issue.get("author_association") or ""),
         author=issue.get("user") if isinstance(issue.get("user"), dict) else {},
+        devflow_sha=os.environ.get("GITHUB_SHA", ""),
     )
     result = BootstrapExecutor(
         GitHubApi(bootstrap_token),

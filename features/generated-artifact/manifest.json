@@ -41,6 +41,8 @@
         "docs/operations/GENERATED_ARTIFACT_WRITEBACK_V1_RUNBOOK.md"
       ],
       "code": [
+        ".github/workflows/generated-artifact-rollout.yml",
+        "templates/bootstrap/verified-artifacts-rollout.yml",
         "tools/generated_artifact_admission.py",
         "tools/generated_artifact_rollout.py",
         "tools/generated_artifact_rollout_admission.py",

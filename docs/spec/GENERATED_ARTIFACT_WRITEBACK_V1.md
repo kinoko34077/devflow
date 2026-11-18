@@ -4,6 +4,12 @@
 **正本:** [devflow #384](https://github.com/kinoko34077/devflow/issues/384)、[devflow #415](https://github.com/kinoko34077/devflow/issues/415)、[JO #300](https://github.com/kinoko34077/japanese-orthography/issues/300)。  
 **実装の受入済み固定SHA:** `f886877e7110f2499125ecc6e07294798c33fe93`（[devflow PR #417](https://github.com/kinoko34077/devflow/pull/417)）。現mainが先に進んでもCaller pinを自動更新しない。
 
+**2026-11-18 Bootstrap integration boundary:** devflow #1050 adds a pinned,
+read-only `workflow_dispatch` Caller for newly bootstrapped managed repos. It
+reuses the generic rollout workflow for `dry-run` only and grants no
+`contents:write`. This is not an effectful rollout admission; exact recipe,
+caller permission, and writer activation remain separately gated.
+
 ## 2026-11-07 mode別token境界
 
 この仕様と同梱する共有workflow版では、`mode=dry-run`は`contents:read`・`actions:read`・`pull-requests:read`だけを持つ専用`verify` jobで同じ固定helperを実行する。`contents:write`を要求する`write` jobは、効果を持つ`write`と受入専用`write-replay-test` modeに限定する。生成jobは引き続きread-only・secretなしで、全modeの生成物は低信頼データとして再検証する。既存のJO受入済みCallerは`f886877e7110f2499125ecc6e07294798c33fe93`に固定されており、この変更では更新しない。変更は新しい明示承認済みpinを使うCallerにのみ適用される。

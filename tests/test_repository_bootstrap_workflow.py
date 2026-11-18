@@ -70,6 +70,12 @@ class RepositoryBootstrapWorkflowTests(unittest.TestCase):
         for ref in refs:
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
 
+    def test_bootstrap_pins_new_caller_to_exact_checked_out_executor_sha(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        script = CLI.read_text(encoding="utf-8")
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', workflow)
+        self.assertIn('devflow_sha=os.environ.get("GITHUB_SHA", "")', script)
+
     def test_cli_exposes_validate_and_execute_without_embedding_secret_name_as_value(self):
         text = CLI.read_text(encoding="utf-8")
         self.assertIn("validate-event", text)
