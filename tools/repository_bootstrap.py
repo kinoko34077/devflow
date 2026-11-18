@@ -654,8 +654,8 @@ class BootstrapExecutor:
             )
 
     @staticmethod
-    def _main_protection_baseline() -> dict[str, Any]:
-        return {
+    def _main_protection_baseline(owner_type: str) -> dict[str, Any]:
+        baseline = {
             "required_status_checks": {
                 "strict": False,
                 "checks": [{"context": "verify", "app_id": 15368}],
@@ -672,15 +672,20 @@ class BootstrapExecutor:
             "required_conversation_resolution": True,
             "allow_force_pushes": False,
             "allow_deletions": False,
-            "restrictions": None,
         }
+        # GitHub documents push restrictions as organization-only. Personal
+        # repositories reject the field even when it is null; an organization
+        # can explicitly use null to disable push restrictions.
+        if owner_type == "Organization":
+            baseline["restrictions"] = None
+        return baseline
 
     @staticmethod
     def _protection_enabled(value: Any) -> Any:
         return value.get("enabled") if isinstance(value, dict) else value
 
     @classmethod
-    def _main_protection_matches(cls, observed: Any) -> bool:
+    def _main_protection_matches(cls, observed: Any, owner_type: str) -> bool:
         if not isinstance(observed, dict):
             return False
         checks = observed.get("required_status_checks")
@@ -697,10 +702,13 @@ class BootstrapExecutor:
             return False
         if not isinstance(bypass, dict) or any(bypass.get(key) != [] for key in ("users", "teams", "apps")):
             return False
-        # The accepted payload sets restrictions=null; require an explicit
-        # null readback so a pre-existing push restriction is not accepted as
-        # the same bootstrap policy.
-        if "restrictions" not in observed or observed["restrictions"] is not None:
+        # Push restrictions are unavailable for personal repositories, where
+        # the API may omit this field. Organizations must read back explicit
+        # null so an existing restriction is never mistaken for no restriction.
+        if owner_type == "User":
+            if observed.get("restrictions") is not None:
+                return False
+        elif "restrictions" not in observed or observed["restrictions"] is not None:
             return False
 
         return (
@@ -819,12 +827,23 @@ class BootstrapExecutor:
                 resources=resources,
             )
 
+        owner = observed_repo.get("owner") if isinstance(observed_repo, dict) else None
+        owner_type = owner.get("type") if isinstance(owner, dict) else None
+        if owner_type not in ("User", "Organization"):
+            self._raise_failure(
+                context,
+                "MAIN_PROTECTION",
+                "repository owner type is unavailable or unsupported for branch protection",
+                safe_retry="after-human-decision",
+                resources=resources,
+            )
+
         # Install the exact status check before making it a branch-protection
         # requirement. Private Free repositories never need or receive this
         # Actions workflow.
         self._ensure_verify_workflow(context, full_name, resources)
 
-        baseline = self._main_protection_baseline()
+        baseline = self._main_protection_baseline(owner_type)
         protection = self._call_main_protection(
             context,
             resources,
@@ -842,7 +861,7 @@ class BootstrapExecutor:
                 lambda: self.repository_api.get_branch_protection(full_name, "main"),
             )
 
-        if not self._main_protection_matches(protection):
+        if not self._main_protection_matches(protection, owner_type):
             self._raise_failure(
                 context,
                 "MAIN_PROTECTION",
