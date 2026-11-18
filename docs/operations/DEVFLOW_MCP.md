@@ -13,6 +13,40 @@ The MCP runtime dependencies in `requirements-mcp.txt` pin the accepted
 default Workspace reader uses that package's `get_state_result` and
 `GitHubStateStore` for a GET-only read of execution-coordinator Issue #3.
 
+## MCP tool discovery and self-describing contract (accepted)
+
+For a **registered, current** Devflow MCP client, use standard `initialize` and
+`tools/list` to discover the available tools, their required/default arguments
+and basic safety/use guidance. `tools/list` is **generated**, not a separate
+hand-maintained help registry: tool descriptions come from function docstrings
+in `tools/devflow_mcp.py`, and input constraints/descriptions from the shared
+Python `Annotated` / Pydantic `Field` metadata.
+
+The accepted public surface documents all 15 tools. In particular, the Inbox
+and Workspace `limit` is **1–20 verified TASK Issue mailboxes per call**, not
+20 messages; `offset` is nonnegative and continuation uses `next_offset`
+when `truncated=true`. The recipient choices, positive Issue numbers,
+strict JSON-integer requirements and Plan/Evidence packet examples are available
+in each relevant generated tool schema/description. Both read-only CLI entry
+points expose matching pagination guidance in `--help`.
+
+**Scope:** `tools/list` describes how to call the tools. It cannot establish
+that the underlying GitHub data is complete, that a filtered-zero result means
+there is no work, or that Claim/execution/acceptance is authorized. Consult the
+source/coverage/status fields, this manual and the applicable original spec
+(e.g. [Agent Inbox](../spec/KAEP_AGENT_INBOX_V01.md)) for those decisions.
+An installed Codex/Claude client can still be pinned to an older checkout:
+inspect that client's actual `tools/list` and source revision before claiming
+the current contract is deployed.
+
+**Evidence and ownership:** The bounded self-documenting development was
+implemented and accepted in [PR #1049](https://github.com/kinoko34077/devflow/pull/1049),
+tracked as the completed capability under [#1052](https://github.com/kinoko34077/devflow/issues/1052).
+The original [#805](https://github.com/kinoko34077/devflow/issues/805) is
+separately **WATCH / DEFER** for optional future tool-contract versioning,
+client release targets and upgrade/rollback design; PR #1049 did not deploy
+that redesign.
+
 ## Workspace coordinator read diagnostics
 
 If the validated reader cannot be imported, the dependent `ongoing` and
