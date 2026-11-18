@@ -464,10 +464,50 @@ class CodexReviewEvidenceTests(unittest.TestCase):
         ).ready)
         self.assertEqual(exercise("USER_wrong")[3], set())
 
+    def test_existing_gh_cli_is_used_without_new_credentials(self):
+        comment = codex_summary()
+        comment["node_id"] = "IC_from_gh"
+        comment["user"]["node_id"] = "BOT_from_gh"
+
+        def gh_run(command, **kwargs):
+            self.assertEqual(command[:2], ["gh", "api"])
+            resource = command[2]
+            if resource.endswith("/pulls/42"):
+                packet = {"head": {"sha": HEAD}, "body": pr_body()}
+            elif "pulls/42/reviews?" in resource:
+                packet = []
+            elif "issues/42/comments?" in resource:
+                packet = [comment]
+            elif resource == "graphql":
+                packet = {"data": {"node": {
+                    "id": "IC_from_gh", "body": comment["body"],
+                    "editor": {"id": "BOT_from_gh"},
+                    "lastEditedAt": "2026-11-18T02:00:00Z",
+                    "userContentEdits": {"pageInfo": {"hasNextPage": False},
+                                         "nodes": [{"editor": {"id": "BOT_from_gh"}}]},
+                }}}
+            else:
+                raise AssertionError("unexpected gh endpoint " + resource)
+            return mock.Mock(stdout=json.dumps(packet), returncode=0)
+
+        with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
+            with mock.patch.object(review_readiness.subprocess, "run",
+                                   side_effect=gh_run) as runner:
+                pr_data, review_data, comments, verified = (
+                    review_readiness._github_review_packet("kinoko34077/devflow", 42)
+                )
+        self.assertEqual(runner.call_count, 4)
+        self.assertIn(801, verified)
+        self.assertTrue(review_readiness.evaluate(
+            pr_data, review_data, comments, verified_codex_ids=verified
+        ).ready)
+
     def test_live_read_uses_existing_auth_only_and_fails_closed(self):
         with mock.patch.dict(review_readiness.os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "GH_TOKEN"):
-                review_readiness._github_review_packet("kinoko34077/devflow", 1057)
+            with mock.patch.object(review_readiness.subprocess, "run",
+                                   side_effect=FileNotFoundError("gh unavailable")):
+                with self.assertRaises(FileNotFoundError):
+                    review_readiness._github_review_packet("kinoko34077/devflow", 1057)
         with self.assertRaisesRegex(ValueError, "owner/name"):
             review_readiness._github_review_packet("https://bad", 1)
         with mock.patch.dict(review_readiness.os.environ,
