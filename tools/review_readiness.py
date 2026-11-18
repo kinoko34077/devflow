@@ -327,11 +327,11 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
             ... on IssueComment {
               id
               body
-              editor { id }
+              editor { ... on Bot { id } }
               lastEditedAt
               userContentEdits(first: 100) {
                 pageInfo { hasNextPage }
-                nodes { editor { id } }
+                nodes { editor { ... on Bot { id } } }
               }
             }
           }
