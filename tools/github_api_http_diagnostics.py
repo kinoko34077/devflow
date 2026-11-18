@@ -40,12 +40,17 @@ _VALIDATION_CODES = frozenset({
 })
 
 
+def _normalize_validation_field(value: str) -> str:
+    """Normalize only numeric array indexes in a GitHub field path."""
+    normalized = re.sub(r"\[\d+\]", "", value)
+    return re.sub(r"\.(\d+)\.", ".", normalized)
+
+
 def _safe_validation_field(value: Any) -> str | None:
     """Return a known field after removing only numeric array indexes."""
     if not isinstance(value, str):
         return None
-    normalized = re.sub(r"\[\d+\]", "", value.strip())
-    normalized = re.sub(r"\.(\d+)\.", ".", normalized)
+    normalized = _normalize_validation_field(value.strip())
     return normalized if normalized in _VALIDATION_FIELDS else None
 
 
@@ -55,6 +60,35 @@ def _safe_validation_code(value: Any) -> str | None:
         return None
     normalized = value.strip().casefold()
     return normalized if normalized in _VALIDATION_CODES else None
+
+
+def _safe_validation_error_from_text(value: str) -> tuple[str | None, str | None]:
+    """Extract only a known field and code from a GitHub string error item."""
+    normalized = _normalize_validation_field(value[:MAX_ERROR_BODY_BYTES].casefold())
+
+    for field in sorted(_VALIDATION_FIELDS, key=len, reverse=True):
+        field_pattern = re.compile(
+            rf"(?<![a-z0-9_.]){re.escape(field)}(?![a-z0-9_.])"
+        )
+        match = field_pattern.search(normalized)
+        if match is None:
+            continue
+        tail = normalized[match.end():match.end() + 96]
+        codes = "|".join(
+            re.escape(code) for code in sorted(_VALIDATION_CODES, key=len, reverse=True)
+        )
+        code_pattern = re.compile(
+            rf"^[\s:=,;\"']*({codes})(?![a-z0-9_])"
+        )
+        code_match = code_pattern.search(tail)
+        if code_match is None:
+            code_pattern = re.compile(
+                rf"\bcode[\"']?\s*[:=]\s*[\"']?({codes})(?![a-z0-9_])"
+            )
+            code_match = code_pattern.search(tail)
+        code = code_match.group(1) if code_match is not None else None
+        return field, code
+    return None, None
 
 
 def _validation_error_item_shape(errors: list[Any]) -> str:
@@ -189,6 +223,8 @@ def _validation_details(response_body: bytes) -> list[str]:
             error_message = error.get("message")
             if isinstance(error_message, str):
                 messages.append(error_message[:MAX_ERROR_BODY_BYTES].casefold())
+        elif isinstance(error, str):
+            messages.append(error[:MAX_ERROR_BODY_BYTES].casefold())
 
     details: list[str] = []
     if any(
@@ -210,6 +246,14 @@ def _validation_details(response_body: bytes) -> list[str]:
         if field is not None and code is not None:
             details.append(f"validation_error={field}:{code}")
             break
+    if not any(item.startswith("validation_error=") for item in details):
+        for error in errors:
+            if not isinstance(error, str):
+                continue
+            field, code = _safe_validation_error_from_text(error)
+            if field is not None and code is not None:
+                details.append(f"validation_error={field}:{code}")
+                break
     if not any(item.startswith("validation_error=") for item in details):
         details.append(f"validation_errors={error_shape}")
     if not any(item.startswith("validation_error=") for item in details):
