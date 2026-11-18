@@ -428,7 +428,7 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             def api(request, timeout=20):
                 path = request.full_url
                 if path.endswith("/pulls/42"):
-                    payload = {"head": {"sha": HEAD}}
+                    payload = {"head": {"sha": HEAD}, "body": pr_body()}
                 elif "pulls/42/reviews?" in path:
                     payload = []
                 elif "issues/42/comments?" in path:
