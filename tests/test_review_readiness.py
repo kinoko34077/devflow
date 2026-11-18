@@ -447,6 +447,9 @@ class CodexReviewEvidenceTests(unittest.TestCase):
                 elif "issues/42/comments?" in path:
                     payload = [comment]
                 elif path.endswith("/graphql"):
+                    query = json.loads(request.data.decode("utf-8"))["query"]
+                    self.assertEqual(query.count("editor { ... on Bot { id } }"), 2)
+                    self.assertNotIn("editor { id }", query)
                     payload = {"data": {"node": {
                         "id": "IC_authoritative", "body": comment["body"],
                         "editor": {"id": editor_id},
@@ -492,6 +495,9 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             elif "issues/42/comments?" in resource:
                 packet = [comment]
             elif resource == "graphql":
+                self.assertEqual(command[3], "-f")
+                self.assertEqual(command[4].count("editor { ... on Bot { id } }"), 2)
+                self.assertEqual(command[5:7], ["-F", "id=IC_from_gh"])
                 packet = {"data": {"node": {
                     "id": "IC_from_gh", "body": comment["body"],
                     "editor": {"id": "BOT_from_gh"},
