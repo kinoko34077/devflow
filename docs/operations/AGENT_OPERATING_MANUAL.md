@@ -313,11 +313,13 @@ Chat history is not review evidence. Unchanged unrelated specifications, Issues 
 
 **Codex bot / KAEP / Private Actions:** The accepted bot evidence is the read-only REST `issues/<pr>/comments` summary with its machine-readable `codex-review-state:v1` marker, verified author and exact full SHA. A short human-readable “no issues” comment alone, older SHA, pending review, unresolved finding, missing source, or untrusted/reformatted KAEP reply is not sufficient. Previous native `CHANGES_REQUESTED` reviews remain blocking. KAEP `REVIEW_REQUEST` / `REVIEW_FEEDBACK` locates review work and references the underlying native/bot artifact; KAEP itself does not upgrade an unauthenticated comment into review authority.
 
-The same read-only validator runs on GitHub Actions or on **an already authorized external agent/host** without Actions, using a preexisting authenticated token:
+The same read-only validator runs on GitHub Actions or on **an already authorized external agent/host** without Actions. It reuses the existing authenticated \`gh api\` CLI login when no \`GH_TOKEN\` / \`GITHUB_TOKEN\` environment variable is present (no new credential setup):
 
 ```sh
-GH_TOKEN=<existing-authenticated-token> python tools/review_readiness.py --repository OWNER/REPO --pr-number N
+python tools/review_readiness.py --repository OWNER/REPO --pr-number N
 ```
+
+In an Actions workflow, the existing \`GH_TOKEN\` is used. The Codex summary must also pass a GitHub GraphQL check that the original bot authored it **and that all recorded edits were by that same bot**. GraphQL unavailability, ambiguous/incomplete edit history, or REST/GraphQL body mismatch must not authorize the bot path.
 
 Never publish the token or private source in logs/Issues. The optional `--pr-json --reviews-json --comments-json` inputs are for replay/unit fixtures, not independently authenticated source. On GitHub Actions, the `issue_comment` trigger evaluates bot-created/edited summaries on the default branch; **it does not update the required PR-head check**. When Actions hosted quota or scheduler blocks work, a successful external read-only validation must **not** be represented as required CI success or a native Check Run. Native Checks writeback, Private sandbox execution, new credentials/permissions, host/scheduler deployment and Claim changes remain separate #541/#639/#610/#752 gates. If a required branch check cannot run, do not bypass it; preserve the blocker and proceed only with other authorized read-only work.
 
