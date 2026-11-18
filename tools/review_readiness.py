@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from typing import Any
 import urllib.parse
 import urllib.request
@@ -286,21 +287,30 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
     if type(pr_number) is not int or pr_number < 1:
         raise ValueError("PR number must be positive")
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise ValueError("GH_TOKEN or GITHUB_TOKEN required for live read")
+    use_existing_gh = not bool(token)
     api = os.environ.get("GH_API_URL", "https://api.github.com").rstrip("/")
     parsed = urllib.parse.urlparse(api)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        raise ValueError("GH_API_URL must be a trusted HTTPS API endpoint")
+    if (parsed.scheme != "https" or parsed.hostname != "api.github.com"
+            or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError("GH_API_URL must be https://api.github.com")
     parts = repository.split("/")
     base = f"{api}/repos/{urllib.parse.quote(parts[0])}/{urllib.parse.quote(parts[1])}"
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     def get_json(url: str) -> Any:
+        if use_existing_gh:
+            endpoint = urllib.parse.urlparse(url)
+            relative = endpoint.path + ("?" + endpoint.query if endpoint.query else "")
+            response = subprocess.run(
+                ["gh", "api", relative], capture_output=True, text=True,
+                check=True, timeout=20,
+            )
+            return json.loads(response.stdout)
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.load(response)
@@ -330,15 +340,23 @@ def _github_review_packet(repository: str, pr_number: int) -> tuple[
         data = json.dumps({"query": query, "variables": {"id": comment.get("node_id")}}).encode("utf-8")
         if not comment.get("node_id"):
             return False
-        request = urllib.request.Request(
-            f"{api}/graphql", data=data,
-            headers={**headers, "Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                packet = json.load(response)
-        except (OSError, ValueError):
+            if use_existing_gh:
+                response = subprocess.run(
+                    ["gh", "api", "graphql", "-f", f"query={query}",
+                     "-F", f"id={comment['node_id']}"],
+                    capture_output=True, text=True, check=True, timeout=20,
+                )
+                packet = json.loads(response.stdout)
+            else:
+                request = urllib.request.Request(
+                    f"{api}/graphql", data=data,
+                    headers={**headers, "Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    packet = json.load(response)
+        except (OSError, ValueError, subprocess.SubprocessError):
             return False
         if not isinstance(packet, dict) or packet.get("errors"):
             return False
@@ -577,7 +595,7 @@ def main() -> int:
                 or (comments is not None and not isinstance(comments, list))):
             raise ValueError("PR/reviews/comments source JSON has invalid structure")
         result = evaluate(pr, reviews, comments, verified_codex_ids=verified_bot_ids)
-    except (ValueError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         print(f"review-readiness: FAIL — source unavailable or invalid: {type(exc).__name__}")
         return 1
     status = "PASS" if result.ready else "FAIL"
