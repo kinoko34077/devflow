@@ -25,8 +25,12 @@ class SameReceiptWorkflowTests(unittest.TestCase):
 
     def test_two_calls_are_same_pinned_api_entry_and_same_job(self):
         invocation = "from tools.generated_artifact_rollout_testapp_write import main"
-        self.assertEqual(self.writer.count(invocation), 2)
-        self.assertEqual(self.writer.count("python3 -I -c "), 2)
+        testapp_calls = [
+            line for line in self.writer.splitlines()
+            if invocation in line
+        ]
+        self.assertEqual(len(testapp_calls), 2)
+        self.assertTrue(all("python3 -I -c " in line for line in testapp_calls))
         self.assertIn('tee "$RUNNER_TEMP/writeback-first.json"', self.writer)
         self.assertIn('tee "$RUNNER_TEMP/writeback-replay.json"', self.writer)
         self.assertIn('test "$GITHUB_REPOSITORY" = "kinoko34077/testapp"', self.writer)

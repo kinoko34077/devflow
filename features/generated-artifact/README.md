@@ -15,6 +15,14 @@ output is `NOT_APPLICABLE/NO_GENERATED_OUTPUT`; effectful writes still require
 the reviewed, exact-recipe caller and per-repository Human/security gates.
 Existing repository adoption remains the separate finite rollout in #386.
 
+## devflow#1050 private E2E fixture
+
+The fixed recipe `bootstrap-writeback-e2e-v1` is limited to the private
+`kinoko34077/devflow-writeback-bootstrap-e2e-20261118` repository. Its dedicated
+caller path and exact template are source-controlled; only the shared writer
+job for that repository/recipe pair receives `contents:write`. This is an
+acceptance fixture, not a default permission or an additional rollout target.
+
 ## contract
 
 Use the contract and packager owners when artifact identity, recipe, digest,

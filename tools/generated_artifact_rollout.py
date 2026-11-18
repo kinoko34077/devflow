@@ -42,6 +42,7 @@ class FixedRecipe:
     max_file_bytes: int
     max_total_bytes: int
     max_archive_bytes: int
+    caller_path: str = CALLER_PATH
 
 
 # Source-controlled, reviewed and intentionally finite. Selection never supplies
@@ -77,7 +78,22 @@ _TESTAPP = FixedRecipe(
     max_archive_bytes=128 * 1024,
 )
 
-_RECIPES: tuple[FixedRecipe, ...] = (_IDS, _TESTAPP)
+_BOOTSTRAP_E2E = FixedRecipe(
+    repository="kinoko34077/devflow-writeback-bootstrap-e2e-20261118",
+    recipe_id="bootstrap-writeback-e2e-v1",
+    version="1",
+    branch_prefix="artifact/writeback-bootstrap-e2e/",
+    outputs=("data/writeback-e2e/generated.json",),
+    node_version="22",
+    generate_npm_script="generate:writeback-e2e",
+    verify_npm_script="verify:writeback-e2e",
+    max_file_bytes=64 * 1024,
+    max_total_bytes=64 * 1024,
+    max_archive_bytes=128 * 1024,
+    caller_path=".github/workflows/bootstrap-writeback-e2e.yml",
+)
+
+_RECIPES: tuple[FixedRecipe, ...] = (_IDS, _TESTAPP, _BOOTSTRAP_E2E)
 
 
 def select_fixed_recipe(repository: str, recipe_id: str) -> FixedRecipe:
@@ -113,7 +129,7 @@ def fixed_policy(repository: str, recipe_id: str, workflow_sha: str) -> dict[str
             "version": recipe.version,
             "paths": list(recipe.outputs),
         },
-        "producer_workflow_ref": f"{recipe.repository}/{CALLER_PATH}@{_sha(workflow_sha, 'workflow_sha')}",
+        "producer_workflow_ref": f"{recipe.repository}/{recipe.caller_path}@{_sha(workflow_sha, 'workflow_sha')}",
         "limits": {
             "max_files": len(recipe.outputs),
             "max_file_bytes": recipe.max_file_bytes,
@@ -171,7 +187,7 @@ def producer_admission(
         "GITHUB_REPOSITORY": recipe.repository,
         "GITHUB_EVENT_NAME": "workflow_dispatch",
         "GITHUB_REF": "refs/heads/main",
-        "GITHUB_WORKFLOW_REF": f"{recipe.repository}/{CALLER_PATH}@refs/heads/main",
+        "GITHUB_WORKFLOW_REF": f"{recipe.repository}/{recipe.caller_path}@refs/heads/main",
     }
     for field, expected in required.items():
         if runner.get(field) != expected:
@@ -184,7 +200,7 @@ def producer_admission(
     ):
         raise ArtifactRejected("untrusted or re-run actor")
     workflow_sha = _sha(runner.get("GITHUB_WORKFLOW_SHA"), "workflow_sha")
-    if p["producer_workflow_ref"] != f"{recipe.repository}/{CALLER_PATH}@{workflow_sha}":
+    if p["producer_workflow_ref"] != f"{recipe.repository}/{recipe.caller_path}@{workflow_sha}":
         raise ArtifactRejected("policy/caller workflow SHA mismatch")
     def positive(field: str) -> int:
         raw = runner.get(field)
