@@ -1,5 +1,6 @@
 import copy
 import unittest
+import time
 from unittest.mock import patch
 
 from tools import repository_bootstrap as rb
@@ -65,6 +66,7 @@ class ProtectionApi(FakeApi):
         self.protection_payloads = []
         self.events = []
         self.fail_put_status = None
+        self.fail_put_statuses = []
         self.fail_second_get_status = None
         self.owner_type = "User"
 
@@ -94,6 +96,10 @@ class ProtectionApi(FakeApi):
         self.events.append(("set_branch_protection", branch))
         self.protection_calls.append(("PUT", full_name, branch))
         self.protection_payloads.append(copy.deepcopy(protection))
+        if self.fail_put_statuses:
+            status = self.fail_put_statuses.pop(0)
+            if status is not None:
+                raise rb.GitHubApiError("PUT protection failed", status_code=status)
         if self.fail_put_status is not None:
             raise rb.GitHubApiError("PUT protection failed", status_code=self.fail_put_status)
         if self.owner_type == "User" and "restrictions" in protection:
@@ -131,10 +137,13 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         verify_path = ".github/workflows/verify.yml"
         workflow = repository.files[(FULL_NAME, verify_path)]
         self.assertIn("name: verify", workflow)
+        self.assertIn("  push:\n    branches:\n      - main", workflow)
         self.assertIn("  pull_request:\n    branches:\n      - main", workflow)
         self.assertIn("jobs:\n  verify:", workflow)
         self.assertIn("permissions: {}", workflow)
         self.assertIn("      contents: read", workflow)
+        self.assertIn("git fetch --no-tags --depth=1 origin \"$BASE_SHA\"", workflow)
+        self.assertIn("if: github.event_name == 'pull_request'", workflow)
         self.assertIn("git diff --check \"$BASE_SHA\" \"$HEAD_SHA\"", workflow)
         self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", workflow)
         self.assertNotIn("contents: write", workflow)
@@ -143,6 +152,35 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
             repository.events.index(("create_file", verify_path)),
             repository.events.index(("set_branch_protection", "main")),
         )
+
+    def test_new_verify_check_race_retries_protection_once_after_a_bounded_wait(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.fail_put_statuses = [422, None]
+
+        with patch.object(time, "sleep") as sleep:
+            try:
+                rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+            except rb.BootstrapFailure:
+                succeeded = False
+            else:
+                succeeded = True
+
+        self.assertTrue(succeeded, "a single transient 422 must retry after the check-availability wait")
+        self.assertEqual(2, len(repository.protection_payloads))
+        sleep.assert_called_once_with(15)
+
+    def test_persistent_protection_validation_failure_stops_after_one_retry(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.fail_put_status = 422
+
+        with patch.object(time, "sleep") as sleep:
+            with self.assertRaises(rb.BootstrapFailure) as caught:
+                rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual("after-human-decision", caught.exception.safe_retry)
+        self.assertEqual(2, len(repository.protection_payloads))
+        sleep.assert_called_once_with(15)
 
     def test_public_bootstrap_records_head_after_all_seed_writes(self):
         repository, devflow = ProtectionApi(), FakeApi()
