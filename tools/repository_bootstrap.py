@@ -658,6 +658,7 @@ class BootstrapExecutor:
         return {
             "required_status_checks": {
                 "strict": False,
+                "contexts": ["verify"],
                 "checks": [{"context": "verify", "app_id": 15368}],
             },
             "enforce_admins": True,
