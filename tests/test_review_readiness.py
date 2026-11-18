@@ -381,6 +381,17 @@ class CodexReviewEvidenceTests(unittest.TestCase):
             pr(different_required="yes"), [native], [codex_summary()]
         ).ready)
 
+    def test_native_comment_blocking_findings_not_overridden(self):
+        blocking = review(blocking="P1: unresolved loss of data")
+        self.assertFalse(review_readiness.evaluate(pr(), [blocking], [codex_summary()]).ready)
+        # A later clean formal Review on the same head can supersede a
+        # previously declared COMMENT finding, without dismissing unrelated
+        # native REQUEST_CHANGES.
+        clear = review(review_id=202)
+        self.assertTrue(review_readiness.evaluate(
+            pr(), [blocking, clear], [codex_summary()]
+        ).ready)
+
     def test_existing_native_formal_review_remains_supported(self):
         self.assertTrue(review_readiness.evaluate(
             pr(), [review()], [codex_summary(head=OTHER)]
