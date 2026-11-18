@@ -179,11 +179,18 @@ def _validation_details(response_body: bytes) -> list[str]:
         details.append(f"validation_errors={error_shape}")
     if not any(item.startswith("validation_error=") for item in details):
         for field in sorted(_VALIDATION_FIELDS, key=len, reverse=True):
-            schema_path = "properties/" + "/properties/".join(
+            schema_paths = ["properties/" + "/properties/".join(
                 re.escape(segment) for segment in field.split(".")
-            )
+            )]
+            if field.startswith("required_status_checks.checks."):
+                leaf = re.escape(field.rsplit(".", 1)[1])
+                schema_paths.append(
+                    "properties/required_status_checks/properties/checks/items/properties/"
+                    + leaf
+                )
             if any(
                 re.search(rf"{schema_path}(?![a-z0-9_])", item)
+                for schema_path in schema_paths
                 for item in messages
             ):
                 details.append(f"validation_field={field}")

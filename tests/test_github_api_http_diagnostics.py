@@ -253,6 +253,18 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("validation_field=required_status_checks", result)
         self.assertNotIn("must-not-appear", result)
 
+    def test_validation_diagnostics_classify_nested_array_schema_path(self):
+        result = self.classify(
+            422,
+            "Invalid request for "
+            "properties/required_status_checks/properties/checks/items/properties/app_id",
+        )
+
+        self.assertIn(
+            "validation_field=required_status_checks.checks.app_id",
+            result,
+        )
+
     def test_validation_diagnostics_do_not_match_longer_schema_field(self):
         result = self.classify(422, "Invalid request for properties/checks_token")
 
@@ -303,6 +315,21 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             "category=validation_failed validation_errors=oversize",
         )
         self.assertNotIn("not-json-secret", malformed)
+
+    def test_validation_diagnostics_response_shape_labels_are_stable(self):
+        cases = [
+            (None, "validation_errors=unavailable"),
+            (b"", "validation_errors=empty_body"),
+            (b"[]", "validation_errors=unexpected_root"),
+            (json.dumps({"errors": "secret-value"}).encode(), "validation_errors=unexpected_shape"),
+            (json.dumps({"errors": []}).encode(), "validation_errors=empty"),
+        ]
+
+        for body, expected in cases:
+            with self.subTest(expected=expected):
+                result = diagnostics.summarize_github_http_error(422, None, body)
+                self.assertEqual(result, f"category=validation_failed {expected}")
+                self.assertNotIn("secret-value", result)
 
 
 if __name__ == "__main__":
