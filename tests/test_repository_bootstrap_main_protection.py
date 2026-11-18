@@ -126,6 +126,20 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
             repository.events.index(("set_branch_protection", "main")),
         )
 
+    def test_public_bootstrap_records_head_after_all_seed_writes(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        result = rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        final_head = repository.get_default_branch_head(FULL_NAME)
+        self.assertEqual(final_head, result.head_sha)
+        controls = devflow.issues["kinoko34077/devflow"]
+        self.assertEqual(1, len(controls))
+        self.assertIn(final_head, controls[0]["body"])
+        done = [body for _, _, body in devflow.comments if "State: DONE" in body]
+        self.assertEqual(1, len(done))
+        self.assertIn(f"Initial-Accepted-SHA: `{final_head}`", done[0])
+
     def test_matching_existing_protection_is_verified_without_rewriting(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.protections[(FULL_NAME, "main")] = protection_readback()

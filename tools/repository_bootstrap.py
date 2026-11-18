@@ -1078,19 +1078,12 @@ class BootstrapExecutor:
                 )
             resources.append(f"file:{STANDARD_FEATURE_MANIFEST_PATH}")
 
-        head_sha = self._call(
-            context,
-            "SEED",
-            resources,
-            lambda: self.repository_api.get_default_branch_head(full_name),
-        )
         audit_ref = self._call(
             context,
             "SEED",
             resources,
             lambda: self.repository_api.get_default_branch_name(full_name),
         )
-        resources.append(f"head:{head_sha}")
         main_protection_status = self._ensure_main_protection(
             request,
             context,
@@ -1098,6 +1091,16 @@ class BootstrapExecutor:
             audit_ref,
             resources,
         )
+        # Protection setup can seed the required verify workflow on a new
+        # Public repository. Capture the accepted head only after every
+        # bootstrap-owned file write is complete.
+        head_sha = self._call(
+            context,
+            "SEED",
+            resources,
+            lambda: self.repository_api.get_default_branch_head(full_name),
+        )
+        resources.append(f"head:{head_sha}")
 
         owner_issues = self._call(
             context,
