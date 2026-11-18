@@ -200,6 +200,67 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("category=unauthorized", self.classify(401, "Bad credentials"))
         self.assertIn("category=validation_failed", self.classify(422, "Validation Failed"))
 
+    def test_validation_diagnostics_allowlist_field_and_code_without_echoing_message(self):
+        secret = "Bearer github_pat_must_not_be_logged"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{
+                "resource": "ProtectionRequest",
+                "field": "required_status_checks",
+                "code": "invalid",
+                "message": f"rejected input contains {secret}",
+            }],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_error=required_status_checks:invalid", result)
+        self.assertNotIn(secret, result)
+
+    def test_validation_diagnostics_classify_known_one_of_failure(self):
+        result = self.classify(
+            422,
+            "Invalid request. More than one subschema in oneOf matched.",
+        )
+
+        self.assertIn("category=validation_failed", result)
+        self.assertIn("validation_shape=one_of_conflict", result)
+
+    def test_validation_diagnostics_classify_allowlisted_schema_path(self):
+        result = self.classify(
+            422,
+            "Invalid request for properties/required_status_checks; token=must-not-appear",
+        )
+
+        self.assertIn("validation_field=required_status_checks", result)
+        self.assertNotIn("must-not-appear", result)
+
+    def test_validation_diagnostics_do_not_match_longer_schema_field(self):
+        result = self.classify(422, "Invalid request for properties/checks_token")
+
+        self.assertEqual("category=validation_failed", result)
+
+    def test_validation_diagnostics_do_not_match_longer_one_of_phrase(self):
+        result = self.classify(
+            422,
+            "Invalid request. More than one subschema in oneOf matched_extra.",
+        )
+
+        self.assertEqual("category=validation_failed", result)
+
+    def test_validation_diagnostics_ignore_unrecognized_error_values(self):
+        secret = "private-field-and-code"
+        body = json.dumps({
+            "message": "Validation Failed",
+            "errors": [{"field": secret, "code": secret, "message": secret}],
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertEqual(result, "category=validation_failed")
+        self.assertNotIn(secret, result)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,14 @@ _ALLOWED_PERMISSIONS = frozenset({
 _PERMISSION = re.compile(r"([a-z_]+)\s*=\s*(read|write|admin)", re.IGNORECASE)
 # GitHub request IDs are colon-delimited hex groups; reject opaque IDs/tokens.
 _REQUEST_ID = re.compile(r"[0-9A-F]{3,10}(?::[0-9A-F]{3,12}){2,4}\Z", re.IGNORECASE)
+_VALIDATION_FIELDS = frozenset({
+    "required_status_checks", "required_pull_request_reviews", "enforce_admins",
+    "restrictions", "allow_force_pushes", "allow_deletions",
+    "required_conversation_resolution", "contexts", "checks", "strict", "app_id",
+})
+_VALIDATION_CODES = frozenset({
+    "already_exists", "custom", "invalid", "missing", "missing_field", "unprocessable",
+})
 
 
 def _header(headers: Any, name: str) -> str | None:
@@ -95,6 +103,66 @@ def _message_kind(response_body: bytes) -> str:
     return ""
 
 
+def _validation_details(response_body: bytes) -> list[str]:
+    """Expose only fixed schema hints and allowlisted field/code pairs."""
+    if not isinstance(response_body, bytes) or len(response_body) > MAX_ERROR_BODY_BYTES:
+        return []
+    try:
+        parsed = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return []
+    if not isinstance(parsed, dict):
+        return []
+
+    messages: list[str] = []
+    top_message = parsed.get("message")
+    if isinstance(top_message, str):
+        messages.append(top_message[:MAX_ERROR_BODY_BYTES].casefold())
+
+    raw_errors = parsed.get("errors")
+    errors = raw_errors[:16] if isinstance(raw_errors, list) else []
+    for error in errors:
+        if isinstance(error, dict):
+            error_message = error.get("message")
+            if isinstance(error_message, str):
+                messages.append(error_message[:MAX_ERROR_BODY_BYTES].casefold())
+
+    details: list[str] = []
+    if any(
+        re.search(r"(?<![a-z0-9_])more than one subschema in oneof matched(?![a-z0-9_])", item)
+        for item in messages
+    ):
+        details.append("validation_shape=one_of_conflict")
+    elif any(
+        re.search(r"(?<![a-z0-9_])no subschema in oneof matched(?![a-z0-9_])", item)
+        for item in messages
+    ):
+        details.append("validation_shape=no_one_of_match")
+
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        field = error.get("field")
+        code = error.get("code")
+        if (
+            isinstance(field, str)
+            and field in _VALIDATION_FIELDS
+            and isinstance(code, str)
+            and code.casefold() in _VALIDATION_CODES
+        ):
+            details.append(f"validation_error={field}:{code.casefold()}")
+            break
+    if not any(item.startswith("validation_error=") for item in details):
+        for field in sorted(_VALIDATION_FIELDS):
+            if any(
+                re.search(rf"properties/{re.escape(field)}(?![a-z0-9_])", item)
+                for item in messages
+            ):
+                details.append(f"validation_field={field}")
+                break
+    return details
+
+
 def summarize_github_http_error(status: int, headers: Any, response_body: bytes) -> str:
     """Return bounded classification and validated metadata; never raw error text."""
     message_kind = _message_kind(response_body)
@@ -135,4 +203,6 @@ def summarize_github_http_error(status: int, headers: Any, response_body: bytes)
         result.append(f"rate_reset_epoch={reset}")
     if retry_after is not None:
         result.append(f"retry_after_seconds={retry_after}")
+    if status == 422:
+        result.extend(_validation_details(response_body))
     return " ".join(result)
