@@ -295,7 +295,9 @@ def _validation_details(response_body: bytes) -> list[str]:
         if field is not None and code is not None:
             details.append(f"validation_error={field}:{code}")
         elif field is not None:
-            details.append(f"validation_field={field}")
+            # A plain mention in GitHub's top-level message does not prove
+            # that the request validator rejected this field.
+            details.append(f"message_field_hint={field}")
     if not any(item.startswith("validation_error=") for item in details):
         for error in errors:
             if not isinstance(error, dict):
