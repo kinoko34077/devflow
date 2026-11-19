@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import json
 from pathlib import Path
 import re
 import sys
+from threading import Thread
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -156,6 +158,51 @@ class BootstrapTokenProbeTests(unittest.TestCase):
         report = probe.run_probe("candidate", opener=opener)
 
         self.assertIsNone(report["user_read"]["request_id"])
+
+    def test_default_transport_rejects_redirect_without_forwarding_bearer(self):
+        received: dict[str, list[tuple[str, str | None]]] = {"origin": [], "target": []}
+        target = ThreadingHTTPServer(("127.0.0.1", 0), None)
+        target_port = target.server_address[1]
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                name = "origin" if self.server is origin else "target"
+                received[name].append((self.path, self.headers.get("Authorization")))
+                if name == "origin":
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{target_port}/collect")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+
+            def log_message(self, *_args):
+                return
+
+        origin = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        target.RequestHandlerClass = Handler
+        target_thread = Thread(target=target.serve_forever, daemon=True)
+        origin_thread = Thread(target=origin.serve_forever, daemon=True)
+        target_thread.start()
+        origin_thread.start()
+        try:
+            _payload, result = probe._get_json(
+                f"http://127.0.0.1:{origin.server_address[1]}/start",
+                "sensitive-token",
+                opener=probe._safe_urlopen,
+            )
+
+            self.assertEqual(result["status"], 302)
+            self.assertEqual(result["classification"], "http_error")
+            self.assertEqual(received["origin"], [("/start", "Bearer sensitive-token")])
+            self.assertEqual(received["target"], [])
+        finally:
+            origin.shutdown()
+            target.shutdown()
+            origin.server_close()
+            target.server_close()
+            origin_thread.join(timeout=2)
+            target_thread.join(timeout=2)
 
     def test_manual_workflow_is_main_actor_locked_and_read_only(self):
         workflow = (ROOT / ".github/workflows/repository-bootstrap-token-probe.yml").read_text(encoding="utf-8")

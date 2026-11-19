@@ -9,7 +9,7 @@ import re
 import sys
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 USER_ENDPOINT = "https://api.github.com/user"
@@ -23,6 +23,17 @@ _SAFE_RUN_ID = re.compile(r"[0-9]{1,20}\Z")
 
 class ProbeInputError(ValueError):
     """The credential cannot safely be used by this probe."""
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Never replay the credential to a redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _safe_urlopen(request: Request, *, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
 
 
 def _request_id(headers: Any) -> str | None:
@@ -132,7 +143,7 @@ def run_probe(
         raise ProbeInputError("credential is missing or malformed")
 
     started_at = _timestamp(now)
-    http_open = opener or urlopen
+    http_open = opener or _safe_urlopen
     user, user_result = _get_json(USER_ENDPOINT, token, http_open)
     principal_matches = bool(
         user

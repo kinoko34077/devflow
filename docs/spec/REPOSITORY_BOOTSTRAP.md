@@ -330,7 +330,9 @@ without a different rerun actor, can proceed; the workflow's `GITHUB_TOKEN` is
 limited to `contents:read`.
 
 The probe sends only fixed-host, fixed-path `GET` requests to `GET /user` and
-`GET /repos/kinoko34077/devflow/branches/main/protection`. It reports whether
+`GET /repos/kinoko34077/devflow/branches/main/protection`. It rejects every
+redirect response so the bearer credential cannot be replayed to a redirect
+target. It reports whether
 the authenticated principal matches `kinoko34077` / user ID `79015263`, whether
 the protected-main read succeeded, HTTP status classifications, validated
 request IDs, UTC observation time, and Actions run ID. It MUST NOT emit the
