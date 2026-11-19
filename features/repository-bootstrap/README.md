@@ -53,9 +53,9 @@ Human Gate requirements; this index does not grant any of them.
   `tests/test_repository_bootstrap_repo_native_dispatch.py`
 
 New managed-repository requests also declare the `standard_features` set and
-`main_protection: "public-only-v1"`. Public-only main protection is verified
+`main_protection: "public-only-v1"` and `text_defaults: "portable-text-v1"`. Public-only main protection is verified
 during Bootstrap; Private repositories report it as not applicable. Historical
-requests without the marker retain their original retry behavior.
+requests without those markers retain their original retry behavior.
 Generated-artifact writeback seeds an integrity-checked capability
 manifest, retains the native read-only status receiver, and adds a pinned
 dry-run-only caller for the existing shared rollout workflow. Bootstrap grants
