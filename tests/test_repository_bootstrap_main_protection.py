@@ -13,7 +13,7 @@ POLICY = "public-only-v1"
 BASELINE = {
     "required_status_checks": {
         "strict": False,
-        "checks": [{"context": "verify", "app_id": 15368}],
+        "contexts": ["verify"],
     },
     "enforce_admins": True,
     "required_pull_request_reviews": {
@@ -40,8 +40,11 @@ def protection_readback(baseline=BASELINE):
     result = {
         "required_status_checks": {
             "strict": baseline["required_status_checks"]["strict"],
-            "contexts": [item["context"] for item in baseline["required_status_checks"]["checks"]],
-            "checks": copy.deepcopy(baseline["required_status_checks"]["checks"]),
+            "contexts": copy.deepcopy(baseline["required_status_checks"]["contexts"]),
+            "checks": [
+                {"context": item, "app_id": 15368}
+                for item in baseline["required_status_checks"]["contexts"]
+            ],
         },
         "enforce_admins": {"enabled": baseline["enforce_admins"]},
         "required_pull_request_reviews": {
@@ -69,6 +72,8 @@ class ProtectionApi(FakeApi):
         self.fail_put_statuses = []
         self.fail_second_get_status = None
         self.owner_type = "User"
+        self.check_runs_responses = []
+        self.check_run_calls = []
 
     def get_repository(self, full_name):
         repository = super().get_repository(full_name)
@@ -112,8 +117,33 @@ class ProtectionApi(FakeApi):
             self.protections[(full_name, branch)].pop("restrictions", None)
         return self.protections[(full_name, branch)]
 
+    def get_check_runs(self, full_name, ref):
+        self.check_run_calls.append((full_name, ref))
+        self.events.append(("get_check_runs", ref))
+        if self.check_runs_responses:
+            response = self.check_runs_responses.pop(0)
+            return response(ref) if callable(response) else copy.deepcopy(response)
+        return [
+            {
+                "name": "verify",
+                "head_sha": ref,
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": 15368},
+            }
+        ]
+
 
 class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
+    def test_public_protection_put_uses_the_documented_status_check_request_shape(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        status_checks = repository.protection_payloads[0]["required_status_checks"]
+        self.assertEqual(["verify"], status_checks.get("contexts"))
+        self.assertNotIn("checks", status_checks)
+
     def test_public_bootstrap_applies_and_reads_back_the_accepted_baseline(self):
         repository, devflow = ProtectionApi(), FakeApi()
 
@@ -153,7 +183,7 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
             repository.events.index(("set_branch_protection", "main")),
         )
 
-    def test_new_verify_check_race_retries_protection_once_after_a_bounded_wait(self):
+    def test_protection_put_retries_one_422_after_successful_verify_preflight(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.fail_put_statuses = [422, None]
 
@@ -168,6 +198,73 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertTrue(succeeded, "a single transient 422 must retry after the check-availability wait")
         self.assertEqual(2, len(repository.protection_payloads))
         sleep.assert_called_once_with(15)
+
+    def test_public_bootstrap_waits_for_successful_app_bound_verify_run_before_protection_put(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.check_runs_responses = [
+            [],
+            lambda ref: [
+                {
+                    "name": "verify",
+                    "head_sha": ref,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "app": {"id": 15368},
+                }
+            ],
+        ]
+
+        with patch.object(time, "sleep") as sleep:
+            rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual(2, len(repository.check_run_calls))
+        self.assertEqual(repository.check_run_calls[0][1], repository.check_run_calls[1][1])
+        self.assertLess(
+            repository.events.index(("get_check_runs", repository.check_run_calls[0][1])),
+            repository.events.index(("set_branch_protection", "main")),
+        )
+        self.assertEqual(1, len(repository.protection_payloads))
+        sleep.assert_called_once_with(rb.MAIN_PROTECTION_CHECK_POLL_INTERVAL_SECONDS)
+
+    def test_public_bootstrap_does_not_apply_protection_when_verify_never_appears(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.check_runs_responses = [[] for _ in range(rb.MAIN_PROTECTION_CHECK_POLL_ATTEMPTS)]
+
+        with patch.object(time, "sleep") as sleep:
+            with self.assertRaises(rb.BootstrapFailure) as caught:
+                rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual("yes", caught.exception.safe_retry)
+        self.assertEqual([], repository.protection_payloads)
+        self.assertEqual(rb.MAIN_PROTECTION_CHECK_POLL_ATTEMPTS, len(repository.check_run_calls))
+        self.assertEqual(
+            rb.MAIN_PROTECTION_CHECK_POLL_ATTEMPTS - 1,
+            sleep.call_count,
+        )
+
+    def test_public_bootstrap_stops_when_app_bound_verify_run_fails(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+        repository.check_runs_responses = [
+            lambda ref: [
+                {
+                    "name": "verify",
+                    "head_sha": ref,
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "app": {"id": 15368},
+                }
+            ]
+        ]
+
+        with patch.object(time, "sleep") as sleep:
+            with self.assertRaises(rb.BootstrapFailure) as caught:
+                rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual("after-human-decision", caught.exception.safe_retry)
+        self.assertEqual([], repository.protection_payloads)
+        self.assertEqual(0, sleep.call_count)
 
     def test_persistent_protection_validation_failure_stops_after_one_retry(self):
         repository, devflow = ProtectionApi(), FakeApi()
@@ -373,7 +470,20 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual("PUT", call.call_args_list[1].args[0])
         self.assertIn("/branches/main/protection", call.call_args_list[1].args[1])
         self.assertEqual(BASELINE, call.call_args_list[1].args[2])
-        self.assertNotIn("contexts", call.call_args_list[1].args[2]["required_status_checks"])
+        self.assertIn("contexts", call.call_args_list[1].args[2]["required_status_checks"])
+        self.assertNotIn("checks", call.call_args_list[1].args[2]["required_status_checks"])
+
+    def test_github_adapter_reads_public_check_runs_without_sending_bootstrap_token(self):
+        api = rb.GitHubApi("token")
+        check_runs = [{"name": "verify", "status": "completed"}]
+        with patch.object(api, "_request", return_value={"check_runs": check_runs}) as call:
+            result = api.get_check_runs(FULL_NAME, "f" * 40)
+
+        self.assertEqual(check_runs, result)
+        self.assertEqual("GET", call.call_args.args[0])
+        self.assertIn("/commits/", call.call_args.args[1])
+        self.assertIn("/check-runs?per_page=100", call.call_args.args[1])
+        self.assertFalse(call.call_args.kwargs["authenticate"])
 
 
 if __name__ == "__main__":
