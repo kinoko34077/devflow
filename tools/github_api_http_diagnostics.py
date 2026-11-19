@@ -287,6 +287,15 @@ def _validation_details(response_body: bytes) -> list[str]:
             if field is not None:
                 details.append(f"validation_field={field}")
                 break
+    if not any(
+        item.startswith(("validation_error=", "validation_field="))
+        for item in details
+    ) and isinstance(top_message, str):
+        field, code = _safe_validation_error_from_text(top_message)
+        if field is not None and code is not None:
+            details.append(f"validation_error={field}:{code}")
+        elif field is not None:
+            details.append(f"validation_field={field}")
     if not any(item.startswith("validation_error=") for item in details):
         for error in errors:
             if not isinstance(error, dict):

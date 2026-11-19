@@ -360,9 +360,11 @@ message are *diagnostic*, not an authorization decision.
 For HTTP 422, `endpoint_spammed` is emitted only when the bounded GitHub
 message explicitly identifies endpoint spam. Other 422 responses remain
 `validation_failed` and expose only allowlisted validation field/code details
-and response-shape labels. `validation_errors=absent` does not identify whether
-the endpoint was spammed or the request failed validation; Bootstrap therefore
-stops without retrying automatically.
+and response-shape labels. Known field names and codes may be extracted from
+either the structured `errors` entries or the top-level `message`; arbitrary
+message text is never emitted. `validation_errors=absent` means the response
+has no `errors` array and does not identify the rejected field; Bootstrap
+therefore stops without retrying automatically.
 
 ### Operator triage
 

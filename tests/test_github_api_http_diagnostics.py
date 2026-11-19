@@ -422,6 +422,26 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             result,
         )
 
+    def test_validation_diagnostics_extract_plain_top_level_field_and_code(self):
+        secret = "github_pat_must_not_be_logged"
+        body = json.dumps({
+            "message": (
+                "Validation failed for "
+                "required_pull_request_reviews.bypass_pull_request_allowances: "
+                f"invalid; detail={secret}"
+            ),
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_errors=absent", result)
+        self.assertIn(
+            "validation_error="
+            "required_pull_request_reviews.bypass_pull_request_allowances:invalid",
+            result,
+        )
+        self.assertNotIn(secret, result)
+
     def test_validation_diagnostics_do_not_match_longer_schema_field(self):
         result = self.classify(422, "Invalid request for properties/checks_token")
 
