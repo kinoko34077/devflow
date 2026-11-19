@@ -157,7 +157,13 @@ Permission, credential, publication, and destructive-operation gates remain
 independent. See the cross-repository lifecycle rule in
 `docs/spec/CROSS_REPOSITORY_DEVELOPMENT_CONTROL.md`.
 
-### Issue authoring language standard (2026-11-04 user direction)
+### Issue / development-record language standard
+
+Write human-readable text in Japanese by default for newly created or materially updated Issues / Work Orders, Pull Request titles and bodies, Formal Reviews, Issue / PR comments, commit messages, specifications, minutes, handoffs, progress notes and audit records. Use another language only when the user requests it or when the target repository or audience has a clear requirement. Preserve API / CLI names, machine-readable markers and schemas, identifiers, branch / path / SHA strings, and quoted source text exactly; add Japanese explanation or translation where useful. This rule does not require bulk rewriting existing Issues.
+
+See §24.2 of [03_Development_Specification_Principles.md](https://drive.google.com/file/d/1B-ssU0JUPHNZ2dhaMYX3yP4ulLGJLq8_/view).
+
+### Issue authoring style standard (2026-11-04 user direction)
 
 Write every newly created Issue (including Work Orders, audits, specifications, minutes and handoffs) **簡潔・平易・明瞭に。冗長な表現を避け、意味や情報量を保ちつつ圧縮的に記述する。** Remove redundant phrasing, repeated explanations and unnecessary preambles; link the authoritative specification/evidence instead of reproducing it wholesale. Preserve the actual user request, higher goal, constraints, definitions, numeric values, causal relationships, exception cases, permissions/Human Gates, acceptance criteria, verification references and actionable next step. Never substitute a shorter but less precise summary for an operative condition or machine-readable marker. Length reduction is **not** an independent acceptance criterion; if faithful compression is not possible, keep the necessary text.
 
