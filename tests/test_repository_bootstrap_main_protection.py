@@ -183,21 +183,19 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
             repository.events.index(("set_branch_protection", "main")),
         )
 
-    def test_protection_put_retries_one_422_after_successful_verify_preflight(self):
+    def test_ambiguous_protection_422_is_not_retried_even_if_next_attempt_would_work(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.fail_put_statuses = [422, None]
 
         with patch.object(time, "sleep") as sleep:
-            try:
+            with self.assertRaises(rb.BootstrapFailure) as caught:
                 rb.BootstrapExecutor(repository, devflow).execute(request(), context())
-            except rb.BootstrapFailure:
-                succeeded = False
-            else:
-                succeeded = True
 
-        self.assertTrue(succeeded, "a single transient 422 must retry after the check-availability wait")
-        self.assertEqual(2, len(repository.protection_payloads))
-        sleep.assert_called_once_with(15)
+        self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
+        self.assertEqual("after-human-decision", caught.exception.safe_retry)
+        self.assertEqual(1, len(repository.protection_payloads))
+        self.assertEqual(1, sum(call[0] == "PUT" for call in repository.protection_calls))
+        self.assertEqual(0, sleep.call_count)
 
     def test_public_bootstrap_waits_for_successful_app_bound_verify_run_before_protection_put(self):
         repository, devflow = ProtectionApi(), FakeApi()
@@ -266,7 +264,7 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual([], repository.protection_payloads)
         self.assertEqual(0, sleep.call_count)
 
-    def test_persistent_protection_validation_failure_stops_after_one_retry(self):
+    def test_persistent_protection_validation_failure_stops_without_retry(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.fail_put_status = 422
 
@@ -276,8 +274,9 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
 
         self.assertEqual("MAIN_PROTECTION", caught.exception.stage)
         self.assertEqual("after-human-decision", caught.exception.safe_retry)
-        self.assertEqual(2, len(repository.protection_payloads))
-        sleep.assert_called_once_with(15)
+        self.assertEqual(1, len(repository.protection_payloads))
+        self.assertEqual(1, sum(call[0] == "PUT" for call in repository.protection_calls))
+        self.assertEqual(0, sleep.call_count)
 
     def test_public_bootstrap_records_head_after_all_seed_writes(self):
         repository, devflow = ProtectionApi(), FakeApi()
