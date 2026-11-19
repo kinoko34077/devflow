@@ -167,6 +167,14 @@ Creating, rotating, replacing or storing this token; creating/configuring a GitH
 
 The implementation and tests may be merged without setting this secret. Until an approved credential is configured, valid requests will stop with a recoverable credential blocker instead of bypassing the boundary.
 
+### Read-only check for an existing Actions secret
+
+The candidate PAT's grant is visible at **GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens**. Open the token and check its resource owner, repository selection (`All repositories` or the intended repository), and **Repository permissions → Administration**. The Actions secret is listed at **devflow → Settings → Secrets and variables → Actions** as `REPOSITORY_BOOTSTRAP_TOKEN`; GitHub does not reveal the saved value in Settings or through its secret-read API.
+
+Use `.github/workflows/repository-bootstrap-token-probe.yml` to check the existing secret without a write request. Select `main` and run this workflow manually while signed in as the canonical user. It makes two fixed GET requests only: `/user` and the protected `devflow/main` branch-protection endpoint. A successful run confirms the secret authenticates as the expected user and has read access to that Administration-protected endpoint. It never attempts a branch-protection PUT and does not establish Administration write by itself.
+
+After the run, compare its UTC time and run ID with the candidate PAT's **Last used** display in Developer settings. If the candidate token's usage time advances at that run and no other process used it concurrently, this is a strong operational correlation that the Actions secret contains that PAT. It is not a mathematical value comparison. Exact proof would require comparing a carefully handled fingerprint or replacing the saved credential with a known token; do not expose a fingerprint or replace/rotate the secret as part of this workflow. Treat ambiguous timing as unresolved and leave the credential unchanged. The official [Actions secret API](https://docs.github.com/en/rest/actions/secrets#get-a-repository-secret) returns metadata without the secret value.
+
 Never put a token in:
 
 - Bootstrap Request bodies;
