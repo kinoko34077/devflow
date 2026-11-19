@@ -676,11 +676,10 @@ class BootstrapExecutor:
             "allow_force_pushes": False,
             "allow_deletions": False,
         }
-        # GitHub documents push restrictions as organization-only. Personal
-        # repositories reject the field even when it is null; an organization
-        # can explicitly use null to disable push restrictions.
-        if owner_type == "Organization":
-            baseline["restrictions"] = None
+        # The branch-protection endpoint requires this body field. Null
+        # explicitly disables push restrictions, which are only configurable
+        # with user, app, or team lists on organization-owned repositories.
+        baseline["restrictions"] = None
         return baseline
 
     @staticmethod
