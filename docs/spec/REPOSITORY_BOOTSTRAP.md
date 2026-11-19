@@ -79,7 +79,8 @@ The request Issue contains exactly one machine-readable block:
       "repo_native_dispatch",
       "generated-artifact-writeback"
     ],
-    "main_protection": "public-only-v1"
+    "main_protection": "public-only-v1",
+    "text_defaults": "portable-text-v1"
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -129,6 +130,7 @@ Other V1 defaults that do not invent semantic/project policy are:
 - no release, deployment, publication, repository deletion, shared-history rewrite, credential change or permission expansion is part of bootstrap.
 - for **new** managed repositories, request emitters MUST include `bootstrap.standard_features` with the supported default IDs `repo_native_dispatch` and `generated-artifact-writeback`, without asking the user to visit repository settings. The older `bootstrap.repo_native_dispatch` field remains a compatibility alias. An absent `standard_features` field preserves historical v1 request replay behavior and does not seed new files.
 - for **new** managed repositories, request emitters MUST include `bootstrap.main_protection: "public-only-v1"`. Bootstrap applies and verifies the accepted `main` protection only for a new Public repository. Private repositories report `NOT_APPLICABLE/PRIVATE_REPOSITORY` and do not call the protection API. An absent field preserves historical v1 replay behavior and does not change branch protection.
+- for **new** managed repositories, request emitters MUST include `bootstrap.text_defaults: "portable-text-v1"`. The executor deterministically seeds root `.gitattributes` and `.editorconfig` from version-controlled trusted files without changing other repo settings. An absent marker preserves historical v1 replay behavior; a conflicting file fails closed without overwrite. This is independent of standard feature manifest, Public-only main protection and future repo-specific formatter selection.
 
 V1 does not automatically generate licence text. A non-null licence request is unsupported until a later version defines exact licence material and attribution inputs; it MUST fail validation rather than be silently ignored or guessed.
 
