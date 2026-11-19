@@ -341,17 +341,21 @@ user-supplied URL, or request input is allowed. A successful protected-main
 GET proves this exact Actions credential can read that Administration-protected
 endpoint; it does not test Administration write.
 
-To correlate the Actions secret with a candidate fine-grained PAT, first
+To assess whether the Actions secret may be a candidate fine-grained PAT,
 inspect the candidate under **GitHub Settings → Developer settings → Personal
 access tokens → Fine-grained tokens** (resource owner, repository selection,
-and Administration permission), then compare the token's last-used time with
-the recorded workflow run time. The repository secret itself is managed under
+and Administration permission) before and after the probe. GitHub may display
+Last used as a coarse relative bucket such as “within the last week”; this
+relative display may be too coarse to correlate a run. An unchanged relative
+label provides no correlation. A more-recent bucket after the run, with no
+concurrent use, is only supporting operational evidence. The repository
+secret itself is managed under
 **devflow → Settings → Secrets and variables → Actions**; GitHub does not show
 its value there or in the REST API. A matching principal plus a tightly
-correlated last-used timestamp is evidence that the candidate PAT was used,
-not a cryptographic equality proof. Do not replace or rotate the secret just
-to strengthen this correlation; credential replacement is a separate Human
-Gate. GitHub documents the [secret metadata response](https://docs.github.com/en/rest/actions/secrets#get-a-repository-secret),
+correlated last-used bucket does not prove the saved secret has the same value;
+the probe confirms only the effective principal and Administration read
+access. Do not replace or rotate the secret just to strengthen this correlation;
+credential replacement is a separate Human Gate. GitHub documents the [secret metadata response](https://docs.github.com/en/rest/actions/secrets#get-a-repository-secret),
 [fine-grained PAT settings](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
 and the [Administration:read requirement for branch-protection GET](https://docs.github.com/en/rest/branches/branch-protection#get-protection-of-a-branch).
 

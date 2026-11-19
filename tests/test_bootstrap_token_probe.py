@@ -226,9 +226,11 @@ class BootstrapTokenProbeTests(unittest.TestCase):
         spec = (ROOT / "docs/spec/REPOSITORY_BOOTSTRAP.md").read_text(encoding="utf-8")
         runbook = (ROOT / "docs/operations/REPOSITORY_BOOTSTRAP.md").read_text(encoding="utf-8")
 
-        self.assertIn("not a cryptographic equality proof", spec)
+        self.assertIn("does not prove the saved secret has the same value", spec)
+        self.assertIn("relative display may be too coarse to correlate a run", spec)
         self.assertIn("does not reveal the saved value", runbook)
         self.assertIn("mathematical value comparison", runbook)
+        self.assertIn("unchanged relative label provides no correlation", runbook)
 
 
 if __name__ == "__main__":
