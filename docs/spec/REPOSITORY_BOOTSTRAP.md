@@ -244,6 +244,14 @@ current policy already matches, Bootstrap verifies it without writing. A
 divergent policy, unexpected repository identity/visibility, or non-`main`
 default branch fails closed and is not overwritten.
 
+For a personal (`User`) repository, the protection PUT omits the optional
+`required_pull_request_reviews.bypass_pull_request_allowances` object. For an
+organization-owned repository, it retains explicit empty `users`, `teams`, and
+`apps` lists. GitHub's documented GET response may omit this object when no
+bypass actors exist, so readback treats an absent object as no actors; if the
+object is present, only explicit empty lists match. A non-empty or malformed
+allowance fails closed.
+
 Before protection is written, Bootstrap reads the exact seeded `main` head and
 polls the Public repository's check-runs endpoint without sending the
 Bootstrap credential. It waits at most nine observations, 15 seconds apart,

@@ -135,8 +135,8 @@ def _number(headers: Any, name: str, upper: int) -> str | None:
     return str(int(value)) if int(value) <= upper else None
 
 
-def _accepted_permissions(headers: Any) -> str | None:
-    """Validate every item; preserve GitHub's AND (comma) / OR (semicolon)."""
+def _endpoint_required_permissions(headers: Any) -> str | None:
+    """Validate endpoint-required permissions, not the caller token's grants."""
     raw = _header(headers, "X-Accepted-GitHub-Permissions")
     if not raw or len(raw) > 256:
         return None
@@ -334,9 +334,9 @@ def summarize_github_http_error(status: int, headers: Any, response_body: bytes)
         category = "unclassified"
 
     result = [f"category={category}"]
-    permissions = _accepted_permissions(headers)
+    permissions = _endpoint_required_permissions(headers)
     if permissions is not None:
-        result.append(f"accepted_permissions={permissions}")
+        result.append(f"endpoint_required_permissions={permissions}")
     request_id = _header(headers, "X-GitHub-Request-Id")
     if request_id and _REQUEST_ID.fullmatch(request_id.strip()):
         result.append(f"request_id={request_id.strip()}")

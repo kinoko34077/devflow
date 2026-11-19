@@ -658,20 +658,20 @@ class BootstrapExecutor:
 
     @staticmethod
     def _main_protection_baseline(owner_type: str) -> dict[str, Any]:
+        reviews: dict[str, Any] = {"required_approving_review_count": 0}
+        if owner_type == "Organization":
+            reviews["bypass_pull_request_allowances"] = {
+                "users": [],
+                "teams": [],
+                "apps": [],
+            }
         baseline = {
             "required_status_checks": {
                 "strict": False,
                 "contexts": ["verify"],
             },
             "enforce_admins": True,
-            "required_pull_request_reviews": {
-                "required_approving_review_count": 0,
-                "bypass_pull_request_allowances": {
-                    "users": [],
-                    "teams": [],
-                    "apps": [],
-                },
-            },
+            "required_pull_request_reviews": reviews,
             "required_conversation_resolution": True,
             "allow_force_pushes": False,
             "allow_deletions": False,
@@ -700,11 +700,17 @@ class BootstrapExecutor:
             return False
 
         reviews = observed.get("required_pull_request_reviews")
-        bypass = reviews.get("bypass_pull_request_allowances") if isinstance(reviews, dict) else None
         if not isinstance(reviews, dict) or reviews.get("required_approving_review_count") != 0:
             return False
-        if not isinstance(bypass, dict) or any(bypass.get(key) != [] for key in ("users", "teams", "apps")):
-            return False
+        # GitHub's documented GET response omits this optional object when
+        # there are no bypass actors. If it is present, accept only explicit
+        # empty lists so unknown or granted allowances fail closed.
+        if "bypass_pull_request_allowances" in reviews:
+            bypass = reviews["bypass_pull_request_allowances"]
+            if not isinstance(bypass, dict) or any(
+                bypass.get(key) != [] for key in ("users", "teams", "apps")
+            ):
+                return False
         # Push restrictions are unavailable for personal repositories, where
         # the API may omit this field. Organizations must read back explicit
         # null so an existing restriction is never mistaken for no restriction.

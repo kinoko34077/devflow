@@ -18,13 +18,19 @@ BASELINE = {
     "enforce_admins": True,
     "required_pull_request_reviews": {
         "required_approving_review_count": 0,
-        "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": []},
     },
     "required_conversation_resolution": True,
     "allow_force_pushes": False,
     "allow_deletions": False,
 }
-ORGANIZATION_BASELINE = {**BASELINE, "restrictions": None}
+ORGANIZATION_BASELINE = {
+    **BASELINE,
+    "required_pull_request_reviews": {
+        **BASELINE["required_pull_request_reviews"],
+        "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": []},
+    },
+    "restrictions": None,
+}
 
 
 def request(visibility="public", *, with_policy=True):
@@ -48,7 +54,9 @@ def protection_readback(baseline=BASELINE):
         },
         "enforce_admins": {"enabled": baseline["enforce_admins"]},
         "required_pull_request_reviews": {
-            **copy.deepcopy(baseline["required_pull_request_reviews"]),
+            "required_approving_review_count": baseline[
+                "required_pull_request_reviews"
+            ]["required_approving_review_count"],
         },
         "required_conversation_resolution": {
             "enabled": baseline["required_conversation_resolution"]
@@ -135,6 +143,37 @@ class ProtectionApi(FakeApi):
 
 
 class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
+    def test_personal_repository_payload_omits_empty_bypass_allowances(self):
+        repository, devflow = ProtectionApi(), FakeApi()
+
+        rb.BootstrapExecutor(repository, devflow).execute(request(), context())
+
+        reviews = repository.protection_payloads[0]["required_pull_request_reviews"]
+        self.assertNotIn("bypass_pull_request_allowances", reviews)
+
+    def test_readback_rejects_explicit_nonempty_bypass_allowances(self):
+        observed = protection_readback()
+        observed["required_pull_request_reviews"]["bypass_pull_request_allowances"] = {
+            "users": ["unexpected-bypass-user"],
+            "teams": [],
+            "apps": [],
+        }
+
+        self.assertFalse(
+            rb.BootstrapExecutor._main_protection_matches(observed, "User")
+        )
+
+    def test_readback_rejects_malformed_bypass_allowances(self):
+        observed = protection_readback()
+        observed["required_pull_request_reviews"]["bypass_pull_request_allowances"] = {
+            "users": [],
+            "teams": [],
+        }
+
+        self.assertFalse(
+            rb.BootstrapExecutor._main_protection_matches(observed, "User")
+        )
+
     def test_public_protection_put_uses_the_documented_status_check_request_shape(self):
         repository, devflow = ProtectionApi(), FakeApi()
 
@@ -317,6 +356,12 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         rb.BootstrapExecutor(repository, devflow).execute(request(), context())
 
         self.assertIsNone(repository.protection_payloads[0]["restrictions"])
+        self.assertEqual(
+            {"users": [], "teams": [], "apps": []},
+            repository.protection_payloads[0]["required_pull_request_reviews"][
+                "bypass_pull_request_allowances"
+            ],
+        )
         self.assertIsNone(repository.protections[(FULL_NAME, "main")]["restrictions"])
 
     def test_organization_readback_requires_explicit_absence_of_push_restrictions(self):
