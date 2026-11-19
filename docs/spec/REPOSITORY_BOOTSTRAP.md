@@ -261,15 +261,14 @@ contain both `contexts: ["verify"]` and `checks: [{"context":"verify",
 required request field for the full branch-protection endpoint. See GitHub's
 [Update branch protection API](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection).
 
-The optional push `restrictions` field is owner-type aware. GitHub only
-supports user, app, and team push restrictions for organization-owned
-repositories. For a personal (`User`) repository, Bootstrap omits this field
-from the PUT and treats an absent or `null` readback as no push restriction; a
-non-null value is divergent and fails closed. For an organization-owned
-repository, Bootstrap sends `restrictions: null` and requires an explicit null
-readback. An unknown owner type fails closed before the protection mutation.
-This preserves the #78 baseline without sending an unsupported field to a
-personal repository. See GitHub's
+The branch-protection request includes `restrictions: null` to disable push
+restrictions. GitHub only supports non-null user, app, or team push
+restrictions for organization-owned repositories. For a personal (`User`)
+repository, Bootstrap treats an absent or `null` readback as no push
+restriction; a non-null value is divergent and fails closed. For an
+organization-owned repository, Bootstrap requires an explicit null readback.
+An unknown owner type fails closed before the protection mutation. See
+GitHub's
 [protected-branches API documentation](https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28).
 
 If GitHub rejects the protection PUT with HTTP 422 despite the successful

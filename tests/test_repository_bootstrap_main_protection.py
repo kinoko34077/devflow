@@ -23,6 +23,7 @@ BASELINE = {
     "required_conversation_resolution": True,
     "allow_force_pushes": False,
     "allow_deletions": False,
+    "restrictions": None,
 }
 ORGANIZATION_BASELINE = {**BASELINE, "restrictions": None}
 
@@ -107,7 +108,7 @@ class ProtectionApi(FakeApi):
                 raise rb.GitHubApiError("PUT protection failed", status_code=status)
         if self.fail_put_status is not None:
             raise rb.GitHubApiError("PUT protection failed", status_code=self.fail_put_status)
-        if self.owner_type == "User" and "restrictions" in protection:
+        if self.owner_type == "User" and protection.get("restrictions") is not None:
             raise rb.GitHubApiError(
                 "personal repositories do not accept push restrictions",
                 status_code=422,
@@ -301,13 +302,14 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual([("GET", FULL_NAME, "main")], repository.protection_calls)
         self.assertEqual([], repository.protection_payloads)
 
-    def test_user_owned_public_repo_omits_unavailable_push_restrictions(self):
+    def test_user_owned_public_repo_disables_unavailable_push_restrictions_with_null(self):
         repository, devflow = ProtectionApi(), FakeApi()
 
         rb.BootstrapExecutor(repository, devflow).execute(request(), context())
 
         self.assertEqual("User", repository.get_repository(FULL_NAME)["owner"]["type"])
-        self.assertNotIn("restrictions", repository.protection_payloads[0])
+        self.assertIn("restrictions", repository.protection_payloads[0])
+        self.assertIsNone(repository.protection_payloads[0]["restrictions"])
         self.assertNotIn("restrictions", repository.protections[(FULL_NAME, "main")])
 
     def test_organization_owned_public_repo_explicitly_disables_push_restrictions(self):
@@ -319,10 +321,12 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertIsNone(repository.protection_payloads[0]["restrictions"])
         self.assertIsNone(repository.protections[(FULL_NAME, "main")]["restrictions"])
 
-    def test_organization_readback_requires_explicit_absence_of_push_restrictions(self):
+    def test_organization_readback_requires_explicit_null_push_restrictions(self):
         repository, devflow = ProtectionApi(), FakeApi()
         repository.owner_type = "Organization"
-        repository.protections[(FULL_NAME, "main")] = protection_readback()
+        readback = protection_readback()
+        readback.pop("restrictions")
+        repository.protections[(FULL_NAME, "main")] = readback
 
         with self.assertRaises(rb.BootstrapFailure) as caught:
             rb.BootstrapExecutor(repository, devflow).execute(request(), context())
