@@ -307,6 +307,14 @@ The branch-protection PUT then sends `contexts: ["verify"]`. Verify that the
 GET readback binds it to GitHub Actions app `15368` in `checks`; stop if the
 provider binding is absent or differs.
 
+For a personal (`User`) repository, omit the optional
+`required_pull_request_reviews.bypass_pull_request_allowances` object from the
+PUT. Organization-owned repositories retain explicit empty `users`, `teams`,
+and `apps` lists. The documented GET response may omit this object when there
+are no bypass actors, so an absent object matches no bypass actors. If present,
+all three lists must be explicitly empty; non-empty or malformed values fail
+closed.
+
 Private repositories explicitly report
 `NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and
 protected main is not a completion condition. A historical v1 request with no
@@ -335,10 +343,10 @@ Authorization, or token values**. The emitted fields are:
   `repository_policy_denied`, `primary_rate_limited`,
   `secondary_rate_limited`, `rate_limited`, `endpoint_spammed`,
   `validation_failed`, `forbidden_unclassified`;
-- `accepted_permissions`: only if the complete
+- `endpoint_required_permissions`: only if the complete
   `X-Accepted-GitHub-Permissions` header passes a strict allowlist.
   A comma joins **concurrent** requirements; a semicolon separates **alternative**
-  permission sets. This is API endpoint metadata, not proof of the token's
+  permission sets. This is API endpoint metadata, not proof of the caller token's
   actual permissions or coverage of an additional workflow-file restriction;
 - `request_id`: validated `X-GitHub-Request-Id` for correlating GitHub support;
 - `rate_remaining`, `rate_reset_epoch`, and `retry_after_seconds`:

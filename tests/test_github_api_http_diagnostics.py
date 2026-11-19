@@ -45,7 +45,10 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             X_GitHub_Request_Id="AA12:BB34:CC56",
         )
         self.assertIn("category=workflow_scope_denied", result)
-        self.assertIn("accepted_permissions=contents=write,workflows=write", result)
+        self.assertIn(
+            "endpoint_required_permissions=contents=write,workflows=write", result
+        )
+        self.assertNotIn("accepted_permissions=", result)
         self.assertIn("request_id=AA12:BB34:CC56", result)
 
     def test_unknown_403_is_not_automatically_a_scope_error(self):
@@ -93,14 +96,14 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
     def test_fallback_429(self):
         self.assertIn("category=rate_limited", self.classify(429, "Try again"))
 
-    def test_accepted_permissions_preserve_alternative_semantics(self):
+    def test_endpoint_required_permissions_preserve_alternative_semantics(self):
         result = self.classify(
             403,
             "Forbidden",
             X_Accepted_GitHub_Permissions="contents=write,workflows=write; contents=read",
         )
         self.assertIn(
-            "accepted_permissions=contents=write,workflows=write;contents=read",
+            "endpoint_required_permissions=contents=write,workflows=write;contents=read",
             result,
         )
 
@@ -217,7 +220,9 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("HTTP 403", message)
         self.assertIn("category=forbidden_unclassified", message)
-        self.assertIn("accepted_permissions=contents=write,workflows=write", message)
+        self.assertIn(
+            "endpoint_required_permissions=contents=write,workflows=write", message
+        )
         self.assertIn("request_id=1234:ABCD:5678", message)
         self.assertNotIn(secret, message)
         self.assertNotIn("dummy-token", message)
