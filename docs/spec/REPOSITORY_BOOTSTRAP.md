@@ -272,10 +272,14 @@ This preserves the #78 baseline without sending an unsupported field to a
 personal repository. See GitHub's
 [protected-branches API documentation](https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28).
 
-If GitHub briefly rejects the protection PUT with HTTP 422 despite the
-successful check preflight, Bootstrap waits 15 seconds and retries it once.
-Every other failure and any persistent 422 fails closed without changing
-credentials, permissions, or an existing protection policy.
+If GitHub rejects the protection PUT with HTTP 422 despite the successful
+check preflight, Bootstrap fails closed immediately at `MAIN_PROTECTION` with
+`Safe-Retry: after-human-decision`. GitHub uses 422 for both validation errors
+and endpoint spam, so Bootstrap does not automatically repeat this write. A
+later explicit request first reads the current protection state and may
+continue only if it already matches the accepted baseline; divergent or
+unreadable state fails closed. This does not change credentials, permissions,
+or an existing protection policy.
 
 The branch-protection API requires an already-authorized credential with
 administration write access for the target repository. Confirm that the
