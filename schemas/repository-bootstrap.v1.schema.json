@@ -118,6 +118,10 @@
           },
           "description": "Opt-in list of known standard capabilities for new managed repositories. Absence preserves legacy repository-bootstrap.v1 retry behavior. generated-artifact-writeback requires repo_native_dispatch; Bootstrap seeds a pinned dry-run-only Caller and status manifest but grants no contents:write permission."
         },
+        "text_defaults": {
+          "const": "portable-text-v1",
+          "description": "Explicit opt-in for trusted .gitattributes and .editorconfig seeds on new managed repositories. Absent legacy v1 requests remain unchanged; a differing existing file is never overwritten."
+        },
         "main_protection": {
           "const": "public-only-v1",
           "description": "For new managed-repository requests, automatically apply and read back the accepted classic main protection baseline on Public repositories. Private repositories are explicitly not applicable. Absence preserves historical v1 retry behavior. Requires an already-authorized Administration:write-capable bootstrap credential; Bootstrap does not widen credentials or permissions."

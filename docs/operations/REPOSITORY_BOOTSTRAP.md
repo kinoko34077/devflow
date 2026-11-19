@@ -31,6 +31,7 @@ Other v1 defaults remain:
 
 - template: `minimal`;
 - devflow-managed: true unless the repository is canonically excluded;
+- New managed-repo request emitters explicitly include `bootstrap.text_defaults: "portable-text-v1"`; old requests without it stay unchanged.
 - `license`: null/omitted.
 
 V1 does not generate licence text. A non-null licence request is unsupported until a later contract defines exact licence material/attribution inputs. Do not guess a licence.
@@ -70,7 +71,8 @@ Include human-readable source/context, then exactly one payload block:
       "repo_native_dispatch",
       "generated-artifact-writeback"
     ],
-    "main_protection": "public-only-v1"
+    "main_protection": "public-only-v1",
+    "text_defaults": "portable-text-v1"
   },
   "initial_content": {
     "readme": "# example-repo\n",
@@ -271,6 +273,10 @@ GitHub's standard web form, the devflow bootstrap executor was not invoked
 and cannot claim that receiver was automatically installed. For full coverage
 of those out-of-band creations, a separate one-time authorized event source
 or template-based creation path would be needed.
+
+## Portable text defaults (#1076)
+
+New managed requests include `bootstrap.text_defaults: "portable-text-v1"`. The deterministic executor copies `templates/bootstrap/repository.gitattributes` and `repository.editorconfig` to root `.gitattributes` and `.editorconfig`. The trusted `.gitattributes` normalizes ordinary text to LF and grants CRLF working-tree endings to `.bat`/`.cmd`; `.editorconfig` sets UTF-8, final newline, sensible indentation and limited Markdown/Windows exceptions. The files do not choose or install language-specific formatter tools. A retry reads existing files and leaves exact matches unchanged; mismatches stop at `SEED` without overwrite. Historical requests lacking the marker do not acquire these settings on retry. Existing repositories and generated/special formats require separately reviewed scoped migration.
 
 ## Public-only main protection (#1058)
 
