@@ -56,6 +56,8 @@ STANDARD_FEATURE_MANIFEST_PATH = ".devflow/standard-features.json"
 STANDARD_ROLLOUT_CALLER_PATH = ".github/workflows/verified-artifacts-rollout.yml"
 VERIFY_WORKFLOW_PATH = ".github/workflows/verify.yml"
 MAIN_PROTECTION_CHECK_PROPAGATION_DELAY_SECONDS = 15
+MAIN_PROTECTION_CHECK_POLL_INTERVAL_SECONDS = 15
+MAIN_PROTECTION_CHECK_POLL_ATTEMPTS = 9
 LEGACY_REPO_NATIVE_DISPATCH_SHA256 = "8f5fb94577be6d03f14faed8a39ee35bcc65058a93ec2a60df51c0678ec460f0"
 SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 REPOSITORY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -753,12 +755,61 @@ class BootstrapExecutor:
         except Exception as exc:
             if getattr(exc, "status_code", None) != 422:
                 raise
-            # The newly seeded push workflow may not have registered its
-            # required check with GitHub before this first protection request.
-            # Retry once after a bounded propagation window; persistent
-            # validation failures remain fail-closed in _call_main_protection.
+            # Retry one transient provider validation after the successful
+            # app-bound check preflight; persistent failures remain fail-closed.
             time.sleep(MAIN_PROTECTION_CHECK_PROPAGATION_DELAY_SECONDS)
             return self.repository_api.set_branch_protection(full_name, "main", baseline)
+
+    def _wait_for_verify_check(
+        self,
+        context: BootstrapContext,
+        full_name: str,
+        resources: list[str],
+    ) -> None:
+        head_sha = self._call_main_protection(
+            context,
+            resources,
+            lambda: self.repository_api.get_default_branch_head(full_name),
+        )
+        for attempt in range(MAIN_PROTECTION_CHECK_POLL_ATTEMPTS):
+            check_runs = self._call_main_protection(
+                context,
+                resources,
+                lambda: self.repository_api.get_check_runs(full_name, head_sha),
+            )
+            latest_verify = next(
+                (
+                    run
+                    for run in check_runs
+                    if run.get("name") == "verify" and run.get("head_sha") == head_sha
+                ),
+                None,
+            )
+            if latest_verify is not None:
+                app = latest_verify.get("app")
+                app_id = app.get("id") if isinstance(app, dict) else None
+                if app_id == 15368 and latest_verify.get("status") == "completed":
+                    if latest_verify.get("conclusion") != "success":
+                        self._raise_failure(
+                            context,
+                            "MAIN_PROTECTION",
+                            "the seeded verify check completed unsuccessfully; main protection was not changed",
+                            safe_retry="after-human-decision",
+                            resources=resources,
+                        )
+                    resources.append(f"check:verify:{head_sha}:app-15368:success")
+                    return
+
+            if attempt + 1 < MAIN_PROTECTION_CHECK_POLL_ATTEMPTS:
+                time.sleep(MAIN_PROTECTION_CHECK_POLL_INTERVAL_SECONDS)
+
+        self._raise_failure(
+            context,
+            "MAIN_PROTECTION",
+            "the seeded verify check from GitHub Actions was not observed successfully within the bounded wait; main protection was not changed",
+            safe_retry="yes",
+            resources=resources,
+        )
 
     def _ensure_verify_workflow(
         self,
@@ -869,6 +920,7 @@ class BootstrapExecutor:
             lambda: self.repository_api.get_branch_protection(full_name, "main"),
         )
         if protection is None:
+            self._wait_for_verify_check(context, full_name, resources)
             self._call_main_protection(
                 context,
                 resources,
@@ -1313,20 +1365,23 @@ class GitHubApi:
         payload: Mapping[str, Any] | None = None,
         *,
         allow_404: bool = False,
+        authenticate: bool = True,
     ) -> Any:
         url = f"{self._api_url}{path}"
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": self._api_version,
+            "User-Agent": "kinoko34077-devflow-repository-bootstrap",
+            "Content-Type": "application/json",
+        }
+        if authenticate:
+            headers["Authorization"] = f"Bearer {self._token}"
         request = urllib.request.Request(
             url,
             data=data,
             method=method,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self._token}",
-                "X-GitHub-Api-Version": self._api_version,
-                "User-Agent": "kinoko34077-devflow-repository-bootstrap",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
@@ -1476,6 +1531,22 @@ class GitHubApi:
         if not isinstance(sha, str) or not sha:
             raise GitHubApiError("branch response has invalid commit SHA")
         return sha
+
+    def get_check_runs(self, full_name: str, ref: str) -> list[dict[str, Any]]:
+        if not isinstance(ref, str) or not SHA_RE.fullmatch(ref):
+            raise BootstrapError("check-run ref must be a full commit SHA")
+        result = self._request(
+            "GET",
+            f"/repos/{self._repo_path(full_name)}/commits/{ref}/check-runs?per_page=100",
+            allow_404=True,
+            authenticate=False,
+        )
+        if result is None:
+            return []
+        check_runs = result.get("check_runs") if isinstance(result, dict) else None
+        if not isinstance(check_runs, list) or any(not isinstance(run, dict) for run in check_runs):
+            raise GitHubApiError("check-run response is malformed")
+        return check_runs
 
     def get_branch_protection(self, full_name: str, branch: str) -> dict[str, Any] | None:
         if not isinstance(branch, str) or not branch:

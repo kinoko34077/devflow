@@ -288,15 +288,24 @@ After confirming the target is Public with default branch `main`, and before
 applying protection, Bootstrap seeds `.github/workflows/verify.yml`. The
 `verify` job runs for every pull request targeting `main`, has no path filters,
 uses only `contents:read`, and checks patch whitespace with `git diff --check`
-without executing repository scripts. A divergent existing workflow is never
-overwritten; setup fails closed at `SEED` for human review. Private repositories
+without executing repository scripts. Bootstrap waits for the seeded `main`
+head's successful `verify` check before applying branch protection. A divergent
+existing workflow is never overwritten; setup fails closed at `SEED` for human
+review. Private repositories
 do not receive this Actions workflow. Historical requests without the
 protection marker do not gain the workflow on retry.
 
-The branch-protection PUT sends `contexts: ["verify"]` after the seeded
-workflow emits the check. Verify that the GET readback binds it to GitHub
-Actions app `15368` in `checks`; stop if the provider binding is absent or
-differs.
+Before the branch-protection PUT, Bootstrap reads the exact seeded `main`
+head and polls the Public repository's unauthenticated, read-only check-runs
+endpoint. It proceeds only after the latest `verify` run for that SHA succeeds
+under GitHub Actions app `15368`; the bounded wait is nine observations spaced
+15 seconds apart. A failed run requires human review. If no successful run
+appears, Bootstrap fails before the protection PUT and records a retryable
+`MAIN_PROTECTION` failure. This read adds no token permission.
+
+The branch-protection PUT then sends `contexts: ["verify"]`. Verify that the
+GET readback binds it to GitHub Actions app `15368` in `checks`; stop if the
+provider binding is absent or differs.
 
 Private repositories explicitly report
 `NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and

@@ -225,8 +225,9 @@ before protection is applied, Bootstrap seeds the trusted
 `.github/workflows/verify.yml` workflow. It emits a job named `verify` for
 pushes to `main` and every pull request targeting `main` (without path
 filters), requests only `contents:read`, and runs `git diff --check` without
-executing repository scripts. The seed push emits the required `verify` check
-before Bootstrap configures branch protection. On pull requests, the workflow
+executing repository scripts. The seed push starts the required `verify`
+check; Bootstrap waits for its successful completion before configuring
+branch protection. On pull requests, the workflow
 fetches the event's base SHA explicitly so its shallow checkout can compare
 branches whose histories have diverged. A conflicting existing workflow is
 left untouched and fails closed. Private repositories do not receive this
@@ -243,10 +244,19 @@ current policy already matches, Bootstrap verifies it without writing. A
 divergent policy, unexpected repository identity/visibility, or non-`main`
 default branch fails closed and is not overwritten.
 
+Before protection is written, Bootstrap reads the exact seeded `main` head and
+polls the Public repository's check-runs endpoint without sending the
+Bootstrap credential. It waits at most nine observations, 15 seconds apart,
+and proceeds only when the latest `verify` run for that SHA has completed
+successfully under GitHub Actions app `15368`. A failed run requires human
+review; a missing or still-pending run times out without issuing a protection
+PUT and can be retried. This uses public read-only check data and adds no token
+permission. See GitHub's
+[List check runs for a Git reference API](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference).
+
 For the required check, the protection PUT sends `contexts: ["verify"]` after
-the seeded workflow has emitted that check. GitHub binds a context to the
-GitHub App that recently provided it; Bootstrap then requires the GET readback
-to contain both `contexts: ["verify"]` and `checks: [{"context":"verify",
+that successful app-bound run. Bootstrap then requires the GET readback to
+contain both `contexts: ["verify"]` and `checks: [{"context":"verify",
 "app_id":15368}]`. This keeps the accepted app-bound check while using the
 required request field for the full branch-protection endpoint. See GitHub's
 [Update branch protection API](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection).
@@ -262,11 +272,10 @@ This preserves the #78 baseline without sending an unsupported field to a
 personal repository. See GitHub's
 [protected-branches API documentation](https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28).
 
-GitHub can briefly reject the first protection PUT before the newly seeded
-`verify` push check is registered. Bootstrap waits 15 seconds and retries that
-PUT once after an HTTP 422; every other failure and any persistent 422 fails
-closed without changing credentials, permissions, or an existing protection
-policy.
+If GitHub briefly rejects the protection PUT with HTTP 422 despite the
+successful check preflight, Bootstrap waits 15 seconds and retries it once.
+Every other failure and any persistent 422 fails closed without changing
+credentials, permissions, or an existing protection policy.
 
 The branch-protection API requires an already-authorized credential with
 administration write access for the target repository. Confirm that the
