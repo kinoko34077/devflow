@@ -442,6 +442,17 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         )
         self.assertNotIn(secret, result)
 
+    def test_validation_diagnostics_mark_unstructured_top_level_field_as_hint(self):
+        body = json.dumps({
+            "message": "Restrictions are not supported for this repository.",
+        }).encode("utf-8")
+
+        result = diagnostics.summarize_github_http_error(422, None, body)
+
+        self.assertIn("validation_errors=absent", result)
+        self.assertIn("message_field_hint=restrictions", result)
+        self.assertNotIn("validation_field=restrictions", result)
+
     def test_validation_diagnostics_do_not_match_longer_schema_field(self):
         result = self.classify(422, "Invalid request for properties/checks_token")
 
