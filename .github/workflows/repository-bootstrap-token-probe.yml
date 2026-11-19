@@ -27,4 +27,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python scripts/bootstrap_token_probe.py
+          python tools/bootstrap_token_probe.py
