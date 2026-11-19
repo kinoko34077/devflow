@@ -83,6 +83,13 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
             self.classify(403, "You have exceeded a secondary rate limit."),
         )
 
+    def test_endpoint_spam_422_has_a_bounded_category(self):
+        result = self.classify(422, "The endpoint has been spammed.")
+
+        self.assertIn("category=endpoint_spammed", result)
+        self.assertIn("validation_errors=absent", result)
+        self.assertNotIn("The endpoint", result)
+
     def test_fallback_429(self):
         self.assertIn("category=rate_limited", self.classify(429, "Try again"))
 

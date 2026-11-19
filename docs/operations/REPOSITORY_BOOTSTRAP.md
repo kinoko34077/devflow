@@ -333,7 +333,8 @@ Authorization, or token values**. The emitted fields are:
 
 - `category`: e.g. `workflow_scope_denied`, `integration_permission_denied`,
   `repository_policy_denied`, `primary_rate_limited`,
-  `secondary_rate_limited`, `rate_limited`, `forbidden_unclassified`;
+  `secondary_rate_limited`, `rate_limited`, `endpoint_spammed`,
+  `validation_failed`, `forbidden_unclassified`;
 - `accepted_permissions`: only if the complete
   `X-Accepted-GitHub-Permissions` header passes a strict allowlist.
   A comma joins **concurrent** requirements; a semicolon separates **alternative**
@@ -347,6 +348,13 @@ A plain HTTP `403` **without a recognized message or rate-limit evidence**
 is `category=forbidden_unclassified`, never automatically
 `workflow_scope_denied`. Classifications based on an allowlisted GitHub
 message are *diagnostic*, not an authorization decision.
+
+For HTTP 422, `endpoint_spammed` is emitted only when the bounded GitHub
+message explicitly identifies endpoint spam. Other 422 responses remain
+`validation_failed` and expose only allowlisted validation field/code details
+and response-shape labels. `validation_errors=absent` does not identify whether
+the endpoint was spammed or the request failed validation; Bootstrap therefore
+stops without retrying automatically.
 
 ### Operator triage
 
