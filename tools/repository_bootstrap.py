@@ -49,6 +49,11 @@ REPOSITORY_STATES = WORKFLOW_CONTRACT.repository_states
 TEMPLATES = frozenset({"minimal"})
 STANDARD_FEATURES = frozenset({"repo_native_dispatch", "generated-artifact-writeback"})
 MAIN_PROTECTION_POLICY = "public-only-v1"
+TEXT_DEFAULTS_POLICY = "portable-text-v1"
+TEXT_DEFAULTS_FILES = (
+    (".gitattributes", "repository.gitattributes"),
+    (".editorconfig", "repository.editorconfig"),
+)
 REQUIRED_MANAGED_STANDARD_FEATURES = frozenset(
     {"repo_native_dispatch", "generated-artifact-writeback"}
 )
@@ -122,6 +127,7 @@ class BootstrapRequest:
     repo_native_dispatch: bool
     generated_artifact_writeback: bool
     main_protection: str | None
+    text_defaults: str | None
     standard_features: tuple[str, ...]
     standard_features_declared: bool
     readme: str
@@ -258,7 +264,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
     _reject_unknown_keys(
         bootstrap, "bootstrap",
-        {"template", "devflow_managed", "repo_native_dispatch", "standard_features", "main_protection"},
+        {"template", "devflow_managed", "repo_native_dispatch", "standard_features", "main_protection", "text_defaults"},
     )
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
@@ -320,6 +326,14 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         )
         if not devflow_managed:
             raise BootstrapError("bootstrap.main_protection requires devflow_managed=true")
+    # Explicit for new managed requests; absence keeps old requests replay-safe.
+    text_defaults = None
+    if "text_defaults" in bootstrap:
+        text_defaults = _enum(
+            bootstrap["text_defaults"], "bootstrap.text_defaults", {TEXT_DEFAULTS_POLICY}
+        )
+        if not devflow_managed:
+            raise BootstrapError("bootstrap.text_defaults requires devflow_managed=true")
 
     initial = _mapping(raw.get("initial_content", {}), "initial_content")
     _reject_unknown_keys(initial, "initial_content", {"readme", "specification", "license"})
@@ -376,6 +390,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         repo_native_dispatch=repo_native_dispatch,
         generated_artifact_writeback=generated_artifact_writeback,
         main_protection=main_protection,
+        text_defaults=text_defaults,
         standard_features=standard_features,
         standard_features_declared=standard_features_declared,
         readme=readme,
@@ -1072,6 +1087,14 @@ class BootstrapExecutor:
                 STANDARD_ROLLOUT_CALLER_PATH,
                 render_standard_rollout_caller(context.devflow_sha),
             ))
+        if request.text_defaults is not None:
+            template_dir = Path(__file__).resolve().parents[1] / "templates/bootstrap"
+            for target, template_name in TEXT_DEFAULTS_FILES:
+                content = self._call(
+                    context, "SEED", resources,
+                    lambda template_name=template_name: (template_dir / template_name).read_text(encoding="utf-8"),
+                )
+                seed_files.append((target, content))
         for path, content in seed_files:
             existing = self._call(
                 context,
@@ -1101,6 +1124,12 @@ class BootstrapExecutor:
                         }
                         else "yes"
                     ),
+                )
+            elif request.text_defaults is not None and path in dict(TEXT_DEFAULTS_FILES) and existing.get("content") != content:
+                self._raise_failure(
+                    context, "SEED",
+                    f"existing {path} differs from trusted portable-text template; never overwrite",
+                    safe_retry="after-human-decision", resources=resources,
                 )
             elif path == ".github/workflows/kinotch-repo-command.yml" and existing.get("content") != content:
                 existing_content = existing.get("content")
