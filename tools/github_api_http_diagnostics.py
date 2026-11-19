@@ -176,6 +176,8 @@ def _message_kind(response_body: bytes) -> str:
         return "secondary_rate_limited"
     if "rate limit exceeded" in message or "api rate limit" in message:
         return "rate_limited"
+    if "endpoint" in message and "spam" in message:
+        return "endpoint_spammed"
     if (
         "protected branch" in message
         or "branch protection" in message
@@ -324,6 +326,8 @@ def summarize_github_http_error(status: int, headers: Any, response_body: bytes)
         category = "unauthorized"
     elif status == 403:
         category = "forbidden_unclassified"
+    elif status == 422 and message_kind == "endpoint_spammed":
+        category = "endpoint_spammed"
     elif status == 422:
         category = "validation_failed"
     else:
