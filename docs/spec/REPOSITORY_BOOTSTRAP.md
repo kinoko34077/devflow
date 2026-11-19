@@ -292,13 +292,31 @@ unreadable state fails closed. This does not change credentials, permissions,
 or an existing protection policy.
 
 The branch-protection API requires an already-authorized credential with
-administration write access for the target repository. Confirm that the
-existing bootstrap credential covers future Public repositories before live
+`Administration:write` for the target repository. Confirm that the existing
+bootstrap credential covers future Public repositories before live
 provisioning. Missing permission is recorded at `MAIN_PROTECTION` with
 `Safe-Retry: after-human-decision`; Bootstrap never expands credential scopes,
 changes secrets, or widens workflow permissions. A protection failure leaves
 the created repository and seed files available for identity-safe recovery and
 does not proceed to new owner Issues or the Repository Control.
+
+Permission evidence MUST come from the credential's actual type and grant
+configuration, not from successful repository creation or the
+`X-Accepted-GitHub-Permissions` response header. That header describes the
+endpoint's required permissions; it does not prove the caller's token has them.
+Repository creation is not proof of branch-protection authority: since
+2026-10-13, GitHub Apps and fine-grained personal access tokens can create
+repositories with `repository_creation:write` without the broader
+`repository_administration:write` permission. The Actions log's
+`GITHUB_TOKEN Permissions` summary describes the workflow's `GITHUB_TOKEN`, not
+the distinct `REPOSITORY_BOOTSTRAP_TOKEN` secret. Verify the latter through its
+authoritative read-only configuration surface without reading or logging its
+secret value.
+If its grant cannot be independently observed, keep it unverified and do not
+use a branch-protection PUT as a permission probe, because a successful probe
+would change repository settings. See GitHub's [fine-grained permission
+header documentation](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens?apiVersion=2026-03-10)
+and [2026-10-13 least-privilege update](https://github.blog/changelog/2026-10-13-github-app-improvements-for-least-privilege-and-management/).
 
 Private repositories report `NOT_APPLICABLE/PRIVATE_REPOSITORY`, do not call
 branch-protection APIs, and do not require `main.protected=true`. Requests
