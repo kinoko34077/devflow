@@ -1,0 +1,30 @@
+name: Repository Bootstrap の認証情報読取確認
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-bootstrap-token-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'kinoko34077/devflow' && github.ref == 'refs/heads/main' && github.actor_id == '79015263' && github.triggering_actor == github.actor }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.x'
+      - name: 既存credentialを読み取りだけで確認
+        env:
+          REPOSITORY_BOOTSTRAP_TOKEN: ${{ secrets.REPOSITORY_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python tools/bootstrap_token_probe.py

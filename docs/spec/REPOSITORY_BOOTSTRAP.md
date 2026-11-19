@@ -318,6 +318,47 @@ would change repository settings. See GitHub's [fine-grained permission
 header documentation](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens?apiVersion=2026-03-10)
 and [2026-10-13 least-privilege update](https://github.blog/changelog/2026-10-13-github-app-improvements-for-least-privilege-and-management/).
 
+### Read-only credential identity check
+
+GitHub never returns an Actions secret's plaintext value. The repository
+Settings page and the Actions Secrets REST API expose the secret name and
+metadata, not its value. The manual workflow
+`.github/workflows/repository-bootstrap-token-probe.yml` checks the existing
+`REPOSITORY_BOOTSTRAP_TOKEN` without changing it: only a `workflow_dispatch`
+run in `kinoko34077/devflow` on `main`, started by canonical user ID `79015263`
+without a different rerun actor, can proceed; the workflow's `GITHUB_TOKEN` is
+limited to `contents:read`.
+
+The probe sends only fixed-host, fixed-path `GET` requests to `GET /user` and
+`GET /repos/kinoko34077/devflow/branches/main/protection`. It rejects every
+redirect response so the bearer credential cannot be replayed to a redirect
+target. It reports whether
+the authenticated principal matches `kinoko34077` / user ID `79015263`, whether
+the protected-main read succeeded, HTTP status classifications, validated
+request IDs, UTC observation time, and Actions run ID. It MUST NOT emit the
+credential, response bodies, or arbitrary response headers. No write endpoint,
+user-supplied URL, or request input is allowed. A successful protected-main
+GET proves this exact Actions credential can read that Administration-protected
+endpoint; it does not test Administration write.
+
+To assess whether the Actions secret may be a candidate fine-grained PAT,
+inspect the candidate under **GitHub Settings → Developer settings → Personal
+access tokens → Fine-grained tokens** (resource owner, repository selection,
+and Administration permission) before and after the probe. GitHub may display
+Last used as a coarse relative bucket such as “within the last week”; this
+relative display may be too coarse to correlate a run. An unchanged relative
+label provides no correlation. A more-recent bucket after the run, with no
+concurrent use, is only supporting operational evidence. The repository
+secret itself is managed under
+**devflow → Settings → Secrets and variables → Actions**; GitHub does not show
+its value there or in the REST API. A matching principal plus a tightly
+correlated last-used bucket does not prove the saved secret has the same value;
+the probe confirms only the effective principal and Administration read
+access. Do not replace or rotate the secret just to strengthen this correlation;
+credential replacement is a separate Human Gate. GitHub documents the [secret metadata response](https://docs.github.com/en/rest/actions/secrets#get-a-repository-secret),
+[fine-grained PAT settings](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
+and the [Administration:read requirement for branch-protection GET](https://docs.github.com/en/rest/branches/branch-protection#get-protection-of-a-branch).
+
 Private repositories report `NOT_APPLICABLE/PRIVATE_REPOSITORY`, do not call
 branch-protection APIs, and do not require `main.protected=true`. Requests
 without `main_protection` report the legacy policy as not applicable and do not
