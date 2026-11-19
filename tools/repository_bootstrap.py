@@ -55,7 +55,6 @@ REQUIRED_MANAGED_STANDARD_FEATURES = frozenset(
 STANDARD_FEATURE_MANIFEST_PATH = ".devflow/standard-features.json"
 STANDARD_ROLLOUT_CALLER_PATH = ".github/workflows/verified-artifacts-rollout.yml"
 VERIFY_WORKFLOW_PATH = ".github/workflows/verify.yml"
-MAIN_PROTECTION_CHECK_PROPAGATION_DELAY_SECONDS = 15
 MAIN_PROTECTION_CHECK_POLL_INTERVAL_SECONDS = 15
 MAIN_PROTECTION_CHECK_POLL_ATTEMPTS = 9
 LEGACY_REPO_NATIVE_DISPATCH_SHA256 = "8f5fb94577be6d03f14faed8a39ee35bcc65058a93ec2a60df51c0678ec460f0"
@@ -745,21 +744,6 @@ class BootstrapExecutor:
                 resources=resources,
             )
 
-    def _set_main_protection_with_check_retry(
-        self,
-        full_name: str,
-        baseline: dict[str, Any],
-    ) -> Any:
-        try:
-            return self.repository_api.set_branch_protection(full_name, "main", baseline)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) != 422:
-                raise
-            # Retry one transient provider validation after the successful
-            # app-bound check preflight; persistent failures remain fail-closed.
-            time.sleep(MAIN_PROTECTION_CHECK_PROPAGATION_DELAY_SECONDS)
-            return self.repository_api.set_branch_protection(full_name, "main", baseline)
-
     def _wait_for_verify_check(
         self,
         context: BootstrapContext,
@@ -924,7 +908,9 @@ class BootstrapExecutor:
             self._call_main_protection(
                 context,
                 resources,
-                lambda: self._set_main_protection_with_check_retry(full_name, baseline),
+                lambda: self.repository_api.set_branch_protection(
+                    full_name, "main", baseline
+                ),
             )
             protection = self._call_main_protection(
                 context,
