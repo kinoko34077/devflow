@@ -12,9 +12,14 @@ import os
 from pathlib import Path
 from typing import Mapping
 
-from .private_ci_billing_ui import (
-    ObservationUnavailable, _read_json, status_view, validate_cached,
-)
+try:
+    from .private_ci_billing_ui import (
+        ObservationUnavailable, _read_json, status_view, validate_cached,
+    )
+except ImportError:  # direct script execution through devflow_mcp.py
+    from private_ci_billing_ui import (  # type: ignore
+        ObservationUnavailable, _read_json, status_view, validate_cached,
+    )
 
 CACHE_ENV = "DEVFLOW_GITHUB_BILLING_UI_CACHE"
 ACCOUNT = "kinoko34077"
