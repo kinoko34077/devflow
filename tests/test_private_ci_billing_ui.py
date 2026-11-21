@@ -123,9 +123,32 @@ class BillingUiTests(unittest.TestCase):
             with patch.object(observer, "parse_marker_directory", return_value=REQUEST_ID), \
                 patch.object(observer, "_collect") as collect:
                 rc = observer.main(["--account", ACCOUNT, "--cache", str(target),
-                                    "--serve-marker-dir", d, "--status-only"])
+                                    "--serve-marker-dir", d, "--request-ledger", str(Path(d) / "ledger.sqlite3"), "--status-only"])
                 self.assertEqual(rc, 0)
                 collect.assert_not_called()
+
+    def test_delayed_request_replay_survives_cache_overwrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "billing.json"
+            ledger = Path(d) / "ledger.sqlite3"
+            args = ["--account", ACCOUNT, "--cache", str(target),
+                    "--serve-marker-dir", d, "--request-ledger", str(ledger),
+                    "--status-only"]
+            a, b = "a" * 32, "b" * 32
+            with patch.object(observer, "parse_marker_directory", side_effect=[a, b, a]), \
+                patch.object(observer, "_collect", side_effect=lambda account: observer.normalize_ui(fixture(), account, NOW)) as collect:
+                self.assertEqual(observer.main(args), 0)
+                self.assertEqual(observer.main(args), 0)
+                self.assertEqual(observer.main(args), 0)
+                self.assertEqual(collect.call_count, 2)
+                self.assertEqual(json.loads(target.read_text())["request_id"], b)
+
+    def test_ledger_is_account_scoped_and_durable(self):
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Path(d) / "requests.sqlite3"
+            self.assertTrue(observer.reserve_request(ledger, ACCOUNT, REQUEST_ID, NOW))
+            self.assertFalse(observer.reserve_request(ledger, ACCOUNT.upper(), REQUEST_ID, NOW + timedelta(minutes=2)))
+            self.assertTrue(observer.reserve_request(ledger, "other-account", REQUEST_ID, NOW))
 
     def test_cache_write_replaces_snapshot(self):
         with tempfile.TemporaryDirectory() as d:
