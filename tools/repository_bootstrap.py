@@ -690,12 +690,10 @@ class BootstrapExecutor:
             "required_conversation_resolution": True,
             "allow_force_pushes": False,
             "allow_deletions": False,
+            # Required by the full PUT schema even when push restrictions
+            # are not supported for the repository owner. Null disables them.
+            "restrictions": None,
         }
-        # GitHub documents push restrictions as organization-only. Personal
-        # repositories reject the field even when it is null; an organization
-        # can explicitly use null to disable push restrictions.
-        if owner_type == "Organization":
-            baseline["restrictions"] = None
         return baseline
 
     @staticmethod

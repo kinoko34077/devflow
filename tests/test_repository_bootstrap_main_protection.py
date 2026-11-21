@@ -22,6 +22,7 @@ BASELINE = {
     "required_conversation_resolution": True,
     "allow_force_pushes": False,
     "allow_deletions": False,
+    "restrictions": None,
 }
 ORGANIZATION_BASELINE = {
     **BASELINE,
@@ -29,7 +30,6 @@ ORGANIZATION_BASELINE = {
         **BASELINE["required_pull_request_reviews"],
         "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": []},
     },
-    "restrictions": None,
 }
 
 
@@ -41,7 +41,7 @@ def request(visibility="public", *, with_policy=True):
     return rb.normalize_request(payload, "[REPO CREATE] example-repo")
 
 
-def protection_readback(baseline=BASELINE):
+def protection_readback(baseline=BASELINE, *, owner_type="User"):
     """Shape returned by GET /branches/main/protection."""
     result = {
         "required_status_checks": {
@@ -64,7 +64,7 @@ def protection_readback(baseline=BASELINE):
         "allow_force_pushes": {"enabled": baseline["allow_force_pushes"]},
         "allow_deletions": {"enabled": baseline["allow_deletions"]},
     }
-    if "restrictions" in baseline:
+    if owner_type == "Organization" and "restrictions" in baseline:
         result["restrictions"] = copy.deepcopy(baseline["restrictions"])
     return result
 
@@ -115,14 +115,18 @@ class ProtectionApi(FakeApi):
                 raise rb.GitHubApiError("PUT protection failed", status_code=status)
         if self.fail_put_status is not None:
             raise rb.GitHubApiError("PUT protection failed", status_code=self.fail_put_status)
-        if self.owner_type == "User" and "restrictions" in protection:
+        # The real endpoint rejected an omitted restrictions field (#1055).
+        # The documented null request is modeled here; live acceptance is separate.
+        if "restrictions" not in protection:
+            raise rb.GitHubApiError("restrictions wasn't supplied", status_code=422)
+        if self.owner_type == "User" and protection["restrictions"] is not None:
             raise rb.GitHubApiError(
-                "personal repositories do not accept push restrictions",
+                "personal repositories do not accept push restriction actors",
                 status_code=422,
             )
-        self.protections[(full_name, branch)] = protection_readback(protection)
-        if self.owner_type == "User":
-            self.protections[(full_name, branch)].pop("restrictions", None)
+        self.protections[(full_name, branch)] = protection_readback(
+            protection, owner_type=self.owner_type
+        )
         return self.protections[(full_name, branch)]
 
     def get_check_runs(self, full_name, ref):
@@ -340,14 +344,34 @@ class RepositoryBootstrapMainProtectionTests(unittest.TestCase):
         self.assertEqual([("GET", FULL_NAME, "main")], repository.protection_calls)
         self.assertEqual([], repository.protection_payloads)
 
-    def test_user_owned_public_repo_omits_unavailable_push_restrictions(self):
+    def test_user_owned_public_repo_sends_required_null_without_bypass(self):
         repository, devflow = ProtectionApi(), FakeApi()
 
         rb.BootstrapExecutor(repository, devflow).execute(request(), context())
 
         self.assertEqual("User", repository.get_repository(FULL_NAME)["owner"]["type"])
-        self.assertNotIn("restrictions", repository.protection_payloads[0])
+        payload = repository.protection_payloads[0]
+        self.assertIsNone(payload["restrictions"])
+        self.assertNotIn("bypass_pull_request_allowances", payload["required_pull_request_reviews"])
         self.assertNotIn("restrictions", repository.protections[(FULL_NAME, "main")])
+
+    def test_personal_readback_accepts_explicit_null_push_restrictions(self):
+        observed = protection_readback()
+        observed["restrictions"] = None
+        self.assertTrue(
+            rb.BootstrapExecutor._main_protection_matches(observed, "User")
+        )
+
+    def test_fake_api_rejects_missing_required_restrictions(self):
+        repository = ProtectionApi()
+        payload = copy.deepcopy(BASELINE)
+        del payload["restrictions"]
+
+        with self.assertRaises(rb.GitHubApiError) as caught:
+            repository.set_branch_protection(FULL_NAME, "main", payload)
+
+        self.assertEqual(422, caught.exception.status_code)
+        self.assertFalse(repository.protections)
 
     def test_organization_owned_public_repo_explicitly_disables_push_restrictions(self):
         repository, devflow = ProtectionApi(), FakeApi()
