@@ -12,10 +12,12 @@ try:
     from .agent_inbox import MAX_INBOX_TASKS
     from .devflow_mcp_core import DEFAULT_OWNER, default_service
     from .kaep_mailbox_codec import RECIPIENT_ORDER
+    from .private_ci_billing_mcp_read import get_configured_billing_observation
 except ImportError:  # direct script execution
     from agent_inbox import MAX_INBOX_TASKS
     from devflow_mcp_core import DEFAULT_OWNER, default_service
     from kaep_mailbox_codec import RECIPIENT_ORDER
+    from private_ci_billing_mcp_read import get_configured_billing_observation
 
 SERVER_NAME = "KiNoTch Devflow"
 SERVER_VERSION = "1.0.0"
@@ -129,6 +131,14 @@ IncludeRecentKaep = Annotated[
             "This does not establish complete historical coverage."
         )
     ),
+]
+BillingIncludeAmounts = Annotated[
+    bool,
+    Field(description=(
+        "Default false: show only observation status, source and freshness. "
+        "True explicitly includes private account billing amounts from the already-configured "
+        "local cache. Never copy these amounts to public Issue/PR/CI logs."
+    )),
 ]
 IncludePublishedSupply = Annotated[
     bool,
@@ -393,6 +403,23 @@ def get_sync_health() -> dict[str, Any]:
     correctness, repository task completeness, or Issue acceptance.
     """
     return _service().get_sync_health()
+
+
+@mcp.tool()
+def get_github_actions_billing_observation(
+    include_amounts: BillingIncludeAmounts = False,
+) -> dict[str, Any]:
+    """Read the owner's current-month GitHub Actions billing UI observation, never refresh it.
+
+    The pinned, private local path must be configured by the MCP host using
+    DEVFLOW_GITHUB_BILLING_UI_CACHE. No path, account, URL or command is accepted
+    from a remote caller. No file/network/credential access outside that one
+    local cache. Missing or stale observations return UNKNOWN, not a guess.
+    Default summary omits amounts; include_amounts=true explicitly returns
+    the private observed USD figures only to this MCP client. This is
+    advisory, not quota remaining proof or authorization to run Private CI.
+    """
+    return get_configured_billing_observation(include_amounts=include_amounts)
 
 
 if __name__ == "__main__":
