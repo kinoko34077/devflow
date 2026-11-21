@@ -29,6 +29,8 @@ _ACCOUNT = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _MONEY = r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]{1,2})?"
 _NUMBER = r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?"
 _REQ_ID = re.compile(r"^[a-f0-9]{32}$")
+_MARKER = re.compile(r"^billing-request-([0-9]{8}T[0-9]{6}Z)-([a-f0-9]{32})\.request$")
+_IDLE_MARKER = "billing-request-idle.request"
 _MONTHS = (
     "", "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December",
@@ -214,6 +216,37 @@ def parse_request(raw: object, account: str, now_utc: datetime) -> str:
     return request_id
 
 
+def parse_marker_directory(directory: Path, account: str, now_utc: datetime) -> str | None:
+    """A sync-directory filename can request just the fixed observation.
+
+    The content is never opened, and the filename cannot choose commands,
+    URLs, credentials, output paths or accounts. A stale/duplicate marker
+    must not trigger a new observation.
+    """
+    try:
+        markers = [p.name for p in directory.iterdir()
+                   if p.name.startswith("billing-request-")
+                   and p.name.endswith(".request")]
+    except OSError as exc:
+        raise ObservationUnavailable("BILLING_REQUEST_DIRECTORY_UNAVAILABLE") from exc
+    if not markers or markers == [_IDLE_MARKER]:
+        return None
+    if len(markers) != 1:
+        raise ObservationUnavailable("BILLING_REQUEST_MARKER_AMBIGUOUS")
+    match = _MARKER.fullmatch(markers[0])
+    if not match:
+        raise ObservationUnavailable("BILLING_REQUEST_MARKER_INVALID")
+    try:
+        stamp = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ObservationUnavailable("BILLING_REQUEST_TIMESTAMP_INVALID") from exc
+    return parse_request({
+        "schema": REQUEST_SCHEMA, "account": account,
+        "action": "OBSERVE_BILLING", "request_id": match.group(2),
+        "requested_at_utc": stamp.isoformat(),
+    }, account, now_utc)
+
+
 def _atomic_write(path: Path, data: dict) -> None:
     # Explicit output path chosen by local operator, never by remote request.
     # No raw page/UI text, token, or arbitrary request body in the cache.
@@ -247,12 +280,15 @@ def _collect(account: str) -> dict:
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-File",
              str(adapter), "-Account", account],
             capture_output=True, encoding="utf-8", errors="strict",
-            timeout=75, check=False,
+            timeout=75, check=False, creationflags=subprocess.CREATE_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         raise ObservationUnavailable("BILLING_UI_ADAPTER_UNAVAILABLE") from exc
     if response.returncode != 0 or len(response.stdout) > MAX_JSON:
-        raise ObservationUnavailable("BILLING_UI_OBSERVATION_FAILED")
+        reason = response.stderr.strip()
+        if not re.fullmatch(r"[A-Z_]{8,80}", reason):
+            reason = "BILLING_UI_OBSERVATION_FAILED"
+        raise ObservationUnavailable(reason)
     try:
         raw = json.loads(response.stdout)
     except json.JSONDecodeError as exc:
@@ -267,7 +303,7 @@ def status_view(data: dict) -> dict:
     """Safe reduced output for CI logs; cache destination still must be private."""
     return {key: data[key] for key in (
         "schema", "source", "observed_at_utc", "billing_month", "status",
-        "verified_for_dispatch", "request_id"
+        "verified_for_dispatch", "request_id", "reason"
     ) if key in data}
 
 
@@ -278,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--read-cache", action="store_true")
     mode.add_argument("--serve-request", type=Path, metavar="REQUEST_JSON")
+    mode.add_argument("--serve-marker-dir", type=Path, metavar="REQUEST_DIRECTORY")
     p.add_argument("--status-only", action="store_true")
     args = p.parse_args(argv)
     request_id = None
@@ -290,15 +327,19 @@ def main(argv: list[str] | None = None) -> int:
                 raise ObservationUnavailable("CACHE_PATH_REQUIRED")
             data = validate_cached(_read_json(args.cache), args.account, now)
         else:
-            if args.serve_request is not None:
+            if args.serve_request is not None or args.serve_marker_dir is not None:
                 if args.cache is None:
                     raise ObservationUnavailable("CACHE_PATH_REQUIRED")
-                if args.serve_request.resolve() == args.cache.resolve():
-                    raise ObservationUnavailable("REQUEST_AND_CACHE_MUST_DIFFER")
-                if not args.serve_request.is_file():
+                if args.serve_marker_dir is not None:
+                    request_id = parse_marker_directory(args.serve_marker_dir, args.account, now)
+                else:
+                    if args.serve_request.resolve() == args.cache.resolve():
+                        raise ObservationUnavailable("REQUEST_AND_CACHE_MUST_DIFFER")
+                    if args.serve_request.is_file():
+                        request_id = parse_request(_read_json(args.serve_request), args.account, now)
+                if request_id is None:
                     print(json.dumps({"status": "NO_REQUEST", "verified_for_dispatch": False}))
                     return 0
-                request_id = parse_request(_read_json(args.serve_request), args.account, now)
                 # Completed (including UNKNOWN) response is idempotent for the
                 # same request. Retry by explicitly issuing a new request ID.
                 try:
