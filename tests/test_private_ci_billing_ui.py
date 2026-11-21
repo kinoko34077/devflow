@@ -97,6 +97,37 @@ class BillingUiTests(unittest.TestCase):
         with self.assertRaises(observer.ObservationUnavailable):
             observer.parse_request(raw, ACCOUNT, NOW+timedelta(minutes=31))
 
+    def test_marker_directory_is_fixed_and_rejects_ambiguity(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.assertIsNone(observer.parse_marker_directory(root, ACCOUNT, NOW))
+            marker = root / "billing-request-idle.request"
+            marker.touch()
+            self.assertIsNone(observer.parse_marker_directory(root, ACCOUNT, NOW))
+            target = root / ("billing-request-20260712T100000Z-" + REQUEST_ID + ".request")
+            marker.rename(target)
+            # Requests are determined only by the exact filename, never contents.
+            target.write_text("arbitrary text is not executed or opened")
+            self.assertEqual(observer.parse_marker_directory(root, ACCOUNT, NOW), REQUEST_ID)
+            with self.assertRaises(observer.ObservationUnavailable):
+                observer.parse_marker_directory(root, ACCOUNT, NOW + timedelta(minutes=31))
+            marker.touch()
+            with self.assertRaises(observer.ObservationUnavailable):
+                observer.parse_marker_directory(root, ACCOUNT, NOW)
+
+    def test_marker_request_same_id_is_not_replayed(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "billing.json"
+            observed = observer.normalize_ui(fixture(), ACCOUNT, NOW)
+            observed["request_id"] = REQUEST_ID
+            observer._atomic_write(target, observed)
+            with patch.object(observer, "parse_marker_directory", return_value=REQUEST_ID), \
+                patch.object(observer, "_collect") as collect:
+                rc = observer.main(["--account", ACCOUNT, "--cache", str(target),
+                                    "--serve-marker-dir", d, "--status-only"])
+                self.assertEqual(rc, 0)
+                collect.assert_not_called()
+
     def test_cache_write_replaces_snapshot(self):
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "billing.json"
