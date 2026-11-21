@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ SOURCE = "github_personal_billing_settings_ui"
 MAX_JSON = 32768
 MAX_AGE = timedelta(hours=12)
 REQUEST_AGE = timedelta(minutes=30)
+REPLAY_RETENTION = timedelta(days=7)
 _ACCOUNT = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _MONEY = r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]{1,2})?"
 _NUMBER = r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?"
@@ -251,6 +253,49 @@ def parse_marker_directory(directory: Path, account: str, now_utc: datetime) -> 
     }, account, now_utc)
 
 
+def reserve_request(path: Path, account: str, request_id: str, now_utc: datetime) -> bool:
+    """Durable local at-most-once reservation, independent of output/cache.
+
+    Reserve before capture. A crash or failed observation is not retried
+    implicitly; the requester can issue a new nonce. This is not Claim.
+    """
+    account, now_utc = _account(account), _utc(now_utc)
+    if not _REQ_ID.fullmatch(request_id) or not path.parent.is_dir():
+        raise ObservationUnavailable("BILLING_REQUEST_LEDGER_INVALID")
+    conn = None
+    try:
+        conn = sqlite3.connect(path, timeout=5, isolation_level=None)
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS observed_requests (
+                account TEXT NOT NULL, request_id TEXT NOT NULL,
+                reserved_at_utc TEXT NOT NULL, PRIMARY KEY(account, request_id)
+            )
+        """)
+        conn.execute("DELETE FROM observed_requests WHERE reserved_at_utc < ?",
+                     ((now_utc - REPLAY_RETENTION).isoformat(),))
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO observed_requests VALUES (?, ?, ?)",
+            (account.casefold(), request_id, now_utc.isoformat()),
+        ).rowcount
+        conn.execute("COMMIT")
+        return inserted == 1
+    except (sqlite3.Error, OSError) as exc:
+        raise ObservationUnavailable("BILLING_REQUEST_LEDGER_UNAVAILABLE") from exc
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _request_ledger_path(path: Path | None) -> Path:
+    if path is not None:
+        return path
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if not local_appdata:
+        raise ObservationUnavailable("LOCAL_REQUEST_LEDGER_REQUIRED")
+    return Path(local_appdata) / "KiNoTch" / "devflow-billing-observer" / "billing-request-ledger.sqlite3"
+
+
 def _atomic_write(path: Path, data: dict) -> None:
     # Explicit output path chosen by local operator, never by remote request.
     # No raw page/UI text, token, or arbitrary request body in the cache.
@@ -320,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--serve-request", type=Path, metavar="REQUEST_JSON")
     mode.add_argument("--serve-marker-dir", type=Path, metavar="REQUEST_DIRECTORY")
     p.add_argument("--status-only", action="store_true")
+    p.add_argument("--request-ledger", type=Path, help="Local non-synced SQLite request reservation ledger")
     args = p.parse_args(argv)
     request_id = None
     collecting = False
@@ -344,14 +390,22 @@ def main(argv: list[str] | None = None) -> int:
                 if request_id is None:
                     print(json.dumps({"status": "NO_REQUEST", "verified_for_dispatch": False}))
                     return 0
-                # Completed (including UNKNOWN) response is idempotent for the
-                # same request. Retry by explicitly issuing a new request ID.
+                # Independent local ledger prevents A -> B -> delayed A,
+                # even when direct reads replace the latest cache.
+                ledger = _request_ledger_path(args.request_ledger)
+                if ledger.resolve() == args.cache.resolve():
+                    raise ObservationUnavailable("REQUEST_LEDGER_AND_CACHE_MUST_DIFFER")
+                reserved = reserve_request(ledger, args.account, request_id, now)
                 try:
                     previous = _read_json(args.cache)
                 except ObservationUnavailable:
                     previous = None
-                if isinstance(previous, dict) and previous.get("request_id") == request_id:
-                    print(json.dumps({"status": "REQUEST_ALREADY_ANSWERED",
+                migrated = (isinstance(previous, dict)
+                            and previous.get("schema") == SCHEMA
+                            and previous.get("account") == args.account
+                            and previous.get("request_id") == request_id)
+                if not reserved or migrated:
+                    print(json.dumps({"status": "REQUEST_ALREADY_HANDLED",
                                       "request_id": request_id,
                                       "verified_for_dispatch": False}))
                     return 0
