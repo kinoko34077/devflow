@@ -127,6 +127,24 @@ class BillingUiTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 collect.assert_not_called()
 
+    def test_default_ledger_directory_created_on_fresh_host(self):
+        with tempfile.TemporaryDirectory() as root:
+            local_appdata = Path(root) / "fresh-localappdata"
+            local_appdata.mkdir()
+            with patch.dict(observer.os.environ, {"LOCALAPPDATA": str(local_appdata)}):
+                ledger = observer._request_ledger_path(None)
+            self.assertTrue(ledger.parent.is_dir())
+            self.assertEqual(ledger.parent.name, "devflow-billing-observer")
+            self.assertTrue(observer.reserve_request(ledger, ACCOUNT, REQUEST_ID, NOW))
+            self.assertFalse(observer.reserve_request(ledger, ACCOUNT, REQUEST_ID, NOW))
+
+    def test_custom_ledger_location_not_created_implicitly(self):
+        with tempfile.TemporaryDirectory() as root:
+            custom = Path(root) / "not-allowed-parent" / "ledger.sqlite3"
+            self.assertEqual(observer._request_ledger_path(custom), custom)
+            with self.assertRaises(observer.ObservationUnavailable):
+                observer.reserve_request(custom, ACCOUNT, REQUEST_ID, NOW)
+
     def test_delayed_request_replay_survives_cache_overwrite(self):
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "billing.json"
