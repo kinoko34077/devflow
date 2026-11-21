@@ -22,7 +22,7 @@ hand-maintained help registry: tool descriptions come from function docstrings
 in `tools/devflow_mcp.py`, and input constraints/descriptions from the shared
 Python `Annotated` / Pydantic `Field` metadata.
 
-The accepted public surface documents all 15 tools. In particular, the Inbox
+The accepted baseline surface documents 15 tools; the additional read-only `get_github_actions_billing_observation` is a separately scoped local-cache observation under [Private CI Billing UI Observation](PRIVATE_CI_BILLING_UI_OBSERVATION.md) (owner #752). In particular, the Inbox
 and Workspace `limit` is **1–20 verified TASK Issue mailboxes per call**, not
 20 messages; `offset` is nonnegative and continuation uses `next_offset`
 when `truncated=true`. The recipient choices, positive Issue numbers,
@@ -79,6 +79,7 @@ The server exposes only read operations:
 - `assess_issue_plan(repository, issue_number, plan)`
 - `assess_outcome_observation(repository, issue_number, evidence)`
 - `get_sync_health()`
+- `get_github_actions_billing_observation(include_amounts=False)` (local private-cache read, no browser collection or GitHub mutation)
 
 ### Workspace recipient TASK-cohort status and entries
 
