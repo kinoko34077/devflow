@@ -36,7 +36,9 @@ function Test-BillingAddress($window, [string[]]$paths) {
         }
         if ($insideDocument -or $depth -ge 32) { continue }
         # Chrome's address control in the English and Japanese UI.
-        if ($edit.Current.Name -notin @('Address and search bar', 'Address bar', 'アドレスバー', 'アドレスと検索バー')) { continue }
+        $jaAddress = (-join @([char]0x30a2, [char]0x30c9, [char]0x30ec, [char]0x30b9, [char]0x30d0, [char]0x30fc))
+        $jaSearch = (-join @([char]0x30a2, [char]0x30c9, [char]0x30ec, [char]0x30b9, [char]0x3068, [char]0x691c, [char]0x7d22, [char]0x30d0, [char]0x30fc))
+        if ($edit.Current.Name -notin @('Address and search bar', 'Address bar', $jaAddress, $jaSearch)) { continue }
         $vp = $null
         if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { continue }
         $value = [string]$vp.Current.Value
