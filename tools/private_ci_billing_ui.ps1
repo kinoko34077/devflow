@@ -60,14 +60,14 @@ function Get-PageNames($document) {
     }
 }
 
-function Find-BillingPage([string]$title, [string[]]$paths, [string]$requiredName) {
+function Find-BillingPage([string]$title, [string[]]$paths, [string]$requiredName, [long]$expectedHandle=0) {
     $docCondition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Document
     )
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
-        foreach ($p in @(Get-Process chrome -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -eq ($title + ' - Google Chrome')})) {
+        foreach ($p in @(Get-Process chrome -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -eq ($title + ' - Google Chrome') -and ($expectedHandle -eq 0 -or [long]$_.MainWindowHandle -eq $expectedHandle)})) {
             try {
                 $window = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
                 if (-not (Test-BillingAddress $window $paths)) { continue }
@@ -92,6 +92,58 @@ function Find-BillingPage([string]$title, [string[]]$paths, [string]$requiredNam
         Start-Sleep -Milliseconds 550
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'BILLING_PAGE_OR_ACCOUNT_NOT_VERIFIED'
+}
+
+# A matching tab might be a stale previously opened Billing page. Refresh
+# that exact Chrome window, then require a new active document runtime ID.
+# No global keystrokes, alternate accounts, or navigation outside fixed URLs.
+function Refresh-BillingPage($page, [string]$title, [string[]]$paths, [string]$requiredName) {
+    $window = $page.Window
+    $originalRuntimeId = [string]::Join(',', $page.Document.GetRuntimeId())
+    $jpReload = (-join @([char]0x518D, [char]0x8AAD, [char]0x307F, [char]0x8FBC, [char]0x307F))
+    $labels = @('Reload this page', 'Reload', 'Reload page', $jpReload)
+    $buttonCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button
+    )
+    $buttons = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCond) | Where-Object {$_.Current.Name -cin $labels})
+    if ($buttons.Count -ne 1 -or -not (Test-BillingAddress $window $paths)) { throw 'BILLING_RELOAD_CONTROL_NOT_VERIFIED' }
+    $invoke = $null
+    if (-not $buttons[0].TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) { throw 'BILLING_RELOAD_UNAVAILABLE' }
+    $handle = [long]$window.Current.NativeWindowHandle
+    $invoke.Invoke()
+    $docCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Document
+    )
+    $deadline = [DateTime]::UtcNow.AddSeconds(25)
+    do {
+        try {
+            if ($window.Current.Name -cne ($title + ' - Google Chrome') -or
+                (-not (Test-BillingAddress $window $paths)) -or
+                [long]$window.Current.NativeWindowHandle -ne $handle) {
+                Start-Sleep -Milliseconds 400
+                continue
+            }
+            $docs = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $docCond) | Where-Object {
+                $_.Current.Name -ceq $title -and -not $_.Current.IsOffscreen -and
+                [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($_).Current.ControlType -eq [System.Windows.Automation.ControlType]::Pane
+            })
+            if ($docs.Count -eq 1 -and [string]::Join(',', $docs[0].GetRuntimeId()) -cne $originalRuntimeId) {
+                $names = @(Get-PageNames $docs[0])
+                if ($names -contains ('@' + $Account) -and
+                    $names -contains 'Your personal account' -and
+                    $names -contains $requiredName -and
+                    (Test-BillingAddress $window $paths)) {
+                    return [pscustomobject]@{Window=$window; Document=$docs[0]; Names=$names}
+                }
+            }
+        } catch {
+            # Reload in flight or Chrome accessibility tree being replaced.
+        }
+        Start-Sleep -Milliseconds 400
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'BILLING_FRESH_RELOAD_NOT_VERIFIED'
 }
 
 function Find-UniqueMatch([string[]]$names, [string]$pattern) {
@@ -121,6 +173,7 @@ try {
     Start-Process 'https://github.com/settings/billing'
     Start-Sleep -Milliseconds 1600
     $overview = Find-BillingPage 'Billing Overview' $overviewPaths 'Current metered usage'
+    $overview = Refresh-BillingPage $overview 'Billing Overview' $overviewPaths 'Current metered usage'
     $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Button
@@ -130,7 +183,7 @@ try {
     $invoke = $null
     if (-not $buttons[0].TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) { throw 'ACTIONS_SELECTOR_UNAVAILABLE' }
     $invoke.Invoke()
-    $overview = Find-BillingPage 'Billing Overview' $overviewPaths 'Included compute usage'
+    $overview = Find-BillingPage 'Billing Overview' $overviewPaths 'Included compute usage' ([long]$overview.Window.Current.NativeWindowHandle)
     $names = [string[]]$overview.Names
     $period = Find-UniqueMatch $names '^Gross metered usage for [A-Za-z]+ 1 - [A-Za-z]+ [0-9]{1,2}, [0-9]{4}\.$'
     $discountPeriod = Find-UniqueMatch $names '^Included usage discounts for [A-Za-z]+ 1 - [A-Za-z]+ [0-9]{1,2}, [0-9]{4}\.$'
@@ -146,6 +199,7 @@ try {
     Start-Process 'https://github.com/settings/billing/budgets'
     Start-Sleep -Milliseconds 1600
     $budgets = Find-BillingPage 'Budgets' @('/settings/billing/budgets') 'Budget table'
+    $budgets = Refresh-BillingPage $budgets 'Budgets' @('/settings/billing/budgets') 'Budget table'
     $names = [string[]]$budgets.Names
     # Exact account-scoped Actions row, never a neighboring SKU/repo row.
     $rowPattern = '^Account ' + [regex]::Escape($Account) + ' \p{P} Actions$'
