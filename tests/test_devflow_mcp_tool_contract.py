@@ -93,7 +93,19 @@ class DevflowMCPToolContractTests(unittest.TestCase):
 
         current = _tool_map(listed.tools)
         baseline = {tool["name"]: tool for tool in self.baseline["tools"]}
-        self.assertEqual(list(current), list(baseline))
+        # Previously accepted 15-tool schema/order stays unchanged. The new
+        # personal billing observation is strictly additive, not a replacement.
+        self.assertEqual(list(current)[:len(baseline)], list(baseline))
+        self.assertEqual(
+            list(current)[len(baseline):],
+            ["get_github_actions_billing_observation"],
+        )
+        private_read = current["get_github_actions_billing_observation"]
+        self.assertIn("UNKNOWN", private_read["description"])
+        self.assertEqual(
+            private_read["inputSchema"]["properties"]["include_amounts"]["default"],
+            False,
+        )
         for name, old in baseline.items():
             with self.subTest(tool=name):
                 new = current[name]
@@ -143,6 +155,21 @@ class DevflowMCPToolContractTests(unittest.TestCase):
         self.assertIn("numeric strings and floats are rejected", inbox_limit_description)
         self.assertIn("Strict JSON integer", inbox_offset_description)
         self.assertIn("numeric strings and floats are rejected", inbox_offset_description)
+
+    def test_stdio_billing_tool_status_and_strict_details_flag(self):
+        _, _, replies = stdio_exchange([
+            ("get_github_actions_billing_observation", {}),
+            ("get_github_actions_billing_observation", {"include_amounts": True}),
+            ("get_github_actions_billing_observation", {"include_amounts": "yes"}),
+        ])
+        self.assertEqual(replies[0].structured_content["status"], "UNKNOWN")
+        self.assertIs(replies[0].structured_content["verified_for_dispatch"], False)
+        self.assertIs(replies[0].structured_content["include_amounts_requested"], False)
+        self.assertIs(replies[1].structured_content["include_amounts_requested"], True)
+        self.assertTrue(replies[2].is_error)
+        error_text = " ".join(x.text for x in replies[2].content)
+        self.assertNotIn("yes", error_text)
+        self.assertIn("include_amounts", error_text)
 
     def test_stdio_rejects_invalid_scalars_before_service_calls(self):
         invalid_calls = [
