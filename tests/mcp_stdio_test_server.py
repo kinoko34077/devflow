@@ -95,6 +95,16 @@ class RecordingService:
 
 SERVICE = RecordingService()
 devflow_mcp.default_service = lambda: SERVICE
+# The contract subprocess must never read an operator's actual personal cache.
+devflow_mcp.get_configured_billing_observation = (
+    lambda include_amounts=False: {
+        "schema": "devflow.github-billing-ui-observation.v1",
+        "status": "UNKNOWN",
+        "reason": "TEST_CONTRACT_FAKE_NO_LOCAL_BILLING_ACCESS",
+        "verified_for_dispatch": False,
+        "include_amounts_requested": include_amounts,
+    }
+)
 
 
 if __name__ == "__main__":
