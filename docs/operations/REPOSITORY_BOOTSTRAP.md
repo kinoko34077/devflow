@@ -329,6 +329,12 @@ are no bypass actors, so an absent object matches no bypass actors. If present,
 all three lists must be explicitly empty; non-empty or malformed values fail
 closed.
 
+For both owner types the full PUT sends `restrictions: null` (the required
+field disables push restrictions; #1055 run #44883397964 rejected omission).
+For personal repositories, accept absent or null restrictions in the GET
+readback; for organizations, require explicit null. Non-null restrictions
+fail closed. Do not add push restriction actors or change permissions.
+
 Private repositories explicitly report
 `NOT_APPLICABLE/PRIVATE_REPOSITORY`; no branch-protection API call is made and
 protected main is not a completion condition. A historical v1 request with no
