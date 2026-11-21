@@ -240,6 +240,10 @@ def parse_marker_directory(directory: Path, account: str, now_utc: datetime) -> 
         stamp = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
     except ValueError as exc:
         raise ObservationUnavailable("BILLING_REQUEST_TIMESTAMP_INVALID") from exc
+    # An expired mailbox marker is no pending work, not a reason to
+    # reopen the browser or repeatedly fail a periodic mailbox poll.
+    if _utc(now_utc) - stamp > REQUEST_AGE:
+        return None
     return parse_request({
         "schema": REQUEST_SCHEMA, "account": account,
         "action": "OBSERVE_BILLING", "request_id": match.group(2),
