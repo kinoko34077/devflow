@@ -99,7 +99,7 @@ function Find-BillingPage([string]$title, [string[]]$paths, [string]$requiredNam
 # No global keystrokes, alternate accounts, or navigation outside fixed URLs.
 function Refresh-BillingPage($page, [string]$title, [string[]]$paths, [string]$requiredName) {
     $window = $page.Window
-    $originalRuntimeId = [string]::Join(',', $page.Document.GetRuntimeId())
+    $originalRuntimeId = ($page.Document.GetRuntimeId() -join ',')
     $jpReload = (-join @([char]0x518D, [char]0x8AAD, [char]0x307F, [char]0x8FBC, [char]0x307F))
     $labels = @('Reload this page', 'Reload', 'Reload page', $jpReload)
     $buttonCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -129,7 +129,7 @@ function Refresh-BillingPage($page, [string]$title, [string[]]$paths, [string]$r
                 $_.Current.Name -ceq $title -and -not $_.Current.IsOffscreen -and
                 [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($_).Current.ControlType -eq [System.Windows.Automation.ControlType]::Pane
             })
-            if ($docs.Count -eq 1 -and [string]::Join(',', $docs[0].GetRuntimeId()) -cne $originalRuntimeId) {
+            if ($docs.Count -eq 1 -and ($docs[0].GetRuntimeId() -join ',') -cne $originalRuntimeId) {
                 $names = @(Get-PageNames $docs[0])
                 if ($names -contains ('@' + $Account) -and
                     $names -contains 'Your personal account' -and
