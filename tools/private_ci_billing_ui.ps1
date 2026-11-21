@@ -172,13 +172,7 @@ try {
 } catch {
     # No raw exception (which may contain machine paths/page text).
     $message = [string]$_.Exception.Message
-    if ($message -cmatch '^[A-Z_]{8,80}
-    exit 2
-} finally {
-    if ($held) { $mutex.ReleaseMutex() }
-    $mutex.Dispose()
-}
-) {
+    if ($message -cmatch '^[A-Z_]{8,80}$') {
         [Console]::Error.WriteLine($message)
     } else {
         [Console]::Error.WriteLine('BILLING_UI_OBSERVATION_FAILED')
