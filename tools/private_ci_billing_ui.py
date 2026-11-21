@@ -154,6 +154,15 @@ def _read_json(path: Path) -> object:
         raise ObservationUnavailable("OBSERVATION_FILE_UNAVAILABLE") from exc
 
 
+def load_cached_observation(path: Path, account: str, now_utc: datetime) -> dict:
+    """Shared read-only verified cache boundary for CLI and local MCP.
+
+    In particular, a raw JSON file's claimed status or fresh timestamp
+    cannot authorize any execution path.
+    """
+    return validate_cached(_read_json(path), account, now_utc)
+
+
 def _parse_timestamp(value: object) -> datetime:
     if not isinstance(value, str) or len(value) > 40:
         raise ObservationUnavailable("OBSERVATION_TIMESTAMP_INVALID")
@@ -384,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.read_cache:
             if args.cache is None:
                 raise ObservationUnavailable("CACHE_PATH_REQUIRED")
-            data = validate_cached(_read_json(args.cache), args.account, now)
+            data = load_cached_observation(args.cache, args.account, now)
         else:
             if args.serve_request is not None or args.serve_marker_dir is not None:
                 if args.cache is None:
