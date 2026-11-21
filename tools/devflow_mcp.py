@@ -134,7 +134,7 @@ IncludeRecentKaep = Annotated[
 ]
 BillingIncludeAmounts = Annotated[
     bool,
-    Field(description=(
+    Field(strict=True, description=(
         "Default false: show only observation status, source and freshness. "
         "True explicitly includes private account billing amounts from the already-configured "
         "local cache. Never copy these amounts to public Issue/PR/CI logs."
