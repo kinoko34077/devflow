@@ -71,7 +71,14 @@ function Find-BillingPage([string]$title, [string[]]$paths, [string]$requiredNam
             try {
                 $window = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
                 if (-not (Test-BillingAddress $window $paths)) { continue }
-                $docs = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $docCondition) | Where-Object {$_.Current.Name -ceq $title})
+                # Chrome may expose cached/background tabs as direct Window
+                # children. Only the live content Pane in the selected window
+                # is eligible; same-title background documents are excluded.
+                $docs = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $docCondition) | Where-Object {
+                    $_.Current.Name -ceq $title -and
+                    (-not $_.Current.IsOffscreen) -and
+                    [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($_).Current.ControlType -eq [System.Windows.Automation.ControlType]::Pane
+                })
                 if ($docs.Count -ne 1) { continue }
                 $names = @(Get-PageNames $docs[0])
                 if ($names -notcontains ('@' + $Account) -or $names -notcontains 'Your personal account' -or $names -notcontains $requiredName) { continue }
