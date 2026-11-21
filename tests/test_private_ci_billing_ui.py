@@ -40,7 +40,16 @@ class BillingUiTests(unittest.TestCase):
 
     def test_zero_extra_budget_does_not_imply_free_compute_exhaustion(self):
         result = observer.normalize_ui(fixture(compute="$3.25 used / $12.00 included"), ACCOUNT, NOW)
+        self.assertEqual(result["status"], "WITHIN_INCLUDED_COMPUTE_AND_BUDGET_BLOCKED")
+
+    def test_when_compute_within_limit_without_budget_block(self):
+        result = observer.normalize_ui(fixture(
+            compute="$3.25 used / $12.00 included",
+            budget_state="10% of budget limit used 10%",
+        ), ACCOUNT, NOW)
         self.assertEqual(result["status"], "WITHIN_INCLUDED_COMPUTE")
+        summary = observer.status_view(result)
+        self.assertIsNone(summary["actions_budget_usage_blocked"])
 
     def test_absence_of_budget_block_label_is_not_permission(self):
         result = observer.normalize_ui(fixture(budget_state="10% of budget limit used 10%"),
