@@ -94,7 +94,10 @@ def _state(data: dict) -> str:
         if data["actions_budget_usage_blocked"] is True:
             return "INCLUDED_COMPUTE_AT_OR_ABOVE_LIMIT_AND_BUDGET_BLOCKED"
         return "INCLUDED_COMPUTE_AT_OR_ABOVE_LIMIT"
-    # A $0 additional budget may be blocked even when free Compute remains.
+    # A $0 additional budget can be blocked even while included Compute
+    # remains. Keep both independent observations visible to MCP consumers.
+    if data["actions_budget_usage_blocked"] is True:
+        return "WITHIN_INCLUDED_COMPUTE_AND_BUDGET_BLOCKED"
     return "WITHIN_INCLUDED_COMPUTE"
 
 
@@ -357,7 +360,8 @@ def status_view(data: dict) -> dict:
     """Safe reduced output for CI logs; cache destination still must be private."""
     return {key: data[key] for key in (
         "schema", "source", "observed_at_utc", "billing_month", "status",
-        "verified_for_dispatch", "request_id", "reason"
+        "verified_for_dispatch", "actions_budget_usage_blocked",
+        "request_id", "reason"
     ) if key in data}
 
 
