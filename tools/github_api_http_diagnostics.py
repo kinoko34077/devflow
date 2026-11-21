@@ -229,16 +229,42 @@ def _validation_details(response_body: bytes) -> list[str]:
             messages.append(error[:MAX_ERROR_BODY_BYTES].casefold())
 
     details: list[str] = []
-    if any(
-        re.search(r"(?<![a-z0-9_])more than one subschema in oneof matched(?![a-z0-9_])", item)
-        for item in messages
-    ):
+    # GitHub's actual schema errors quote the keyword (e.g. "oneOf").
+    # Preserve the older unquoted form, and emit only fixed labels.
+    def schema_phrase(prefix: str, keyword: str, suffix: str) -> bool:
+        pattern = (
+            rf"(?<![a-z0-9_]){re.escape(prefix)} "
+            rf"""(?:{keyword}|"{keyword}"|'{keyword}') """
+            rf"{re.escape(suffix)}(?![a-z0-9_])"
+        )
+        return any(re.search(pattern, item) for item in messages)
+
+    if schema_phrase("more than one subschema in", "oneof", "matched"):
         details.append("validation_shape=one_of_conflict")
-    elif any(
-        re.search(r"(?<![a-z0-9_])no subschema in oneof matched(?![a-z0-9_])", item)
-        for item in messages
-    ):
+    elif schema_phrase("no subschema in", "oneof", "matched"):
         details.append("validation_shape=no_one_of_match")
+    if schema_phrase("no subschema in", "anyof", "matched"):
+        details.append("validation_shape=no_any_of_match")
+    if schema_phrase("not all subschemas of", "allof", "matched"):
+        details.append("validation_shape=all_of_mismatch")
+
+    # Distinguish an explicit missing-field statement from a field mention.
+    # Match complete lines only and never echo a non-allowlisted field.
+    missing_fields: set[str] = set()
+    for item in messages:
+        for match in re.finditer(
+            r"""^[ \t]*(?P<quote>["'])(?P<field>[a-z0-9_.]+)(?P=quote) wasn't supplied\.[ \t]*$""",
+            item,
+            flags=re.MULTILINE,
+        ):
+            field = _safe_validation_field(match.group("field"))
+            if field is not None:
+                missing_fields.add(field)
+    if "restrictions" in missing_fields:
+        details.append("validation_missing_field=restrictions")
+        missing_fields.remove("restrictions")
+    for field in sorted(missing_fields)[:3]:
+        details.append(f"validation_missing_field={field}")
 
     for error in errors:
         if not isinstance(error, dict):

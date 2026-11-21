@@ -401,6 +401,44 @@ class GitHubErrorDiagnosticsTest(unittest.TestCase):
         self.assertIn("category=validation_failed", result)
         self.assertIn("validation_shape=one_of_conflict", result)
 
+    def test_validation_diagnostics_recognize_real_quoted_schema_phrases(self):
+        # google/go-github #2976 and cli/cli #8363 show the quoted form.
+        result = self.classify(
+            422,
+            'Invalid request.\n\nNo subschema in "anyOf" matched.\n'
+            'More than one subschema in "oneOf" matched.\n'
+            'Not all subschemas of "allOf" matched.\n'
+            'For anyOf/1: private-value is not a null.',
+        )
+        self.assertIn("validation_shape=one_of_conflict", result)
+        self.assertIn("validation_shape=no_any_of_match", result)
+        self.assertIn("validation_shape=all_of_mismatch", result)
+        self.assertNotIn("private-value", result)
+
+    def test_validation_diagnostics_quoted_no_one_of_match(self):
+        result = self.classify(422, 'No subschema in "oneOf" matched.')
+        self.assertIn("validation_shape=no_one_of_match", result)
+
+    def test_validation_diagnostics_distinguish_missing_restrictions(self):
+        # Candidate server message shape, not a claim about #1055's lost body.
+        result = self.classify(
+            422,
+            'Invalid request.\n\n"restrictions" wasn\'t supplied.\n'
+            '"private_token" wasn\'t supplied.',
+        )
+        self.assertIn("validation_missing_field=restrictions", result)
+        self.assertNotIn("private_token", result)
+        self.assertNotIn("wasn", result)
+
+    def test_validation_diagnostics_do_not_call_a_mention_missing(self):
+        result = self.classify(422, "Restrictions are not supported for this repository.")
+        self.assertIn("message_field_hint=restrictions", result)
+        self.assertNotIn("validation_missing_field=", result)
+
+    def test_validation_diagnostics_do_not_match_incomplete_missing_phrase(self):
+        result = self.classify(422, '"restrictions" wasn\'t supplied. extra text')
+        self.assertNotIn("validation_missing_field=", result)
+
     def test_validation_diagnostics_classify_allowlisted_schema_path(self):
         result = self.classify(
             422,
