@@ -17,7 +17,7 @@ CLI出力はJSON。観測成功0、失敗2。キャッシュはUTC当月、12時
 
 ## 非公開同期の要求/応答
 
-既存認証で書き込みを許可された所有者限定のフォルダを使用（共有権限・新たな認証は付与しない）。公開repoを依頼・生データの保存先にしない。固定マーカーを1ファイル用意し、非公開コネクタから既存ファイルを `billing-request-YYYYMMDDTHHMMSSZ-<32桁小文字hex>.request` にリネームする。日時はUTC、要求期限30分。ファイル内容を開かず、固定名の操作だけを受け付ける。idleファイル名は `billing-request-idle.request`。同一マーカーの重複、期限切れ、不明な操作は処理しない。
+既存認証で書き込みを許可された所有者限定のフォルダを使用（共有権限・新たな認証は付与しない）。公開repoを依頼・生データの保存先にしない。固定マーカーを1ファイル用意し、非公開コネクタから既存ファイルを `billing-request-YYYYMMDDTHHMMSSZ-<32桁小文字hex>.request` にリネームする。日時はUTC、要求期限30分。ファイル内容を開かず、固定名の操作だけを受け付ける。idleファイル名は `billing-request-idle.request`。同一マーカーの重複、期限切れ、不明な操作は処理しない。要求は最新観測キャッシュとは独立したローカルSQLite台帳へ事前に原子的予約し、7日保持する。A→B→遅延Aを再実行しない。失敗・中断の再試行は新規依頼IDで行う。Windowsの既定台帳はLocalAppData/KiNoTch/devflow-billing-observer/billing-request-ledger.sqlite3。別環境は`--request-ledger`で非同期ローカルパスを指定する。
 対話PCで既に認められた固定の実行入口から `--serve-marker-dir` を呼ぶと、その1件のみ観測し、明示された非公開出力JSONに同じrequest_idを返す。依頼から読み返したJSONのrequest_idを照合する。応答を読んだ後、固定マーカーをidleに戻してよい。キャッシュの上書き/同期でDriveファイルIDが変わり得るため、出力ファイルは指定フォルダの固定名で再検索する。マーカーと結果には実行権限がなく、任意コマンド、URL、他アカウント、資格情報、実行ファイルを指定できない。
 
 対話ホスト以外のCIは承認済み経路から配布された結果の検査のみ可能。GitHub-hosted ActionsのGITHUB_TOKENまたは新規secretで個人課金ページへアクセスできると仮定しない。CIでは金額の出力・アーティファクト公開を避ける。Private Actions停止時にもホスト側観測はActionsに依存しない。
