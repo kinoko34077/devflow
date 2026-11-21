@@ -14,11 +14,11 @@ from typing import Mapping
 
 try:
     from .private_ci_billing_ui import (
-        ObservationUnavailable, _read_json, status_view, validate_cached,
+        ObservationUnavailable, load_cached_observation, status_view,
     )
 except ImportError:  # direct script execution through devflow_mcp.py
     from private_ci_billing_ui import (  # type: ignore
-        ObservationUnavailable, _read_json, status_view, validate_cached,
+        ObservationUnavailable, load_cached_observation, status_view,
     )
 
 CACHE_ENV = "DEVFLOW_GITHUB_BILLING_UI_CACHE"
@@ -55,8 +55,8 @@ def get_configured_billing_observation(
     try:
         # This is deliberately independent from the external billing summary
         # REST adapter: only the verified private-browser observation qualifies.
-        validated = validate_cached(
-            _read_json(path), ACCOUNT,
+        validated = load_cached_observation(
+            path, ACCOUNT,
             datetime.now(timezone.utc) if now_utc is None else now_utc,
         )
     except (ObservationUnavailable, OSError, ValueError):
