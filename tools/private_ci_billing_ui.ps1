@@ -38,7 +38,8 @@ function Test-BillingAddress($window, [string[]]$paths) {
         # Chrome's address control in the English and Japanese UI.
         $jaAddress = (-join @([char]0x30a2, [char]0x30c9, [char]0x30ec, [char]0x30b9, [char]0x30d0, [char]0x30fc))
         $jaSearch = (-join @([char]0x30a2, [char]0x30c9, [char]0x30ec, [char]0x30b9, [char]0x3068, [char]0x691c, [char]0x7d22, [char]0x30d0, [char]0x30fc))
-        if ($edit.Current.Name -notin @('Address and search bar', 'Address bar', $jaAddress, $jaSearch)) { continue }
+        $jaSearchAlt = (-join @([char]0x30A2, [char]0x30C9, [char]0x30EC, [char]0x30B9, [char]0x691C, [char]0x7D22, [char]0x30D0, [char]0x30FC))
+        if ($edit.Current.Name -notin @('Address and search bar', 'Address bar', $jaAddress, $jaSearch, $jaSearchAlt)) { continue }
         $vp = $null
         if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { continue }
         $value = [string]$vp.Current.Value
@@ -170,7 +171,18 @@ try {
     } | ConvertTo-Json -Compress
 } catch {
     # No raw exception (which may contain machine paths/page text).
-    [Console]::Error.WriteLine('BILLING_UI_OBSERVATION_FAILED')
+    $message = [string]$_.Exception.Message
+    if ($message -cmatch '^[A-Z_]{8,80}
+    exit 2
+} finally {
+    if ($held) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
+}
+) {
+        [Console]::Error.WriteLine($message)
+    } else {
+        [Console]::Error.WriteLine('BILLING_UI_OBSERVATION_FAILED')
+    }
     exit 2
 } finally {
     if ($held) { $mutex.ReleaseMutex() }
