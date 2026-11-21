@@ -109,8 +109,7 @@ class BillingUiTests(unittest.TestCase):
             # Requests are determined only by the exact filename, never contents.
             target.write_text("arbitrary text is not executed or opened")
             self.assertEqual(observer.parse_marker_directory(root, ACCOUNT, NOW), REQUEST_ID)
-            with self.assertRaises(observer.ObservationUnavailable):
-                observer.parse_marker_directory(root, ACCOUNT, NOW + timedelta(minutes=31))
+            self.assertIsNone(observer.parse_marker_directory(root, ACCOUNT, NOW + timedelta(minutes=31)))
             marker.touch()
             with self.assertRaises(observer.ObservationUnavailable):
                 observer.parse_marker_directory(root, ACCOUNT, NOW)
