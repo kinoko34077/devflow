@@ -293,7 +293,12 @@ def _request_ledger_path(path: Path | None) -> Path:
     local_appdata = os.environ.get("LOCALAPPDATA")
     if not local_appdata:
         raise ObservationUnavailable("LOCAL_REQUEST_LEDGER_REQUIRED")
-    return Path(local_appdata) / "KiNoTch" / "devflow-billing-observer" / "billing-request-ledger.sqlite3"
+    parent = Path(local_appdata) / "KiNoTch" / "devflow-billing-observer"
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ObservationUnavailable("LOCAL_REQUEST_LEDGER_DIRECTORY_UNAVAILABLE") from exc
+    return parent / "billing-request-ledger.sqlite3"
 
 
 def _atomic_write(path: Path, data: dict) -> None:
