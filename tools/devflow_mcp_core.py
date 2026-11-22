@@ -79,6 +79,7 @@ DEFAULT_OWNER = "kinoko34077"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
 API_BASE = "https://api.github.com"
+MAX_GITHUB_REST_PER_PAGE = 100
 USER_AGENT = "kinotch-devflow-mcp"
 HUMAN_PORTFOLIO_READ_SCHEMA_VERSION = "human-portfolio-read.v1"
 COORDINATOR_STATE_REPOSITORY = "kinoko34077/execution-coordinator"
@@ -95,6 +96,14 @@ class DevflowMCPError(RuntimeError):
     def __init__(self, message: str, *, reason_code: str = "DEVFLOW_READ_UNAVAILABLE") -> None:
         super().__init__(message)
         self.reason_code = reason_code
+
+def _validate_github_page_size(per_page: int) -> None:
+    """Reject invalid GitHub REST page bounds before any network read."""
+    if type(per_page) is not int or not 1 <= per_page <= MAX_GITHUB_REST_PER_PAGE:
+        raise DevflowMCPError(
+            "Invalid GitHub page size; expected integer from 1 to 100."
+        )
+
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
@@ -233,9 +242,10 @@ class GitHubReader:
         safe_name = urllib.parse.quote(name, safe="")
         return f"{self._api_base}/repos/{safe_owner}/{safe_name}/{suffix.lstrip('/')}"
 
-    def list_issues(self, repository: str, state: str = "open", per_page: int = 100) -> list[dict[str, Any]]:
+    def list_issues(self, repository: str, state: str = "open", per_page: int = MAX_GITHUB_REST_PER_PAGE) -> list[dict[str, Any]]:
         if state not in {"open", "closed", "all"}:
             raise DevflowMCPError(f"Unsupported issue state: {state!r}")
+        _validate_github_page_size(per_page)
         issues: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -263,13 +273,14 @@ class GitHubReader:
         return issue
 
     def list_issue_comments(
-        self, repository: str, issue_number: int, per_page: int = 100,
+        self, repository: str, issue_number: int, per_page: int = MAX_GITHUB_REST_PER_PAGE,
         *, max_comments: int | None = None,
     ) -> list[dict[str, Any]]:
         if issue_number < 1:
             raise DevflowMCPError("Issue number must be >= 1.")
         if max_comments is not None and (type(max_comments) is not int or max_comments < 1):
             raise DevflowMCPError("Invalid comment read bound.")
+        _validate_github_page_size(per_page)
         comments: list[dict[str, Any]] = []
         page = 1
         while True:
