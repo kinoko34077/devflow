@@ -26,6 +26,38 @@ class DevflowMCPParsingTests(unittest.TestCase):
         with self.assertRaises(devflow_mcp_core.DevflowMCPError):
             devflow_mcp_core.normalize_repository("   ")
 
+    def test_normalize_repository_rejects_internal_whitespace(self):
+        for name in (
+            "dev flow",
+            "team name/repo",
+            "team/repo name",
+            "team/repo\tname",
+            "team/repo\nname",
+        ):
+            with self.subTest(repository=name):
+                with self.assertRaisesRegex(
+                    devflow_mcp_core.DevflowMCPError, "Invalid repository name"
+                ):
+                    devflow_mcp_core.normalize_repository(name)
+
+    def test_normalize_repository_keeps_valid_short_full_and_outer_trim(self):
+        for name, expected in (
+            (" devflow ", "kinoko34077/devflow"),
+            (" kinoko34077/devflow ", "kinoko34077/devflow"),
+            ("team-name/repo.name_v1", "team-name/repo.name_v1"),
+        ):
+            with self.subTest(repository=name):
+                self.assertEqual(devflow_mcp_core.normalize_repository(name), expected)
+
+    def test_invalid_repository_whitespace_rejected_before_github_get(self):
+        calls = []
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, headers: calls.append((url, headers)),
+        )
+        with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+            reader.list_issues("team/repo name")
+        self.assertEqual(calls, [])
+
     def test_parse_sections_reads_h2_scalar_sections(self):
         body = "## Work Status\n\n`AUDITED`\n\n## Next Action\n\n[WAIT]\n"
         self.assertEqual(

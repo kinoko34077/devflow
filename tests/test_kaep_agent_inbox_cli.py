@@ -136,6 +136,19 @@ class AgentInboxCLITests(unittest.TestCase):
             parsed["repositories"][0]["issues"][0]["title"], "日本語 🎵"
         )
 
+    def test_internal_whitespace_is_rejected_before_checkin_read(self):
+        from tools.devflow_mcp_core import DevflowMCPError
+
+        service = FakeService({"kinoko34077/devflow": view()})
+        with self.assertRaises(DevflowMCPError):
+            cli.read_checkin(
+                service,
+                repositories=["dev flow"],
+                recipient="claude-code", work_status=None,
+                limit=20, offset=0, pending_only=False,
+            )
+        self.assertEqual(service.calls, [])
+
     def test_short_and_full_repository_aliases_are_one_identity(self):
         service = FakeService({"kinoko34077/devflow": view()})
         with self.assertRaisesRegex(ValueError, "DUPLICATE_REPOSITORY"):

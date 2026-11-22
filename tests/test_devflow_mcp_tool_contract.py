@@ -441,6 +441,12 @@ class DevflowMCPToolContractTests(unittest.TestCase):
                 self.assertIn("truncated", result.stdout)
 
 
+    def test_repository_name_help_exposes_whitespace_contract(self):
+        _initialized, listed, _results = stdio_exchange()
+        current = _tool_map(listed.tools)
+        description = current["bootstrap_repository"]["inputSchema"]["properties"]["repository"]["description"]
+        self.assertIn("whitespace within the owner or name", description)
+
     def test_advisory_packet_help_points_to_actual_owning_guide(self):
         _initialized, listed, _results = stdio_exchange()
         current = _tool_map(listed.tools)

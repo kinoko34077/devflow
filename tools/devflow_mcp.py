@@ -71,7 +71,7 @@ RepositoryName = Annotated[
     Field(
         description=(
             f"Repository as owner/name, or a short name under {DEFAULT_OWNER}; "
-            "outer whitespace is trimmed and spaces inside the owner or name are rejected."
+            "outer whitespace is trimmed and whitespace within the owner or name is rejected."
         )
     ),
 ]
