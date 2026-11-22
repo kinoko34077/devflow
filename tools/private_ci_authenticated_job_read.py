@@ -187,6 +187,7 @@ def observe_github_job_launch_once(
                 or job.get("head_sha") != expected_head_sha
                 or job.get("status") != "completed"
                 or job.get("conclusion") != "failure"
+                or "runner_name" not in job or "runner_id" not in job
                 or job.get("runner_name") not in (None, "")
                 or job.get("runner_id") not in (None, 0)
                 or type(job.get("steps")) is not list
