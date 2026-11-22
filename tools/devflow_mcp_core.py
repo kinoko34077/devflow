@@ -97,13 +97,13 @@ class DevflowMCPError(RuntimeError):
         super().__init__(message)
         self.reason_code = reason_code
 
+
 def _validate_github_page_size(per_page: int) -> None:
     """Reject invalid GitHub REST page bounds before any network read."""
     if type(per_page) is not int or not 1 <= per_page <= MAX_GITHUB_REST_PER_PAGE:
         raise DevflowMCPError(
-            "Invalid GitHub page size; expected integer from 1 to 100."
+            f"Invalid GitHub page size; expected integer from 1 to {MAX_GITHUB_REST_PER_PAGE}."
         )
-
 
 
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
