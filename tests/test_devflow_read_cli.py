@@ -664,5 +664,20 @@ class CloudReadCLITests(unittest.TestCase):
         self.assertEqual(service.calls, [])
 
 
+    def test_core_and_cli_share_single_inbox_limit_default(self):
+        import inspect
+
+        from tools import agent_inbox
+        from tools.devflow_mcp_core import DevflowService
+
+        self.assertEqual(cli.MAX_INBOX_LIMIT, agent_inbox.MAX_INBOX_TASKS)
+        for operation in (DevflowService.get_agent_inbox, DevflowService.get_agent_workspace):
+            with self.subTest(operation=operation.__name__):
+                self.assertEqual(
+                    inspect.signature(operation).parameters["limit"].default,
+                    agent_inbox.MAX_INBOX_TASKS,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

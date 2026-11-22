@@ -11,7 +11,8 @@ import sys
 from typing import Any
 
 from tools.agent_inbox import MAX_INBOX_TASKS
-from tools.devflow_mcp_core import DevflowMCPError, default_service
+from tools.devflow_mcp_core import DevflowMCPError, default_service, normalize_repository
+from tools.devflow_read_errors import failure_reason_code
 
 MAX_REPOSITORIES = 5
 
@@ -23,7 +24,10 @@ def read_checkin(
 ) -> dict[str, Any]:
     if not isinstance(repositories, list) or not 1 <= len(repositories) <= MAX_REPOSITORIES:
         raise ValueError("INVALID_REPOSITORY_COUNT")
-    if len(repositories) != len(set(repositories)):
+    # Short and fully qualified names resolve to the same managed repository.
+    # Reject duplicate identities before the first live GitHub read.
+    normalized = [normalize_repository(repository) for repository in repositories]
+    if len(normalized) != len(set(normalized)):
         raise ValueError("DUPLICATE_REPOSITORY")
     results: list[dict[str, Any]] = []
     for repository in repositories:
@@ -74,11 +78,15 @@ def main(argv: list[str] | None = None) -> int:
             recipient=args.recipient, work_status=args.work_status,
             limit=args.limit, offset=args.offset,
             pending_only=args.pending_only)
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        # ASCII escaping preserves all Unicode Issue content on cp932 consoles.
+        print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
         return 0
     except (DevflowMCPError, ValueError) as exc:
         # Fixed status, no raw secrets/private Issue text in errors.
-        reason = str(exc) if isinstance(exc, ValueError) else "DEVFLOW_READ_UNAVAILABLE"
+        # Preserve the existing generic core-error contract and only emit
+        # allowlisted ValueError codes; never echo arbitrary exception text.
+        reason = ("DEVFLOW_READ_UNAVAILABLE" if isinstance(exc, DevflowMCPError)
+                  else failure_reason_code(exc))
         print(json.dumps({"status": "BLOCKED", "reason_code": reason}))
         return 2
 

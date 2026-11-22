@@ -30,6 +30,21 @@ strict JSON-integer requirements and Plan/Evidence packet examples are available
 in each relevant generated tool schema/description. Both read-only CLI entry
 points expose matching pagination guidance in `--help`.
 
+Plan and outcome packet usage is documented in this manual, alongside the
+generated MCP argument metadata. Exact validation belongs to the existing
+`tools/goal_plan_assessment.py` and `tools/acceptance_evidence_preflight.py`
+implementations; the separate KAEP Agent Inbox specification does not define
+these advisory packet schemas.
+
+Both read-only CLI entry points preserve Unicode in JSON using ASCII escapes,
+so non-ASCII Issue content remains encodable on Windows cp932 consoles.
+Check-in repository names are deduplicated by their normalized `owner/repo`
+identity before a GitHub read, including short/full-name aliases. Diagnostic
+`reason_code` values come from a finite allowlist; unexpected ValueError
+messages are redacted to `INVALID_ARGUMENTS`. The legacy native check-in CLI
+continues to report core read failures as `DEVFLOW_READ_UNAVAILABLE` rather
+than exposing raw exception text.
+
 **Scope:** `tools/list` describes how to call the tools. It cannot establish
 that the underlying GitHub data is complete, that a filtered-zero result means
 there is no work, or that Claim/execution/acceptance is authorized. Consult the

@@ -1,4 +1,5 @@
 """Native KAEP Agent Inbox CLI regression tests; no external GitHub access."""
+import io
 import json
 import unittest
 from unittest.mock import patch
@@ -103,6 +104,48 @@ class AgentInboxCLITests(unittest.TestCase):
         data=json.loads(out.call_args.args[0])
         self.assertEqual(data["reason_code"],"DUPLICATE_REPOSITORY")
         load.assert_called_once()
+
+
+    def test_cli_unknown_valueerror_is_redacted(self):
+        class BrokenService:
+            def get_agent_inbox(self, *_args, **_kwargs):
+                raise ValueError("secret response body 日本語 token=private")
+
+        with patch("tools.kaep_agent_inbox_cli.default_service",
+                   return_value=BrokenService()):
+            with patch("builtins.print") as out:
+                self.assertEqual(cli.main(["--repository", "kinoko34077/devflow"]), 2)
+        self.assertEqual(json.loads(out.call_args.args[0]), {
+            "status": "BLOCKED", "reason_code": "INVALID_ARGUMENTS",
+        })
+        self.assertNotIn("secret", out.call_args.args[0])
+
+    def test_cli_cp932_console_keeps_non_ascii_issue_content(self):
+        reported = view()
+        reported["issues"][0]["title"] = "日本語 🎵"
+        service = FakeService({"kinoko34077/devflow": reported})
+        wire = io.BytesIO()
+        with io.TextIOWrapper(wire, encoding="cp932", errors="strict") as stdout:
+            with patch("tools.kaep_agent_inbox_cli.default_service", return_value=service):
+                with patch("sys.stdout", stdout):
+                    self.assertEqual(cli.main([]), 0)
+            stdout.flush()
+            response = wire.getvalue().decode("ascii")
+        parsed = json.loads(response)
+        self.assertEqual(
+            parsed["repositories"][0]["issues"][0]["title"], "日本語 🎵"
+        )
+
+    def test_short_and_full_repository_aliases_are_one_identity(self):
+        service = FakeService({"kinoko34077/devflow": view()})
+        with self.assertRaisesRegex(ValueError, "DUPLICATE_REPOSITORY"):
+            cli.read_checkin(
+                service,
+                repositories=["devflow", "kinoko34077/devflow"],
+                recipient="claude-code", work_status=None,
+                limit=20, offset=0, pending_only=False,
+            )
+        self.assertEqual(service.calls, [])
 
 
 if __name__ == "__main__":
