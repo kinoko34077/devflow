@@ -107,6 +107,7 @@ class GitHubWslPullTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as root, \
              patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "_owner_session_verified", return_value=True), \
              patch.object(pull, "run_fixed_public", return_value=proof) as worker:
             ledger = Path(root) / "existing-ledger.sqlite3"
             first = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
@@ -135,9 +136,64 @@ class GitHubWslPullTests(unittest.TestCase):
             observed = pull._fetch_comment(data["id"])
         self.assertEqual(observed["id"], data["id"])
         argv = run.call_args.args[0]
-        self.assertEqual(argv[:4], ["gh", "api", "-H", "Accept: application/vnd.github+json"])
+        self.assertEqual(argv[:6], ["gh", "api", "--hostname", "github.com", "--method", "GET"])
+        self.assertEqual(argv[6:8], ["-H", "Accept: application/vnd.github+json"])
         self.assertEqual(argv[-1], f"repos/kinoko34077/devflow/issues/comments/{data['id']}")
         self.assertFalse(run.call_args.kwargs["shell"])
+
+    def test_owner_gh_session_identity_pins_both_host_and_numeric_account(self):
+        valid = {"login": "kinoko34077", "id": 79015263, "type": "User"}
+        variants = [
+            (valid, True),
+            ({**valid, "login": "another"}, False),
+            ({**valid, "id": 79015264}, False),
+            ({**valid, "type": "Bot"}, False),
+            ({**valid, "id": True}, False),
+            ({"login": "kinoko34077"}, False),
+            ([], False),
+        ]
+        for value, expected in variants:
+            with self.subTest(value=value):
+                mock_result = subprocess.CompletedProcess(
+                    [], 0, stdout=json.dumps(value), stderr="PRIVATE_ERROR")
+                with patch.object(pull.subprocess, "run", return_value=mock_result) as call:
+                    observed = pull._owner_session_verified()
+                self.assertIs(observed, expected)
+                self.assertEqual(call.call_args.args[0],
+                                 ["gh", "api", "--hostname", "github.com",
+                                  "--method", "GET", "-H",
+                                  "Accept: application/vnd.github+json", "user"])
+                self.assertIs(call.call_args.kwargs["shell"], False)
+                self.assertTrue(call.call_args.kwargs["capture_output"])
+
+    def test_local_owner_check_errors_fail_closed_without_details(self):
+        values = (
+            subprocess.CompletedProcess([], 403, stdout="", stderr="TOP_SECRET"),
+            subprocess.CompletedProcess([], 0, stdout="{bad", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="x" * 4097, stderr=""),
+        )
+        for value in values:
+            with self.subTest(exit=value.returncode), \
+                 patch.object(pull.subprocess, "run", return_value=value):
+                self.assertFalse(pull._owner_session_verified())
+        with patch.object(pull.subprocess, "run",
+                          side_effect=subprocess.TimeoutExpired("gh", 15)):
+            self.assertFalse(pull._owner_session_verified())
+
+    def test_local_gh_identity_denial_never_reserves_or_runs(self):
+        c = comment()
+        with patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "_owner_session_verified", return_value=False) as owner, \
+             patch.object(pull, "_reserve") as reserve, \
+             patch.object(pull, "run_fixed_public") as worker:
+            outcome = pull.execute_comment(c["id"], execute=True)
+        self.assertEqual((outcome.status, outcome.reason),
+                         ("HOLD", "LOCAL_GITHUB_OWNER_NOT_VERIFIED"))
+        self.assertTrue(outcome.github_author_observed)
+        self.assertFalse(outcome.authenticated)
+        owner.assert_called_once()
+        reserve.assert_not_called()
+        worker.assert_not_called()
 
     def test_api_errors_are_redacted(self):
         cases = [
@@ -170,6 +226,7 @@ class GitHubWslPullTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as root, \
              patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "_owner_session_verified", return_value=True), \
              patch.object(pull, "run_fixed_public", return_value=mock_worker) as worker:
             ledger = Path(root) / "replay.sqlite3"
             first = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
@@ -185,6 +242,7 @@ class GitHubWslPullTests(unittest.TestCase):
         c = comment()
         with tempfile.TemporaryDirectory() as root, \
              patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "_owner_session_verified", return_value=True), \
              patch.object(pull, "run_fixed_public", side_effect=RuntimeError("SECRET")) as worker:
             ledger = Path(root) / "replay.sqlite3"
             first = pull.execute_comment(c["id"], execute=True, ledger_path=ledger)
@@ -200,6 +258,7 @@ class GitHubWslPullTests(unittest.TestCase):
     def test_missing_ledger_does_not_run(self):
         c = comment()
         with patch.object(pull, "_fetch_comment", return_value=c), \
+             patch.object(pull, "_owner_session_verified", return_value=True), \
              patch.object(pull, "_ledger_path", return_value=None), \
              patch.object(pull, "run_fixed_public") as worker:
             self.assertEqual(pull.execute_comment(c["id"], execute=True).reason, "LEDGER_PATH_UNAVAILABLE")
