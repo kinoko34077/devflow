@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
+from unittest.mock import patch
 
 from tools import devflow_mcp_core, issue_goal_context, repository_projection
 from tests.test_repository_bootstrap import issue_body, request_payload
@@ -118,8 +119,8 @@ class GitHubReaderPageSizeContractTests(unittest.TestCase):
 
                     def tracked_transport(url, _headers):
                         calls.append(url)
-                        # A zero page size currently loops even on an empty
-                        # page. Bound this fixture to avoid an unending test.
+                        # Before preflight, zero could loop on an empty page.
+                        # Keep the fixture bounded to detect a regression safely.
                         if len(calls) > 1:
                             raise RuntimeError("unexpected second GitHub GET")
                         return []
@@ -138,6 +139,26 @@ class GitHubReaderPageSizeContractTests(unittest.TestCase):
                                 "kinoko34077/devflow", 17, per_page=bad,
                             )
                     self.assertEqual(calls, [])
+
+    def test_shared_page_size_limit_also_owns_the_error_message(self):
+        calls = []
+        reader = devflow_mcp_core.GitHubReader(
+            transport=lambda url, _headers: calls.append(url) or [],
+        )
+        with patch.object(devflow_mcp_core, "MAX_GITHUB_REST_PER_PAGE", 3):
+            for operation in ("list_issues", "list_issue_comments"):
+                with self.subTest(operation=operation):
+                    with self.assertRaisesRegex(
+                        devflow_mcp_core.DevflowMCPError,
+                        "expected integer from 1 to 3",
+                    ):
+                        if operation == "list_issues":
+                            reader.list_issues("kinoko34077/devflow", per_page=4)
+                        else:
+                            reader.list_issue_comments(
+                                "kinoko34077/devflow", 17, per_page=4,
+                            )
+        self.assertEqual(calls, [])
 
     def test_valid_one_and_hundred_page_sizes_preserve_pagination(self):
         for operation in ("list_issues", "list_issue_comments"):
