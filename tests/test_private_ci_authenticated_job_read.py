@@ -166,6 +166,16 @@ class AuthenticatedJobReadTests(unittest.TestCase):
                 self.assertEqual((result.status, result.reason), ("HOLD", expected))
                 self.assertIsNone(result.receipt)
 
+    def test_missing_runner_fields_are_not_unassigned_runner(self):
+        for missing in ("runner_name", "runner_id"):
+            with self.subTest(missing=missing):
+                data = valid_resources()
+                del data[BASE + f"/actions/jobs/{JOB_ID}"][missing]
+                result = observe(FakeOpener(data))
+                self.assertEqual(result.status, "HOLD")
+                self.assertEqual(result.reason, "GITHUB_UNSTARTED_JOB_NOT_VERIFIED")
+                self.assertIsNone(result.receipt)
+
     def test_check_annotations_must_match_exact_unique_evidence(self):
         for annotation_list in (
             [],
