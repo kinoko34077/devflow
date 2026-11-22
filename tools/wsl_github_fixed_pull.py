@@ -26,7 +26,6 @@ _ENDPOINT = "repos/kinoko34077/devflow/issues/comments/"
 _PREFIX = "F3C-WSL-PUBLIC-ONCE-V1\n"
 _MAX_RESPONSE = 16384
 _MAX_USER_RESPONSE = 4096
-_OWNER_ID = 79015263  # Stable GitHub numeric user id, verified from current #610 comment.
 _GH_GET = ("gh", "api", "--hostname", "github.com", "--method", "GET")
 
 
@@ -85,8 +84,10 @@ def _owner_session_verified() -> bool:
         user = json.loads(proc.stdout)
     except (ValueError, TypeError):
         return False
+    # Reuse the single canonical numeric GitHub principal allowlist instead
+    # of maintaining a second owner-id definition inside the WSL adapter.
     return (type(user) is dict
-            and type(user.get("id")) is int and user["id"] == _OWNER_ID
+            and is_trusted_principal({"user": user})
             and user.get("login") == "kinoko34077"
             and user.get("type") == "User")
 
