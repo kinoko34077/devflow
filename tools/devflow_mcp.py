@@ -163,7 +163,7 @@ PlanPacket = Annotated[
             '[{"id":"docs","intent":"Update the usage guide","declared_effects":'
             '[{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}. '
             "Malformed packets remain eligible for a NEEDS_EVIDENCE advisory. "
-            "See docs/spec/KAEP_AGENT_INBOX_V01.md for the canonical packet contract."
+            "See docs/operations/DEVFLOW_MCP.md for the accepted packet usage; validators own exact bounds."
         )
     ),
 ]
@@ -189,7 +189,7 @@ OutcomeEvidence = Annotated[
             '["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}. '
             "Null or incomplete packets return NEEDS_EVIDENCE. DECLARED_ALIGNED checks "
             "declared identities only; it does not fetch/authenticate linked comments or acceptance. "
-            "See docs/spec/KAEP_AGENT_INBOX_V01.md for the canonical packet contract."
+            "See docs/operations/DEVFLOW_MCP.md for the accepted packet usage; validators own exact bounds."
         )
     ),
 ]
@@ -354,18 +354,11 @@ def assess_issue_plan(
     issue_number: PositiveIssueNumber,
     plan: PlanPacket,
 ) -> dict[str, Any]:
-    """Compare a declared plan packet with adopted source-linked conditions for one Issue.
+    """Compare one declared plan with the Issue's adopted source-linked conditions.
 
-    `task_ref` must identify the normalized `repository#issue_number` passed to this call;
-    this comparison is case-insensitive.
-    Packet example: {"schema_version":1,"task_ref":"kinoko34077/devflow#14","steps":
-    [{"id":"docs","intent":"Update the usage guide","declared_effects":
-    [{"key":"guide","scope":"docs/guide.md","state":"set","value":true}]}]}.
-    Top-level keys are exact; use 1–64 steps, unique 1–120 character ASCII ids, non-empty
-    intents (up to 1000 chars), and at most 128 effects. An effect uses non-empty key/scope
-    (up to 200 chars) and either state=set plus value or state=removed without value.
-    Malformed packets return NEEDS_EVIDENCE. Results are read-only and cannot authorize or
-    block execution; detailed packet rules live in the canonical spec.
+    The plan argument schema in tools/list contains the accepted packet keys,
+    bounds, and example; see docs/operations/DEVFLOW_MCP.md for usage.
+    This is advisory only: no execution permission or task-wide acceptance.
     """
     return _service().assess_issue_plan(repository, issue_number, plan)
 
@@ -376,21 +369,12 @@ def assess_outcome_observation(
     issue_number: PositiveIssueNumber,
     evidence: OutcomeEvidence,
 ) -> dict[str, Any]:
-    """Compare declared outcome identities with one Issue's current body revision.
+    """Compare declared outcome identities against one Issue's current body revision.
 
-    A SUCCESS example is {"task_ref":"kinoko34077/devflow#14","issue_body_sha256":
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required_surface":"PUBLIC_BROWSER","required_target":"git:abc123",
-    "observed_surface":"PUBLIC_BROWSER","observed_target":"git:abc123","observed_result":
-    "SUCCESS","evidence_refs":["https://github.com/kinoko34077/devflow/issues/14#issuecomment-123"]}.
-    Use exactly these fields; `task_ref` must exactly match (case-sensitively) the normalized
-    `repository#issue_number` passed to this call. `evidence_refs` must contain 1–8 unique
-    URLs of the form `https://github.com/kinoko34077/<repo>/issues/<issue>#issuecomment-<comment>`.
-    Replace the example digest with the current Issue body's SHA-256.
-    Surface ids match
-    [A-Z][A-Z0-9_]{0,63} and targets use 1–256 printable ASCII chars.
-    Null, partial, malformed, and stale packets can return NEEDS_EVIDENCE. DECLARED_ALIGNED means
-    the declared identities match; linked comments are not fetched or authenticated, and user
-    acceptance is not established. This read-only advisory cannot authorize execution.
+    The evidence argument schema in tools/list contains the exact packet fields,
+    constraints, and example; see docs/operations/DEVFLOW_MCP.md for usage.
+    No evidence URL is authenticated here, and alignment does not prove acceptance
+    or authorize any execution.
     """
     return _service().assess_outcome_observation(repository, issue_number, evidence)
 
