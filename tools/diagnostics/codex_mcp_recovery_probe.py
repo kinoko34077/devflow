@@ -180,7 +180,19 @@ def call(client: AppServer, thread: str, name: str) -> bool:
                     if isinstance(item, dict)))
 
 
-def one_scenario(codex: str, scenario: str) -> dict:
+def wait_for_automatic_recovery(client: AppServer, thread: str, seconds: float) -> bool:
+    """Check both live tool discovery and a harmless read-only call."""
+    deadline = time.monotonic() + seconds
+    while True:
+        if tools_count(client, thread) == 2 and call(client, thread, "ping"):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.5, remaining))
+
+
+def one_scenario(codex: str, scenario: str, recovery_window_sec: float) -> dict:
     directory = Path(tempfile.mkdtemp(prefix="codex-mcp-recovery-probe-"))
     server = directory / "mock_mcp.py"
     wrapper = directory / "fail_once.py"
@@ -201,15 +213,12 @@ def one_scenario(codex: str, scenario: str) -> dict:
         client = AppServer(codex, directory)
         thread = client.start_thread(directory)
         initial = tools_count(client, thread)
-        if scenario == "startup":
-            before = tools_count(client, thread)
-            auto = before > 0 and call(client, thread, "ping")
-        else:
+        if scenario != "startup":
             if initial != 2 or not call(client, thread, "ping"):
                 raise AssertionError("healthy MCP could not answer ping")
             call(client, thread, "drop")
-            auto = call(client, thread, "ping")
-            before = tools_count(client, thread)
+        auto = wait_for_automatic_recovery(client, thread, recovery_window_sec)
+        before = tools_count(client, thread)
 
         if not auto:
             client.request("config/mcpServer/reload", timeout=20)
@@ -222,6 +231,7 @@ def one_scenario(codex: str, scenario: str) -> dict:
             "automatic_recovery": auto,
             "eventual_read_only_tool_success": recovered,
             "explicit_reload_needed": not auto,
+            "automatic_recovery_window_sec": recovery_window_sec,
         }
     finally:
         if client is not None:
@@ -240,13 +250,17 @@ def main() -> int:
     parser.add_argument("--scenario", choices=("startup", "drop", "all"),
                         default="all")
     parser.add_argument("--require-auto", action="store_true")
+    parser.add_argument("--recovery-window-sec", type=float, default=6.0,
+                        help="bounded wait for automatic recovery (1–60 seconds)")
     args = parser.parse_args()
+    if not 1 <= args.recovery_window_sec <= 60:
+        parser.error("--recovery-window-sec must be between 1 and 60")
     if not args.codex or not Path(args.codex).is_file():
         parser.error("--codex must specify an existing Codex executable")
     scenarios = ("startup", "drop") if args.scenario == "all" else (args.scenario,)
     failed = False
     for scenario in scenarios:
-        result = one_scenario(args.codex, scenario)
+        result = one_scenario(args.codex, scenario, args.recovery_window_sec)
         print(json.dumps(result, sort_keys=True), flush=True)
         failed |= not result["eventual_read_only_tool_success"]
         if args.require_auto:
