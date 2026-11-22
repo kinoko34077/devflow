@@ -25,6 +25,9 @@ _ISSUE_URL = "https://api.github.com/repos/kinoko34077/devflow/issues/610"
 _ENDPOINT = "repos/kinoko34077/devflow/issues/comments/"
 _PREFIX = "F3C-WSL-PUBLIC-ONCE-V1\n"
 _MAX_RESPONSE = 16384
+_MAX_USER_RESPONSE = 4096
+_OWNER_ID = 79015263  # Stable GitHub numeric user id, verified from current #610 comment.
+_GH_GET = ("gh", "api", "--hostname", "github.com", "--method", "GET")
 
 
 @dataclass(frozen=True)
@@ -44,7 +47,7 @@ def _fetch_comment(comment_id: int) -> dict | None:
     # Existing Windows gh credential is used by gh ONLY; never forwarded to WSL.
     try:
         proc = subprocess.run(
-            ["gh", "api", "-H", "Accept: application/vnd.github+json",
+            [*_GH_GET, "-H", "Accept: application/vnd.github+json",
              _ENDPOINT + str(comment_id)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             check=False, shell=False, timeout=15,
@@ -58,6 +61,34 @@ def _fetch_comment(comment_id: int) -> dict | None:
     except (ValueError, TypeError):
         return None
     return result if type(result) is dict else None
+
+
+
+def _owner_session_verified() -> bool:
+    """Verify the existing *local* gh session against the fixed account.
+
+    This only checks which GitHub account the local credential currently reads
+    as. It does NOT authenticate the issuer of an Issue comment, authorize a
+    worker, or establish a trusted remote actor. No credential is exported.
+    """
+    try:
+        proc = subprocess.run(
+            [*_GH_GET, "-H", "Accept: application/vnd.github+json", "user"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, shell=False, timeout=15,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0 or len(proc.stdout) > _MAX_USER_RESPONSE:
+        return False
+    try:
+        user = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return False
+    return (type(user) is dict
+            and type(user.get("id")) is int and user["id"] == _OWNER_ID
+            and user.get("login") == "kinoko34077"
+            and user.get("type") == "User")
 
 
 def _validate(comment: dict | None, comment_id: int) -> str | None:
@@ -148,6 +179,12 @@ def execute_comment(comment_id: int, *, execute: bool = False,
     if not execute:
         return PullResult("CANDIDATE_ONLY", comment_id=comment_id,
                           nonce_sha256=digest, github_author_observed=True)
+    # An observed GitHub Issue author is not the local gh session principal.
+    # Require the configured fixed github.com credential to read as the owner
+    # before even reserving the one-shot local ledger. Still NOT issuer proof.
+    if not _owner_session_verified():
+        return PullResult("HOLD", "LOCAL_GITHUB_OWNER_NOT_VERIFIED", comment_id,
+                          digest, github_author_observed=True)
     path = ledger_path if ledger_path is not None else _ledger_path()
     if not isinstance(path, Path):
         return PullResult("HOLD", "LEDGER_PATH_UNAVAILABLE", comment_id)
