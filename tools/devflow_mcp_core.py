@@ -1209,7 +1209,7 @@ class DevflowService:
 
     def get_agent_inbox(
         self, repository: str, recipient: str = "claude-code",
-        *, limit: int = 20, offset: int = 0,
+        *, limit: int = agent_inbox.MAX_INBOX_TASKS, offset: int = 0,
         work_status: str | None = None,
     ) -> dict[str, Any]:
         """Read-only TASK + KAEP per-issue observation for a single managed repo.
@@ -1641,7 +1641,7 @@ class DevflowService:
 
     def get_agent_workspace(
         self, repository: str, recipient: str = "codex",
-        *, limit: int = 20, offset: int = 0,
+        *, limit: int = agent_inbox.MAX_INBOX_TASKS, offset: int = 0,
         work_status: str | None = None,
         include_recent_kaep: bool = False,
         include_published_supply: bool = False,
