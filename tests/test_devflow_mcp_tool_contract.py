@@ -441,5 +441,19 @@ class DevflowMCPToolContractTests(unittest.TestCase):
                 self.assertIn("truncated", result.stdout)
 
 
+    def test_advisory_packet_help_points_to_actual_owning_guide(self):
+        _initialized, listed, _results = stdio_exchange()
+        current = _tool_map(listed.tools)
+        for tool_name, argument in (
+            ("assess_issue_plan", "plan"),
+            ("assess_outcome_observation", "evidence"),
+        ):
+            with self.subTest(tool=tool_name):
+                description = current[tool_name]["inputSchema"]["properties"][argument]["description"]
+                self.assertIn("docs/operations/DEVFLOW_MCP.md", description)
+                self.assertNotIn("docs/spec/KAEP_AGENT_INBOX_V01.md", description)
+                self.assertGreater(len(current[tool_name]["description"]), 60)
+
+
 if __name__ == "__main__":
     unittest.main()
