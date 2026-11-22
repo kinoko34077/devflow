@@ -106,6 +106,72 @@ class GitHubReaderMalformedListRowsTests(unittest.TestCase):
         )
 
 
+
+class GitHubReaderPageSizeContractTests(unittest.TestCase):
+    """Contract-first regression for a shared REST page-size preflight."""
+
+    def test_invalid_size_fails_before_any_github_get(self):
+        for operation in ("list_issues", "list_issue_comments"):
+            for bad in (0, -1, 101, True, 1.5, "2", None):
+                with self.subTest(operation=operation, per_page=bad):
+                    calls = []
+
+                    def tracked_transport(url, _headers):
+                        calls.append(url)
+                        # A zero page size currently loops even on an empty
+                        # page. Bound this fixture to avoid an unending test.
+                        if len(calls) > 1:
+                            raise RuntimeError("unexpected second GitHub GET")
+                        return []
+
+                    reader = devflow_mcp_core.GitHubReader(
+                        transport=tracked_transport,
+                    )
+                    with self.assertRaisesRegex(
+                        devflow_mcp_core.DevflowMCPError,
+                        "Invalid GitHub page size",
+                    ):
+                        if operation == "list_issues":
+                            reader.list_issues("kinoko34077/devflow", per_page=bad)
+                        else:
+                            reader.list_issue_comments(
+                                "kinoko34077/devflow", 17, per_page=bad,
+                            )
+                    self.assertEqual(calls, [])
+
+    def test_valid_one_and_hundred_page_sizes_preserve_pagination(self):
+        for operation in ("list_issues", "list_issue_comments"):
+            for size in (1, 100):
+                with self.subTest(operation=operation, per_page=size):
+                    requested_pages = []
+
+                    def transport(url, _headers):
+                        query = parse_qs(urlsplit(url).query)
+                        requested_pages.append(
+                            (int(query["page"][0]), int(query["per_page"][0]))
+                        )
+                        if len(requested_pages) == 1:
+                            return (
+                                [{"number": 17, "title": "source"}]
+                                if operation == "list_issues"
+                                else [{"id": 1, "body": "safe"}]
+                            )
+                        return []
+
+                    reader = devflow_mcp_core.GitHubReader(transport=transport)
+                    if operation == "list_issues":
+                        rows = reader.list_issues("kinoko34077/devflow", per_page=size)
+                    else:
+                        rows = reader.list_issue_comments(
+                            "kinoko34077/devflow", 17, per_page=size,
+                        )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(
+                        requested_pages,
+                        [(1, size), (2, size)] if size == 1 else [(1, size)],
+                    )
+
+
 class DevflowMCPCommentPageBoundTests(unittest.TestCase):
     def test_bounded_inbox_fetch_stops_once_comment_limit_proved(self):
         for total, expected_pages, expected_count in (
