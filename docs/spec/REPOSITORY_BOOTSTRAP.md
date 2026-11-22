@@ -214,6 +214,16 @@ The feature manifest is ensured without overwriting existing files. A
 mismatch fails at `SEED` with `Safe-Retry: after-human-decision`. A historical
 request without `standard_features` does not gain this manifest during retry.
 
+A completed fixed-recipe write proves only the independently verified
+pre-write contract and bounded Git mutation. The scoped writer reports
+`ci_verified: false` because it does **not** attest asynchronous GitHub checks
+or review of the newly generated commit. Before an actual generated PR can be
+merged, any required CI must execute successfully against that exact HEAD, and
+required formal review and branch protection must also be satisfied. An Actions
+run with `action_required` and no executed jobs is not successful CI; resolving
+its execution gate does not retrospectively change the writer's prior result.
+A scratch E2E PR retained solely as evidence does not require production merge.
+
 ### 5.3 Public-only main protection (#1058)
 
 For a new managed-repository request, `bootstrap.main_protection` is the

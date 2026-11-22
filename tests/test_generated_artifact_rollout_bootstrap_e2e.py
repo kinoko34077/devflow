@@ -1,4 +1,4 @@
-"""devflow#1050: fixed admission for the private Bootstrap writer E2E."""
+"""devflow#1050: fixed admission for the originally Private, now Public E2E."""
 import pathlib
 import unittest
 
@@ -45,7 +45,7 @@ class BootstrapE2ERecipeTests(unittest.TestCase):
             with self.subTest(repository=repository, recipe=recipe), self.assertRaises(ArtifactRejected):
                 select_fixed_recipe(repository, recipe)
 
-    def test_private_e2e_caller_path_is_pinned_as_recipe_data(self):
+    def test_fixed_e2e_caller_path_is_pinned_as_recipe_data(self):
         recipe = select_fixed_recipe(REPOSITORY, RECIPE)
         caller_path = getattr(recipe, "caller_path", None)
         self.assertEqual(caller_path, ".github/workflows/bootstrap-writeback-e2e.yml")
