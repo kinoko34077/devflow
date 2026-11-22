@@ -115,7 +115,7 @@ def normalize_repository(repository: str) -> str:
     if value.count("/") != 1:
         raise DevflowMCPError(f"Invalid repository name: {repository!r}")
     owner, name = value.split("/", 1)
-    if not owner or not name or any(part.strip() != part for part in (owner, name)):
+    if not owner or not name or any(char.isspace() for char in owner + name):
         raise DevflowMCPError(f"Invalid repository name: {repository!r}")
     return value
 
