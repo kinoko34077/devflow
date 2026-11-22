@@ -1,11 +1,7 @@
 """Fixed testapp writer entry, devflow#474 (not dispatched by default)."""
 from __future__ import annotations
 
-import argparse
-import json
-import os
 import pathlib
-import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -13,8 +9,8 @@ from tools.generated_artifact_contract import ArtifactRejected
 from tools.generated_artifact_rollout import select_fixed_recipe
 from tools.generated_artifact_rollout_scoped_write import (
     NarrowRegisteredWriteApi, execute_registered_write, require_main_protection,
+    run_registered_write_cli,
 )
-from tools.generated_artifact_writer import GitHubWriteApi
 
 _REPOSITORY = "kinoko34077/testapp"
 _RECIPE = "testapp-public-fixture-v1"
@@ -52,26 +48,11 @@ def execute_testapp_scoped_write(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Scoped testapp-only verified scratch write")
-    parser.add_argument("--artifact", required=True)
-    parser.add_argument("--target-branch", required=True)
-    parser.add_argument("--expected-head", required=True)
-    parser.add_argument("--devflow-sha", required=True)
-    args = parser.parse_args(argv)
-    try:
-        api = GitHubWriteApi(_REPOSITORY, os.environ.get("WRITER_TOKEN", ""))
-        result = execute_testapp_scoped_write(
-            api, os.environ, pathlib.Path(args.artifact),
-            target_branch=args.target_branch, expected_head=args.expected_head,
-            devflow_sha=args.devflow_sha,
-            devflow_checkout_sha=os.environ.get("DEVFLOW_CHECKOUT_SHA", ""),
-        )
-    except (ArtifactRejected, OSError, ValueError) as exc:
-        print(f"REJECTED: {exc}", file=sys.stderr)
-        return 2
-    print(json.dumps(result, sort_keys=True))
-    return 0
-
+    return run_registered_write_cli(
+        argv, repository=_REPOSITORY,
+        description="Scoped testapp-only verified scratch write",
+        execute=execute_testapp_scoped_write,
+    )
 
 if __name__ == "__main__":
     raise SystemExit(main())

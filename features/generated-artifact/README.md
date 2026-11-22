@@ -15,13 +15,25 @@ output is `NOT_APPLICABLE/NO_GENERATED_OUTPUT`; effectful writes still require
 the reviewed, exact-recipe caller and per-repository Human/security gates.
 Existing repository adoption remains the separate finite rollout in #386.
 
-## devflow#1050 private E2E fixture
+## devflow#1050 bounded E2E fixture (currently Public)
 
-The fixed recipe `bootstrap-writeback-e2e-v1` is limited to the private
-`kinoko34077/devflow-writeback-bootstrap-e2e-20261118` repository. Its dedicated
-caller path and exact template are source-controlled; only the shared writer
-job for that repository/recipe pair receives `contents:write`. This is an
-acceptance fixture, not a default permission or an additional rollout target.
+The fixed recipe `bootstrap-writeback-e2e-v1` is limited to
+`kinoko34077/devflow-writeback-bootstrap-e2e-20261118`. This fixture was
+originally Private, then explicitly changed to Public for the accepted
+protected-main E2E (#1058). The historical `private` label in the pinned
+workflow/template is **not** a visibility requirement; the exact template
+bytes are authenticated and must not be rewritten as documentation cleanup.
+Only the separate, reviewed fixed-recipe writer job receives `contents:write`.
+The default Bootstrap-installed Caller remains read-only. This fixture is not
+an additional existing-repository rollout target.
+
+The fixed-recipe E2E accepted real writing, same-receipt replay, stale-head
+refusal and forward-only recovery (#1050). The resulting scratch PR #3 is
+an unmerged evidence surface. Its generated HEAD's GitHub CI was
+`action_required` with zero executed jobs, not a passing PR check. The
+shared scoped writer intentionally reports `ci_verified=false`; it cannot
+attest checks or reviews that run after the commit. Do not interpret writer
+success as permission to merge or release the generated artifact.
 
 ## contract
 

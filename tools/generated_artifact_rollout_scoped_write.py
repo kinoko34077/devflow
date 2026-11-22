@@ -1,11 +1,14 @@
 """Shared narrow GitHub adapter for reviewed fixed-recipe writer entries."""
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import pathlib
 import re
+import sys
 import urllib.parse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from tools.generated_artifact_contract import ArtifactRejected
@@ -14,7 +17,7 @@ from tools.generated_artifact_rollout import (
 )
 from tools.generated_artifact_rollout_admission import attest_authenticated_readonly
 from tools.generated_artifact_rollout_dryrun import MANIFEST_CEILING, _read_regular_bounded
-from tools.generated_artifact_writer import verified_writeback
+from tools.generated_artifact_writer import GitHubWriteApi, verified_writeback
 
 
 class NarrowRegisteredWriteApi:
@@ -116,3 +119,28 @@ def execute_registered_write(
         scoped, policy, auth["admission"], manifest, archive, dry_run=False,
     )
     return {**result, "writer_scope": repository, "ci_verified": False}
+
+def run_registered_write_cli(
+    argv: list[str] | None, *, repository: str, description: str,
+    execute: Callable[..., dict[str, Any]],
+) -> int:
+    """Share CLI plumbing while each entry owns its fixed recipe admission."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--artifact", required=True)
+    parser.add_argument("--target-branch", required=True)
+    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--devflow-sha", required=True)
+    args = parser.parse_args(argv)
+    try:
+        api = GitHubWriteApi(repository, os.environ.get("WRITER_TOKEN", ""))
+        result = execute(
+            api, os.environ, pathlib.Path(args.artifact),
+            target_branch=args.target_branch, expected_head=args.expected_head,
+            devflow_sha=args.devflow_sha,
+            devflow_checkout_sha=os.environ.get("DEVFLOW_CHECKOUT_SHA", ""),
+        )
+    except (ArtifactRejected, OSError, ValueError) as exc:
+        print(f"REJECTED: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, sort_keys=True))
+    return 0
