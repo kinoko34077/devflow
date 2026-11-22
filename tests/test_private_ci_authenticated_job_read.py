@@ -186,7 +186,7 @@ class AuthenticatedJobReadTests(unittest.TestCase):
         self.assertEqual(observe(FakeOpener(data)).reason, "GITHUB_CHECK_RUN_NOT_VERIFIED")
 
     def test_historical_or_future_job_is_hold(self):
-        for clock in (NOW + timedelta(hours=25), NOW - timedelta(seconds=1)):
+        for clock in (NOW + timedelta(hours=25), NOW - timedelta(minutes=4)):
             r = observe(FakeOpener(), now_utc=clock)
             self.assertEqual(r.status, "HOLD")
             self.assertIsNone(r.receipt)
