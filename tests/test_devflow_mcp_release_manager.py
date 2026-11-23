@@ -119,6 +119,54 @@ class ReleaseManagerContractTests(unittest.TestCase):
         self.assertEqual(manager._compatible_schema(a), manager._compatible_schema(b))
         self.assertNotEqual(manager._compatible_schema(a), manager._compatible_schema(c))
 
+    def test_schema_property_names_and_literal_objects_are_never_dropped(self):
+        old = {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "old hint"},
+                "title": {"type": "string"},
+                "examples": {"type": "array"},
+                "payload": {"const": {"description": "a", "title": "source"}},
+            },
+            "required": ["description"],
+            "description": "documentation only",
+        }
+        new = json.loads(json.dumps(old))
+        new["description"] = "new documentation"
+        new["properties"]["description"]["description"] = "new hint"
+        self.assertEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        new["properties"]["description"]["type"] = "integer"
+        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        new = json.loads(json.dumps(old))
+        new["properties"]["payload"]["const"]["description"] = "changed data"
+        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+
+    def test_existing_inactive_release_never_executes_under_trusted_sha(self):
+        self._release(SHA_A)
+        self._release(SHA_B)
+        manager.write_marker(self.root, SHA_A, None)
+        with (patch.object(manager, "trusted_latest", return_value=SHA_B),
+              patch.object(manager, "run", return_value=""),
+              patch.object(manager, "registered_mcp_env", return_value={}),
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
+              patch.object(manager, "run_unittests") as tests):
+            with self.assertRaisesRegex(manager.ReleaseError, "unverified reuse"):
+                manager.promote(**self._runner())
+            # Only current approved release was consulted for catalog.
+            self.assertEqual(invoke.call_count, 1)
+            tests.assert_not_called()
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
+
+    def test_release_script_rejects_in_root_redirected_symlink(self):
+        self._release(SHA_A)
+        redirected = self.root / "releases" / SHA_B
+        try:
+            redirected.symlink_to(self.root / "releases" / SHA_A, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation unavailable on this platform")
+        with self.assertRaisesRegex(manager.ReleaseError, "redirected"):
+            manager.release_script(self.root, SHA_B)
+
     def test_release_gate_requires_actual_success_from_github_actions_and_exact_sha(self):
         success = [
             {"name": name, "status": "completed", "conclusion": "success",
