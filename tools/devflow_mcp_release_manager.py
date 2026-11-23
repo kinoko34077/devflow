@@ -7,6 +7,8 @@ The MCP launcher itself never fetches Git or runs validation.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import hashlib
 import asyncio
 import json
 import os
@@ -17,6 +19,7 @@ import sys
 import tempfile
 import tomllib
 import zipfile
+import uuid
 
 
 REPOSITORY = "kinoko34077/devflow"
@@ -46,37 +49,100 @@ def validate_sha(value: object) -> str:
     return value
 
 
+def validate_digest(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ReleaseError("invalid release tree digest")
+    return value
+
+
+def release_tree_digest(directory: Path) -> str:
+    """全相対パスと全ファイルのバイトを検査する。リダイレクトは拒否。"""
+    if (not directory.is_dir() or directory.is_symlink()
+            or directory.resolve() != directory.parent.resolve() / directory.name):
+        raise ReleaseError("release directory is missing or redirected")
+    base = directory.resolve()
+    digest = hashlib.sha256()
+    entries = sorted(directory.rglob("*"), key=lambda p: p.relative_to(directory).as_posix())
+    if not entries:
+        raise ReleaseError("empty release directory")
+    try:
+        for entry in entries:
+            relative = entry.relative_to(directory)
+            name = relative.as_posix().encode("utf-8")
+            if entry.is_symlink() or entry.resolve() != base.joinpath(*relative.parts):
+                raise ReleaseError("release entry is redirected")
+            if entry.is_dir():
+                digest.update(b"D\0" + name + b"\0")
+            elif entry.is_file():
+                digest.update(b"F\0" + name + b"\0")
+                size = entry.stat().st_size
+                digest.update(size.to_bytes(8, "big"))
+                read_size = 0
+                with entry.open("rb") as stream:
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+                        read_size += len(chunk)
+                if read_size != size:
+                    raise ReleaseError("release changed during integrity check")
+            else:
+                raise ReleaseError("unsupported release entry")
+    except OSError as error:
+        raise ReleaseError("release tree could not be checked") from error
+    return digest.hexdigest()
+
+
+def require_integrity(root: Path, sha: str, expected_digest: str) -> None:
+    validate_digest(expected_digest)
+    if release_tree_digest(root / "releases" / sha) != expected_digest:
+        raise ReleaseError("release contents differ from verified bytes")
+
+
 def read_marker(root: Path) -> dict | None:
     marker = root / "active.json"
     if not marker.exists():
         return None
-    if marker.stat().st_size > 4096:
-        raise ReleaseError("invalid active release marker")
     try:
+        if marker.stat().st_size > 4096:
+            raise ReleaseError("invalid active release marker")
         data = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError) as error:
         raise ReleaseError("invalid active release marker") from error
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict) or data.get("schema_version") != 2:
         raise ReleaseError("invalid active release marker")
     validate_sha(data.get("sha"))
+    validate_digest(data.get("tree_sha256"))
     previous = data.get("previous_sha")
-    if previous is not None:
+    previous_digest = data.get("previous_tree_sha256")
+    if previous is None:
+        if previous_digest is not None:
+            raise ReleaseError("invalid previous release marker")
+    else:
         validate_sha(previous)
+        validate_digest(previous_digest)
     return data
 
 
-def write_marker(root: Path, sha: str, previous_sha: str | None) -> None:
-    """Atomic same-directory state change; marker contains no credentials."""
+def write_marker(
+    root: Path, sha: str, previous_sha: str | None, *,
+    tree_sha256: str, previous_tree_sha256: str | None = None,
+) -> None:
+    """検証済みのdigestだけを原子的に書き込む。秘密情報は含まない。"""
     validate_sha(sha)
+    validate_digest(tree_sha256)
     if previous_sha is not None:
         validate_sha(previous_sha)
+        validate_digest(previous_tree_sha256)
+    elif previous_tree_sha256 is not None:
+        raise ReleaseError("unexpected previous release digest")
     root.mkdir(parents=True, exist_ok=True)
     marker = root / "active.json"
     fd, name = tempfile.mkstemp(prefix=".active-", suffix=".tmp", dir=root)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             json.dump(
-                {"schema_version": 1, "sha": sha, "previous_sha": previous_sha},
+                {"schema_version": 2, "sha": sha, "previous_sha": previous_sha,
+                 "tree_sha256": tree_sha256,
+                 "previous_tree_sha256": previous_tree_sha256},
                 out, sort_keys=True,
             )
             out.write("\n")
@@ -86,6 +152,57 @@ def write_marker(root: Path, sha: str, previous_sha: str | None) -> None:
     finally:
         if os.path.exists(name):
             os.unlink(name)
+
+
+@contextmanager
+def release_lock(root: Path):
+    """OS側の短命な排他ロック。クラッシュ後のstale lockを残さない。"""
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        with (root / ".manager.lock").open("a+b") as handle:
+            if os.name == "nt":
+                import msvcrt
+                if handle.seek(0, os.SEEK_END) == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError as error:
+                    raise ReleaseError("another release manager is active") from error
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as error:
+                    raise ReleaseError("another release manager is active") from error
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError as error:
+        raise ReleaseError("release manager lock unavailable") from error
+
+
+def quarantine_inactive(root: Path, sha: str) -> bool:
+    """未検証の既存リリースは一切実行せず隔離、次回はtrusted sourceから再構築。"""
+    target = root / "releases" / sha
+    if not target.exists() and not target.is_symlink():
+        return False
+    current = read_marker(root)
+    if current is not None and current["sha"] == sha:
+        raise ReleaseError("refusing to move an active release")
+    destination = target.with_name(".quarantine-" + sha + "-" + uuid.uuid4().hex)
+    try:
+        os.replace(target, destination)
+    except OSError as error:
+        raise ReleaseError("inactive release cannot be quarantined") from error
+    return True
 
 
 def run(args: list[str], *, timeout: int = 60, cwd: Path | None = None) -> str:
@@ -320,20 +437,19 @@ def release_script(root: Path, sha: str) -> Path:
     return script
 
 
-def promote(
-    *,
-    repo: Path, python: Path, gh: Path, root: Path, fallback: Path,
+def _promote_unlocked(
+    *, repo: Path, python: Path, gh: Path, root: Path, fallback: Path,
 ) -> str:
-    root.mkdir(parents=True, exist_ok=True)
     state = read_marker(root)
     latest = trusted_latest(repo, gh)
+    if state is not None:
+        # 「最新版と同じ」場合でも改変済み実体を正常扱いしない。
+        require_integrity(root, state["sha"], state["tree_sha256"])
     if state is not None and state["sha"] == latest:
         return "UP_TO_DATE " + latest
     if state is not None:
-        # Refuse to promote history rewrites or unrelated commits.
         run(["git", "-C", str(repo), "merge-base", "--is-ancestor",
              state["sha"], latest], timeout=15)
-    # For a first activation, compare against the existing configured catalog.
     old_script = release_script(root, state["sha"]) if state else fallback
     if not old_script.is_file():
         raise ReleaseError("current MCP fallback is missing")
@@ -341,12 +457,8 @@ def promote(
     previous_catalog = smoke(python, gh, old_script, full=False, mcp_env=mcp_env)
     target = root / "releases" / latest
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Never execute an already existing inactive cache under a trusted SHA:
-    # it might have been modified, or be a redirected Windows junction.
-    if target.exists() or target.is_symlink():
-        raise ReleaseError(
-            "inactive release directory already exists; refusing unverified reuse"
-        )
+    # 再利用すると未検証実体にtokenを渡すため、必ず隔離して再作成する。
+    quarantine_inactive(root, latest)
     with tempfile.TemporaryDirectory(prefix=".candidate-", dir=root) as tmp:
         stage = Path(tmp) / latest
         stage.mkdir()
@@ -357,29 +469,60 @@ def promote(
             raise ReleaseError("candidate MCP entrypoint is missing")
         if candidate.resolve() != stage.resolve() / "tools" / "devflow_mcp.py":
             raise ReleaseError("candidate release is redirected")
-        new_catalog = smoke(
-            python, gh, candidate, full=True, mcp_env=mcp_env,
-        )
+        new_catalog = smoke(python, gh, candidate, full=True, mcp_env=mcp_env)
         if new_catalog != previous_catalog:
             raise ReleaseError("MCP callable schema changed; manual review required")
-        os.replace(stage, target)
-    write_marker(root, latest, state["sha"] if state else None)
+        verified_digest = release_tree_digest(stage)
+        try:
+            os.replace(stage, target)
+        except OSError as error:
+            raise ReleaseError("verified release could not be installed") from error
+    try:
+        # active.jsonに先に記録したdigestは、検証済みstageの実バイトに対応。
+        require_integrity(root, latest, verified_digest)
+        write_marker(
+            root, latest, state["sha"] if state else None,
+            tree_sha256=verified_digest,
+            previous_tree_sha256=state["tree_sha256"] if state else None,
+        )
+    except (OSError, ReleaseError) as error:
+        # 書込失敗後のinactive dirを隔離。activeになった可能性があれば触らない。
+        quarantine_inactive(root, latest)
+        raise ReleaseError(
+            "release activation incomplete; inspect status before next check"
+        ) from error
     return "ACTIVATED " + latest
 
 
+def promote(
+    *, repo: Path, python: Path, gh: Path, root: Path, fallback: Path,
+) -> str:
+    with release_lock(root):
+        return _promote_unlocked(
+            repo=repo, python=python, gh=gh, root=root, fallback=fallback,
+        )
+
+
 def rollback(root: Path, fallback: Path) -> str:
-    state = read_marker(root)
-    if state is None:
-        return "ALREADY_LEGACY"
-    previous = state["previous_sha"]
-    if previous is None:
-        if not fallback.is_file():
-            raise ReleaseError("original fallback MCP is unavailable")
-        (root / "active.json").unlink()
-        return "ROLLED_BACK_TO_LEGACY"
-    release_script(root, previous)
-    write_marker(root, previous, state["sha"])
-    return "ROLLED_BACK " + previous
+    with release_lock(root):
+        state = read_marker(root)
+        if state is None:
+            return "ALREADY_LEGACY"
+        previous = state["previous_sha"]
+        if previous is None:
+            if not fallback.is_file():
+                raise ReleaseError("original fallback MCP is unavailable")
+            (root / "active.json").unlink()
+            return "ROLLED_BACK_TO_LEGACY"
+        release_script(root, previous)
+        # 旧版のdigestを作り直して「未検証の改変」を再承認しない。
+        require_integrity(root, previous, state["previous_tree_sha256"])
+        write_marker(
+            root, previous, state["sha"],
+            tree_sha256=state["previous_tree_sha256"],
+            previous_tree_sha256=state["tree_sha256"],
+        )
+        return "ROLLED_BACK " + previous
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -405,8 +548,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(outcome, flush=True)
         return 0
-    except ReleaseError as error:
-        print("BLOCKED " + str(error), file=sys.stderr, flush=True)
+    except (ReleaseError, OSError) as error:
+        print("BLOCKED release operation failed: " + (str(error) if isinstance(error, ReleaseError) else "local filesystem error"), file=sys.stderr, flush=True)
         return 3
 
 
