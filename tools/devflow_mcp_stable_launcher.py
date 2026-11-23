@@ -6,6 +6,7 @@ command and arguments remain unchanged. Never fetch, update, or test on launch.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,43 @@ def release_root() -> Path:
     return base / "KiNoTch" / "devflow-mcp-releases"
 
 
+def release_tree_digest(directory: Path) -> str:
+    """全相対パスと全ファイルのバイトを検査する。リダイレクトは拒否。"""
+    if (not directory.is_dir() or directory.is_symlink()
+            or directory.resolve() != directory.parent.resolve() / directory.name):
+        raise ValueError("release directory is missing or redirected")
+    base = directory.resolve()
+    digest = hashlib.sha256()
+    entries = sorted(directory.rglob("*"), key=lambda p: p.relative_to(directory).as_posix())
+    if not entries:
+        raise ValueError("empty release directory")
+    try:
+        for entry in entries:
+            relative = entry.relative_to(directory)
+            name = relative.as_posix().encode("utf-8")
+            if entry.is_symlink() or entry.resolve() != base.joinpath(*relative.parts):
+                raise ValueError("release entry is redirected")
+            if entry.is_dir():
+                digest.update(b"D\0" + name + b"\0")
+            elif entry.is_file():
+                digest.update(b"F\0" + name + b"\0")
+                size = entry.stat().st_size
+                digest.update(size.to_bytes(8, "big"))
+                read_size = 0
+                with entry.open("rb") as stream:
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+                        read_size += len(chunk)
+                if read_size != size:
+                    raise ValueError("release changed during integrity check")
+            else:
+                raise ValueError("unsupported release entry")
+    except OSError as error:
+        raise ValueError("release tree could not be checked") from error
+    return digest.hexdigest()
+
+
+
 def selected_script(fallback_script: str, *, root: Path | None = None) -> Path:
     """Select exactly one complete immutable release or the original fallback.
 
@@ -48,7 +86,7 @@ def selected_script(fallback_script: str, *, root: Path | None = None) -> Path:
     if marker.stat().st_size > 4096:
         raise ValueError("invalid MCP release marker size")
     state = json.loads(marker.read_text(encoding="utf-8"))
-    if not isinstance(state, dict) or state.get("schema_version") != 1:
+    if not isinstance(state, dict) or state.get("schema_version") != 2:
         raise ValueError("invalid MCP release marker")
     sha = state.get("sha")
     if type(sha) is not str or not _SHA.fullmatch(sha):
@@ -59,6 +97,11 @@ def selected_script(fallback_script: str, *, root: Path | None = None) -> Path:
     expected = root.resolve() / "releases" / sha / "tools" / "devflow_mcp.py"
     if candidate.resolve() != expected:
         raise ValueError("selected MCP release is redirected")
+    verified_digest = state.get("tree_sha256")
+    if type(verified_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", verified_digest) is None:
+        raise ValueError("invalid verified release digest")
+    if release_tree_digest(root / "releases" / sha) != verified_digest:
+        raise ValueError("active release contents changed")
     return candidate
 
 
