@@ -141,6 +141,28 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 with self.assertRaises(manager.ReleaseError):
                     manager.github_gate(Path("/fake/gh"), SHA_A)
 
+
+    def test_registered_env_read_preserves_values_without_emitting_or_modifying_config(self):
+        with tempfile.TemporaryDirectory() as home:
+            user = Path(home)
+            config = user / ".codex" / "config.toml"
+            config.parent.mkdir()
+            config.write_text(
+                '[mcp_servers.kinotch_devflow]\n'
+                'command = "/fake/python"\n'
+                'args = ["/fake/launcher", "/fake/gh", "/fake/fallback"]\n'
+                '[mcp_servers.kinotch_devflow.env]\n'
+                'PYTHONPATH = "/allowed/repo"\n',
+                encoding="utf-8",
+            )
+            with patch("pathlib.Path.home", return_value=user):
+                env = manager.registered_mcp_env(
+                    Path("/fake/python"), Path("/fake/fallback"),
+                )
+            self.assertEqual(env, {"PYTHONPATH": "/allowed/repo"})
+            self.assertIn('command = "/fake/python"', config.read_text())
+
+
     def test_staging_failure_does_not_promote_or_modify_old_release(self):
         old = self._release(SHA_A)
         manager.write_marker(self.root, SHA_A, None)
@@ -152,6 +174,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "run", return_value=""),
               patch.object(manager, "source_archive", side_effect=fake_archive),
               patch.object(manager, "run_unittests", return_value=None),
+              patch.object(manager, "registered_mcp_env", return_value={}),
               patch.object(manager, "smoke", side_effect=[
                   {"bootstrap_repository": {"type": "object"}},
                   manager.ReleaseError("new MCP smoke failed"),
@@ -170,6 +193,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
         with (patch.object(manager, "trusted_latest", return_value=SHA_A),
               patch.object(manager, "source_archive", side_effect=fake_archive),
               patch.object(manager, "run_unittests", return_value=None),
+              patch.object(manager, "registered_mcp_env", return_value={}),
               patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
             self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_A)
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
