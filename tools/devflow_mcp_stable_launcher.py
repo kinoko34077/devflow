@@ -56,8 +56,9 @@ def selected_script(fallback_script: str, *, root: Path | None = None) -> Path:
     candidate = root / "releases" / sha / "tools" / "devflow_mcp.py"
     if not candidate.is_file():
         raise ValueError("selected MCP release is missing")
-    if not candidate.resolve().is_relative_to(root.resolve()):
-        raise ValueError("selected MCP release escapes trusted directory")
+    expected = root.resolve() / "releases" / sha / "tools" / "devflow_mcp.py"
+    if candidate.resolve() != expected:
+        raise ValueError("selected MCP release is redirected")
     return candidate
 
 
