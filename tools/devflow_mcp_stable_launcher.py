@@ -137,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         return 78
     child_env = os.environ.copy()
     child_env["DEVFLOW_GITHUB_TOKEN"] = token
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
     token = None
     try:
         child = subprocess.Popen([sys.executable, str(script)], env=child_env)
