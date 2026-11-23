@@ -16,7 +16,8 @@ A local read-only state file determines which *newly started* server is selected
 
 ```text
 %LOCALAPPDATA%/KiNoTch/devflow-mcp-releases/
-  active.json                    {"schema_version":1,"sha":"<40-hex>","previous_sha":null}
+  active.json                    {"schema_version":2,"sha":"<40-hex>","tree_sha256":"<64-hex>",
+                                 "previous_sha":null,"previous_tree_sha256":null}
   releases/<sha>/tools/devflow_mcp.py
   releases/<prior_sha>/...
 ```
@@ -51,9 +52,14 @@ The updater performs, in order:
    MCP registration's environment (for example its existing `PYTHONPATH`),
    without printing or persisting any secret values. Compare existing/new callable tool schemas,
    excluding only descriptions/titles/examples.
-6. Install immutable release and atomically replace the active SHA marker.
-   Failure anywhere **before** marker replacement leaves the prior version
-   selected. For automatic schedule activation, preserve old releases.
+6. Record the verified staged tree SHA-256 digest alongside the active commit SHA,
+   then atomically replace the active marker. Both the launcher and manager
+   re-hash every relative path and file before using an active release.
+   Both real MCP and local tests disable Python bytecode writes into the staged
+   tree. Failure before marker replacement keeps the prior version selected.
+   An incomplete target is quarantined (not executed) and rebuilt from trusted
+   Git source on the next check. Previous releases remain for rollback and
+   in-flight MCP processes.
 
 A Windows Task Scheduler entry can run `check` hourly using the *current
 interactive user*, without elevation and with concurrent executions suppressed.
@@ -78,3 +84,12 @@ A changed set of callable MCP tool names, required arguments, schemas, or
 missing successful exact-head CI **blocks** automatic promotion. Re-check
 the user-facing Codex version and compatibility before an explicit
 breaking-contract rollout.
+
+## P2-A / P2-B：復旧と実行時完全性の境界（DFM02）
+
+- **部分切替の復旧**：候補ディレクトリが存在しても検証済みとみなさない。既存候補を `releases/.quarantine-<sha>-<random>` に隔離し、GitHub `main` の検証済みSHAから再取得・再試験する。隔離された内容は実行しない。marker書換えが失敗した場合も旧markerを保持し、可能なら新規候補を隔離して `BLOCKED` を返す。Windowsで使用中のディレクトリを移動できない場合、保護を迂回せず原因を解消して再試行する。隔離ディレクトリの消去は自動実行しない。
+- **起動時の検証**：`active.json` のschema version 2は、検証済みreleaseのSHAだけでなく、全相対パスと全ファイルバイトを含むSHA-256を保持する。launcherは `gh auth token` の実行**前**にハッシュ、パスリダイレクト、schemaを確認し、不一致ならMCPを起動しない。管理コマンドの `UP_TO_DATE` 判定も同じ検証を行う。
+- **rollback**：前の版への復帰では、新規に読み取った改変済み内容を「検証済み」に昇格させず、切替前に保持していた `previous_tree_sha256` と照合する。初回有効化の取り消しは元の固定launcher・fallbackへ戻す。schema v1の未検証markerは互換性を仮定せず拒否する（現時点では新方式未導入）。
+- **競合防止**：managerはOSのプロセス連動ファイルロックを利用して `check` と `rollback` を排他し、クラッシュ後に永続的なstale lockを残さない。Scheduler側も重複起動を禁止する。
+- **残る権限境界**：markerと安定launcher自体の書換え権限を持つ、同一ユーザー権限の攻撃者に対してSHA-256だけでは防御できない。改変検出は「markerを信頼できる」ことが前提であり、検証終了後からプロセス起動までのファイル差替え競合も完全に消せない。DSKTP-SSD2での導入前に、実際のACL・Codex sandboxの書込み範囲・親ディレクトリの保護とプロセス起動経路を確認する。検証不能なら自動更新は有効化しない。
+- **互換性の限界**：入力schemaの一致はツールの機能がread-onlyである証明ではない。各版はmain側の正式レビュー・Required CIに依存する。tool数16の変更時はmanagerの手動更新と互換性確認が必要。
