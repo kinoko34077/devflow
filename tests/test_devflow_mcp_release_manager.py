@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,6 +30,16 @@ class StableLauncherTests(unittest.TestCase):
         target.write_text("print('release')\n", encoding="utf-8")
         return target
 
+    def _marker(self, sha, previous=None):
+        manager.write_marker(
+            self.root, sha, previous,
+            tree_sha256=manager.release_tree_digest(self.root / "releases" / sha),
+            previous_tree_sha256=(
+                manager.release_tree_digest(self.root / "releases" / previous)
+                if previous is not None else None
+            ),
+        )
+
     def test_no_marker_preserves_original_legacy_launch(self):
         self.assertEqual(
             launcher.selected_script(str(self.legacy), root=self.root),
@@ -37,7 +48,7 @@ class StableLauncherTests(unittest.TestCase):
 
     def test_atomic_marker_picks_verified_sha_without_editing_config(self):
         candidate = self._release(SHA_A)
-        manager.write_marker(self.root, SHA_A, None)
+        self._marker(SHA_A)
         self.assertEqual(
             launcher.selected_script(str(self.legacy), root=self.root),
             candidate,
@@ -57,17 +68,43 @@ class StableLauncherTests(unittest.TestCase):
 
     def test_launcher_rejects_in_root_release_alias(self):
         self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B)
         redirect = self.root / "releases" / SHA_B
+        shutil.rmtree(redirect)
         try:
             redirect.symlink_to(self.root / "releases" / SHA_A, target_is_directory=True)
         except (OSError, NotImplementedError):
             self.skipTest("symlink creation unavailable on this platform")
-        manager.write_marker(self.root, SHA_B, None)
         with self.assertRaisesRegex(ValueError, "redirected"):
             launcher.selected_script(str(self.legacy), root=self.root)
 
+
+    def test_active_release_change_blocks_token_bearing_launch_and_update(self):
+        script = self._release(SHA_A)
+        sibling = script.with_name("agent_inbox.py")
+        sibling.write_text("# trusted\n", encoding="utf-8")
+        self._marker(SHA_A)
+        sibling.write_text("# tampered\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "contents changed"):
+            launcher.selected_script(str(self.legacy), root=self.root)
+        with patch.object(manager, "trusted_latest", return_value=SHA_A):
+            with self.assertRaisesRegex(manager.ReleaseError, "differ"):
+                manager.promote(**self._runner())
+
+    def test_marker_schema_v1_is_rejected_before_token_lookup(self):
+        self._release(SHA_A)
+        (self.root / "active.json").write_text(
+            json.dumps({"schema_version": 1, "sha": SHA_A}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "marker"):
+            launcher.selected_script(str(self.legacy), root=self.root)
+
     def test_marker_requires_installed_release(self):
-        manager.write_marker(self.root, SHA_A, None)
+        target = self._release(SHA_A)
+        self._marker(SHA_A)
+        target.unlink()
         with self.assertRaisesRegex(ValueError, "missing"):
             launcher.selected_script(str(self.legacy), root=self.root)
 
@@ -94,17 +131,27 @@ class ReleaseManagerContractTests(unittest.TestCase):
             "gh": Path("/fake/gh"), "root": self.root, "fallback": self.legacy,
         }
 
+    def _marker(self, sha, previous=None):
+        manager.write_marker(
+            self.root, sha, previous,
+            tree_sha256=manager.release_tree_digest(self.root / "releases" / sha),
+            previous_tree_sha256=(
+                manager.release_tree_digest(self.root / "releases" / previous)
+                if previous is not None else None
+            ),
+        )
+
     def test_missing_and_invalid_sha_rejected_without_state_change(self):
         with self.assertRaises(manager.ReleaseError):
-            manager.write_marker(self.root, "unknown", None)
+            manager.write_marker(self.root, "unknown", None, tree_sha256="0" * 64)
         self.assertIsNone(manager.read_marker(self.root))
         with self.assertRaises(manager.ReleaseError):
-            manager.write_marker(self.root, SHA_A, "../unsafe")
+            manager.write_marker(self.root, SHA_A, "../unsafe", tree_sha256="0" * 64, previous_tree_sha256="0" * 64)
         self.assertIsNone(manager.read_marker(self.root))
 
     def test_rollback_first_restores_legacy_without_deleting_release(self):
         self._release(SHA_A)
-        manager.write_marker(self.root, SHA_A, None)
+        self._marker(SHA_A)
         self.assertEqual(
             manager.rollback(self.root, self.legacy), "ROLLED_BACK_TO_LEGACY",
         )
@@ -114,7 +161,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
     def test_subsequent_rollback_switches_sha_and_retains_both(self):
         self._release(SHA_A)
         self._release(SHA_B)
-        manager.write_marker(self.root, SHA_B, SHA_A)
+        self._marker(SHA_B, SHA_A)
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
         self.assertEqual(manager.read_marker(self.root)["previous_sha"], SHA_B)
@@ -154,19 +201,25 @@ class ReleaseManagerContractTests(unittest.TestCase):
 
     def test_existing_inactive_release_never_executes_under_trusted_sha(self):
         self._release(SHA_A)
-        self._release(SHA_B)
-        manager.write_marker(self.root, SHA_A, None)
+        inactive = self._release(SHA_B)
+        inactive.write_text("# unverified poison\n", encoding="utf-8")
+        self._marker(SHA_A)
+        def fresh_archive(_repo, _sha, destination):
+            target = destination / "tools" / "devflow_mcp.py"
+            target.parent.mkdir(parents=True)
+            target.write_text("# verified rebuild\n", encoding="utf-8")
         with (patch.object(manager, "trusted_latest", return_value=SHA_B),
               patch.object(manager, "run", return_value=""),
+              patch.object(manager, "source_archive", side_effect=fresh_archive),
               patch.object(manager, "registered_mcp_env", return_value={}),
               patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
               patch.object(manager, "run_unittests") as tests):
-            with self.assertRaisesRegex(manager.ReleaseError, "unverified reuse"):
-                manager.promote(**self._runner())
-            # Only current approved release was consulted for catalog.
-            self.assertEqual(invoke.call_count, 1)
-            tests.assert_not_called()
-        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
+            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            self.assertEqual(invoke.call_count, 2)
+            tests.assert_called_once()
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
+        self.assertEqual(inactive.read_text(), "# verified rebuild\n")
+        self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
 
     def test_release_script_rejects_in_root_redirected_symlink(self):
         self._release(SHA_A)
@@ -224,7 +277,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
 
     def test_staging_failure_does_not_promote_or_modify_old_release(self):
         old = self._release(SHA_A)
-        manager.write_marker(self.root, SHA_A, None)
+        self._marker(SHA_A)
         def fake_archive(_repo, _sha, destination):
             target = destination / "tools" / "devflow_mcp.py"
             target.parent.mkdir()
@@ -243,6 +296,56 @@ class ReleaseManagerContractTests(unittest.TestCase):
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
         self.assertTrue(old.is_file())
         self.assertFalse((self.root / "releases" / SHA_B).exists())
+
+
+    def test_partial_marker_failure_recovers_without_unverified_execution(self):
+        self._release(SHA_A)
+        self._marker(SHA_A)
+        def fake_archive(_repo, _sha, destination):
+            script = destination / "tools" / "devflow_mcp.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("# rebuilt\n", encoding="utf-8")
+        with (patch.object(manager, "trusted_latest", return_value=SHA_B),
+              patch.object(manager, "run", return_value=""),
+              patch.object(manager, "source_archive", side_effect=fake_archive),
+              patch.object(manager, "run_unittests"),
+              patch.object(manager, "registered_mcp_env", return_value={}),
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
+            with patch.object(manager, "write_marker", side_effect=OSError("locked")):
+                with self.assertRaisesRegex(manager.ReleaseError, "activation incomplete"):
+                    manager.promote(**self._runner())
+            self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
+            self.assertFalse((self.root / "releases" / SHA_B).exists())
+            self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
+            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
+
+    def test_rollback_rejects_modified_previously_verified_release(self):
+        old = self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        old.write_text("# tampered\n", encoding="utf-8")
+        with self.assertRaisesRegex(manager.ReleaseError, "differ"):
+            manager.rollback(self.root, self.legacy)
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
+
+    def test_rollback_then_repromotion_rebuilds_inactive_release(self):
+        self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
+        def fresh_archive(_repo, _sha, destination):
+            script = destination / "tools" / "devflow_mcp.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("# freshly rebuilt\n", encoding="utf-8")
+        with (patch.object(manager, "trusted_latest", return_value=SHA_B),
+              patch.object(manager, "run", return_value=""),
+              patch.object(manager, "source_archive", side_effect=fresh_archive),
+              patch.object(manager, "run_unittests"),
+              patch.object(manager, "registered_mcp_env", return_value={}),
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
+            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+        self.assertIn("# freshly rebuilt", (self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py").read_text())
 
     def test_successful_staging_atomically_selects_new_release(self):
         def fake_archive(_repo, _sha, destination):
