@@ -305,6 +305,7 @@ def run_unittests(python: Path, source: Path) -> None:
             [str(python), "-m", "unittest", *suites],
             cwd=source, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=100, check=False,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ReleaseError("local Python unit suite could not run") from error
@@ -384,6 +385,7 @@ async def _stdio_test(
     env = os.environ.copy()
     env.update(mcp_env)
     env["DEVFLOW_GITHUB_TOKEN"] = token
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     server = StdioServerParameters(command=str(python), args=[str(script)], env=env)
     with open(os.devnull, "w") as log:
         async with stdio_client(server, errlog=log) as (rd, wr):
