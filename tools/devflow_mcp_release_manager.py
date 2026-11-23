@@ -195,17 +195,44 @@ def run_unittests(python: Path, source: Path) -> None:
         raise ReleaseError("local Python unit suite failed; release not activated")
 
 
+_SCHEMA_MAPS = frozenset({
+    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+})
+_SCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+_SCHEMA_CHILDREN = frozenset({
+    "items", "additionalProperties", "unevaluatedProperties", "contains",
+    "not", "if", "then", "else", "propertyNames",
+})
+
+
 def _compatible_schema(schema: object) -> object:
-    """Descriptions/titles may change; tool names and callable contracts may not."""
-    if isinstance(schema, dict):
-        return {
-            k: _compatible_schema(v)
-            for k, v in schema.items()
-            if k not in {"title", "description", "examples"}
-        }
-    if isinstance(schema, list):
-        return [_compatible_schema(v) for v in schema]
-    return schema
+    """Ignore only schema-node annotations, not property names/literal values.
+
+    Do not descend into const, enum, default, examples, or unknown extension
+    values: those may contain data keys named "title" or "description".
+    """
+    if not isinstance(schema, dict):
+        return schema
+    normalized = {}
+    for key, value in schema.items():
+        if key in {"title", "description", "examples"}:
+            continue
+        if key in _SCHEMA_MAPS and isinstance(value, dict):
+            normalized[key] = {
+                name: _compatible_schema(child)
+                for name, child in value.items()
+            }
+        elif key in _SCHEMA_LISTS and isinstance(value, list):
+            normalized[key] = [_compatible_schema(child) for child in value]
+        elif key in _SCHEMA_CHILDREN and isinstance(value, (dict, list)):
+            normalized[key] = (
+                [_compatible_schema(child) for child in value]
+                if isinstance(value, list)
+                else _compatible_schema(value)
+            )
+        else:
+            normalized[key] = value
+    return normalized
 
 
 def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
@@ -287,8 +314,9 @@ def smoke(
 def release_script(root: Path, sha: str) -> Path:
     validate_sha(sha)
     script = root / "releases" / sha / "tools" / "devflow_mcp.py"
-    if not script.is_file() or not script.resolve().is_relative_to(root.resolve()):
-        raise ReleaseError("selected release is missing or invalid")
+    expected = root.resolve() / "releases" / sha / "tools" / "devflow_mcp.py"
+    if not script.is_file() or script.resolve() != expected:
+        raise ReleaseError("selected release is missing or redirected")
     return script
 
 
@@ -313,28 +341,28 @@ def promote(
     previous_catalog = smoke(python, gh, old_script, full=False, mcp_env=mcp_env)
     target = root / "releases" / latest
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        with tempfile.TemporaryDirectory(prefix=".candidate-", dir=root) as tmp:
-            stage = Path(tmp) / latest
-            stage.mkdir()
-            source_archive(repo, latest, stage)
-            run_unittests(python, stage)
-            candidate = stage / "tools" / "devflow_mcp.py"
-            if not candidate.is_file():
-                raise ReleaseError("candidate MCP entrypoint is missing")
-            new_catalog = smoke(
-                python, gh, candidate, full=True, mcp_env=mcp_env,
-            )
-            if new_catalog != previous_catalog:
-                raise ReleaseError("MCP callable schema changed; manual review required")
-            os.replace(stage, target)
-    else:
+    # Never execute an already existing inactive cache under a trusted SHA:
+    # it might have been modified, or be a redirected Windows junction.
+    if target.exists() or target.is_symlink():
+        raise ReleaseError(
+            "inactive release directory already exists; refusing unverified reuse"
+        )
+    with tempfile.TemporaryDirectory(prefix=".candidate-", dir=root) as tmp:
+        stage = Path(tmp) / latest
+        stage.mkdir()
+        source_archive(repo, latest, stage)
+        run_unittests(python, stage)
+        candidate = stage / "tools" / "devflow_mcp.py"
+        if not candidate.is_file():
+            raise ReleaseError("candidate MCP entrypoint is missing")
+        if candidate.resolve() != stage.resolve() / "tools" / "devflow_mcp.py":
+            raise ReleaseError("candidate release is redirected")
         new_catalog = smoke(
-            python, gh, release_script(root, latest),
-            full=True, mcp_env=mcp_env,
+            python, gh, candidate, full=True, mcp_env=mcp_env,
         )
         if new_catalog != previous_catalog:
             raise ReleaseError("MCP callable schema changed; manual review required")
+        os.replace(stage, target)
     write_marker(root, latest, state["sha"] if state else None)
     return "ACTIVATED " + latest
 
