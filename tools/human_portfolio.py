@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from tools import reconciliation_publication, repository_projection
+try:
+    from . import reconciliation_publication, repository_projection
+except ImportError:  # direct stdio script: keep the Core's top-level module identity
+    import reconciliation_publication
+    import repository_projection
 
 
 ATTENTION_DISPOSITIONS = frozenset(

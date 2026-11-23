@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from tools import human_portfolio
 from tools import reconciliation_publication
@@ -289,6 +292,50 @@ class HumanPortfolioReadModelTests(unittest.TestCase):
                 [first],
                 reconciliation_publications={"owner/missing": []},
             )
+
+
+
+class HumanPortfolioImportModeRegressionTests(unittest.TestCase):
+    """Exercise isolated package and script entrypoints (no GitHub I/O)."""
+
+    def _assert_entrypoint_accepts_projection(self, mode: str) -> None:
+        root = Path(__file__).resolve().parents[1]
+        code = """
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+mode = sys.argv[2]
+if mode == "direct":
+    sys.path.insert(0, str(root / "tools"))
+    import devflow_mcp_core as core
+else:
+    sys.path.insert(0, str(root))
+    from tools import devflow_mcp_core as core
+assert (
+    core.repository_projection.RepositoryProjection
+    is core.human_portfolio.repository_projection.RepositoryProjection
+), "RepositoryProjection split across import aliases"
+assert (
+    core.reconciliation_publication is core.human_portfolio.reconciliation_publication
+), "Reconciliation module split across import aliases"
+projection = core.repository_projection.build_repository_projection(
+    "owner/repo", [], observed_at="2026-11-23T00:00:00Z"
+)
+result = core.human_portfolio.build_repository_human_portfolio(projection)
+assert result.repository == "owner/repo"
+assert not result.entries
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", code, str(root), mode],
+            cwd=root, text=True, capture_output=True, check=False, timeout=40,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_package_import_human_portfolio_accepts_projection(self):
+        self._assert_entrypoint_accepts_projection("package")
+
+    def test_direct_script_import_human_portfolio_accepts_projection(self):
+        self._assert_entrypoint_accepts_projection("direct")
 
 
 if __name__ == "__main__":
