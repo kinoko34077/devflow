@@ -55,6 +55,17 @@ class StableLauncherTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             launcher.selected_script(str(self.legacy), root=self.root)
 
+    def test_launcher_rejects_in_root_release_alias(self):
+        self._release(SHA_A)
+        redirect = self.root / "releases" / SHA_B
+        try:
+            redirect.symlink_to(self.root / "releases" / SHA_A, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation unavailable on this platform")
+        manager.write_marker(self.root, SHA_B, None)
+        with self.assertRaisesRegex(ValueError, "redirected"):
+            launcher.selected_script(str(self.legacy), root=self.root)
+
     def test_marker_requires_installed_release(self):
         manager.write_marker(self.root, SHA_A, None)
         with self.assertRaisesRegex(ValueError, "missing"):
