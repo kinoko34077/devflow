@@ -543,12 +543,22 @@ In particular:
 
 If these conditions do not hold, leave the PR unmerged and set the correct Next Action / `[USER_DECISION]` boundary.
 
+### 5.2 CI and Review lifecycle — PR first, verified integration
+
+Use three separate verification boundaries. Their evidence is not interchangeable:
+
+1. **PR created or updated:** run the required CI/checks for the current change and complete the applicable Formal Review against the current exact PR head. When the branch changes, refresh stale CI/Review evidence as required. Do not start the same CI redundantly on both a feature-branch `push` and the corresponding `pull_request` event without a separately justified purpose.
+2. **Merge into `main`:** merge only a current, reviewed, branch-protection-compatible integration candidate. Observe the required check results and validate the PR base/head freshness; use an applicable up-to-date synthetic merge candidate, merge queue, or equivalent verified integration path where needed. If a new base, conflict resolution or merge queue produces a materially different candidate not covered by accepted checks, obtain the missing *pre-merge* evidence. Do not treat a green but stale PR-head check as proof of the actual integration state.
+3. **After merge:** read back the actual `main` SHA and merged PR outcome. Perform only checks that provide distinct evidence required for this integrated state, such as real deployment/public entry, environment-specific behavior, post-merge-only consistency or data integrity checks. **Do not automatically rerun the full CI or identical PR tests solely because the merge succeeded.** Existing `main`-`push` workflows may run by configuration; their necessity and triggers belong to the owning repository and must be assessed before changing them.
+
+Do not use this rule to remove GitHub-required checks, bypass branch protection/Review, ignore an already-failed mandatory check, treat a deployment as a test, or waive stronger security, migration, external-effect, product acceptance or Human gates. Changes to individual repository workflow triggers are owner-scoped implementation, not an implicit fleet-wide policy write.
+
 ## 6. Post-merge reconciliation
 
-After merge:
+After merge, apply §5.2's evidence separation: integration readback is always required, but another full CI run is **not** a universal acceptance condition. Observe required post-merge workflows when the owning repository or actual side effect calls for them; do not invent a second required test pass.
 
-1. read the actual merged default-branch SHA;
-2. verify required post-merge checks/workflows;
+1. read the actual merged default-branch SHA and verify the merged PR/outcome;
+2. verify only applicable post-merge-specific checks/workflows and actual deploy/environment effects; when an already-configured `push` workflow runs, record its actual outcome if it is an acceptance gate, but do not manually rerun identical PR tests by default. If none is required, record the SHA/outcome and proceed without extra CI;
 3. update repository-local Current State/specs if needed;
 4. update the devflow Control Issue only when its summary changed;
 5. set `Audit SHA` to an accepted current SHA only when the relevant state has actually been rechecked;
