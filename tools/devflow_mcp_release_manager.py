@@ -12,10 +12,10 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import zipfile
 
 
@@ -208,14 +208,37 @@ def _compatible_schema(schema: object) -> object:
     return schema
 
 
+def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
+    """Reproduce exactly the existing registered Codex MCP runtime env."""
+    config = Path.home() / ".codex" / "config.toml"
+    try:
+        raw = tomllib.loads(config.read_text(encoding="utf-8-sig"))
+        server = raw["mcp_servers"]["kinotch_devflow"]
+        values = server.get("env", {})
+        argv = server["args"]
+        if (type(argv) is not list or len(argv) != 3
+                or Path(argv[2]).resolve() != fallback.resolve()
+                or Path(server["command"]).resolve() != python.resolve()):
+            raise ReleaseError("registered Codex MCP launch paths have changed")
+        if not isinstance(values, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in values.items()
+        ):
+            raise ReleaseError("invalid registered MCP environment")
+    except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as error:
+        raise ReleaseError("registered Codex MCP settings unavailable") from error
+    return values
+
+
 async def _stdio_test(
     python: Path, script: Path, token: str, *,
-    full: bool,
+    full: bool, mcp_env: dict[str, str],
 ) -> dict[str, object]:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     env = os.environ.copy()
+    env.update(mcp_env)
     env["DEVFLOW_GITHUB_TOKEN"] = token
     server = StdioServerParameters(command=str(python), args=[str(script)], env=env)
     with open(os.devnull, "w") as log:
@@ -242,12 +265,17 @@ async def _stdio_test(
                 return catalog
 
 
-def smoke(python: Path, gh: Path, script: Path, *, full: bool) -> dict:
+def smoke(
+    python: Path, gh: Path, script: Path, *,
+    full: bool, mcp_env: dict[str, str],
+) -> dict:
     token = run([str(gh), "auth", "token", "--hostname", "github.com"], timeout=12)
     if not token or any(ch.isspace() for ch in token):
         raise ReleaseError("existing GitHub CLI authentication is unavailable")
     try:
-        return asyncio.run(_stdio_test(python, script, token, full=full))
+        return asyncio.run(_stdio_test(
+            python, script, token, full=full, mcp_env=mcp_env,
+        ))
     except (ReleaseError, KeyboardInterrupt):
         raise
     except Exception as error:
@@ -281,7 +309,8 @@ def promote(
     old_script = release_script(root, state["sha"]) if state else fallback
     if not old_script.is_file():
         raise ReleaseError("current MCP fallback is missing")
-    previous_catalog = smoke(python, gh, old_script, full=False)
+    mcp_env = registered_mcp_env(python, fallback)
+    previous_catalog = smoke(python, gh, old_script, full=False, mcp_env=mcp_env)
     target = root / "releases" / latest
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -293,12 +322,17 @@ def promote(
             candidate = stage / "tools" / "devflow_mcp.py"
             if not candidate.is_file():
                 raise ReleaseError("candidate MCP entrypoint is missing")
-            new_catalog = smoke(python, gh, candidate, full=True)
+            new_catalog = smoke(
+                python, gh, candidate, full=True, mcp_env=mcp_env,
+            )
             if new_catalog != previous_catalog:
                 raise ReleaseError("MCP callable schema changed; manual review required")
             os.replace(stage, target)
     else:
-        new_catalog = smoke(python, gh, release_script(root, latest), full=True)
+        new_catalog = smoke(
+            python, gh, release_script(root, latest),
+            full=True, mcp_env=mcp_env,
+        )
         if new_catalog != previous_catalog:
             raise ReleaseError("MCP callable schema changed; manual review required")
     write_marker(root, latest, state["sha"] if state else None)
