@@ -90,7 +90,10 @@ class StableLauncherTests(unittest.TestCase):
             launcher.selected_script(str(self.legacy), root=self.root)
         with patch.object(manager, "trusted_latest", return_value=SHA_A):
             with self.assertRaisesRegex(manager.ReleaseError, "differ"):
-                manager.promote(**self._runner())
+                manager.promote(
+                    repo=self.root, python=Path("/fake/python"),
+                    gh=Path("/fake/gh"), root=self.root, fallback=self.legacy,
+                )
 
     def test_marker_schema_v1_is_rejected_before_token_lookup(self):
         self._release(SHA_A)
