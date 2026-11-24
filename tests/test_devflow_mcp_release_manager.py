@@ -245,27 +245,72 @@ class ReleaseManagerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(manager.ReleaseError, "redirected"):
             manager.release_script(self.root, SHA_B)
 
-    def test_release_gate_requires_actual_success_from_github_actions_and_exact_sha(self):
-        success = [
+    def test_release_gate_uses_only_exact_main_push_workflow_and_its_jobs(self):
+        run = {"id": 45316024800, "head_sha": SHA_A, "head_branch": "main",
+               "event": "push", "status": "completed", "conclusion": "success",
+               "run_attempt": 1, "path": ".github/workflows/project-sync-tests.yml"}
+        jobs = [
             {"name": name, "status": "completed", "conclusion": "success",
-             "head_sha": SHA_A, "app": {"slug": "github-actions"}}
-            for name in manager.REQUIRED_CHECKS
+             "head_sha": SHA_A, "run_id": run["id"], "run_attempt": 1}
+            for name in sorted(manager.REQUIRED_CHECKS)
         ]
-        with patch.object(manager, "gh_json", return_value={
-            "total_count": 2, "check_runs": success,
-        }):
-            manager.github_gate(Path("/fake/gh"), SHA_A)
+        workflow_endpoint = (
+            f"repos/{manager.REPOSITORY}/actions/workflows/project-sync-tests.yml/runs"
+            f"?head_sha={SHA_A}&event=push&branch=main&per_page=100"
+        )
+        jobs_endpoint = (
+            f"repos/{manager.REPOSITORY}/actions/runs/{run['id']}/jobs"
+            "?filter=latest&per_page=100"
+        )
+        gh = Path("/fake/gh")
+        # The actual commit had 327 unrelated check-runs; no broad check-runs
+        # request is needed when using this existing workflow's own run/jobs.
+        with patch.object(manager, "gh_json", side_effect=[
+            {"total_count": 1, "workflow_runs": [run]},
+            {"total_count": 2, "jobs": jobs},
+        ]) as get:
+            manager.github_gate(gh, SHA_A)
+            self.assertEqual([c.args for c in get.call_args_list],
+                             [(gh, workflow_endpoint), (gh, jobs_endpoint)])
         for invalid in (
-            [success[0]],
-            [{**success[0], "head_sha": SHA_B}, success[1]],
-            [{**success[0], "conclusion": "skipped"}, success[1]],
-            [{**success[0], "app": {"slug": "unknown"}}, success[1]],
+            [],
+            [{**run, "head_sha": SHA_B}],
+            [{**run, "head_branch": "other"}],
+            [{**run, "event": "pull_request"}],
+            [{**run, "path": ".github/workflows/other.yml"}],
+            [{**run, "status": "in_progress"}],
+            [{**run, "conclusion": "failure"}],
+            [run, {**run, "id": 456}],
         ):
-            with self.subTest(invalid=invalid), patch.object(manager, "gh_json", return_value={
-                "total_count": len(invalid), "check_runs": invalid,
-            }):
+            with self.subTest(invalid_run=invalid), patch.object(
+                manager, "gh_json",
+                return_value={"total_count": len(invalid), "workflow_runs": invalid},
+            ) as get:
                 with self.assertRaises(manager.ReleaseError):
-                    manager.github_gate(Path("/fake/gh"), SHA_A)
+                    manager.github_gate(gh, SHA_A)
+                get.assert_called_once()
+        for invalid in (
+            [jobs[0]],
+            [{**jobs[0], "head_sha": SHA_B}, jobs[1]],
+            [{**jobs[0], "conclusion": "skipped"}, jobs[1]],
+            [{**jobs[0], "run_id": 456}, jobs[1]],
+            [{**jobs[0], "run_attempt": 2}, jobs[1]],
+            [*jobs, {**jobs[0], "conclusion": "failure"}],
+        ):
+            with self.subTest(invalid_jobs=invalid), patch.object(
+                manager, "gh_json", side_effect=[
+                    {"total_count": 1, "workflow_runs": [run]},
+                    {"total_count": len(invalid), "jobs": invalid},
+                ],
+            ):
+                with self.assertRaises(manager.ReleaseError):
+                    manager.github_gate(gh, SHA_A)
+        with patch.object(manager, "gh_json", side_effect=[
+            {"total_count": 1, "workflow_runs": [run]},
+            {"total_count": 327, "jobs": jobs},
+        ]):
+            with self.assertRaises(manager.ReleaseError):
+                manager.github_gate(gh, SHA_A)
 
 
     def test_registered_env_read_preserves_values_without_emitting_or_modifying_config(self):
