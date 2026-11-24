@@ -42,8 +42,9 @@ The updater first checks the current release integrity and the persistent update
 
 1. Restrict Git remote origin to `kinoko34077/devflow`.
 2. Compare GitHub's `main` SHA to newly fetched `origin/main`. Require
-   successful exact-SHA `verify` and `mcp-stdio-python311` GitHub Actions
-   checks (not simply the presence of a workflow name).
+   the unique successful `project-sync-tests.yml` main-push workflow run for
+   that exact SHA and both successful `verify` and `mcp-stdio-python311` jobs
+   belonging to that run. Unrelated commit check-runs are not enumerated.
 3. Stage a Git archive of that SHA in a temporary new directory, without
    touching a running source clone or virtual environment.
 4. Execute bounded Windows local Python unit contract tests (Devflow MCP Core,
@@ -63,10 +64,15 @@ The updater first checks the current release integrity and the persistent update
    Git source on the next check. Previous releases remain for rollback and
    in-flight MCP processes.
 
-A Windows Task Scheduler entry can run `check` hourly using the *current
-interactive user*, without elevation and with concurrent executions suppressed.
-It must be explicitly authorized before installation. No updater runs in
-the MCP launcher itself. Task logs record only status and SHA, never token.
+定期実行は既存の共通PC自動実行基盤 [#1120](https://github.com/kinoko34077/devflow/issues/1120) の
+`AutoRunner/jobs.json` へ固定argvの単発 `check` Jobを登録する。周期は60分、共通runnerの
+待機・再試行・重複防止・非表示起動・実行結果記録をそのまま利用する。
+MCP専用Windows Task、常駐プロセス、追加の待機ループを作らない。
+共通runnerにはMCPの認証・取得・検証・版選択を実装しない。
+個別managerの排他は手動rollback/resumeとの競合を防ぐため維持する。
+初回は無効登録または手動検証とし、実行環境の保護・既存登録との一致・実stdio・
+rollbackの受入後のみ有効化する。既存ジョブとTaskの権限を変更しない。
+共通runnerの記録はJob ID・結果・終了コードのみで、認証情報を保存しない。
 
 ## Rollback and safety boundaries
 
