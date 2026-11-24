@@ -228,12 +228,13 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "registered_mcp_env", return_value={}),
               patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
               patch.object(manager, "run_unittests") as tests):
-            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            with self.assertRaisesRegex(manager.ReleaseError, "differ"):
+                manager.promote(**self._runner())
             self.assertEqual(invoke.call_count, 2)
+            self.assertNotIn(inactive, [call.args[2] for call in invoke.call_args_list])
             tests.assert_called_once()
-        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
-        self.assertEqual(inactive.read_text(), "# verified rebuild\n")
-        self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
+        self.assertEqual(inactive.read_text(), "# unverified poison\n")
 
     def test_release_script_rejects_in_root_redirected_symlink(self):
         self._release(SHA_A)
@@ -374,9 +375,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(manager.ReleaseError, "activation incomplete"):
                     manager.promote(**self._runner())
             self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
-            self.assertFalse((self.root / "releases" / SHA_B).exists())
-            self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
-            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            retained = self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py"
+            self.assertEqual(retained.read_text(), "# rebuilt\n")
+            with patch.object(manager.os, "replace", wraps=manager.os.replace) as replace:
+                self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+                self.assertEqual(len(replace.call_args_list), 1)
+                self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
             self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
 
     def test_rollback_rejects_modified_previously_verified_release(self):
@@ -388,24 +392,54 @@ class ReleaseManagerContractTests(unittest.TestCase):
             manager.rollback(self.root, self.legacy)
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
 
-    def test_rollback_then_repromotion_rebuilds_inactive_release(self):
+    def test_rollback_then_repromotion_preserves_prior_process_source(self):
         self._release(SHA_A)
-        self._release(SHA_B)
+        prior = self._release(SHA_B)
+        prior_bytes = prior.read_bytes()
         self._marker(SHA_B, SHA_A)
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
         self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED ACTIVE " + SHA_A)
+
         def fresh_archive(_repo, _sha, destination):
             script = destination / "tools" / "devflow_mcp.py"
             script.parent.mkdir(parents=True)
-            script.write_text("# freshly rebuilt\n", encoding="utf-8")
+            script.write_bytes(prior_bytes)
+
         with (patch.object(manager, "trusted_latest", return_value=SHA_B),
               patch.object(manager, "run", return_value=""),
               patch.object(manager, "source_archive", side_effect=fresh_archive),
               patch.object(manager, "run_unittests"),
               patch.object(manager, "registered_mcp_env", return_value={}),
-              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
+              patch.object(manager.os, "replace", wraps=manager.os.replace) as replace):
             self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
-        self.assertIn("# freshly rebuilt", (self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py").read_text())
+            self.assertEqual(len(replace.call_args_list), 1)
+            self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
+            self.assertNotIn(prior, [call.args[2] for call in invoke.call_args_list])
+        self.assertEqual(prior.read_bytes(), prior_bytes)
+
+    def test_legacy_rollback_then_repromotion_preserves_original_release(self):
+        prior = self._release(SHA_A)
+        prior_bytes = prior.read_bytes()
+        self._marker(SHA_A)
+        self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK_TO_LEGACY")
+        self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED LEGACY")
+
+        def fresh_archive(_repo, _sha, destination):
+            script = destination / "tools" / "devflow_mcp.py"
+            script.parent.mkdir(parents=True)
+            script.write_bytes(prior_bytes)
+
+        with (patch.object(manager, "trusted_latest", return_value=SHA_A),
+              patch.object(manager, "source_archive", side_effect=fresh_archive),
+              patch.object(manager, "run_unittests"),
+              patch.object(manager, "registered_mcp_env", return_value={}),
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}),
+              patch.object(manager.os, "replace", wraps=manager.os.replace) as replace):
+            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_A)
+            self.assertEqual(len(replace.call_args_list), 1)
+            self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
+        self.assertEqual(prior.read_bytes(), prior_bytes)
 
     def test_failed_rollback_keeps_hold_even_when_marker_write_fails(self):
         self._release(SHA_A)
