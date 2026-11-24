@@ -35,20 +35,22 @@ class UpdatedRangeTests(unittest.TestCase):
 
     def test_issue_native_since_and_local_half_open_range(self):
         reader, calls = self.reader(
-            [issue(4, HIGH), issue(3, LOW, pull_request={})],
-            [issue(2, LOW), issue(1, "2026-11-19T23:59:59Z")],
-            [],
+            [issue(1, "2026-11-19T23:59:59Z"), issue(2, LOW)],
+            [issue(3, LOW, pull_request={}), issue(4, HIGH)],
         )
         result = reader.read_updated_range(REPO, kind="issue", from_utc=LOW,
                                            to_utc=HIGH, per_page=2)
         self.assertEqual([x["id"] for x in result["items"]], [2])
         self.assertEqual(result["status"], "BOUNDED_WINDOW_READ")
         self.assertFalse(result["snapshot_atomic"])
-        self.assertEqual(result["read_pages"], 3)
+        self.assertEqual(result["read_pages"], 2)
+        self.assertTrue(result["upper_bound_reached"])
+        self.assertFalse(result["page_exhausted"])
         self.assertEqual(calls[0][0], "/repos/" + REPO + "/issues")
         self.assertEqual(calls[0][1]["since"], ["2026-11-19T23:59:59Z"])
         self.assertEqual(calls[0][1]["state"], ["all"])
-        self.assertEqual([q["page"] for _, q in calls], [["1"], ["2"], ["3"]])
+        self.assertEqual([q["page"] for _, q in calls], [["1"], ["2"]])
+        self.assertEqual(calls[0][1]["direction"], ["asc"])
 
     def test_comments_page_limit_and_duplicates(self):
         reader, calls = self.reader([comment(1, LOW)], [comment(1, LOW)])
@@ -100,6 +102,53 @@ class UpdatedRangeTests(unittest.TestCase):
         reader, _ = self.reader([comment(1, LOW)], RuntimeError("failed"))
         with self.assertRaises(DevflowMCPError):
             reader.read_updated_range(REPO, kind="issue_comment", per_page=1)
+
+    def test_historical_window_avoids_newer_300_rows(self):
+        for kind, make in (("issue", issue), ("issue_comment", comment)):
+            with self.subTest(kind=kind):
+                rows = [make(1, LOW)] + [make(n, HIGH) for n in range(2, 302)]
+                calls = []
+                def transport(url, headers):
+                    query = parse_qs(urlsplit(url).query)
+                    calls.append(query)
+                    page = int(query["page"][0])
+                    ordered = rows if query["direction"] == ["asc"] else list(reversed(rows))
+                    return ordered[(page - 1) * 100:page * 100]
+                result = GitHubReader(transport=transport).read_updated_range(
+                    REPO, kind=kind, from_utc=LOW, to_utc=HIGH, max_pages=3)
+                self.assertEqual([r["id"] for r in result["items"]], [1])
+                self.assertEqual(result["read_pages"], 1)
+                self.assertTrue(result["upper_bound_reached"])
+                self.assertEqual(result["status"], "BOUNDED_WINDOW_READ")
+                self.assertEqual(len(calls), 1)
+
+    def test_order_drift_never_claims_upper_stop(self):
+        reader, _ = self.reader(
+            [comment(1, HIGH), comment(2, LOW)],
+            [comment(3, HIGH), comment(4, HIGH)],
+        )
+        result = reader.read_updated_range(REPO, kind="issue_comment",
+            from_utc=LOW, to_utc=HIGH, per_page=2, max_pages=2)
+        self.assertEqual(result["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(result["reason_codes"], ["ORDER_DRIFT", "PAGE_LIMIT"])
+        self.assertFalse(result["upper_bound_reached"])
+        self.assertEqual([r["id"] for r in result["items"]], [2])
+
+    def test_epoch_clamped_and_open_window_descending(self):
+        reader, calls = self.reader([])
+        reader.read_updated_range(REPO, kind="issue", from_utc="1970-01-01T00:00:00Z")
+        self.assertEqual(calls[0][1]["since"], ["1970-01-01T00:00:00Z"])
+        self.assertEqual(calls[0][1]["direction"], ["desc"])
+
+    def test_pr_boundary_and_page_validation(self):
+        reader, _ = self.reader([issue(1, LOW), issue(2, HIGH, pull_request={})])
+        result = reader.read_updated_range(REPO, kind="issue",
+            from_utc=LOW, to_utc=HIGH, per_page=2)
+        self.assertTrue(result["upper_bound_reached"])
+        self.assertEqual([r["id"] for r in result["items"]], [1])
+        reader, _ = self.reader([issue(1, HIGH), issue(2, "bad", pull_request={})])
+        with self.assertRaises(DevflowMCPError):
+            reader.read_updated_range(REPO, kind="issue", to_utc=HIGH, per_page=2)
 
     def test_legacy_recent_reader_remains_one_page(self):
         row = {"id": 1}

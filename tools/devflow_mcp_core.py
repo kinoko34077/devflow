@@ -344,21 +344,25 @@ class GitHubReader:
         if lower is not None and upper is not None and lower >= upper:
             raise DevflowMCPError("Invalid half-open updated range.")
         query: dict[str, Any] = {
-            "sort": "updated", "direction": "desc", "per_page": per_page,
+            "sort": "updated", "direction": "asc" if upper is not None else "desc",
+            "per_page": per_page,
         }
         endpoint = "issues" if kind == "issue" else "issues/comments"
         if state is not None:
             query["state"] = state
         if lower is not None:
-            # GitHub since is strictly after its boundary. Include the prior
-            # second and then enforce >= locally so an exact boundary is kept.
-            query["since"] = (lower - timedelta(seconds=1)).strftime(
+            # Native since can include the boundary (observed on GitHub).
+            # Retain a conservative one-second overlap; never send pre-epoch.
+            epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+            query["since"] = max(epoch, lower - timedelta(seconds=1)).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
         seen: set[int] = set()
         items: list[dict[str, Any]] = []
         reasons: set[str] = set()
         exhausted = False
+        upper_bound_reached = False
+        previous_updated: datetime | None = None
         for page in range(1, max_pages + 1):
             query["page"] = page
             url = self._repository_url(repository, endpoint + "?" + urllib.parse.urlencode(query))
@@ -368,6 +372,14 @@ class GitHubReader:
             for item in batch:
                 if not isinstance(item, dict):
                     raise DevflowMCPError("Invalid updated-range response row.")
+                updated = parse_time(item.get("updated_at"))
+                if previous_updated is not None and (
+                    (upper is not None and updated < previous_updated)
+                    or (upper is None and updated > previous_updated)
+                ):
+                    reasons.add("ORDER_DRIFT")
+                previous_updated = updated
+                # PR rows also participate in observed ordering and the page budget.
                 if kind == "issue" and "pull_request" in item:
                     continue
                 identity = item.get("id")
@@ -387,7 +399,6 @@ class GitHubReader:
                     if (origin is None or origin[0].casefold() != repository.casefold()
                             or origin[1] is None or origin[1] <= 0):
                         raise DevflowMCPError("Invalid updated-range comment origin.")
-                updated = parse_time(item.get("updated_at"))
                 if identity in seen:
                     reasons.add("DUPLICATE_RECORD_ID")
                     continue
@@ -397,7 +408,13 @@ class GitHubReader:
             if len(batch) < per_page:
                 exhausted = True
                 break
-        if not exhausted:
+            # Inspect the entire page before stopping. A detected ordering
+            # violation or overlap makes early termination unsafe.
+            if (upper is not None and previous_updated is not None
+                    and previous_updated >= upper and not reasons):
+                upper_bound_reached = True
+                break
+        if not exhausted and not upper_bound_reached:
             reasons.add("PAGE_LIMIT")
         return {
             "repository": repository, "kind": kind,
@@ -405,7 +422,8 @@ class GitHubReader:
             "items": items, "read_pages": page,
             "status": "PARTIAL_UNKNOWN" if reasons else "BOUNDED_WINDOW_READ",
             "reason_codes": sorted(reasons),
-            "page_exhausted": exhausted, "snapshot_atomic": False,
+            "page_exhausted": exhausted, "upper_bound_reached": upper_bound_reached,
+            "snapshot_atomic": False,
             "requires_source_revalidation": True,
         }
 
