@@ -154,6 +154,30 @@ def write_marker(
             os.unlink(name)
 
 
+def updates_held(root: Path) -> bool:
+    """停止ファイルの存在だけで判定。読めない状態を再開扱いしない。"""
+    try:
+        (root / "updates.hold").lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def hold_updates(root: Path) -> None:
+    # rollbackより先に永続化する。途中停止した空ファイルも停止扱い。
+    try:
+        with (root / "updates.hold").open("xb") as stream:
+            stream.write(b"rollback hold\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        pass
+
+
+def selection_label(state: dict | None) -> str:
+    return "ACTIVE " + state["sha"] if state else "LEGACY"
+
+
 @contextmanager
 def release_lock(root: Path):
     """OS側の短命な排他ロック。クラッシュ後のstale lockを残さない。"""
@@ -443,10 +467,12 @@ def _promote_unlocked(
     *, repo: Path, python: Path, gh: Path, root: Path, fallback: Path,
 ) -> str:
     state = read_marker(root)
-    latest = trusted_latest(repo, gh)
     if state is not None:
-        # 「最新版と同じ」場合でも改変済み実体を正常扱いしない。
+        # 停止中・最新版のいずれでも改変済み実体を正常扱いしない。
         require_integrity(root, state["sha"], state["tree_sha256"])
+    if updates_held(root):
+        return "HELD " + selection_label(state)
+    latest = trusted_latest(repo, gh)
     if state is not None and state["sha"] == latest:
         return "UP_TO_DATE " + latest
     if state is not None:
@@ -507,6 +533,8 @@ def promote(
 
 def rollback(root: Path, fallback: Path) -> str:
     with release_lock(root):
+        # 切替失敗やlegacy復帰でも次回の自動昇格を許可しない。
+        hold_updates(root)
         state = read_marker(root)
         if state is None:
             return "ALREADY_LEGACY"
@@ -527,9 +555,31 @@ def rollback(root: Path, fallback: Path) -> str:
         return "ROLLED_BACK " + previous
 
 
+def resume_updates(root: Path, fallback: Path) -> str:
+    """明示再開だけが停止を解除する。ここでは候補を実行・昇格しない。"""
+    with release_lock(root):
+        state = read_marker(root)
+        if state is not None:
+            require_integrity(root, state["sha"], state["tree_sha256"])
+        elif not fallback.is_file():
+            raise ReleaseError("original fallback MCP is unavailable")
+        if not updates_held(root):
+            return "ALREADY_ENABLED " + selection_label(state)
+        (root / "updates.hold").unlink()
+        return "RESUMED " + selection_label(state)
+
+
+def status(root: Path) -> str:
+    with release_lock(root):
+        state = read_marker(root)
+        if state is not None:
+            require_integrity(root, state["sha"], state["tree_sha256"])
+        return ("HELD " if updates_held(root) else "") + selection_label(state)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "status", "rollback"))
+    parser.add_argument("action", choices=("check", "status", "rollback", "resume"))
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--gh", type=Path, required=True)
@@ -539,10 +589,11 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root or release_root()
     try:
         if args.action == "status":
-            state = read_marker(root)
-            outcome = "ACTIVE " + state["sha"] if state else "LEGACY"
+            outcome = status(root)
         elif args.action == "rollback":
             outcome = rollback(root, args.fallback)
+        elif args.action == "resume":
+            outcome = resume_updates(root, args.fallback)
         else:
             outcome = promote(
                 repo=args.repo, python=args.python, gh=args.gh,
