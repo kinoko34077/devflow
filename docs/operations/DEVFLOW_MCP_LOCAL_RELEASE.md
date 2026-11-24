@@ -56,9 +56,12 @@ The updater first checks the current release integrity and the persistent update
    Human Portfolio, release manager). The complete suite is run on GitHub CI.
 5. With existing `gh auth` and no stored token, launch real read-only MCP
    stdio and check `initialize`, exactly 16 tools, `bootstrap_repository`
-   and `get_human_portfolio`. The smoke test inherits the configured Codex
-   MCP registration's environment (for example its existing `PYTHONPATH`),
-   without printing or persisting any secret values. Compare existing/new callable tool schemas,
+   and `get_human_portfolio`. Preserve the registered MCP environment except
+   for `PYTHONPATH`: the launcher and smoke both bind it to the selected script's
+   own release root, and the unit test process uses its staged source root.
+   A legacy checkout path would otherwise import old `tools.*` modules even
+   when the new script is selected. The original fallback uses its own root.
+   Do not persist credentials or print environment values. Compare existing/new callable tool schemas,
    excluding only descriptions/titles/examples.
 6. Record the verified staged tree SHA-256 digest alongside the active commit SHA,
    then atomically replace the active marker. Both the launcher and manager
