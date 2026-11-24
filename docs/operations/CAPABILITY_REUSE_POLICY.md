@@ -2,6 +2,18 @@
 
 Authority: user decision 2026-10-21 JST; [devflow #758](https://github.com/kinoko34077/devflow/issues/758); [devflow AGENTS.md](../../AGENTS.md). This document defines **cross-repository discovery and acceptance rules**, not the internal implementation of a particular product. The owning repository's current spec/API and user requirements remain authoritative.
 
+## Mandatory cross-repository centralization preflight
+
+Authority: user decision 2026-11-25 JST; [devflow #1136](https://github.com/kinoko34077/devflow/issues/1136).
+
+Before starting, switching work/repositories, or expanding scope, determine:
+
+- Can this be a shared mechanism across the managed GitHub repositories, using or extending an existing canonical implementation rather than copying it?
+- Are identical implementations, rules or settings being duplicated, or would a future common change require updates to every consumer?
+- Is the proposed local work necessary discovery or minimal representative verification, or repetitive per-repository implementation/adoption before the shared mechanism is ready?
+
+Default order: identify the common problem → discover existing mechanisms → design and implement the shared mechanism → minimal representative verification → consumer adoption. Stop repetitive local fixes once representative evidence is sufficient; return to the shared design. **Cross-repository rollout is not cross-repository centralization.** Separate mechanism acceptance from rollout; never require adoption by all repositories to finish the mechanism. Permit local implementation only for a concrete technical, semantic, ownership or cost/benefit reason. Record that reason in the owning Issue/PR. An existing roadmap alone does not justify repetitive work; prioritize the user's objective and reassess the route. Preserve all safety, authority and verification boundaries; do not force unrelated responsibilities into a common owner.
+
 ## Mandatory pre-implementation lookup
 
 For every new feature, bug fix or UI component, before implementation:
