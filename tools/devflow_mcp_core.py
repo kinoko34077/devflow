@@ -9,7 +9,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
 
 try:
@@ -299,6 +299,115 @@ class GitHubReader:
             if len(batch) < per_page:
                 return comments
             page += 1
+
+    def read_updated_range(
+        self, repository: str, *, kind: str,
+        from_utc: str | None = None, to_utc: str | None = None,
+        state: str | None = None, per_page: int = MAX_GITHUB_REST_PER_PAGE,
+        max_pages: int = 3,
+    ) -> dict[str, Any]:
+        """Read a bounded current-state updated_at window, not edit history.
+
+        The native since filter reduces traffic; an exact half-open interval
+        is enforced locally. This internal reader is not a public projection
+        or execution authority. A live paginated read is never atomic.
+        """
+        repository = normalize_repository(repository)
+        _validate_github_page_size(per_page)
+        if type(max_pages) is not int or not 1 <= max_pages <= 40:
+            raise DevflowMCPError("Invalid updated-range page bound.")
+        if kind not in ("issue", "issue_comment"):
+            raise DevflowMCPError("Unsupported updated-range object kind.")
+        if kind == "issue":
+            if state is None:
+                state = "all"
+            if state not in ("open", "closed", "all"):
+                raise DevflowMCPError("Unsupported updated-range issue state.")
+        elif state is not None:
+            raise DevflowMCPError("Issue state is not a comment filter.")
+
+        def parse_time(value: Any) -> datetime:
+            if not isinstance(value, str) or not re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value
+            ):
+                raise DevflowMCPError("Expected a UTC second-resolution timestamp.")
+            try:
+                parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+            except ValueError:
+                raise DevflowMCPError("Invalid UTC timestamp.") from None
+            if parsed.year < 1970:
+                raise DevflowMCPError("Timestamp precedes supported range.")
+            return parsed
+
+        lower = parse_time(from_utc) if from_utc is not None else None
+        upper = parse_time(to_utc) if to_utc is not None else None
+        if lower is not None and upper is not None and lower >= upper:
+            raise DevflowMCPError("Invalid half-open updated range.")
+        query: dict[str, Any] = {
+            "sort": "updated", "direction": "desc", "per_page": per_page,
+        }
+        endpoint = "issues" if kind == "issue" else "issues/comments"
+        if state is not None:
+            query["state"] = state
+        if lower is not None:
+            # GitHub since is strictly after its boundary. Include the prior
+            # second and then enforce >= locally so an exact boundary is kept.
+            query["since"] = (lower - timedelta(seconds=1)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        seen: set[int] = set()
+        items: list[dict[str, Any]] = []
+        reasons: set[str] = set()
+        exhausted = False
+        for page in range(1, max_pages + 1):
+            query["page"] = page
+            url = self._repository_url(repository, endpoint + "?" + urllib.parse.urlencode(query))
+            batch = self._read(url)
+            if not isinstance(batch, list) or len(batch) > per_page:
+                raise DevflowMCPError("Invalid updated-range response page.")
+            for item in batch:
+                if not isinstance(item, dict):
+                    raise DevflowMCPError("Invalid updated-range response row.")
+                if kind == "issue" and "pull_request" in item:
+                    continue
+                identity = item.get("id")
+                if type(identity) is not int or identity <= 0:
+                    raise DevflowMCPError("Invalid updated-range record identity.")
+                if kind == "issue":
+                    number = item.get("number")
+                    if type(number) is not int or number <= 0:
+                        raise DevflowMCPError("Invalid updated-range Issue number.")
+                    verify_observed_issue_identity(item, repository, number)
+                    if item.get("state") not in ("open", "closed"):
+                        raise DevflowMCPError("Invalid updated-range Issue state.")
+                    if state != "all" and item["state"] != state:
+                        raise DevflowMCPError("Unexpected updated-range Issue state.")
+                else:
+                    origin = _parse_issue_identity_url(item.get("issue_url"), field="url")
+                    if (origin is None or origin[0].casefold() != repository.casefold()
+                            or origin[1] is None or origin[1] <= 0):
+                        raise DevflowMCPError("Invalid updated-range comment origin.")
+                updated = parse_time(item.get("updated_at"))
+                if identity in seen:
+                    reasons.add("DUPLICATE_RECORD_ID")
+                    continue
+                seen.add(identity)
+                if (lower is None or updated >= lower) and (upper is None or updated < upper):
+                    items.append(item)
+            if len(batch) < per_page:
+                exhausted = True
+                break
+        if not exhausted:
+            reasons.add("PAGE_LIMIT")
+        return {
+            "repository": repository, "kind": kind,
+            "from_utc": from_utc, "to_utc": to_utc, "state": state,
+            "items": items, "read_pages": page,
+            "status": "PARTIAL_UNKNOWN" if reasons else "BOUNDED_WINDOW_READ",
+            "reason_codes": sorted(reasons),
+            "page_exhausted": exhausted, "snapshot_atomic": False,
+            "requires_source_revalidation": True,
+        }
 
     def list_recent_repository_comments(self, repository: str) -> list[dict[str, Any]]:
         """One B6-compatible updated-desc repository comment page, GET only.
