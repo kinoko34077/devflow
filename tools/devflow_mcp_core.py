@@ -335,8 +335,6 @@ class GitHubReader:
                 parsed = datetime.fromisoformat(value[:-1] + "+00:00")
             except ValueError:
                 raise DevflowMCPError("Invalid UTC timestamp.") from None
-            if parsed.year < 1970:
-                raise DevflowMCPError("Timestamp precedes supported range.")
             return parsed
 
         lower = parse_time(from_utc) if from_utc is not None else None
@@ -350,11 +348,14 @@ class GitHubReader:
         endpoint = "issues" if kind == "issue" else "issues/comments"
         if state is not None:
             query["state"] = state
-        if lower is not None:
-            # Native since can include the boundary (observed on GitHub).
-            # Retain a conservative one-second overlap; never send pre-epoch.
-            epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-            query["since"] = max(epoch, lower - timedelta(seconds=1)).strftime(
+        # GitHub Issue REST has returned a false empty page for epoch-era
+        # since values. Before the conservative 2008 pushdown floor, omit
+        # the optimization entirely and enforce the same range locally.
+        # This is not an input-date restriction. Keep a one-second overlap
+        # for supported native boundaries (observed inclusive).
+        pushdown_floor = datetime(2008, 1, 1, tzinfo=timezone.utc)
+        if lower is not None and lower > pushdown_floor:
+            query["since"] = (lower - timedelta(seconds=1)).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
         seen: set[int] = set()

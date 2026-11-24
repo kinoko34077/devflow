@@ -134,11 +134,28 @@ class UpdatedRangeTests(unittest.TestCase):
         self.assertFalse(result["upper_bound_reached"])
         self.assertEqual([r["id"] for r in result["items"]], [2])
 
-    def test_epoch_clamped_and_open_window_descending(self):
+    def test_old_lower_bound_omits_native_since_and_preserves_rows(self):
+        for kind, make in (("issue", issue), ("issue_comment", comment)):
+            for lower in ("0001-01-01T00:00:00Z", "1970-01-01T00:00:00Z",
+                          "1970-01-01T00:00:01Z", "2008-01-01T00:00:00Z"):
+                with self.subTest(kind=kind, lower=lower):
+                    reader, calls = self.reader([make(1, LOW)])
+                    result = reader.read_updated_range(REPO, kind=kind, from_utc=lower)
+                    self.assertEqual([row["id"] for row in result["items"]], [1])
+                    self.assertEqual(result["status"], "BOUNDED_WINDOW_READ")
+                    self.assertNotIn("since", calls[0][1])
+                    self.assertEqual(calls[0][1]["direction"], ["desc"])
+
+    def test_pushdown_floor_is_not_a_local_filter_boundary(self):
+        reader, calls = self.reader([issue(1, "2007-12-31T23:59:59Z"),
+                                     issue(2, "2008-01-01T00:00:00Z")])
+        result = reader.read_updated_range(REPO, kind="issue",
+            from_utc="2008-01-01T00:00:00Z", to_utc=HIGH)
+        self.assertEqual([row["id"] for row in result["items"]], [2])
+        self.assertNotIn("since", calls[0][1])
         reader, calls = self.reader([])
-        reader.read_updated_range(REPO, kind="issue", from_utc="1970-01-01T00:00:00Z")
-        self.assertEqual(calls[0][1]["since"], ["1970-01-01T00:00:00Z"])
-        self.assertEqual(calls[0][1]["direction"], ["desc"])
+        reader.read_updated_range(REPO, kind="issue", from_utc="2008-01-01T00:00:01Z")
+        self.assertEqual(calls[0][1]["since"], ["2008-01-01T00:00:00Z"])
 
     def test_pr_boundary_and_page_validation(self):
         reader, _ = self.reader([issue(1, LOW), issue(2, HIGH, pull_request={})])
