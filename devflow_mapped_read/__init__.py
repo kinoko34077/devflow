@@ -9,10 +9,10 @@ import json
 import re
 from typing import Any
 
-from tools.kaep_repository_validation import REPOSITORY
-
 SCHEMA = "mapped-read.v1"
 RESULT_SCHEMA = "mapped-read-result.v1"
+# Syntax only; the trusted caller owns the exact authorization scope.
+_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z")
 
 
@@ -77,10 +77,12 @@ def read_mapped(packet: dict, *, sources: Mapping[str, SourceMap],
     source = sources[dataset]
     repos = target["repositories"]
     if (type(repos) is not list or not repos or any(
-        type(r) is not str or not REPOSITORY.fullmatch(r)
-        or r.rsplit("/", 1)[1] in (".", "..") for r in repos
+        type(r) is not str or not _REPOSITORY.fullmatch(r)
+        or any(part in (".", "..") for part in r.split("/")) for r in repos
     ) or len({r.casefold() for r in repos}) != len(repos)):
         raise MappedReadError("INVALID_REPOSITORY_SCOPE")
+    if isinstance(allowed_repositories, (str, bytes, Mapping)):
+        raise MappedReadError("INVALID_AUTHORIZED_SCOPE")
     if any(r not in allowed_repositories for r in repos):
         raise MappedReadError("REPOSITORY_OUTSIDE_AUTHORIZED_SCOPE")
 
@@ -122,14 +124,34 @@ def read_mapped(packet: dict, *, sources: Mapping[str, SourceMap],
         observed = read(repo)
         if (not isinstance(observed, SourceObservation)
                 or observed.status not in ("BOUNDED_READ", "PARTIAL_UNKNOWN", "BLOCKED")
+                or type(observed.items) is not tuple
                 or (observed.status == "BLOCKED" and observed.items)):
-            raise MappedReadError("INVALID_SOURCE_OBSERVATION")
+            observed = SourceObservation((), "BLOCKED", "INVALID_SOURCE_OBSERVATION",
+                                         ("INVALID_SOURCE_OBSERVATION",))
+        projected = []
         for row in observed.items:
             if not isinstance(row, Mapping) or any(f not in row for f in fields):
-                raise MappedReadError("MISSING_SOURCE_FIELD")
-            matched += 1
-            if limit is None or len(items) < limit:
-                items.append({"repository": repo, "record": {f: row[f] for f in fields}})
+                reason = "MISSING_SOURCE_FIELD"
+                break
+            try:
+                # Copy only the requested attributes into a JSON-safe result.
+                # Nested attribute semantics remain the adapter owner's duty.
+                record = json.loads(json.dumps({f: row[f] for f in fields}, allow_nan=False))
+            except (TypeError, ValueError, OverflowError):
+                reason = "INVALID_SOURCE_FIELD_VALUE"
+                break
+            projected.append({"repository": repo, "record": record})
+        else:
+            reason = None
+        if reason is not None:
+            # Do not retain a prefix from an invalid source. Other repositories
+            # remain available; the broken source is explicitly BLOCKED.
+            observed = SourceObservation((), "BLOCKED", "SOURCE_PROJECTION_INVALID",
+                                         (reason,), read_units=observed.read_units)
+            projected = []
+        matched += len(projected)
+        remaining = None if limit is None else max(0, limit - len(items))
+        items.extend(projected if remaining is None else projected[:remaining])
         observations.append({
             "repository": repo, "status": observed.status,
             "source_status": observed.source_status,

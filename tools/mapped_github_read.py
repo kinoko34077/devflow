@@ -6,7 +6,7 @@ from tools.devflow_mcp_core import (
     validate_updated_range_options,
 )
 from tools.devflow_read_errors import failure_reason_code
-from tools.mapped_read import MappedReadError, SourceMap, SourceObservation
+from devflow_mapped_read import MappedReadError, SourceMap, SourceObservation
 
 
 def github_source_maps(reader: GitHubReader) -> dict[str, SourceMap]:
@@ -36,6 +36,13 @@ def github_source_maps(reader: GitHubReader) -> dict[str, SourceMap]:
                                              (failure_reason_code(exc),))
                 if result["status"] not in ("BOUNDED_WINDOW_READ", "PARTIAL_UNKNOWN"):
                     raise MappedReadError("INVALID_SOURCE_OBSERVATION")
+                # GitHub metadata fields are scalar; do not allow a malformed
+                # response to smuggle nested raw payloads into a selected field.
+                for row in result["items"]:
+                    if any(key in row and type(row[key]) is not (int if key in {"id", "number"} else str)
+                           for key in fields):
+                        return SourceObservation((), "BLOCKED", "SOURCE_PROJECTION_INVALID",
+                            ("INVALID_GITHUB_METADATA",), read_units=result["read_pages"])
                 return SourceObservation(
                     tuple(result["items"]),
                     "BOUNDED_READ" if result["status"] == "BOUNDED_WINDOW_READ" else "PARTIAL_UNKNOWN",

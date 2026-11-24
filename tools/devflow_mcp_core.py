@@ -107,7 +107,7 @@ def _validate_github_page_size(per_page: int) -> None:
 
 
 def _parse_updated_range_time(value: Any) -> datetime:
-    from tools.mapped_read import parse_utc_timestamp
+    from devflow_mapped_read import parse_utc_timestamp
     try:
         return parse_utc_timestamp(value, seconds_only=True)
     except ValueError:

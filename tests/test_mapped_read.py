@@ -1,11 +1,16 @@
 """Common mapped-read contract: real Reader fixtures, no network or new auth."""
 import copy
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from urllib.parse import urlsplit, parse_qs
 
 from tools.devflow_mcp_core import GitHubReader
 from tools.mapped_github_read import github_source_maps
-from tools.mapped_read import MappedReadError, SourceMap, SourceObservation, read_mapped
+from devflow_mapped_read import MappedReadError, SourceMap, SourceObservation, read_mapped
 
 REPO = "kinoko34077/devflow"
 OTHER = "kinoko34077/example"
@@ -66,6 +71,58 @@ class MappedReadTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["repository"], OTHER)
         self.assertNotIn("private failure detail", repr(result))
 
+    def test_missing_projection_is_local_and_never_returns_prefix(self):
+        def prepare(lower, upper, filters, budget):
+            def read(repo):
+                rows = ({"id": 1}, {"other": 2}) if repo == REPO else ({"id": 3},)
+                return SourceObservation(rows, "BOUNDED_READ", "FIXTURE_READ", read_units=1)
+            return read
+        packet = query("fixture", [REPO, OTHER])
+        packet["time"] = None
+        packet["response"]["fields"] = ["id"]
+        sources = {"fixture": SourceMap("fixture", None, frozenset({"id"}), prepare)}
+        result = read_mapped(packet, sources=sources, allowed_repositories={REPO, OTHER})
+        self.assertEqual(result["items"], [{"repository": OTHER, "record": {"id": 3}}])
+        self.assertEqual(result["coverage"]["status"], "PARTIAL_UNKNOWN")
+        bad = result["coverage"]["repositories"][0]
+        self.assertEqual(bad["reason_codes"], ["MISSING_SOURCE_FIELD"])
+        self.assertEqual(bad["read_units"], 1)
+
+    def test_invalid_metadata_is_not_exposed(self):
+        def transport(url, headers):
+            return [{"id": 1, "number": 1, "state": "open", "repository_url":
+                     "https://api.github.com/repos/" + REPO, "updated_at": LOW,
+                     "title": {"body": "must not be returned"}}]
+        sources = github_source_maps(GitHubReader(transport=transport))
+        packet = query()
+        packet["response"]["fields"] = ["title"]
+        result = read_mapped(packet, sources=sources, allowed_repositories={REPO})
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["coverage"]["status"], "BLOCKED")
+        self.assertNotIn("must not be returned", repr(result))
+        self.assertEqual(result["coverage"]["repositories"][0]["reason_codes"],
+                         ["INVALID_GITHUB_METADATA"])
+
+    def test_external_checkout_import_does_not_depend_on_tools_namespace(self):
+        # The foreign repository owns its own tools package. Import the one
+        # canonical module from the verified devflow checkout, not a copy.
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            foreign = Path(tmp)
+            (foreign / "tools").mkdir()
+            (foreign / "tools" / "__init__.py").write_text("FOREIGN = True\n", encoding="utf-8")
+            env = dict(os.environ, PYTHONPATH=str(root))
+            script = (
+                "import pathlib,tools,devflow_mapped_read as m;"
+                "assert tools.FOREIGN;"
+                "assert pathlib.Path(m.__file__).resolve().parent.parent == "
+                "pathlib.Path(__import__('os').environ['PYTHONPATH']).resolve();"
+                "assert m.SCHEMA == 'mapped-read.v1';"
+                "assert m.parse_utc_timestamp('2026-11-20T00:00:00Z').year == 2026"
+            )
+            subprocess.run([sys.executable, "-c", script], cwd=foreign, env=env,
+                           check=True, capture_output=True, timeout=30)
+
     def test_response_limit_is_not_complete(self):
         sources, calls = self.reader()
         packet = query(repos=[REPO, OTHER])
@@ -83,6 +140,7 @@ class MappedReadTests(unittest.TestCase):
             ("target", {"dataset": "unregistered", "repositories": [REPO]}),
             ("target", {"dataset": "github.issue", "repositories": [REPO, OTHER]}),
             ("target", {"dataset": "github.issue", "repositories": [REPO, REPO]}),
+            ("target", {"dataset": "github.issue", "repositories": ["../devflow"]}),
             ("target", {"dataset": "github.issue", "repositories": [REPO], "filters": {"unknown": 1}}),
             ("response", {"fields": ["body"]}),
             ("response", {"fields": ["id", "id"]}),
