@@ -6,11 +6,16 @@ MCP protocol versioning scheme, Codex lifecycle fix or claim authority.
 
 ## Stable registration
 
-The existing `~/.codex/config.toml` keeps its existing Python `command` and
-the three `args`: stable launcher, authenticated `gh.exe`, immutable original
-`tools/devflow_mcp.py`. The launcher file is installed from
-`tools/devflow_mcp_stable_launcher.py` **once**, after backing up the existing
-launcher byte-for-byte. The old third argument is preserved as the fallback.
+Initial rollout [#1124](https://github.com/kinoko34077/devflow/issues/1124)
+must use a protected Python runtime and source clone. If the existing registered
+Python is writable by the development sandbox, the one-time, explicitly
+authorized migration changes only the MCP Python `command` after a byte-for-byte
+backup of `~/.codex/config.toml`. Preserve the three existing `args` (stable
+launcher, authenticated `gh.exe`, immutable original `tools/devflow_mcp.py`),
+registration environment and unrelated settings. Install
+`tools/devflow_mcp_stable_launcher.py` **once**, after backing up the original
+launcher. Routine release updates must not edit either registration or launcher.
+The old third argument remains the fallback.
 
 A local read-only state file determines which *newly started* server is selected:
 
@@ -42,8 +47,9 @@ The updater first checks the current release integrity and the persistent update
 
 1. Restrict Git remote origin to `kinoko34077/devflow`.
 2. Compare GitHub's `main` SHA to newly fetched `origin/main`. Require
-   successful exact-SHA `verify` and `mcp-stdio-python311` GitHub Actions
-   checks (not simply the presence of a workflow name).
+   the unique successful `project-sync-tests.yml` main-push workflow run for
+   that exact SHA and both successful `verify` and `mcp-stdio-python311` jobs
+   belonging to that run. Unrelated commit check-runs are not enumerated.
 3. Stage a Git archive of that SHA in a temporary new directory, without
    touching a running source clone or virtual environment.
 4. Execute bounded Windows local Python unit contract tests (Devflow MCP Core,
@@ -59,14 +65,22 @@ The updater first checks the current release integrity and the persistent update
    re-hash every relative path and file before using an active release.
    Both real MCP and local tests disable Python bytecode writes into the staged
    tree. Failure before marker replacement keeps the prior version selected.
-   An incomplete target is quarantined (not executed) and rebuilt from trusted
-   Git source on the next check. Previous releases remain for rollback and
-   in-flight MCP processes.
+   A pre-existing target is never moved, overwritten, or executed as a
+   candidate. Rebuild and test in a fresh stage; reuse the existing directory
+   only when its complete digest matches those verified bytes. On mismatch,
+   block promotion and preserve the directory for investigation. Previous
+   releases remain at their original paths for rollback and in-flight MCP
+   processes. A marker-write failure retains the verified target for safe retry.
 
-A Windows Task Scheduler entry can run `check` hourly using the *current
-interactive user*, without elevation and with concurrent executions suppressed.
-It must be explicitly authorized before installation. No updater runs in
-the MCP launcher itself. Task logs record only status and SHA, never token.
+定期実行は既存の共通PC自動実行基盤 [#1120](https://github.com/kinoko34077/devflow/issues/1120) の
+`AutoRunner/jobs.json` へ固定argvの単発 `check` Jobを登録する。周期は60分、共通runnerの
+待機・再試行・重複防止・非表示起動・実行結果記録をそのまま利用する。
+MCP専用Windows Task、常駐プロセス、追加の待機ループを作らない。
+共通runnerにはMCPの認証・取得・検証・版選択を実装しない。
+個別managerの排他は手動rollback/resumeとの競合を防ぐため維持する。
+初回は無効登録または手動検証とし、実行環境の保護・既存登録との一致・実stdio・
+rollbackの受入後のみ有効化する。既存ジョブとTaskの権限を変更しない。
+共通runnerの記録はJob ID・結果・終了コードのみで、認証情報を保存しない。
 
 ## Rollback and safety boundaries
 
@@ -86,7 +100,7 @@ breaking-contract rollout.
 
 ## P2-A / P2-B / P2-C：復旧と実行時完全性の境界（DFM02）
 
-- **部分切替の復旧**：候補ディレクトリが存在しても検証済みとみなさない。既存候補を `releases/.quarantine-<sha>-<random>` に隔離し、GitHub `main` の検証済みSHAから再取得・再試験する。隔離された内容は実行しない。marker書換えが失敗した場合も旧markerを保持し、可能なら新規候補を隔離して `BLOCKED` を返す。Windowsで使用中のディレクトリを移動できない場合、保護を迂回せず原因を解消して再試行する。隔離ディレクトリの消去は自動実行しない。
+- **部分切替・旧稼働版の保持**：Windows実fixtureで稼働中Pythonのsource directory移動が成功し、後続ファイル読取が失敗した。inactiveであっても既存版を移動・上書きしない。GitHubの検証済みSHAから新規stageを再構築・試験し、既存版がその全バイトdigestと一致する場合に限り元の場所で再利用する。不一致は旧markerを保持しBLOCKED。marker書換え失敗時は検証済みdirを保持し、同様に再試験・一致確認後に再試行できる。破損や未知の既存dirは自動で隔離/消去しない。稼働プロセスへの影響がなく安全に復旧できることを人間が確認した場合のみ、別の明示操作で処置する。
 - **起動時の検証**：`active.json` のschema version 2は、検証済みreleaseのSHAだけでなく、全相対パスと全ファイルバイトを含むSHA-256を保持する。launcherは `gh auth token` の実行**前**にハッシュ、パスリダイレクト、schemaを確認し、不一致ならMCPを起動しない。管理コマンドの `UP_TO_DATE` 判定も同じ検証を行う。
 - **rollback**：前の版への復帰では、新規に読み取った改変済み内容を「検証済み」に昇格させず、切替前に保持していた `previous_tree_sha256` と照合する。初回有効化の取り消しは元の固定launcher・fallbackへ戻す。schema v1の未検証markerは互換性を仮定せず拒否する（現時点では新方式未導入）。
 - **ロールバックの持続（P2-C）**：`updates.hold` の存在中は、同じSHAだけでなく将来のmainへの自動昇格も停止する。空ファイルも停止扱いとし、切替失敗時にも停止を解除しない。`resume` は現行版を確認して停止だけを解除し、次の `check` が通常の検証を再開する。

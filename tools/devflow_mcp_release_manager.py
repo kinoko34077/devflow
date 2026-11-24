@@ -1,6 +1,6 @@
 """Verified, rollbackable local Codex Devflow MCP releases (Issue #1111).
 
-The command runs only by explicit invocation or a separate scheduled task.
+The command runs only by explicit invocation or the shared local AutoRunner.
 The MCP launcher itself never fetches Git or runs validation.
 """
 
@@ -19,7 +19,6 @@ import sys
 import tempfile
 import tomllib
 import zipfile
-import uuid
 
 
 REPOSITORY = "kinoko34077/devflow"
@@ -213,20 +212,23 @@ def release_lock(root: Path):
         raise ReleaseError("release manager lock unavailable") from error
 
 
-def quarantine_inactive(root: Path, sha: str) -> bool:
-    """未検証の既存リリースは一切実行せず隔離、次回はtrusted sourceから再構築。"""
+def install_verified_release(root: Path, sha: str, stage: Path, digest: str) -> None:
+    """Reuse identical bytes in place; never move an existing release directory."""
+    validate_sha(sha)
+    validate_digest(digest)
     target = root / "releases" / sha
-    if not target.exists() and not target.is_symlink():
-        return False
-    current = read_marker(root)
-    if current is not None and current["sha"] == sha:
-        raise ReleaseError("refusing to move an active release")
-    destination = target.with_name(".quarantine-" + sha + "-" + uuid.uuid4().hex)
     try:
-        os.replace(target, destination)
-    except OSError as error:
-        raise ReleaseError("inactive release cannot be quarantined") from error
-    return True
+        target.lstat()
+    except FileNotFoundError:
+        try:
+            os.replace(stage, target)
+        except OSError as error:
+            raise ReleaseError("verified release could not be installed") from error
+    else:
+        # A previously selected SHA can still serve an in-flight process after
+        # rollback, even when active.json is absent. Never rename/overwrite it.
+        # Only the newly staged source was executed; compare the retained bytes.
+        require_integrity(root, sha, digest)
 
 
 def run(args: list[str], *, timeout: int = 60, cwd: Path | None = None) -> str:
@@ -252,26 +254,54 @@ def gh_json(gh: Path, endpoint: str) -> object:
 
 
 def github_gate(gh: Path, sha: str) -> None:
-    """Require actual successful main-SHA PR-gate jobs, not a vague CI label."""
+    """Verify the existing Required PR gate's exact main push and its jobs."""
     validate_sha(sha)
-    packet = gh_json(gh, f"repos/{REPOSITORY}/commits/{sha}/check-runs?per_page=100")
-    if not isinstance(packet, dict) or type(packet.get("total_count")) is not int:
-        raise ReleaseError("GitHub check evidence missing")
-    checks = packet.get("check_runs")
-    if not isinstance(checks, list) or len(checks) < packet["total_count"]:
-        raise ReleaseError("GitHub check evidence incomplete")
-    succeeded = {
-        c["name"] for c in checks
-        if isinstance(c, dict)
-        and c.get("name") in REQUIRED_CHECKS
-        and c.get("status") == "completed"
-        and c.get("conclusion") == "success"
-        and isinstance(c.get("app"), dict)
-        and c["app"].get("slug") == "github-actions"
-        and isinstance(c.get("head_sha"), str)
-        and c["head_sha"] == sha
-    }
-    if succeeded != REQUIRED_CHECKS:
+    workflow = ".github/workflows/project-sync-tests.yml"
+    packet = gh_json(
+        gh, f"repos/{REPOSITORY}/actions/workflows/project-sync-tests.yml/runs"
+        f"?head_sha={sha}&event=push&branch=main&per_page=100",
+    )
+    if (not isinstance(packet, dict) or type(packet.get("total_count")) is not int
+            or packet["total_count"] != 1
+            or not isinstance(packet.get("workflow_runs"), list)
+            or len(packet["workflow_runs"]) != 1):
+        raise ReleaseError("unique required main-push workflow evidence unavailable")
+    record = packet["workflow_runs"][0]
+    if (not isinstance(record, dict)
+            or record.get("path") != workflow
+            or record.get("head_sha") != sha
+            or record.get("head_branch") != "main"
+            or record.get("event") != "push"
+            or record.get("status") != "completed"
+            or record.get("conclusion") != "success"
+            or type(record.get("id")) is not int or record["id"] <= 0
+            or type(record.get("run_attempt")) is not int or record["run_attempt"] <= 0):
+        raise ReleaseError("required main-push workflow has not succeeded")
+    run_id = record["id"]
+    packet = gh_json(
+        gh, f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs"
+        "?filter=latest&per_page=100",
+    )
+    if (not isinstance(packet, dict) or type(packet.get("total_count")) is not int
+            or not isinstance(packet.get("jobs"), list)
+            or len(packet["jobs"]) != packet["total_count"]):
+        raise ReleaseError("required workflow job evidence incomplete")
+    seen = set()
+    for job in packet["jobs"]:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            raise ReleaseError("invalid required workflow job evidence")
+        name = job["name"]
+        if name not in REQUIRED_CHECKS:
+            continue
+        if (name in seen or job.get("head_sha") != sha
+                or type(job.get("run_id")) is not int or job["run_id"] != run_id
+                or type(job.get("run_attempt")) is not int
+                or not 1 <= job["run_attempt"] <= record["run_attempt"]
+                or job.get("status") != "completed"
+                or job.get("conclusion") != "success"):
+            raise ReleaseError("required main-commit verification has not succeeded")
+        seen.add(name)
+    if seen != REQUIRED_CHECKS:
         raise ReleaseError("required main-commit verification has not succeeded")
 
 
@@ -485,8 +515,6 @@ def _promote_unlocked(
     previous_catalog = smoke(python, gh, old_script, full=False, mcp_env=mcp_env)
     target = root / "releases" / latest
     target.parent.mkdir(parents=True, exist_ok=True)
-    # 再利用すると未検証実体にtokenを渡すため、必ず隔離して再作成する。
-    quarantine_inactive(root, latest)
     with tempfile.TemporaryDirectory(prefix=".candidate-", dir=root) as tmp:
         stage = Path(tmp) / latest
         stage.mkdir()
@@ -501,12 +529,9 @@ def _promote_unlocked(
         if new_catalog != previous_catalog:
             raise ReleaseError("MCP callable schema changed; manual review required")
         verified_digest = release_tree_digest(stage)
-        try:
-            os.replace(stage, target)
-        except OSError as error:
-            raise ReleaseError("verified release could not be installed") from error
+        install_verified_release(root, latest, stage, verified_digest)
     try:
-        # active.jsonに先に記録したdigestは、検証済みstageの実バイトに対応。
+        # active.jsonには検証済みstageと一致した実バイトのdigestのみ記録。
         require_integrity(root, latest, verified_digest)
         write_marker(
             root, latest, state["sha"] if state else None,
@@ -514,8 +539,8 @@ def _promote_unlocked(
             previous_tree_sha256=state["tree_sha256"] if state else None,
         )
     except (OSError, ReleaseError) as error:
-        # 書込失敗後のinactive dirを隔離。activeになった可能性があれば触らない。
-        quarantine_inactive(root, latest)
+        # 稼働中の旧版を含め既存releaseは動かさない。次回はfresh stageと
+        # digestを比較し、完全一致する場合に限って同じ場所を再利用する。
         raise ReleaseError(
             "release activation incomplete; inspect status before next check"
         ) from error

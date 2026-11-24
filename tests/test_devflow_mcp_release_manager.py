@@ -228,12 +228,13 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "registered_mcp_env", return_value={}),
               patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
               patch.object(manager, "run_unittests") as tests):
-            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            with self.assertRaisesRegex(manager.ReleaseError, "differ"):
+                manager.promote(**self._runner())
             self.assertEqual(invoke.call_count, 2)
+            self.assertNotIn(inactive, [call.args[2] for call in invoke.call_args_list])
             tests.assert_called_once()
-        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
-        self.assertEqual(inactive.read_text(), "# verified rebuild\n")
-        self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
+        self.assertEqual(inactive.read_text(), "# unverified poison\n")
 
     def test_release_script_rejects_in_root_redirected_symlink(self):
         self._release(SHA_A)
@@ -245,27 +246,72 @@ class ReleaseManagerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(manager.ReleaseError, "redirected"):
             manager.release_script(self.root, SHA_B)
 
-    def test_release_gate_requires_actual_success_from_github_actions_and_exact_sha(self):
-        success = [
+    def test_release_gate_uses_only_exact_main_push_workflow_and_its_jobs(self):
+        run = {"id": 45316024800, "head_sha": SHA_A, "head_branch": "main",
+               "event": "push", "status": "completed", "conclusion": "success",
+               "run_attempt": 1, "path": ".github/workflows/project-sync-tests.yml"}
+        jobs = [
             {"name": name, "status": "completed", "conclusion": "success",
-             "head_sha": SHA_A, "app": {"slug": "github-actions"}}
-            for name in manager.REQUIRED_CHECKS
+             "head_sha": SHA_A, "run_id": run["id"], "run_attempt": 1}
+            for name in sorted(manager.REQUIRED_CHECKS)
         ]
-        with patch.object(manager, "gh_json", return_value={
-            "total_count": 2, "check_runs": success,
-        }):
-            manager.github_gate(Path("/fake/gh"), SHA_A)
+        workflow_endpoint = (
+            f"repos/{manager.REPOSITORY}/actions/workflows/project-sync-tests.yml/runs"
+            f"?head_sha={SHA_A}&event=push&branch=main&per_page=100"
+        )
+        jobs_endpoint = (
+            f"repos/{manager.REPOSITORY}/actions/runs/{run['id']}/jobs"
+            "?filter=latest&per_page=100"
+        )
+        gh = Path("/fake/gh")
+        # The actual commit had 327 unrelated check-runs; no broad check-runs
+        # request is needed when using this existing workflow's own run/jobs.
+        with patch.object(manager, "gh_json", side_effect=[
+            {"total_count": 1, "workflow_runs": [run]},
+            {"total_count": 2, "jobs": jobs},
+        ]) as get:
+            manager.github_gate(gh, SHA_A)
+            self.assertEqual([c.args for c in get.call_args_list],
+                             [(gh, workflow_endpoint), (gh, jobs_endpoint)])
         for invalid in (
-            [success[0]],
-            [{**success[0], "head_sha": SHA_B}, success[1]],
-            [{**success[0], "conclusion": "skipped"}, success[1]],
-            [{**success[0], "app": {"slug": "unknown"}}, success[1]],
+            [],
+            [{**run, "head_sha": SHA_B}],
+            [{**run, "head_branch": "other"}],
+            [{**run, "event": "pull_request"}],
+            [{**run, "path": ".github/workflows/other.yml"}],
+            [{**run, "status": "in_progress"}],
+            [{**run, "conclusion": "failure"}],
+            [run, {**run, "id": 456}],
         ):
-            with self.subTest(invalid=invalid), patch.object(manager, "gh_json", return_value={
-                "total_count": len(invalid), "check_runs": invalid,
-            }):
+            with self.subTest(invalid_run=invalid), patch.object(
+                manager, "gh_json",
+                return_value={"total_count": len(invalid), "workflow_runs": invalid},
+            ) as get:
                 with self.assertRaises(manager.ReleaseError):
-                    manager.github_gate(Path("/fake/gh"), SHA_A)
+                    manager.github_gate(gh, SHA_A)
+                get.assert_called_once()
+        for invalid in (
+            [jobs[0]],
+            [{**jobs[0], "head_sha": SHA_B}, jobs[1]],
+            [{**jobs[0], "conclusion": "skipped"}, jobs[1]],
+            [{**jobs[0], "run_id": 456}, jobs[1]],
+            [{**jobs[0], "run_attempt": 2}, jobs[1]],
+            [*jobs, {**jobs[0], "conclusion": "failure"}],
+        ):
+            with self.subTest(invalid_jobs=invalid), patch.object(
+                manager, "gh_json", side_effect=[
+                    {"total_count": 1, "workflow_runs": [run]},
+                    {"total_count": len(invalid), "jobs": invalid},
+                ],
+            ):
+                with self.assertRaises(manager.ReleaseError):
+                    manager.github_gate(gh, SHA_A)
+        with patch.object(manager, "gh_json", side_effect=[
+            {"total_count": 1, "workflow_runs": [run]},
+            {"total_count": 327, "jobs": jobs},
+        ]):
+            with self.assertRaises(manager.ReleaseError):
+                manager.github_gate(gh, SHA_A)
 
 
     def test_registered_env_read_preserves_values_without_emitting_or_modifying_config(self):
@@ -329,9 +375,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(manager.ReleaseError, "activation incomplete"):
                     manager.promote(**self._runner())
             self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
-            self.assertFalse((self.root / "releases" / SHA_B).exists())
-            self.assertEqual(len(list((self.root / "releases").glob(".quarantine-" + SHA_B + "-*"))), 1)
-            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+            retained = self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py"
+            self.assertEqual(retained.read_text(), "# rebuilt\n")
+            with patch.object(manager.os, "replace", wraps=manager.os.replace) as replace:
+                self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
+                self.assertEqual(len(replace.call_args_list), 1)
+                self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
             self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
 
     def test_rollback_rejects_modified_previously_verified_release(self):
@@ -343,24 +392,54 @@ class ReleaseManagerContractTests(unittest.TestCase):
             manager.rollback(self.root, self.legacy)
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
 
-    def test_rollback_then_repromotion_rebuilds_inactive_release(self):
+    def test_rollback_then_repromotion_preserves_prior_process_source(self):
         self._release(SHA_A)
-        self._release(SHA_B)
+        prior = self._release(SHA_B)
+        prior_bytes = prior.read_bytes()
         self._marker(SHA_B, SHA_A)
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
         self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED ACTIVE " + SHA_A)
+
         def fresh_archive(_repo, _sha, destination):
             script = destination / "tools" / "devflow_mcp.py"
             script.parent.mkdir(parents=True)
-            script.write_text("# freshly rebuilt\n", encoding="utf-8")
+            script.write_bytes(prior_bytes)
+
         with (patch.object(manager, "trusted_latest", return_value=SHA_B),
               patch.object(manager, "run", return_value=""),
               patch.object(manager, "source_archive", side_effect=fresh_archive),
               patch.object(manager, "run_unittests"),
               patch.object(manager, "registered_mcp_env", return_value={}),
-              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}) as invoke,
+              patch.object(manager.os, "replace", wraps=manager.os.replace) as replace):
             self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
-        self.assertIn("# freshly rebuilt", (self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py").read_text())
+            self.assertEqual(len(replace.call_args_list), 1)
+            self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
+            self.assertNotIn(prior, [call.args[2] for call in invoke.call_args_list])
+        self.assertEqual(prior.read_bytes(), prior_bytes)
+
+    def test_legacy_rollback_then_repromotion_preserves_original_release(self):
+        prior = self._release(SHA_A)
+        prior_bytes = prior.read_bytes()
+        self._marker(SHA_A)
+        self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK_TO_LEGACY")
+        self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED LEGACY")
+
+        def fresh_archive(_repo, _sha, destination):
+            script = destination / "tools" / "devflow_mcp.py"
+            script.parent.mkdir(parents=True)
+            script.write_bytes(prior_bytes)
+
+        with (patch.object(manager, "trusted_latest", return_value=SHA_A),
+              patch.object(manager, "source_archive", side_effect=fresh_archive),
+              patch.object(manager, "run_unittests"),
+              patch.object(manager, "registered_mcp_env", return_value={}),
+              patch.object(manager, "smoke", return_value={"bootstrap_repository": {}}),
+              patch.object(manager.os, "replace", wraps=manager.os.replace) as replace):
+            self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_A)
+            self.assertEqual(len(replace.call_args_list), 1)
+            self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
+        self.assertEqual(prior.read_bytes(), prior_bytes)
 
     def test_failed_rollback_keeps_hold_even_when_marker_write_fails(self):
         self._release(SHA_A)
