@@ -1,6 +1,6 @@
 """Verified, rollbackable local Codex Devflow MCP releases (Issue #1111).
 
-The command runs only by explicit invocation or a separate scheduled task.
+The command runs only by explicit invocation or the shared local AutoRunner.
 The MCP launcher itself never fetches Git or runs validation.
 """
 
@@ -252,26 +252,54 @@ def gh_json(gh: Path, endpoint: str) -> object:
 
 
 def github_gate(gh: Path, sha: str) -> None:
-    """Require actual successful main-SHA PR-gate jobs, not a vague CI label."""
+    """Verify the existing Required PR gate's exact main push and its jobs."""
     validate_sha(sha)
-    packet = gh_json(gh, f"repos/{REPOSITORY}/commits/{sha}/check-runs?per_page=100")
-    if not isinstance(packet, dict) or type(packet.get("total_count")) is not int:
-        raise ReleaseError("GitHub check evidence missing")
-    checks = packet.get("check_runs")
-    if not isinstance(checks, list) or len(checks) < packet["total_count"]:
-        raise ReleaseError("GitHub check evidence incomplete")
-    succeeded = {
-        c["name"] for c in checks
-        if isinstance(c, dict)
-        and c.get("name") in REQUIRED_CHECKS
-        and c.get("status") == "completed"
-        and c.get("conclusion") == "success"
-        and isinstance(c.get("app"), dict)
-        and c["app"].get("slug") == "github-actions"
-        and isinstance(c.get("head_sha"), str)
-        and c["head_sha"] == sha
-    }
-    if succeeded != REQUIRED_CHECKS:
+    workflow = ".github/workflows/project-sync-tests.yml"
+    packet = gh_json(
+        gh, f"repos/{REPOSITORY}/actions/workflows/project-sync-tests.yml/runs"
+        f"?head_sha={sha}&event=push&branch=main&per_page=100",
+    )
+    if (not isinstance(packet, dict) or type(packet.get("total_count")) is not int
+            or packet["total_count"] != 1
+            or not isinstance(packet.get("workflow_runs"), list)
+            or len(packet["workflow_runs"]) != 1):
+        raise ReleaseError("unique required main-push workflow evidence unavailable")
+    record = packet["workflow_runs"][0]
+    if (not isinstance(record, dict)
+            or record.get("path") != workflow
+            or record.get("head_sha") != sha
+            or record.get("head_branch") != "main"
+            or record.get("event") != "push"
+            or record.get("status") != "completed"
+            or record.get("conclusion") != "success"
+            or type(record.get("id")) is not int or record["id"] <= 0
+            or type(record.get("run_attempt")) is not int or record["run_attempt"] <= 0):
+        raise ReleaseError("required main-push workflow has not succeeded")
+    run_id = record["id"]
+    packet = gh_json(
+        gh, f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs"
+        "?filter=latest&per_page=100",
+    )
+    if (not isinstance(packet, dict) or type(packet.get("total_count")) is not int
+            or not isinstance(packet.get("jobs"), list)
+            or len(packet["jobs"]) != packet["total_count"]):
+        raise ReleaseError("required workflow job evidence incomplete")
+    seen = set()
+    for job in packet["jobs"]:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            raise ReleaseError("invalid required workflow job evidence")
+        name = job["name"]
+        if name not in REQUIRED_CHECKS:
+            continue
+        if (name in seen or job.get("head_sha") != sha
+                or type(job.get("run_id")) is not int or job["run_id"] != run_id
+                or type(job.get("run_attempt")) is not int
+                or not 1 <= job["run_attempt"] <= record["run_attempt"]
+                or job.get("status") != "completed"
+                or job.get("conclusion") != "success"):
+            raise ReleaseError("required main-commit verification has not succeeded")
+        seen.add(name)
+    if seen != REQUIRED_CHECKS:
         raise ReleaseError("required main-commit verification has not succeeded")
 
 
