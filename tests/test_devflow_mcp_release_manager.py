@@ -160,6 +160,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
         )
         self.assertIsNone(manager.read_marker(self.root))
         self.assertTrue((self.root / "releases" / SHA_A).is_dir())
+        self.assertEqual(manager.status(self.root), "HELD LEGACY")
+        with patch.object(manager, "trusted_latest") as fetch:
+            self.assertEqual(manager.promote(**self._runner()), "HELD LEGACY")
+            fetch.assert_not_called()
+        self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED LEGACY")
+        self.assertEqual(manager.status(self.root), "LEGACY")
 
     def test_subsequent_rollback_switches_sha_and_retains_both(self):
         self._release(SHA_A)
@@ -169,6 +175,11 @@ class ReleaseManagerContractTests(unittest.TestCase):
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
         self.assertEqual(manager.read_marker(self.root)["previous_sha"], SHA_B)
         self.assertTrue((self.root / "releases" / SHA_B).is_dir())
+        self.assertEqual(manager.status(self.root), "HELD ACTIVE " + SHA_A)
+        with patch.object(manager, "trusted_latest") as fetch:
+            self.assertEqual(manager.promote(**self._runner()), "HELD ACTIVE " + SHA_A)
+            self.assertEqual(manager.promote(**self._runner()), "HELD ACTIVE " + SHA_A)
+            fetch.assert_not_called()
 
     def test_strips_only_narrative_schema_metadata(self):
         a = {"type": "object", "required": ["repository"], "description": "old",
@@ -337,6 +348,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
         self._release(SHA_B)
         self._marker(SHA_B, SHA_A)
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
+        self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED ACTIVE " + SHA_A)
         def fresh_archive(_repo, _sha, destination):
             script = destination / "tools" / "devflow_mcp.py"
             script.parent.mkdir(parents=True)
@@ -349,6 +361,40 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "smoke", return_value={"bootstrap_repository": {}})):
             self.assertEqual(manager.promote(**self._runner()), "ACTIVATED " + SHA_B)
         self.assertIn("# freshly rebuilt", (self.root / "releases" / SHA_B / "tools" / "devflow_mcp.py").read_text())
+
+    def test_failed_rollback_keeps_hold_even_when_marker_write_fails(self):
+        self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        with patch.object(manager, "write_marker", side_effect=OSError("locked")):
+            with self.assertRaises(manager.ReleaseError):
+                manager.rollback(self.root, self.legacy)
+        self.assertEqual(manager.status(self.root), "HELD ACTIVE " + SHA_B)
+        with patch.object(manager, "trusted_latest") as fetch:
+            self.assertEqual(manager.promote(**self._runner()), "HELD ACTIVE " + SHA_B)
+            fetch.assert_not_called()
+
+    def test_resume_rejects_tampered_active_release_without_clearing_hold(self):
+        old = self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        manager.rollback(self.root, self.legacy)
+        old.write_text("# modified\n", encoding="utf-8")
+        with self.assertRaisesRegex(manager.ReleaseError, "differ"):
+            manager.resume_updates(self.root, self.legacy)
+        self.assertTrue(manager.updates_held(self.root))
+
+    def test_empty_hold_file_is_still_held(self):
+        (self.root / "updates.hold").touch()
+        with patch.object(manager, "trusted_latest") as fetch:
+            self.assertEqual(manager.promote(**self._runner()), "HELD LEGACY")
+            fetch.assert_not_called()
+
+    def test_launcher_and_manager_tree_digest_agree(self):
+        script = self._release(SHA_A)
+        script.with_name("module.py").write_text("# extra\n", encoding="utf-8")
+        tree = self.root / "releases" / SHA_A
+        self.assertEqual(manager.release_tree_digest(tree), launcher.release_tree_digest(tree))
 
     def test_successful_staging_atomically_selects_new_release(self):
         def fake_archive(_repo, _sha, destination):
