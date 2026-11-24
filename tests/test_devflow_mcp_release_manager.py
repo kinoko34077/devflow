@@ -1,10 +1,14 @@
 """No-network contract tests for guarded local MCP release selection (#1111)."""
 
+import asyncio
+from contextlib import asynccontextmanager
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tools import devflow_mcp_release_manager as manager
@@ -39,6 +43,34 @@ class StableLauncherTests(unittest.TestCase):
                 if previous is not None else None
             ),
         )
+
+    def test_launcher_uses_only_selected_release_import_root(self):
+        # Simulate the registered old checkout path using a real child process.
+        # Neither GitHub nor actual credentials are used by this fixture.
+        candidate = self._release(SHA_A)
+        for script, label in ((self.legacy, "old"), (candidate, "new")):
+            script.with_name("__init__.py").write_text("", encoding="utf-8")
+            script.with_name("marker.py").write_text(
+                f"LABEL = {label!r}\n", encoding="utf-8",
+            )
+            script.write_text(
+                "import os\nfrom tools.marker import LABEL\n"
+                f"assert LABEL == {label!r}\n"
+                "assert os.environ['DFM_TEST_OTHER'] == 'keep'\n",
+                encoding="utf-8",
+            )
+        with (patch.dict(os.environ, {
+                  "PYTHONPATH": str(self.legacy.parent.parent),
+                  "DFM_TEST_OTHER": "keep",
+              }),
+              patch.object(launcher, "release_root", return_value=self.root),
+              patch.object(launcher.subprocess, "run", return_value=SimpleNamespace(
+                  returncode=0, stdout="fixture-token",
+              ))):
+            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            self._marker(SHA_A)
+            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            self.assertEqual(os.environ["PYTHONPATH"], str(self.legacy.parent.parent))
 
     def test_no_marker_preserves_original_legacy_launch(self):
         self.assertEqual(
@@ -334,6 +366,55 @@ class ReleaseManagerContractTests(unittest.TestCase):
             self.assertEqual(env, {"PYTHONPATH": "/allowed/repo"})
             self.assertIn('command = "/fake/python"', config.read_text())
 
+
+    def test_stdio_validation_uses_selected_script_root_not_registered_old_path(self):
+        candidate = self._release(SHA_B)
+        supplied_env = {"PYTHONPATH": str(self.legacy.parent), "DFM_TEST_OTHER": "keep"}
+        observed = []
+        @asynccontextmanager
+        async def fake_stdio(server, **kwargs):
+            observed.append(server)
+            yield None, None
+
+        class Session:
+            def __init__(self, *args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def initialize(self):
+                pass
+
+            async def list_tools(self):
+                return SimpleNamespace(tools=[
+                    SimpleNamespace(name=f"tool{i}", input_schema={})
+                    for i in range(manager.EXPECTED_TOOLS)
+                ])
+
+        with (patch("mcp.client.stdio.stdio_client", fake_stdio),
+              patch("mcp.ClientSession", Session)):
+            result = asyncio.run(manager._stdio_test(
+                Path("/fake/python"), candidate, "fixture-token",
+                full=False, mcp_env=supplied_env,
+            ))
+        self.assertEqual(len(result), manager.EXPECTED_TOOLS)
+        self.assertEqual(observed[0].env["PYTHONPATH"], str(candidate.parent.parent.resolve()))
+        self.assertEqual(observed[0].env["DFM_TEST_OTHER"], "keep")
+        self.assertEqual(supplied_env["PYTHONPATH"], str(self.legacy.parent))
+
+    def test_unit_validation_uses_staged_root_not_inherited_old_path(self):
+        source = self.root / "stage"
+        source.mkdir()
+        with (patch.dict(os.environ, {"PYTHONPATH": str(self.legacy.parent)}),
+              patch.object(manager.subprocess, "run", return_value=SimpleNamespace(
+                  returncode=0,
+              )) as invoke):
+            manager.run_unittests(Path("/fake/python"), source)
+        self.assertEqual(invoke.call_args.kwargs["env"]["PYTHONPATH"], str(source.resolve()))
 
     def test_staging_failure_does_not_promote_or_modify_old_release(self):
         old = self._release(SHA_A)

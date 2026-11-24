@@ -136,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         _diagnose(AUTH_FAILURE)
         return 78
     child_env = os.environ.copy()
+    # Bind package imports to the selected release, not a legacy registration.
+    child_env["PYTHONPATH"] = str(script.resolve().parent.parent)
     child_env["DEVFLOW_GITHUB_TOKEN"] = token
     child_env["PYTHONDONTWRITEBYTECODE"] = "1"
     token = None
