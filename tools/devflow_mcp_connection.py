@@ -18,13 +18,11 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
 if __package__:
-    from .devflow_mcp_release_manager import _compatible_schema
     from .devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
-                                     admit_catalog, arguments_supported)
+                                     admit_catalog, arguments_supported, publication_schema)
 else:
-    from devflow_mcp_release_manager import _compatible_schema
     from devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
-                                    admit_catalog, arguments_supported)
+                                    admit_catalog, arguments_supported, publication_schema)
 
 START_TIMEOUT = 20
 LIST_TIMEOUT = 10
@@ -49,7 +47,7 @@ def catalog_contract(tools: list[types.Tool]) -> dict[str, Any]:
             data.pop(key, None)
         for key in ("inputSchema", "outputSchema"):
             if key in data:
-                data[key] = _compatible_schema(data[key])
+                data[key] = publication_schema(data[key])
         result[tool.name] = data
     return result
 
