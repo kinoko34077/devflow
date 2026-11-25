@@ -2107,6 +2107,7 @@ class DevflowService:
             "source_freshness": view["source_freshness"],
             "source_error": view["source_error"],
             "coverage_status": view["coverage_status"],
+            "coverage_status_scope": "WORK_VIEW",
             "has_unknown_work": True,  # B5/non-TASK source universe unproven
             "sections": {
                 "ongoing": ongoing,
@@ -2131,6 +2132,8 @@ class DevflowService:
                         view["observed_task_view"]["unresolved_open_issue_count"]
                     ),
                     "claimability": "NOT_EVALUATED",
+                    # Same observation, not a new inventory or extra fetch.
+                    "unresolved_issue_discovery": view["unresolved_issue_discovery"],
                     "scoped_read_precedence": view["scoped_known_task_read"]["precedence"],
                     "scoped_read_record_field": view["scoped_known_task_read"]["record_field"],
                 },
