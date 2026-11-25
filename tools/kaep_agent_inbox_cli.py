@@ -39,7 +39,8 @@ def read_checkin(
             result["issues"] = [
                 item for item in result["issues"]
                 if item.get("requests") is None
-                or any(req["status"] in ("PENDING_REPLY", "ACK_OBSERVED")
+                or any(req["status"] in ("PENDING_REPLY", "ACK_OBSERVED",
+                                         "CANCEL_REQUEST_OBSERVED")
                        for req in item["requests"])
             ]
         results.append(result)
