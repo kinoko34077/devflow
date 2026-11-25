@@ -3,7 +3,8 @@ import unittest
 from urllib.parse import parse_qs, urlsplit
 
 from devflow_mapped_read import MappedReadError
-from devflow_mapped_read.github_pages import RepositoryIssueQuery, iter_list_pages
+from devflow_mapped_read.github_pages import (RepositoryIssueQuery, iter_list_pages,
+                                             read_linked_rows)
 
 REPO = "kinoko34077/devflow"
 
@@ -70,3 +71,45 @@ class NativePagesTests(unittest.TestCase):
             return [1], True
         with self.assertRaisesRegex(RuntimeError, "transport failed"):
             list(iter_list_pages(failed, per_page=2, max_pages=2))
+
+    def test_complete_link_read_uses_declared_plan_and_does_not_follow_link_url(self):
+        plan = RepositoryIssueQuery(REPO, "issue", state="all", per_page=2,
+                                    native_since="2026-11-20T00:00:00Z")
+        calls = []
+        def get(path):
+            calls.append(path)
+            page = parse_qs(urlsplit(path).query)["page"]
+            if page == ["1"]:
+                # A short page with explicit next still has a next page.
+                return [{"id": 1}], '<https://untrusted.example/other>; rel="next"'
+            return [{"id": 2}, {"id": 3}], ""
+        self.assertEqual(read_linked_rows(plan.path, get, per_page=plan.per_page, max_pages=3),
+                         [{"id": 1}, {"id": 2}, {"id": 3}])
+        self.assertEqual(calls, [plan.path(1), plan.path(2)])
+
+    def test_complete_link_read_refuses_budget_and_invalid_header(self):
+        plan = RepositoryIssueQuery(REPO, "issue", per_page=2)
+        calls = []
+        def get(path):
+            calls.append(path)
+            return [1], '<https://api.github.com/example>; rel="next"'
+        with self.assertRaisesRegex(MappedReadError, "PAGE_LIMIT"):
+            read_linked_rows(plan.path, get, per_page=2, max_pages=2)
+        self.assertEqual(calls, [plan.path(1), plan.path(2)])
+        for invalid in (None, True, []):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                    MappedReadError, "INVALID_LINK_HEADER"):
+                read_linked_rows(plan.path, lambda path: ([], invalid),
+                                 per_page=2, max_pages=2)
+
+    def test_complete_link_read_never_returns_failed_prefix(self):
+        plan = RepositoryIssueQuery(REPO, "issue", per_page=2)
+        def get(path):
+            if path == plan.path(1):
+                return [1, 2], '<https://api.github.com/example>; rel="next"'
+            raise RuntimeError("existing transport failed")
+        with self.assertRaisesRegex(RuntimeError, "existing transport failed"):
+            read_linked_rows(plan.path, get, per_page=2, max_pages=2)
+        with self.assertRaisesRegex(MappedReadError, "INVALID_LIST_PAGE"):
+            read_linked_rows(plan.path, lambda path: ([], 'rel="next"'),
+                             per_page=2, max_pages=2)
