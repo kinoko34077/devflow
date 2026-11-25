@@ -608,3 +608,12 @@ A real repository-creation E2E is separate. It may run only after an approved le
 - automatic release/deploy/publication;
 - automatic repository deletion;
 - replacement of repository-local specs, Issues or Current State with the Bootstrap Request.
+
+
+## 参照型Repository Baseの明示採用（#1168候補・未稼働）
+
+通常の `minimal` と過去のrequest replayを維持する。明示採用の候補入力 `bootstrap.reference_base` は `manifest` と `defaults` の二つのProject固有JSON objectだけを含む。Project名はrepo名と一致させ、`devflow_managed=true` を要求する。URL、Base版、resolver、workflow本文はrequestで指定できない。`initial_content.specification` がある場合は `project/docs/SPEC.md` として保持する。
+
+既存 `BootstrapExecutor` の信頼済み構成側だけが `reference_seed_provider(request, context)` を接続する。providerはBase #66の承認済み中央素材、Base固有Schema・互換検査、#1121の承認済み共通Verifyを再利用する。executorはその真正性を代替しない。seedは `AGENTS.md`、`knt.cmd`、`.github/workflows/verify.yml`、`project/project.json`、`project/defaults.json`、`project/docs/{INDEX,CURRENT_STATE,SPEC}.md` の固定8pathと、必要時 `project/contracts/{actions,surfaces}.json` のみ。固有manifest/defaults/specを変更せず、未知path/欠落/空contentを拒否する。追加のhost必須生成物が必要なProjectは正式providerの受入範囲で判定し、未対応なら作成前に拒否する。
+
+provider未配線・不正ならrepo作成前に非成功。既存provenanceが一致するretryでも全reference seedを先に照合し、差分は上書きしない。共通VerifyはProject seedの後に配置し、Publicは既存main保護の `verify` check/context/発行元をその同じworkflowで検証する。Privateの保護非適用を維持。実運用provider/host保護/正式workflow/権限・実repo作成は未受入。現行production constructorはproviderを設定しないため、この候補を実際のBootstrap Requestに使わない。合成Fake APIのみで接続試験を行う。

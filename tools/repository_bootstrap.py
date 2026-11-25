@@ -138,6 +138,8 @@ class BootstrapRequest:
     work_status: str
     repository_state: str
     next_action: str
+    # Explicit Project-owned data, never a resolver or workflow source.
+    reference_base: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -264,7 +266,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
     bootstrap = _mapping(raw.get("bootstrap", {}), "bootstrap")
     _reject_unknown_keys(
         bootstrap, "bootstrap",
-        {"template", "devflow_managed", "repo_native_dispatch", "standard_features", "main_protection", "text_defaults"},
+        {"template", "devflow_managed", "repo_native_dispatch", "standard_features", "main_protection", "text_defaults", "reference_base"},
     )
     template = _enum(bootstrap.get("template", "minimal"), "bootstrap.template", TEMPLATES)
     if "devflow_managed" in bootstrap:
@@ -335,6 +337,21 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         if not devflow_managed:
             raise BootstrapError("bootstrap.text_defaults requires devflow_managed=true")
 
+    reference_base = None
+    if "reference_base" in bootstrap:
+        if not devflow_managed:
+            raise BootstrapError("bootstrap.reference_base requires devflow_managed=true")
+        selected = _mapping(bootstrap["reference_base"], "bootstrap.reference_base")
+        _reject_unknown_keys(selected, "bootstrap.reference_base", {"manifest", "defaults"})
+        manifest = _mapping(selected.get("manifest"), "bootstrap.reference_base.manifest")
+        defaults = _mapping(selected.get("defaults"), "bootstrap.reference_base.defaults")
+        project = _mapping(manifest.get("project"), "bootstrap.reference_base.manifest.project")
+        if project.get("name") != name:
+            raise BootstrapError("reference Base Project name must match repository name")
+        # Full Base schema/compatibility and seed rendering belong to the
+        # admitted central source provider, not this provisioning executor.
+        reference_base = {"manifest": manifest, "defaults": defaults}
+
     initial = _mapping(raw.get("initial_content", {}), "initial_content")
     _reject_unknown_keys(initial, "initial_content", {"readme", "specification", "license"})
     readme = initial.get("readme", f"# {name}\n")
@@ -401,6 +418,7 @@ def normalize_request(raw: Mapping[str, Any], issue_title: str) -> BootstrapRequ
         work_status=work_status,
         repository_state=repository_state,
         next_action=next_action,
+        reference_base=reference_base,
     )
 
 
@@ -618,9 +636,50 @@ def _repository_field_matches(body: str, full_name: str) -> bool:
 class BootstrapExecutor:
     """Deterministic ensure-oriented provisioning over narrow GitHub adapters."""
 
-    def __init__(self, repository_api: Any, devflow_api: Any) -> None:
+    def __init__(self, repository_api: Any, devflow_api: Any, *, reference_seed_provider: Any = None) -> None:
         self.repository_api = repository_api
         self.devflow_api = devflow_api
+        # Only the trusted executor composition may supply this capability.
+        # The existing production constructor leaves it unavailable.
+        self.reference_seed_provider = reference_seed_provider
+
+    def _reference_seed(self, request: BootstrapRequest, context: BootstrapContext, resources: list[str]) -> dict[str, str]:
+        if request.reference_base is None:
+            return {}
+        if not callable(self.reference_seed_provider):
+            self._raise_failure(
+                context, "VALIDATION", "trusted reference Base seed provider is unavailable; no repository created",
+                safe_retry="after-human-decision", resources=resources,
+            )
+        # Do not expose exceptions from an admission/provider implementation.
+        try:
+            supplied = self.reference_seed_provider(request, context)
+            required = {
+                "AGENTS.md", "knt.cmd", ".github/workflows/verify.yml",
+                "project/project.json", "project/defaults.json",
+                "project/docs/INDEX.md", "project/docs/CURRENT_STATE.md",
+                "project/docs/SPEC.md",
+            }
+            optional = {"project/contracts/actions.json", "project/contracts/surfaces.json"}
+            if not isinstance(supplied, Mapping) or not required.issubset(supplied) or set(supplied) - (required | optional):
+                raise BootstrapError("reference seed path contract mismatch")
+            if any(not isinstance(value, str) or not value.strip() for value in supplied.values()):
+                raise BootstrapError("invalid reference seed content")
+            for path, key in (("project/project.json", "manifest"), ("project/defaults.json", "defaults")):
+                # Compare JSON representations (not Python bool/int equality).
+                actual = json.dumps(json.loads(supplied[path]), sort_keys=True, allow_nan=False)
+                expected = json.dumps(request.reference_base[key], sort_keys=True, allow_nan=False)
+                if actual != expected:
+                    raise BootstrapError("reference seed changed explicit Project data")
+            if request.specification is not None and supplied["project/docs/SPEC.md"] != request.specification:
+                raise BootstrapError("reference seed changed explicit specification")
+            return dict(supplied)
+        except Exception:
+            self._raise_failure(
+                context, "VALIDATION", "trusted reference Base seed unavailable or invalid; no repository created",
+                safe_retry="after-human-decision", resources=resources,
+            )
+            raise AssertionError("unreachable")
 
     def _comment(self, context: BootstrapContext, body: str) -> None:
         self.devflow_api.comment_issue(context.devflow_repo, context.request_issue_number, body)
@@ -819,14 +878,18 @@ class BootstrapExecutor:
         context: BootstrapContext,
         full_name: str,
         resources: list[str],
+        reference_verify_content: str | None = None,
     ) -> None:
-        verify_workflow_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verify.yml"
-        content = self._call(
-            context,
-            "SEED",
-            resources,
-            lambda: verify_workflow_path.read_text(encoding="utf-8"),
-        )
+        if reference_verify_content is not None:
+            content = reference_verify_content
+        else:
+            verify_workflow_path = Path(__file__).resolve().parents[1] / "templates/bootstrap/verify.yml"
+            content = self._call(
+                context,
+                "SEED",
+                resources,
+                lambda: verify_workflow_path.read_text(encoding="utf-8"),
+            )
         existing = self._call(
             context,
             "SEED",
@@ -863,6 +926,7 @@ class BootstrapExecutor:
         full_name: str,
         default_branch: str,
         resources: list[str],
+        reference_verify_content: str | None = None,
     ) -> str:
         if request.main_protection is None:
             return "NOT_APPLICABLE/LEGACY_V1_REQUEST"
@@ -914,7 +978,7 @@ class BootstrapExecutor:
         # Install the exact status check before making it a branch-protection
         # requirement. Private Free repositories never need or receive this
         # Actions workflow.
-        self._ensure_verify_workflow(context, full_name, resources)
+        self._ensure_verify_workflow(context, full_name, resources, reference_verify_content)
 
         baseline = self._main_protection_baseline(owner_type)
         protection = self._call_main_protection(
@@ -978,6 +1042,8 @@ class BootstrapExecutor:
                 safe_retry="after-human-decision",
                 resources=resources,
             )
+
+        reference_seed = self._reference_seed(request, context, resources)
 
         self._call(
             context,
@@ -1068,9 +1134,24 @@ class BootstrapExecutor:
             )
         resources.append(f"file:{provenance_path}")
 
+        # On recovery, check every reference seed path before writing any new
+        # seed files. A changed central template must not overwrite an existing
+        # bootstrap's immutable seed; ordinary reference updates occur at use.
+        for path, content in reference_seed.items():
+            existing = self._call(
+                context, "SEED", resources,
+                lambda path=path: self.repository_api.get_file(full_name, path),
+            )
+            if existing is not None and existing.get("content") != content:
+                self._raise_failure(
+                    context, "SEED", f"existing reference Base seed differs at {path}; never overwrite",
+                    safe_retry="after-human-decision", resources=resources,
+                )
         seed_files: list[tuple[str, str]] = [("README.md", request.readme)]
-        if request.specification is not None:
+        if request.specification is not None and not reference_seed:
             seed_files.append(("docs/SPECIFICATION.md", request.specification))
+        # Write the common Verify last, after the complete Project seed exists.
+        seed_files.extend((path, reference_seed[path]) for path in sorted(reference_seed) if path != VERIFY_WORKFLOW_PATH)
         if request.repo_native_dispatch:
             # Versioned/trusted source from devflow accepted main. No
             # repository-wide App or new Actions secret is provisioned.
@@ -1093,6 +1174,8 @@ class BootstrapExecutor:
                     lambda template_name=template_name: (template_dir / template_name).read_text(encoding="utf-8"),
                 )
                 seed_files.append((target, content))
+        if reference_seed:
+            seed_files.append((VERIFY_WORKFLOW_PATH, reference_seed[VERIFY_WORKFLOW_PATH]))
         for path, content in seed_files:
             existing = self._call(
                 context,
@@ -1119,9 +1202,15 @@ class BootstrapExecutor:
                         if path in {
                             ".github/workflows/kinotch-repo-command.yml",
                             STANDARD_ROLLOUT_CALLER_PATH,
+                            VERIFY_WORKFLOW_PATH,
                         }
                         else "yes"
                     ),
+                )
+            elif path in reference_seed and existing.get("content") != content:
+                self._raise_failure(
+                    context, "SEED", f"existing reference Base seed differs at {path}; never overwrite",
+                    safe_retry="after-human-decision", resources=resources,
                 )
             elif request.text_defaults is not None and path in dict(TEXT_DEFAULTS_FILES) and existing.get("content") != content:
                 self._raise_failure(
@@ -1199,6 +1288,7 @@ class BootstrapExecutor:
             full_name,
             audit_ref,
             resources,
+            reference_seed.get(VERIFY_WORKFLOW_PATH),
         )
         # Protection setup can seed the required verify workflow on a new
         # Public repository. Capture the accepted head only after every
@@ -1293,7 +1383,14 @@ class BootstrapExecutor:
             else:
                 active_work = "\n".join(issue_refs) if issue_refs else "No repository-local bootstrap Issue was requested."
                 entry_points = ["- `README.md`"]
-                if request.specification is not None:
+                if reference_seed:
+                    entry_points.extend(
+                        f"- `{path}`" for path in (
+                            "AGENTS.md", "project/project.json", "project/docs/INDEX.md",
+                            "project/docs/CURRENT_STATE.md", "project/docs/SPEC.md",
+                        )
+                    )
+                elif request.specification is not None:
                     entry_points.append("- `docs/SPECIFICATION.md`")
                 if request.standard_features_declared:
                     entry_points.append(f"- `{STANDARD_FEATURE_MANIFEST_PATH}`")
