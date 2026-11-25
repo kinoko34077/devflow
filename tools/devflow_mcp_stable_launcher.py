@@ -1,7 +1,8 @@
 """Stable, read-only Codex Devflow MCP launcher.
 
 Installed once at ~/.codex/bin/devflow_mcp_launcher.py; existing Codex
-command and arguments remain unchanged. Never fetch or promote on launch.\nThe protected connection adapter replaces only verified local workers.
+command and original script arguments are preserved after adding Python -I.
+Never fetch or promote on launch. The protected adapter replaces only verified local workers.
 """
 
 from __future__ import annotations
@@ -179,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         if __package__:
             from .devflow_mcp_connection import serve_connection
             from .devflow_mcp_catalog import REQUIRED_CALLS
+            from .devflow_mcp_release_manager import updates_held
         else:
             # A registered legacy PYTHONPATH must not influence the protected
             # front or SDK. The one-time installer adds -I before this script.
@@ -193,11 +195,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.path.insert(0, str(directory))
             from devflow_mcp_connection import serve_connection
             from devflow_mcp_catalog import REQUIRED_CALLS
+            from devflow_mcp_release_manager import updates_held
         asyncio.run(serve_connection(
             lambda: selection_revision(root),
             lambda: launch_parameters(gh_executable, fallback_script, root=root),
             smoke_name="bootstrap_repository",
             smoke_arguments=dict(REQUIRED_CALLS["bootstrap_repository"]),
+            updates_held=lambda: updates_held(root),
         ))
         return 0
     except AuthenticationUnavailable:
