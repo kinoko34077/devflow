@@ -864,9 +864,15 @@ class DevflowService:
 
     def get_repository_control(self, repository: str) -> dict[str, Any]:
         normalized = normalize_repository(repository)
+        issues = self.reader.list_issues(self.devflow_repository, state="open")
+        return self._resolve_repository_control(normalized, issues)
+
+    def _resolve_repository_control(
+        self, normalized: str, issues: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Resolve from the caller's current complete Open Issue observation."""
         short_name = normalized.split("/", 1)[1]
         title = f"[REPO] {short_name}"
-        issues = self.reader.list_issues(self.devflow_repository, state="open")
         titled = [issue for issue in issues if str(issue.get("title") or "").strip() == title]
         matches = [issue for issue in titled if self._is_accepted_control(issue, normalized)]
         if not matches:
@@ -1027,14 +1033,97 @@ class DevflowService:
             observed_at=observed_at,
         )
 
+    def _read_control_and_projection(
+        self, normalized: str,
+    ) -> tuple[dict[str, Any], repository_projection.RepositoryProjection,
+               list[dict[str, Any]] | None]:
+        """Reuse one Open listing when both read purposes address devflow.
+
+        Other repositories still require independent Control and Issue reads.
+        A failed Control lookup remains a failure, not a partial empty view.
+        The returned rows are request-local, not a persisted cache.
+        """
+        if normalized == self.devflow_repository:
+            issues = self.reader.list_issues(normalized, state="open")
+            control = self._resolve_repository_control(normalized, issues)
+            projection = repository_projection.build_repository_projection(
+                normalized, issues, observed_at=self._observed_at_factory(),
+            )
+            return control, projection, issues
+        control = self.get_repository_control(normalized)
+        projection = self._read_repository_projection(
+            normalized, observed_at=self._observed_at_factory(),
+        )
+        return control, projection, None
+
+    def _unresolved_issue_discovery(
+        self, projection: repository_projection.RepositoryProjection,
+        control_source: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        """Compact locators only; never replace the authoritative role counts.
+
+        A directly trusted, unique, schema-valid Control can be distinguished
+        without extra API reads. Bot provenance is deliberately not scanned
+        here; unresolved bot candidates remain visible. This is not a
+        negative assertion about any independent Control attention or work.
+        """
+        if projection.source_status != "AVAILABLE" or projection.source_freshness != "CURRENT":
+            return {
+                "status": "SOURCE_UNAVAILABLE",
+                "verified_control_issue_numbers": None,
+                "role_review_issue_numbers": None,
+            }
+        unresolved = {
+            record.number for record in projection.records
+            if record.source_kind in {
+                "LEGACY_HINT", "UNCLASSIFIED", "INVALID_METADATA", "UNTRUSTED_METADATA",
+            }
+        }
+        unclassified = {
+            record.number for record in projection.records
+            if record.source_kind == "UNCLASSIFIED"
+        }
+        verified: set[int] = set()
+        if control_source is not None:
+            # Group exact titles once. Even an untrusted same-title collision
+            # is left visible for discovery rather than inferred away.
+            groups: dict[str, list[dict[str, Any]]] = {}
+            for issue in control_source:
+                title = str(issue.get("title") or "").strip()
+                if title.startswith("[REPO] "):
+                    groups.setdefault(title, []).append(issue)
+            for title, candidates in groups.items():
+                if len(candidates) != 1:
+                    continue
+                issue = candidates[0]
+                number = issue.get("number")
+                if (type(number) is not int or number not in unclassified
+                        or issue.get("state") != "open"
+                        or not is_trusted_control_author(issue)):
+                    continue
+                try:
+                    verify_observed_issue_identity(issue, self.devflow_repository, number)
+                    target = normalize_repository(title.removeprefix("[REPO] "))
+                    if title != f"[REPO] {target.split('/', 1)[1]}":
+                        continue
+                    resolved = self._resolve_repository_control(target, candidates)
+                    recorded = resolved["sections"].get("Repository", "").strip()
+                    if not recorded or normalize_repository(recorded) != target:
+                        continue
+                    if resolved["issue_number"] != number:
+                        continue
+                except (DevflowMCPError, TypeError, ValueError):
+                    continue
+                verified.add(number)
+        return {
+            "status": "AVAILABLE",
+            "verified_control_issue_numbers": sorted(verified),
+            "role_review_issue_numbers": sorted(unresolved - verified),
+        }
+
     def get_repository_projection(self, repository: str) -> dict[str, Any]:
         normalized = normalize_repository(repository)
-        self.get_repository_control(normalized)
-        observed_at = self._observed_at_factory()
-        projection = self._read_repository_projection(
-            normalized,
-            observed_at=observed_at,
-        )
+        _, projection, _ = self._read_control_and_projection(normalized)
         return self._repository_projection_dict(
             projection,
             include_records=True,
@@ -1145,11 +1234,8 @@ class DevflowService:
         """
 
         normalized = normalize_repository(repository)
-        control = self.get_repository_control(normalized)
-        observed_at = self._observed_at_factory()
-        projection = self._read_repository_projection(
-            normalized, observed_at=observed_at
-        )
+        control, projection, control_source = self._read_control_and_projection(normalized)
+        observed_at = projection.observed_at
         unresolved = (
             projection.legacy_hint_count
             + projection.unclassified_count
@@ -1287,6 +1373,11 @@ class DevflowService:
             "source_error": projection.source_error,
             "coverage_status": coverage,
             "observed_task_view": observed_task_view,
+            # Discovery locators only. The legacy inventory counts and all
+            # authority decisions above remain independent of this partition.
+            "unresolved_issue_discovery": self._unresolved_issue_discovery(
+                projection, control_source,
+            ),
             # P2 scoped read precedence: an admitted read-only consumer can
             # use the live, verified records for their EXACT Issue refs even
             # when other open Issues remain unclassified. This is NOT a
