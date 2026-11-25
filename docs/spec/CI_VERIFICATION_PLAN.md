@@ -31,6 +31,13 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 - 観測は原子的でない。実行直前には必要なsource revalidationを行う。R1残存/R3で信頼できる実checkout・検証定義・実解決依存・環境の証拠を最小限記録する契約を実証する。高価なログ走査や無条件再実行を前提にしない。native run/job観測と実コード保証の意味を混同しない。
 
 
+## 既存read-only CLI接続（R2先行・native観測限定）
+
+既存の `python -m tools.devflow_read_cli` に `ci-pr-evidence --repository OWNER/REPO --pr-number N` と `ci-run-evidence --repository OWNER/REPO --run-id N` を追加する。既存認証・reader・R1原典観測を直接利用し、他操作の引数や混合targetを拒否。新しいアクセス権、ログ/PR本文の出力、任意receipt・host policyの入力、取得器の複製は行わない。
+
+JSONは現行のPR metadata/candidateまたはrun/jobの観測に限定し、can_authorize_execution=false・can_skip_verification=false・requires_source_revalidation=true。終了値0はOBSERVEDの意味のみ（失敗したrunも観測可能、候補tree未確認も区別）。UNKNOWN/PARTIAL/引数不正は2。native REUSE_CANDIDATEは当該run/job結果の観測でありテスト済みtree・別保証・統合可否を証明しない。一般CI等価性・真正receipt接続・MCP公開tool/既存workflow変更は未受入のまま。
+
+
 ## 実行証拠の結合（R1）
 
 `read_execution_verification` は既存native run/job観測を利用する内部入口。特定のコード実行保証に限り、`ExecutionInputs` で実checkoutのtree SHA、検証定義、実解決環境、実解決依存、適用policyの各SHA-256を比較する。metadata等の別保証にこの次元を強制しない。ハッシュ対象と正規化は保証ownerの信頼済み収集契約が定める（この入口はハッシュから実行内容を推定しない）。
@@ -46,10 +53,3 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 初回の承認済み固定版供給に一般的なコード等価性・全consumer展開を前提としない。保護されたpolicy側で選択済みの固定repo/ID、channel、policy revision、commit、branch、workflow ID/path、必須job名を `FixedSourceRequirement` に渡す。既存 `GitHubReader` のexact workflow push照会と `read_run_verification` の最新job・run再照合を使用し、対象runの一意性、repo/head repo ID、head/branch/workflow/event、成功・必須jobの一意な成功、commit treeを確認する。
 
 `NATIVE_SOURCE_CANDIDATE` は指定固定版のnative成功と供給元treeの観測結果だけを表す。実行済みtreeは推定せず `tested_tree=null`、`can_authorize_execution=false`。取得不能・曖昧・drift・欠落はUNKNOWN、非成功はNOT_SUCCESSFUL。正規policyの真正性、pin/チャネル採否、host保護、供給物検証、実行許可・offline承認は別責務。公開JSON/MCP/CLIからpolicyを受け取らない。既存専用MCP release managerの実運用gateは変更しない。初回供給後の自動候補選択や実行証拠の測定/認証は別受入。
-
-
-## 既存read-only CLI接続（R2先行・native観測限定）
-
-既存の `python -m tools.devflow_read_cli` に `ci-pr-evidence --repository OWNER/REPO --pr-number N` と `ci-run-evidence --repository OWNER/REPO --run-id N` を追加する。既存認証・reader・R1原典観測を直接利用し、他操作の引数や混合targetを拒否。新しいアクセス権、ログ/PR本文の出力、任意receipt・host policyの入力、取得器の複製は行わない。
-
-JSONは現行のPR metadata/candidateまたはrun/jobの観測に限定し、can_authorize_execution=false・can_skip_verification=false・requires_source_revalidation=true。終了値0はOBSERVEDの意味のみ（失敗したrunも観測可能、候補tree未確認も区別）。UNKNOWN/PARTIAL/引数不正は2。native REUSE_CANDIDATEは当該run/job結果の観測でありテスト済みtree・別保証・統合可否を証明しない。一般CI等価性・真正receipt接続・MCP公開tool/既存workflow変更は未受入のまま。
