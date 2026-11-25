@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from tools import devflow_mcp_release_manager as manager
+from tools.devflow_mcp_catalog import publication_schema
 from tools import devflow_mcp_stable_launcher as launcher
 
 
@@ -220,8 +221,8 @@ class ReleaseManagerContractTests(unittest.TestCase):
              "properties": {"repository": {"type": "string", "title": "new"}}}
         c = {"type": "object", "required": [], "properties":
              {"repository": {"type": "string"}}}
-        self.assertEqual(manager._compatible_schema(a), manager._compatible_schema(b))
-        self.assertNotEqual(manager._compatible_schema(a), manager._compatible_schema(c))
+        self.assertEqual(publication_schema(a), publication_schema(b))
+        self.assertNotEqual(publication_schema(a), publication_schema(c))
 
     def test_schema_property_names_and_literal_objects_are_never_dropped(self):
         old = {
@@ -238,12 +239,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
         new = json.loads(json.dumps(old))
         new["description"] = "new documentation"
         new["properties"]["description"]["description"] = "new hint"
-        self.assertEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertEqual(publication_schema(old), publication_schema(new))
         new["properties"]["description"]["type"] = "integer"
-        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertNotEqual(publication_schema(old), publication_schema(new))
         new = json.loads(json.dumps(old))
         new["properties"]["payload"]["const"]["description"] = "changed data"
-        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertNotEqual(publication_schema(old), publication_schema(new))
 
     def test_existing_inactive_release_never_executes_under_trusted_sha(self):
         self._release(SHA_A)
