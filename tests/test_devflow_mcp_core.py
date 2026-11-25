@@ -303,11 +303,12 @@ class DevflowMCPServiceTests(unittest.TestCase):
         }
         self.health = {
             "number": 41,
+            "id": 5579583279,
             "title": devflow_mcp_core.HEALTH_TITLE,
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
             "html_url": "https://github.com/kinoko34077/devflow/issues/41",
             "state": "closed",
-            "author_association": "OWNER",
-            "user": {"id": 79015263, "login": "kinoko34077"},
+            "user": {"id": 41898282, "login": "github-actions[bot]"},
             "body": "## Result\n\nPASS\n\n## Mode\n\nevent-sync\n",
         }
 
@@ -350,12 +351,12 @@ class DevflowMCPServiceTests(unittest.TestCase):
         )
         self.assertEqual(service.list_managed_repositories(), ["kinoko34077/devflow"])
 
-    def test_sync_health_reads_closed_health_issue_from_all_states(self):
+    def test_sync_health_reads_exact_closed_health_issue(self):
         reader = FakeReader([self.health])
         service = devflow_mcp_core.DevflowService(reader)
         result = service.get_sync_health()
         self.assertEqual(result["result"], "PASS")
-        self.assertIn((devflow_mcp_core.DEVFLOW_REPOSITORY, "all"), reader.calls)
+        self.assertEqual(reader.calls, [(devflow_mcp_core.DEVFLOW_REPOSITORY, 41)])
 
     def test_missing_control_fails_without_guessing(self):
         service = devflow_mcp_core.DevflowService(FakeReader([]))
@@ -2347,55 +2348,74 @@ class ObservedIssueIdentityTests(unittest.TestCase):
 
 
 class SyncHealthTrustTests(unittest.TestCase):
-    """devflow#154 P2: Sync Health selection applies the trusted-author policy."""
+    """The documented machine observation is a fixed identity, not a bot allowlist."""
 
-    def _health(self, number, association, state="open", result="PASS"):
+    def _health(self, **changes):
         return {
-            "number": number,
+            "number": 41,
+            "id": 5579583279,
             "title": devflow_mcp_core.HEALTH_TITLE,
-            "state": state,
-            "author_association": association,
-            "user": (
-                {"id": 79015263, "login": "kinoko34077"}
-                if association == "OWNER"
-                else {"id": 123456789, "login": "untrusted"}
-            ),
-            "body": f"## Result\n\n{result}\n",
+            "state": "closed",
+            "repository_url": "https://api.github.com/repos/kinoko34077/devflow",
+            "html_url": "https://github.com/kinoko34077/devflow/issues/41",
+            "user": {"id": 41898282, "login": "github-actions[bot]"},
+            "body": "## Result\n\nPASS\n",
+            **changes,
         }
 
-    def _service(self, issues):
-        return devflow_mcp_core.DevflowService(FakeReader(issues))
+    def _service(self, issue):
+        calls = []
+        def transport(url, _headers):
+            calls.append(url)
+            if len(calls) != 1 or not url.endswith("/repos/kinoko34077/devflow/issues/41"):
+                self.fail("Unexpected health discovery or alternate GET")
+            return issue
+        return devflow_mcp_core.DevflowService(
+            devflow_mcp_core.GitHubReader(transport=transport)
+        ), calls
 
-    def test_outsider_only_health_is_unavailable(self):
-        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, r"No trusted Sync Health.*\[5\]"):
-            self._service([self._health(5, "NONE")]).get_sync_health()
-
-    def test_missing_association_is_untrusted(self):
-        issue = self._health(5, "OWNER")
-        del issue["author_association"]
-        del issue["user"]
-        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "No trusted Sync Health"):
-            self._service([issue]).get_sync_health()
-
-    def test_trusted_plus_outsider_selects_trusted_and_reports_ignored(self):
-        result = self._service([
-            self._health(41, "OWNER"),
-            self._health(900, "CONTRIBUTOR", result="FAIL"),
-        ]).get_sync_health()
+    def test_pinned_bot_record_returns_observation_without_candidate_scan(self):
+        issue = self._health()
+        service, calls = self._service(issue)
+        result = service.get_sync_health()
+        self.assertEqual(len(calls), 1)
         self.assertEqual(result["issue_number"], 41)
         self.assertEqual(result["result"], "PASS")
-        self.assertEqual(result["ignored_untrusted_candidates"], [900])
+        self.assertEqual(result["ignored_untrusted_candidates"], [])
+        self.assertIs(result["candidate_scan_performed"], False)
+        self.assertFalse(devflow_mcp_core.is_trusted_control_author(issue))
 
-    def test_open_trusted_preferred_over_closed_trusted_history(self):
-        result = self._service([
-            self._health(30, "OWNER", state="closed", result="FAIL"),
-            self._health(41, "OWNER"),
-        ]).get_sync_health()
-        self.assertEqual(result["issue_number"], 41)
+    def test_all_documented_health_results_remain_observations(self):
+        for result in ("PASS", "DEGRADED", "FAIL", "NOT_CONFIGURED"):
+            with self.subTest(result=result):
+                service, _ = self._service(self._health(body=f"## Result\n\n{result}\n"))
+                self.assertEqual(service.get_sync_health()["result"], result)
 
-    def test_two_open_trusted_candidates_remain_ambiguous(self):
-        with self.assertRaisesRegex(devflow_mcp_core.DevflowMCPError, "found 2"):
-            self._service([self._health(41, "OWNER"), self._health(42, "OWNER")]).get_sync_health()
+    def test_rejects_wrong_or_malformed_canonical_record(self):
+        for changes in (
+            {"number": 42}, {"id": 5579583280}, {"id": "5579583279"},
+            {"repository_url": "https://api.github.com/repos/other/devflow"},
+            {"html_url": "https://github.com/kinoko34077/devflow/issues/42"},
+            {"pull_request": {}}, {"title": "other"}, {"state": "open"},
+            {"user": None}, {"user": {"login": "github-actions[bot]"}},
+            {"user": {"id": 41898282, "login": "other"}},
+            {"user": {"id": "41898282", "login": "github-actions[bot]"}},
+            {"user": {"id": 79015263, "login": "kinoko34077"}},
+            {"body": None}, {"body": "## Result\n\nUNKNOWN\n"},
+            {"body": "## Mode\n\nevent-sync\n"},
+            {"body": "## Result\n\nPASS\n\n## Result\n\nFAIL\n"},
+        ):
+            with self.subTest(changes=changes):
+                service, calls = self._service(self._health(**changes))
+                with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+                    service.get_sync_health()
+                self.assertEqual(len(calls), 1)
+
+    def test_missing_record_does_not_fall_back_to_title_search(self):
+        service, calls = self._service(None)
+        with self.assertRaises(devflow_mcp_core.DevflowMCPError):
+            service.get_sync_health()
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":
