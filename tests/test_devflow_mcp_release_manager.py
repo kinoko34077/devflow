@@ -262,7 +262,8 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "run_unittests") as tests):
             with self.assertRaisesRegex(manager.ReleaseError, "differ"):
                 manager.promote(**self._runner())
-            self.assertEqual(invoke.call_count, 2)
+            invoke.assert_called_once()
+            self.assertTrue(invoke.call_args.kwargs["full"])
             self.assertNotIn(inactive, [call.args[2] for call in invoke.call_args_list])
             tests.assert_called_once()
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
