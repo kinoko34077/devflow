@@ -24,12 +24,14 @@ class BootstrapRecipe:
     repository_id: int
     private: bool
     recipe_id: str
+    owning_issue: int
     paths: tuple[str, ...]
     limits: dict[str, int]
 
 
 def _read_base(api: Any, recipe: BootstrapRecipe, base: str) -> str:
     if (type(recipe.repository_id) is not int or recipe.repository_id <= 0
+            or type(recipe.owning_issue) is not int or not 0 < recipe.owning_issue <= 999999999
             or type(recipe.private) is not bool
             or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", recipe.repository)
             or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,59}", recipe.recipe_id)
@@ -55,7 +57,8 @@ def _receipt(recipe: BootstrapRecipe, base: str, files: list[dict]) -> str:
     return manifest_digest({
         "schema": "generated-pr-bootstrap.v1", "repository_id": recipe.repository_id,
         "repository": recipe.repository, "private": recipe.private, "recipe": recipe.recipe_id,
-        "base": base, "files": sorted(files, key=lambda f: f["path"]),
+        "base": base, "owning_issue": recipe.owning_issue,
+        "files": sorted(files, key=lambda f: f["path"]),
     })
 
 
@@ -92,7 +95,7 @@ def _observe(api: Any, recipe: BootstrapRecipe, branch: str, base: str,
     h = _mapping(pr.get("head"), "PR head")
     b = _mapping(pr.get("base"), "PR base")
     if (pr.get("state") != "open" or h.get("ref") != branch or h.get("sha") != head
-            or b.get("ref") != "main"
+            or b.get("ref") != "main" or b.get("sha") != base
             or any(_mapping(x.get("repo"), "PR repository").get("id") != recipe.repository_id
                    or x["repo"].get("full_name") != recipe.repository for x in (h,b))
             or type(pr.get("number")) is not int or pr["number"] <= 0):
@@ -178,11 +181,20 @@ def _execute_admitted_new_pr(api: Any, recipe: BootstrapRecipe, base: str,
     if latest != state:
         raise WritebackRejected("branch or PR changed before creation")
     _read_base(api, recipe, base)
+    body = (
+        f"Owning-Issue: #{recipe.owning_issue}\n\n"
+        "- Formal review required: yes\n"
+        "- Different reviewer required: yes\n"
+        "- Implementer-System: generated-artifact\n"
+        "- Implementer-Model: deterministic-v1\n\n"
+        "Generated-PR-Bootstrap-V1: sha256:" + receipt
+    )
     api.post("/pulls", {"title": "chore: apply verified generated artifacts",
-                       "body": "Generated-PR-Bootstrap-V1: sha256:" + receipt,
+                       "body": body,
                        "head": branch, "base": "main"})
     state = _observe(api, recipe, branch, base, receipt, verified, payload["changes"])
     if state["status"] != "NO_OP_REPLAY":
         raise WritebackRejected("post-create PR readback not established")
+    _read_base(api, recipe, base)
     return {**state, "status": "PR_CREATED", "writes_performed": True,
             "ci_verified": False}

@@ -95,3 +95,8 @@ immediately before creation and verifies the exact resulting PR/head/bytes
 afterward. Remaining external races require the admitted single writer and
 merge-time verification. Uncertain responses are re-observed, not blindly
 retried. No claim of global CAS or automatic merge is made.
+
+The trusted recipe also binds the owning Issue. Created PRs carry the canonical
+Owning-Issue and formal/different-reviewer metadata with deterministic producer
+attribution, not a fabricated human/AI review. The PR base SHA and final main
+readback must agree with the observed source before reporting success.

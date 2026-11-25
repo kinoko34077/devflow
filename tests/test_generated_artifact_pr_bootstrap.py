@@ -64,7 +64,8 @@ class BootstrapFake(FakeGitHub):
             repo = {"id":7,"full_name":self.repository}
             self.prs = [{"number":1,"state":"open",
                          "head":{"ref":payload["head"],"sha":self.ref["object"]["sha"],"repo":repo},
-                         "base":{"ref":payload["base"],"repo":repo}}]
+                         "base":{"ref":payload["base"],"sha":self.main,"repo":repo},
+                         "body":payload["body"]}]
             if self.lost_pr_response:
                 raise WritebackRejected("response lost")
             return copy.deepcopy(self.prs[0])
@@ -80,7 +81,7 @@ class BootstrapFake(FakeGitHub):
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         policy, _, _, blobs = fixture()
-        self.recipe = BootstrapRecipe("kinoko34077/example",7,True,"fixture",
+        self.recipe = BootstrapRecipe("kinoko34077/example",7,True,"fixture",54,
                                      tuple(sorted(blobs)),policy["limits"])
         self.api = BootstrapFake(blobs)
         self.files,self.archive = package_generated_bytes(list(self.recipe.paths),self.recipe.limits,blobs)
@@ -96,6 +97,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertFalse(self.plan()["writer_authorized"])
         self.assertEqual(self.api.mutation_count,0)
         self.assertEqual(self.execute()["status"],"PR_CREATED")
+        self.assertIn("Owning-Issue: #54", self.api.prs[0]["body"])
+        self.assertIn("- Formal review required: yes", self.api.prs[0]["body"])
         n=self.api.mutation_count
         self.assertEqual(self.execute()["status"],"NO_OP_REPLAY")
         self.assertEqual(self.api.mutation_count,n)
@@ -143,6 +146,14 @@ class BootstrapTests(unittest.TestCase):
             self.execute()
         self.api.prs[0]["state"]="open"
         self.api.extra_diff=True
+        with self.assertRaises(WritebackRejected):
+            self.execute()
+        self.assertEqual(self.api.mutation_count,n)
+
+    def test_stale_pr_base_rejected_without_mutation(self):
+        self.execute()
+        n = self.api.mutation_count
+        self.api.prs[0]["base"]["sha"] = "9"*40
         with self.assertRaises(WritebackRejected):
             self.execute()
         self.assertEqual(self.api.mutation_count,n)
