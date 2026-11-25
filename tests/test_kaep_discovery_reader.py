@@ -70,6 +70,31 @@ def read(index, source, *, after_id=0, notice_actor=ACTOR, source_actor=ACTOR):
 
 
 class DiscoveryReaderTests(unittest.TestCase):
+    def test_pointer_observes_same_cooperative_cancellation_as_inbox(self):
+        root, hint, _ = fixtures()
+        cancel = {**root, "message_id": "msg_pointer_cancel_request",
+                  "in_reply_to": root["message_id"], "kind": "CANCEL_REQUEST",
+                  "intent": "CANCEL", "idempotency_key": "kaep.pointer.cancel.request"}
+        receipt = {**cancel, "message_id": "msg_pointer_cancel_ack",
+                   "in_reply_to": cancel["message_id"], "kind": "CANCEL_ACK",
+                   "recipient": "chatgpt", "idempotency_key": "kaep.pointer.cancel.ack"}
+        index = pages([comment(88, hint)])
+        for actor, expected in ((ACTOR, "CANCEL_ACK_OBSERVED"),
+                                ("outsider", "CANCEL_REQUEST_OBSERVED")):
+            with self.subTest(actor=actor):
+                originals = [comment(77, root), comment(79, cancel),
+                             comment(80, receipt, actor=actor)]
+                out = discover_batch(
+                    index, expected_notice_actor=ACTOR, expected_source_actor=ACTOR,
+                    fetch_source=lambda r, i: pages(originals))
+                self.assertEqual(out["hints"][0]["cancellation_observation"], expected)
+                inbox, _ = agent_inbox._issue_messages(
+                    originals, repository=SOURCE_REPO, issue_number=SOURCE_ISSUE,
+                    recipient="claude-code", expected_actor=ACTOR)
+                self.assertEqual(inbox[0]["status"], expected)
+                self.assertEqual(out["hints"][0]["observed_reply_kinds"], [])
+                self.assertEqual(out["hints"][0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
+
     def test_multiple_pointers_to_one_source_decode_one_complete_mailbox(self):
         root, first_notice, pointer = fixtures()
         second_notice = other_notice(
