@@ -17,6 +17,22 @@ registration environment and unrelated settings. Install
 launcher. Routine release updates must not edit either registration or launcher.
 The old third argument remains the fallback.
 
+### 接続内更新への移行案（#1138、実機導入未受入）
+
+保護された同じ入口ディレクトリへ stable launcher、release manager、
+`devflow_mcp_catalog.py`、`devflow_mcp_connection.py` を同じ検証済み版から配置する。
+長寿命の入口が旧登録の Python 検索パスからSDK等を読まないよう、Pythonの既存argsの
+先頭に `-I` を追加する。既存launcher/manager、config.tomlのbyte-exact backup、
+保護ACL・候補SHA・Python隔離環境・既存args/env/認証の同一性を確認する。
+この変更は初回の限定実機移行に含め、明示承認と独立Review前に本番適用しない。
+旧版launcherを稼働させた既存会話を強制終了しない。新入口は既存SDKで接続を保持し、
+検証済みmarkerの変更を通常の呼出しで観測する。取得・昇格・hold解除は行わない。
+実行部だけに選択済みrelease rootのPYTHONPATHと既存gh tokenを渡す。
+不正marker/候補起動失敗では正常な旧実行部とcatalogを保つ。catalog変更はSDKの通知と
+実際のtools/list再取得後に反映し、退役した実行部を回収する。
+現行のholdは配布昇格停止であり、接続内のrollback切替とcatalog非対応clientの扱いは
+別途負例受入が必要。markerや実行ファイルの改変を許可するものではない。
+
 A local read-only state file determines which *newly started* server is selected:
 
 ```text
@@ -93,7 +109,7 @@ rollbackの受入後のみ有効化する。既存ジョブとTaskの権限を�
 
 `rollback` first creates a durable `updates.hold` under the manager lock, then switches back to the previous verified SHA. On the first activation, it removes the active marker and restores the **original immutable fallback** without editing `config.toml`. The hold remains even after failed rollback or a crash between the two steps; the scheduler does not automatically promote any SHA while held. `status` reports the held selection. Only an explicit `resume` verifies the selected release (or the original fallback path) and removes the hold; it does not itself promote or launch a candidate. The next `check` uses the normal verification gates. Keep the backed-up launcher separately for full uninstall.
 
-Only **newly created MCP processes** observe a changed marker. Existing Codex
+Before the #1138 migration, only **newly created MCP processes** observe a changed marker. Existing Codex
 chat tool catalogs and running MCP servers do not become new code by changing a
 file. Never automatically kill the Codex app, call global MCP reload, or
 resend an ambiguous write call. Codex connection recovery and dynamic tool
