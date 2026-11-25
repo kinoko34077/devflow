@@ -29,7 +29,11 @@ ORIGIN_URLS = {
 }
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED_CHECKS = frozenset({"verify", "mcp-stdio-python311"})
-EXPECTED_TOOLS = 16
+# The installed manager and connection adapter use the same admission module.
+try:
+    from .devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
+except ImportError:
+    from devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
 
 
 class ReleaseError(Exception):
@@ -449,18 +453,14 @@ async def _stdio_test(
             async with ClientSession(rd, wr) as client:
                 await asyncio.wait_for(client.initialize(), timeout=35)
                 listing = await asyncio.wait_for(client.list_tools(), timeout=15)
-                catalog = {
-                    t.name: _compatible_schema(t.input_schema)
-                    for t in listing.tools
-                }
-                if len(catalog) != EXPECTED_TOOLS:
-                    raise ReleaseError("MCP tool count changed; manual compatibility review required")
+                try:
+                    catalog = admit_catalog(listing.tools, next_cursor=listing.next_cursor)
+                except CatalogError as error:
+                    raise ReleaseError("MCP candidate catalog rejected") from error
                 if full:
-                    for name in ("bootstrap_repository", "get_human_portfolio"):
-                        if name not in catalog:
-                            raise ReleaseError("required read-only MCP tool missing")
+                    for name in SMOKE_CALLS:
                         result = await asyncio.wait_for(
-                            client.call_tool(name, {"repository": REPOSITORY}),
+                            client.call_tool(name, dict(REQUIRED_CALLS[name])),
                             timeout=75,
                         )
                         if result.is_error:
@@ -515,7 +515,6 @@ def _promote_unlocked(
     if not old_script.is_file():
         raise ReleaseError("current MCP fallback is missing")
     mcp_env = registered_mcp_env(python, fallback)
-    previous_catalog = smoke(python, gh, old_script, full=False, mcp_env=mcp_env)
     target = root / "releases" / latest
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".candidate-", dir=root) as tmp:
@@ -528,9 +527,7 @@ def _promote_unlocked(
             raise ReleaseError("candidate MCP entrypoint is missing")
         if candidate.resolve() != stage.resolve() / "tools" / "devflow_mcp.py":
             raise ReleaseError("candidate release is redirected")
-        new_catalog = smoke(python, gh, candidate, full=True, mcp_env=mcp_env)
-        if new_catalog != previous_catalog:
-            raise ReleaseError("MCP callable schema changed; manual review required")
+        smoke(python, gh, candidate, full=True, mcp_env=mcp_env)
         verified_digest = release_tree_digest(stage)
         install_verified_release(root, latest, stage, verified_digest)
     try:
