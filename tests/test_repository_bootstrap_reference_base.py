@@ -35,6 +35,8 @@ def fixture_seed(req, _ctx):
         "project/docs/INDEX.md": "# Index\n",
         "project/docs/CURRENT_STATE.md": "# Initial state\n",
         "project/docs/SPEC.md": req.specification,
+        "project/contracts/actions.json": '{"schema_version":1,"actions":[]}',
+        "project/contracts/surfaces.json": '{"schema_version":1,"surfaces":{}}',
     }
 
 
@@ -78,6 +80,7 @@ class ReferenceBaseBootstrapTests(unittest.TestCase):
         for mutation in (
             lambda f: f.update({".kinotch/copied.ps1": "forbidden"}),
             lambda f: f.pop("knt.cmd"),
+            lambda f: f.pop("project/contracts/actions.json"),
             lambda f: f.update({"project/project.json": '{"project":{"name":"other"}}'}),
             lambda f: f.update({"project/docs/SPEC.md": "# Changed"}),
         ):

@@ -658,10 +658,10 @@ class BootstrapExecutor:
                 "AGENTS.md", "knt.cmd", ".github/workflows/verify.yml",
                 "project/project.json", "project/defaults.json",
                 "project/docs/INDEX.md", "project/docs/CURRENT_STATE.md",
-                "project/docs/SPEC.md",
+                "project/docs/SPEC.md", "project/contracts/actions.json",
+                "project/contracts/surfaces.json",
             }
-            optional = {"project/contracts/actions.json", "project/contracts/surfaces.json"}
-            if not isinstance(supplied, Mapping) or not required.issubset(supplied) or set(supplied) - (required | optional):
+            if not isinstance(supplied, Mapping) or set(supplied) != required:
                 raise BootstrapError("reference seed path contract mismatch")
             if any(not isinstance(value, str) or not value.strip() for value in supplied.values()):
                 raise BootstrapError("invalid reference seed content")
