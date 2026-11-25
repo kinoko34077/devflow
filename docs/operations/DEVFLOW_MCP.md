@@ -143,6 +143,30 @@ python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
 
+### Unresolved Issue discovery within Work View
+
+`get_repository_work_view` additionally returns `unresolved_issue_discovery`:
+`verified_control_issue_numbers` identifies unique, directly trusted,
+identity- and schema-validated canonical Controls already present in the
+same devflow Open Issue listing. `role_review_issue_numbers` locates the
+remaining unresolved roles in that listing, including legacy, invalid and
+untrusted metadata. Resolve those numbers against the returned repository
+and inspect the originals only as needed. They are not TASKs, assignments
+or permissions. Controls may have independent Human/security/cross-repository
+attention; their verified role is not proof that no such attention exists.
+Bot-authored Controls that would require additional bootstrap-provenance
+reads and ambiguous or invalid identities remain unresolved. No title-only
+classification, per-Control extra GET, new store or metadata write is used.
+
+The existing role counts, `coverage_status`, M2 cache contract, manual
+fallback and execution authority are unchanged. These are read-only
+discovery locators, not a complete work inventory; unavailable sources
+return null lists. When the target is devflow itself, repository Control
+resolution and Projection use one request-local Open listing rather than
+fetching that same listing twice. This does not make GitHub's paginated
+reads transactional or extend authorization. Other repositories still
+require their own independent Issue listing.
+
 ### Targetless managed-repository discovery without registered MCP (portfolio)
 
 For user-authorized portfolio scope when no repository has yet been selected, the
