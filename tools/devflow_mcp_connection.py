@@ -182,6 +182,7 @@ class Connection:
         self.contract: dict[str, Any] = {}
         self.pending: tuple[str, Worker, list[types.Tool]] | None = None
         self.session = None
+        self.retired: set[asyncio.Task] = set()
 
     async def start(self) -> Any:
         revision = self.revision()
@@ -207,6 +208,18 @@ class Connection:
         self.last_status = status
         return {"status": status, "running_version": self.version()}
 
+    def _retire(self, worker: Worker | None) -> None:
+        """Transfer cleanup ownership before any cancellable await."""
+        if worker is not None:
+            task = asyncio.create_task(worker.close())
+            self.retired.add(task)
+            task.add_done_callback(self.retired.discard)
+
+    def _discard_pending(self) -> None:
+        if self.pending is not None:
+            self._retire(self.pending[1])
+            self.pending = None
+
     def _schedule_refresh(self, *, explicit: bool):
         """Under routing lock, start at most one connection-local candidate task."""
         if self.closed:
@@ -216,7 +229,12 @@ class Connection:
         try:
             revision = self.revision()
         except Exception:
+            self._discard_pending()
             return None, self._state("INVALID_SELECTION")
+        if self.pending is not None and (
+            self.pending[0] != revision or not self.pending[1].usable()
+        ):
+            self._discard_pending()
         healthy = self.worker is not None and self.worker.usable()
         if (self.pending is not None and self.pending[0] == revision
                 and self.pending[1].usable()):
@@ -251,14 +269,9 @@ class Connection:
     async def _refresh(self, revision: str) -> dict[str, Any]:
         """Prepare outside routing lock; publish changed catalogs on re-list."""
         candidate = None
-        previous = None
-        incompatible = False
         try:
             async with self.lock:
-                stale = self.pending
-                self.pending = None
-            if stale is not None:
-                await stale[1].close()
+                self._discard_pending()
             candidate = Worker(await asyncio.to_thread(self.launch), self.required_calls)
             _, tools = await candidate.start()
             if self.smoke_name not in {tool.name for tool in tools}:
@@ -276,14 +289,13 @@ class Connection:
                 else:
                     previous, state = self._commit(revision, candidate, tools)
                     candidate = None
+                    self._retire(previous)
             if state["status"] == "AWAITING_CATALOG_REFRESH" and self.session is not None:
                 try:
-                    await self.session.send_tool_list_changed()
+                    await asyncio.wait_for(self.session.send_tool_list_changed(), 5)
                 except Exception:
                     # Keep the old catalog/worker until an actual list request.
                     pass
-            if previous is not None:
-                await previous.close()
             return state
         except asyncio.CancelledError:
             raise
@@ -300,7 +312,7 @@ class Connection:
                 return self._state("CANDIDATE_REJECTED" if incompatible else "RETRY_DEFERRED")
         finally:
             if candidate is not None:
-                await candidate.close()
+                self._retire(candidate)
 
     def _with_runtime_status(self, result: types.CallToolResult) -> types.CallToolResult:
         """Keep domain content unchanged; publish explicit runtime metadata."""
@@ -314,14 +326,20 @@ class Connection:
         return types.CallToolResult.model_validate(payload)
 
     async def list_tools(self, context, _params):
-        previous = None
         async with self.lock:
             self.session = context.session
             if self.pending is not None:
                 revision, worker, tools = self.pending
-                if worker.usable() and self.revision() == revision:
+                try:
+                    current = self.revision()
+                except Exception:
+                    current = None
+                if worker.usable() and current == revision:
                     self.pending = None
                     previous, _ = self._commit(revision, worker, tools)
+                    self._retire(previous)
+                else:
+                    self._discard_pending()
             self._schedule_refresh(explicit=False)
             result = types.ListToolsResult(tools=[*self.tools, types.Tool(
                 name=RESTART_TOOL,
@@ -330,8 +348,6 @@ class Connection:
                              "fetch, arbitrary command, or other connection is affected."),
                 inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
             )])
-        if previous is not None:
-            await previous.close()
         return result
 
     def _validate_call(self, params):
@@ -401,9 +417,11 @@ class Connection:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         if pending is not None:
-            await pending[1].close()
-        if worker is not None:
-            await worker.close()
+            self._retire(pending[1])
+        self._retire(worker)
+        # Includes candidates discarded or committed during the cancelled task.
+        if self.retired:
+            await asyncio.gather(*tuple(self.retired), return_exceptions=True)
 
 
 async def serve_connection(revision: Callable[[], str], launch: Callable[[], Launch],
