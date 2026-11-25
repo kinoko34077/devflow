@@ -79,7 +79,7 @@ class Worker:
             return await asyncio.shield(self.ready)
         except BaseException:
             self.ready.cancel()
-            await self.close()
+            await self.close(abort=True)
             raise
 
     async def _run(self) -> None:
@@ -148,10 +148,13 @@ class Worker:
     async def call(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         return await self.submit(name, arguments)
 
-    async def close(self) -> None:
+    async def close(self, *, abort: bool = False) -> None:
         if self.task is not None:
             if not self.task.done():
-                self.queue.put_nowait(None)
+                if abort:
+                    self.task.cancel()
+                else:
+                    self.queue.put_nowait(None)
             await asyncio.gather(self.task, return_exceptions=True)
 
 
@@ -165,8 +168,10 @@ class Connection:
 
     def __init__(self, revision: Callable[[], str], launch: Callable[[], Launch],
                  *, smoke_name: str, smoke_arguments: dict[str, Any],
-                 required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS):
+                 required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
+                 updates_held: Callable[[], bool] = lambda: False):
         self.revision = revision
+        self.updates_held = updates_held
         self.launch = launch
         self.required_calls = required_calls
         self.smoke_name = smoke_name
@@ -185,7 +190,8 @@ class Connection:
         self.contract: dict[str, Any] = {}
         self.pending: tuple[str, Worker, list[types.Tool]] | None = None
         self.session = None
-        self.retired: set[asyncio.Task] = set()
+        self.retired: dict[asyncio.Task, Worker] = {}
+        self.stale_contract: dict[str, Any] | None = None
 
     async def start(self) -> Any:
         revision = self.revision()
@@ -210,7 +216,7 @@ class Connection:
     def _state(self, status: str) -> dict[str, Any]:
         self.last_status = status
         state = {"status": status, "running_version": self.version()}
-        if status == "AWAITING_CATALOG_REFRESH":
+        if status in {"AWAITING_CATALOG_REFRESH", "CATALOG_REFRESH_REQUIRED"}:
             state["action"] = "REFRESH_TOOLS_LIST"
         return state
 
@@ -218,13 +224,35 @@ class Connection:
         """Transfer cleanup ownership before any cancellable await."""
         if worker is not None:
             task = asyncio.create_task(worker.close())
-            self.retired.add(task)
-            task.add_done_callback(self.retired.discard)
+            self.retired[task] = worker
+            task.add_done_callback(lambda done: self.retired.pop(done, None))
 
     def _discard_pending(self) -> None:
         if self.pending is not None:
             self._retire(self.pending[1])
             self.pending = None
+
+    def _held_selection_differs(self) -> bool:
+        # Failure to observe the hold is not permission to keep a superseded
+        # worker in service. Ordinary (unheld) candidate failure is recoverable.
+        try:
+            return self.updates_held() and self.revision() != self.current_revision
+        except Exception:
+            return True
+
+    def _commit_pending_rollback(self, revision: str) -> bool:
+        if self.pending is None:
+            return False
+        selected, worker, tools = self.pending
+        if selected != revision or not worker.usable():
+            return False
+        if self.stale_contract is None:
+            self.stale_contract = self.contract
+        self.pending = None
+        previous, _ = self._commit(revision, worker, tools)
+        self._retire(previous)
+        self._state("CATALOG_REFRESH_REQUIRED")
+        return True
 
     def _schedule_refresh(self, *, explicit: bool):
         """Under routing lock, start at most one connection-local candidate task."""
@@ -241,12 +269,14 @@ class Connection:
             self.pending[0] != revision or not self.pending[1].usable()
         ):
             self._discard_pending()
+        if self._held_selection_differs() and self._commit_pending_rollback(revision):
+            return None, self._state("CATALOG_REFRESH_REQUIRED")
         healthy = self.worker is not None and self.worker.usable()
         if (self.pending is not None and self.pending[0] == revision
                 and self.pending[1].usable()):
             return None, self._state("AWAITING_CATALOG_REFRESH")
         if not explicit and healthy and revision == self.current_revision:
-            return None, self._state("UP_TO_DATE")
+            return None, self._state("CATALOG_REFRESH_REQUIRED" if self.stale_contract is not None else "UP_TO_DATE")
         if not explicit and revision == self.rejected_revision:
             return None, self._state("PREVIOUSLY_REJECTED")
         if revision != self.retry_revision:
@@ -291,12 +321,16 @@ class Connection:
                 if catalog_contract(tools) != self.contract:
                     self.pending = (revision, candidate, tools)
                     candidate = None
-                    state = self._state("AWAITING_CATALOG_REFRESH")
+                    if self._held_selection_differs():
+                        self._commit_pending_rollback(revision)
+                        state = self._state("CATALOG_REFRESH_REQUIRED")
+                    else:
+                        state = self._state("AWAITING_CATALOG_REFRESH")
                 else:
                     previous, state = self._commit(revision, candidate, tools)
                     candidate = None
                     self._retire(previous)
-            if state["status"] == "AWAITING_CATALOG_REFRESH" and self.session is not None:
+            if state["status"] in {"AWAITING_CATALOG_REFRESH", "CATALOG_REFRESH_REQUIRED"} and self.session is not None:
                 try:
                     await asyncio.wait_for(self.session.send_tool_list_changed(), 5)
                 except Exception:
@@ -349,6 +383,7 @@ class Connection:
                 else:
                     self._discard_pending()
             self._schedule_refresh(explicit=False)
+            self.stale_contract = None
             result = types.ListToolsResult(tools=[*self.tools, types.Tool(
                 name=RESTART_TOOL,
                 description=("Restart this MCP connection's worker on the locally selected "
@@ -360,7 +395,9 @@ class Connection:
 
     def _validate_call(self, params):
         tool = next((tool for tool in self.tools if tool.name == params.name), None)
-        if tool is None or not arguments_supported(tool, params.arguments or {}):
+        if (tool is None or not arguments_supported(tool, params.arguments or {})
+                or (self.stale_contract is not None and
+                    self.stale_contract.get(params.name) != self.contract.get(params.name))):
             return _reply({"status": "TOOL_CONTRACT_UNAVAILABLE", "action": "REFRESH_TOOLS_LIST"}, error=True)
         return None
 
@@ -399,7 +436,8 @@ class Connection:
                 if self.closed:
                     return _reply(self._state("CONNECTION_CLOSED"), error=True)
                 task, state = self._schedule_refresh(explicit=False)
-                if self.worker is not None and self.worker.usable():
+                if (self.worker is not None and self.worker.usable()
+                        and not self._held_selection_differs()):
                     invalid = self._validate_call(params)
                     if invalid is not None:
                         return self._with_runtime_status(invalid)
@@ -407,6 +445,8 @@ class Connection:
                     future = worker.submit(params.name, params.arguments or {})
                     break
                 if task is None or attempt:
+                    if self._held_selection_differs():
+                        return _reply(self._state("ROLLBACK_SELECTION_UNAVAILABLE"), error=True)
                     if state["status"] == "AWAITING_CATALOG_REFRESH":
                         return _reply(state, error=True)
                     return _reply(self._state("WORKER_UNAVAILABLE"), error=True)
@@ -432,20 +472,27 @@ class Connection:
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        # EOF closes this connection only. Cancel outstanding child I/O; an
+        # uncertain submitted request is not replayed. Normal swaps still drain.
+        children = set(self.retired.values())
         if pending is not None:
-            self._retire(pending[1])
-        self._retire(worker)
-        # Includes candidates discarded or committed during the cancelled task.
+            children.add(pending[1])
+        if worker is not None:
+            children.add(worker)
+        await asyncio.gather(*(child.close(abort=True) for child in children),
+                             return_exceptions=True)
         if self.retired:
             await asyncio.gather(*tuple(self.retired), return_exceptions=True)
 
 
 async def serve_connection(revision: Callable[[], str], launch: Callable[[], Launch],
                            *, smoke_name: str, smoke_arguments: dict[str, Any],
-                           required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS) -> None:
+                           required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
+                           updates_held: Callable[[], bool] = lambda: False) -> None:
     """Isolated pilot; the production installer is deliberately unchanged."""
     connection = Connection(revision, launch, required_calls=required_calls,
-                            smoke_name=smoke_name, smoke_arguments=smoke_arguments)
+                            smoke_name=smoke_name, smoke_arguments=smoke_arguments,
+                            updates_held=updates_held)
     try:
         initial = await connection.start()
         server = Server(
