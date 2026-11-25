@@ -13,6 +13,8 @@ import json
 import sys
 from typing import Callable, Any
 
+from tools.agent_inbox import observe_request_cancellations
+from tools.github_issue_trust import is_trusted_principal
 from tools.kaep_link_validation import ISSUE_URL as ISSUE_URL_PATTERN
 from tools.kaep_inbox_reader import InvalidMessage, fetch_gh_pages, parse_pages
 from tools.kaep_mailbox_codec import (
@@ -93,8 +95,19 @@ def _source_context(
         and msg["kind"] in REPLY_KINDS
         and _matching_actor(actors[cid], expected_actor)
     })
+    trusted_actor_ids = {
+        cid for cid, actor in actors.items()
+        if _matching_actor(actor, expected_actor)
+        and is_trusted_principal({"user": {
+            "id": actor.get("actor_id"), "login": actor.get("actor_login"),
+        }})
+    }
+    cancellation = observe_request_cancellations(
+        items, trusted_actor_ids=trusted_actor_ids,
+    ).get(message_id)
     return {"expected_head": root["scope"]["expected_head"],
-            "observed_reply_kinds": replies}
+            "observed_reply_kinds": replies,
+            **({"cancellation_observation": cancellation} if cancellation else {})}
 
 
 def _verified_source_pointer(
@@ -157,6 +170,8 @@ def _verified_pointer_hint(
         "source_message_id": verified["message_id"],
         "expected_head": context["expected_head"],
         "observed_reply_kinds": list(context["observed_reply_kinds"]),
+        **({"cancellation_observation": context["cancellation_observation"]}
+           if "cancellation_observation" in context else {}),
         "status": "POINTER_SOURCE_VERIFIED_ONLY",
     }
 
@@ -521,6 +536,8 @@ def discover_dual_index_shadow(
                     "source_comment_id": key[2],
                     "expected_head": hint["expected_head"],
                     "observed_reply_kinds": hint["observed_reply_kinds"],
+                    **({"cancellation_observation": hint["cancellation_observation"]}
+                       if "cancellation_observation" in hint else {}),
                     "index_origins": [origin],
                     "index_comment_ids": {origin: hint["index_comment_id"]},
                     "status": "POINTER_SOURCE_VERIFIED_ONLY",
@@ -528,7 +545,9 @@ def discover_dual_index_shadow(
             else:
                 current = by_root[key]
                 if (current["expected_head"] != hint["expected_head"]
-                        or current["observed_reply_kinds"] != hint["observed_reply_kinds"]):
+                        or current["observed_reply_kinds"] != hint["observed_reply_kinds"]
+                        or current.get("cancellation_observation")
+                        != hint.get("cancellation_observation")):
                     conflict_roots.add(key)
                     continue
                 duplicate_count += 1
