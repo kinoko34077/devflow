@@ -43,7 +43,7 @@ the launcher for future invocations. Example (paths are illustrative):
 & <PYTHON311_VENV> <INSTALLED_RELEASE_MANAGER> resume --repo <TRUSTED_LOCAL_DEVFLOW_GIT_CLONE> --gh <INSTALLED_GH_EXE> --fallback <ORIGINAL_MCP_SCRIPT>
 ```
 
-The updater first checks the current release integrity and the persistent update hold. While held, `check` returns `HELD ACTIVE <sha>` or `HELD LEGACY` without fetching, staging or promotion. Otherwise it performs, in order:
+The updater and shared `devflow_mcp_catalog.py` admission module are installed together at the protected entry point, after review and the one-time authorized migration (#805). The updater first checks the current release integrity and the persistent update hold. While held, `check` returns `HELD ACTIVE <sha>` or `HELD LEGACY` without fetching, staging or promotion. Otherwise it performs, in order:
 
 1. Restrict Git remote origin to `kinoko34077/devflow`.
 2. Compare GitHub's `main` SHA to newly fetched `origin/main`. Require
@@ -55,14 +55,23 @@ The updater first checks the current release integrity and the persistent update
 4. Execute bounded Windows local Python unit contract tests (Devflow MCP Core,
    Human Portfolio, release manager). The complete suite is run on GitHub CI.
 5. With existing `gh auth` and no stored token, launch real read-only MCP
-   stdio and check `initialize`, exactly 16 tools, `bootstrap_repository`
-   and `get_human_portfolio`. Preserve the registered MCP environment except
+   stdio and check `initialize`, the observed complete dynamic tool catalog, the
+   shared required-call contract and live `bootstrap_repository` / `get_human_portfolio`.
+   The old release is retained, not started merely to compare catalogs.
+   This intentionally does not re-prove old-worker startup on every promotion;
+   rollback selection remains integrity-checked and the actual runtime can recover. Preserve the registered MCP environment except
    for `PYTHONPATH`: the launcher and smoke both bind it to the selected script's
    own release root, and the unit test process uses its staged source root.
    A legacy checkout path would otherwise import old `tools.*` modules even
    when the new script is selected. The original fallback uses its own root.
-   Do not persist credentials or print environment values. Compare existing/new callable tool schemas,
-   excluding only descriptions/titles/examples.
+   Do not persist credentials or print environment values. Reject duplicate or reserved names,
+   invalid schemas, incomplete catalogs, explicit incompatible side-effect annotations,
+   or missing/incompatible essential calls. New tool names must explicitly declare
+   readOnlyHint=true; only the verified original read-only names can omit the
+   declaration for legacy fallback compatibility. This does not establish authority.
+   Do not require a fixed total tool count or
+   equality with the prior catalog. This is structural admission, not semantic proof;
+   existing reviewed-source, CI, authority and runtime gates remain required.
 6. Record the verified staged tree SHA-256 digest alongside the active commit SHA,
    then atomically replace the active marker. Both the launcher and manager
    re-hash every relative path and file before using an active release.
@@ -94,12 +103,13 @@ chat tool catalogs and running MCP servers do not become new code by changing a
 file. Never automatically kill the Codex app, call global MCP reload, or
 resend an ambiguous write call. Codex connection recovery and dynamic tool
 publication remain owned by [#869](https://github.com/kinoko34077/devflow/issues/869);
-broader tool contract versioning remains [#805 WATCH/DEFER](https://github.com/kinoko34077/devflow/issues/805).
+connection-local worker exchange is owned by [#1138](https://github.com/kinoko34077/devflow/issues/1138) ; the narrowly resumed shared admission contract is owned by [#805](https://github.com/kinoko34077/devflow/issues/805) .
 
-A changed set of callable MCP tool names, required arguments, schemas, or
-missing successful exact-head CI **blocks** automatic promotion. Re-check
-the user-facing Codex version and compatibility before an explicit
-breaking-contract rollout.
+Changes to nonessential tools or optional inputs do not alone block promotion.
+Essential call incompatibility, invalid catalog, failed smoke, missing exact-head CI
+or any existing integrity/authority gate failure retains the prior selection.
+A running client may have a stale tool catalog: automatic in-session refresh and
+localized compatibility fallback require the separate #1138 acceptance.
 
 ## P2-A / P2-B / P2-C：復旧と実行時完全性の境界（DFM02）
 
@@ -109,4 +119,4 @@ breaking-contract rollout.
 - **ロールバックの持続（P2-C）**：`updates.hold` の存在中は、同じSHAだけでなく将来のmainへの自動昇格も停止する。空ファイルも停止扱いとし、切替失敗時にも停止を解除しない。`resume` は現行版を確認して停止だけを解除し、次の `check` が通常の検証を再開する。
 - **競合防止**：managerはOSのプロセス連動ファイルロックを利用して `check`・`status`・`rollback`・`resume` を排他し、クラッシュ後に永続的なstale lockを残さない。Scheduler側も重複起動を禁止する。
 - **残る権限境界**：markerと安定launcher自体の書換え権限を持つ、同一ユーザー権限の攻撃者に対してSHA-256だけでは防御できない。改変検出は「markerを信頼できる」ことが前提であり、検証終了後からプロセス起動までのファイル差替え競合も完全に消せない。DSKTP-SSD2での導入前に、実際のACL・Codex sandboxの書込み範囲・親ディレクトリの保護とプロセス起動経路を確認する。検証不能なら自動更新は有効化しない。
-- **互換性の限界**：入力schemaの一致はツールの機能がread-onlyである証明ではない。各版はmain側の正式レビュー・Required CIに依存する。tool数16の変更時はmanagerの手動更新と互換性確認が必要。
+- **互換性の限界**：入力schemaの一致はツールの機能がread-onlyである証明ではない。各版はmain側の正式レビュー・Required CIに依存する。固定tool数ではなく共通catalog受入判定と実必須呼出を検査する。既存会話の動的catalog更新は#1138の別受入とする。
