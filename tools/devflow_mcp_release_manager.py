@@ -372,46 +372,6 @@ def run_unittests(python: Path, source: Path) -> None:
         raise ReleaseError("local Python unit suite failed; release not activated")
 
 
-_SCHEMA_MAPS = frozenset({
-    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
-})
-_SCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
-_SCHEMA_CHILDREN = frozenset({
-    "items", "additionalProperties", "unevaluatedProperties", "contains",
-    "not", "if", "then", "else", "propertyNames",
-})
-
-
-def _compatible_schema(schema: object) -> object:
-    """Ignore only schema-node annotations, not property names/literal values.
-
-    Do not descend into const, enum, default, examples, or unknown extension
-    values: those may contain data keys named "title" or "description".
-    """
-    if not isinstance(schema, dict):
-        return schema
-    normalized = {}
-    for key, value in schema.items():
-        if key in {"title", "description", "examples"}:
-            continue
-        if key in _SCHEMA_MAPS and isinstance(value, dict):
-            normalized[key] = {
-                name: _compatible_schema(child)
-                for name, child in value.items()
-            }
-        elif key in _SCHEMA_LISTS and isinstance(value, list):
-            normalized[key] = [_compatible_schema(child) for child in value]
-        elif key in _SCHEMA_CHILDREN and isinstance(value, (dict, list)):
-            normalized[key] = (
-                [_compatible_schema(child) for child in value]
-                if isinstance(value, list)
-                else _compatible_schema(value)
-            )
-        else:
-            normalized[key] = value
-    return normalized
-
-
 def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
     """Reproduce exactly the existing registered Codex MCP runtime env."""
     config = Path.home() / ".codex" / "config.toml"
