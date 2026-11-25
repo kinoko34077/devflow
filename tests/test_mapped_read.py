@@ -10,7 +10,8 @@ from urllib.parse import urlsplit, parse_qs
 
 from tools.devflow_mcp_core import GitHubReader
 from tools.mapped_github_read import github_source_maps
-from devflow_mapped_read import MappedReadError, SourceMap, SourceObservation, read_mapped
+from devflow_mapped_read import (MappedReadError, SourceMap, SourceObservation,
+                                read_mapped, read_mapped_batch)
 
 REPO = "kinoko34077/devflow"
 OTHER = "kinoko34077/example"
@@ -122,6 +123,97 @@ class MappedReadTests(unittest.TestCase):
             )
             subprocess.run([sys.executable, "-c", script], cwd=foreign, env=env,
                            check=True, capture_output=True, timeout=30)
+
+    def test_batch_reuses_acquisition_across_projections_and_not_calls(self):
+        sources, calls = self.reader()
+        first = query()
+        second = copy.deepcopy(first)
+        second["response"] = {"fields": ["number"], "limit": 1}
+        packet = {"schema_version": "mapped-read-batch.v1", "requests": [first, second]}
+        result = read_mapped_batch(packet, sources=sources, allowed_repositories={REPO})
+        self.assertEqual(result["status"], "BOUNDED_READ")
+        self.assertEqual((result["source_reads"], result["reused_observations"]), (1, 1))
+        self.assertEqual(len(calls), 1)
+        x, y = [r["result"] for r in result["results"]]
+        self.assertEqual(y["items"][0]["record"], {"number": 1})
+        self.assertNotIn("body", repr(result))
+        xcov, ycov = [r["coverage"]["repositories"][0] for r in (x, y)]
+        self.assertEqual(xcov["source_observed_at"], ycov["source_observed_at"])
+        self.assertFalse(xcov["reused_observation"])
+        self.assertTrue(ycov["reused_observation"])
+        self.assertEqual(ycov["observed_new_read_units"], 0)
+        self.assertTrue(y["requires_source_revalidation"])
+        read_mapped_batch(packet, sources=sources, allowed_repositories={REPO})
+        self.assertEqual(len(calls), 2)
+        read_mapped(first, sources=sources, allowed_repositories={REPO})
+        self.assertEqual(len(calls), 3)
+
+    def test_batch_separates_conditions_and_refuses_scope(self):
+        sources, calls = self.reader()
+        first = query()
+        second = copy.deepcopy(first)
+        second["budget"]["max_pages"] = 3
+        third = query("github.issue_comment")
+        fourth = query(repos=[OTHER])
+        fifth = copy.deepcopy(first)
+        fifth["response"]["fields"] = ["body"]
+        result = read_mapped_batch(
+            {"schema_version": "mapped-read-batch.v1",
+             "requests": [first, second, third, fourth, fifth, first]},
+            sources=sources, allowed_repositories={REPO})
+        self.assertEqual(result["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual((result["source_reads"], result["reused_observations"]), (3, 1))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([r["status"] for r in result["results"]],
+            ["BOUNDED_READ", "BOUNDED_READ", "BOUNDED_READ", "BLOCKED",
+             "BLOCKED", "BOUNDED_READ"])
+
+    def test_batch_partial_failure_and_non_opt_in_are_not_reused(self):
+        for status, opt_in in (("PARTIAL_UNKNOWN", True), ("BLOCKED", True),
+                               ("BOUNDED_READ", False)):
+            with self.subTest(status=status, opt_in=opt_in):
+                calls = []
+                def prepare(lower, upper, filters, budget):
+                    def read(repo):
+                        calls.append(repo)
+                        return SourceObservation(() if status == "BLOCKED" else ({"id": 1},),
+                                                 status, "FIXTURE")
+                    return read
+                sources = {"fixture": SourceMap("fixture", None, frozenset({"id"}),
+                                               prepare, batch_reusable=opt_in)}
+                first = query("fixture")
+                first["time"] = None
+                first["response"]["fields"] = ["id"]
+                result = read_mapped_batch(
+                    {"schema_version": "mapped-read-batch.v1", "requests": [first, first]},
+                    sources=sources, allowed_repositories={REPO})
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(result["reused_observations"], 0)
+                self.assertEqual(result["status"], status)
+
+    def test_batch_missing_field_requires_new_read_and_failure_is_not_cached(self):
+        calls = []
+        def prepare(lower, upper, filters, budget):
+            def read(repo):
+                calls.append(repo)
+                row = {"id": 1} if len(calls) < 3 else {"id": 1, "extra": 2}
+                return SourceObservation((row,), "BOUNDED_READ", "FIXTURE")
+            return read
+        sources = {"fixture": SourceMap("fixture", None, frozenset({"id", "extra"}),
+                                       prepare, batch_reusable=True)}
+        first = query("fixture")
+        first["time"] = None
+        first["response"]["fields"] = ["id"]
+        second = copy.deepcopy(first)
+        second["response"]["fields"] = ["extra"]
+        result = read_mapped_batch(
+            {"schema_version": "mapped-read-batch.v1",
+             "requests": [first, second, second, first]},
+            sources=sources, allowed_repositories={REPO})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(result["reused_observations"], 1)
+        self.assertEqual([r["status"] for r in result["results"]],
+                         ["BOUNDED_READ", "BLOCKED", "BOUNDED_READ", "BOUNDED_READ"])
 
     def test_response_limit_is_not_complete(self):
         sources, calls = self.reader()

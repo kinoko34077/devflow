@@ -15,7 +15,7 @@ from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.devflow_read_errors import SAFE_READ_FAILURE_CODES, SAFE_ARGUMENT_FAILURE_CODES, failure_reason_code
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 from tools.mapped_github_read import github_source_maps
-from devflow_mapped_read import read_mapped
+from devflow_mapped_read import BATCH_SCHEMA, read_mapped, read_mapped_batch
 
 OPERATIONS = (
     "portfolio", "human-portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
@@ -43,8 +43,10 @@ def read_operation(
             raise ValueError("MAPPED_READ_OPTIONS_CONFLICT")
         if type(mapped_request) is not dict or type(allowed_repositories) is not list or not allowed_repositories:
             raise ValueError("MAPPED_READ_REQUEST_OR_SCOPE_REQUIRED")
-        return read_mapped(mapped_request, sources=github_source_maps(service.reader),
-                           allowed_repositories=allowed_repositories)
+        read = (read_mapped_batch if mapped_request.get("schema_version") == BATCH_SCHEMA
+                else read_mapped)
+        return read(mapped_request, sources=github_source_maps(service.reader),
+                    allowed_repositories=allowed_repositories)
     if mapped_request is not None or allowed_repositories is not None:
         raise ValueError("MAPPED_READ_OPTIONS_ON_OTHER_OPERATION")
     if operation == "portfolio":
@@ -164,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
                                     mapped_request=packet,
                                     allowed_repositories=args.allowed_repository)
             print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
-            return 2 if result["coverage"]["status"] == "BLOCKED" else 0
+            status = (result["status"] if packet.get("schema_version") == BATCH_SCHEMA
+                      else result["coverage"]["status"])
+            return 2 if status == "BLOCKED" else 0
         if args.request_file is not None or args.allowed_repository is not None:
             raise ValueError("MAPPED_READ_OPTIONS_ON_OTHER_OPERATION")
         plan = None
