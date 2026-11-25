@@ -17,11 +17,11 @@ from mcp.client.stdio import stdio_client
 from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
-try:
+if __package__:
     from .devflow_mcp_release_manager import _compatible_schema
     from .devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
                                      admit_catalog, arguments_supported)
-except ImportError:
+else:
     from devflow_mcp_release_manager import _compatible_schema
     from devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
                                     admit_catalog, arguments_supported)
@@ -138,12 +138,17 @@ class Worker:
                 if entry is not None and not entry[2].done():
                     entry[2].set_result(_reply({"status": "WORKER_UNAVAILABLE"}, error=True))
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
-        if not self.usable():
-            return _reply({"status": "WORKER_UNAVAILABLE"}, error=True)
+    def submit(self, name: str, arguments: dict[str, Any]) -> asyncio.Future:
+        """Enqueue synchronously while the routing lock still owns selection."""
         future = asyncio.get_running_loop().create_future()
-        self.queue.put_nowait((name, arguments, future))
-        return await future
+        if not self.usable():
+            future.set_result(_reply({"status": "WORKER_UNAVAILABLE"}, error=True))
+        else:
+            self.queue.put_nowait((name, arguments, future))
+        return future
+
+    async def call(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+        return await self.submit(name, arguments)
 
     async def close(self) -> None:
         if self.task is not None:
@@ -206,7 +211,10 @@ class Connection:
 
     def _state(self, status: str) -> dict[str, Any]:
         self.last_status = status
-        return {"status": status, "running_version": self.version()}
+        state = {"status": status, "running_version": self.version()}
+        if status == "AWAITING_CATALOG_REFRESH":
+            state["action"] = "REFRESH_TOOLS_LIST"
+        return state
 
     def _retire(self, worker: Worker | None) -> None:
         """Transfer cleanup ownership before any cancellable await."""
@@ -314,7 +322,7 @@ class Connection:
             if candidate is not None:
                 self._retire(candidate)
 
-    def _with_runtime_status(self, result: types.CallToolResult) -> types.CallToolResult:
+    def _with_runtime_status(self, result: types.CallToolResult, *, served_version=None) -> types.CallToolResult:
         """Keep domain content unchanged; publish explicit runtime metadata."""
         payload = result.model_dump(by_alias=True, exclude_none=True)
         meta = dict(payload.get("_meta") or {})
@@ -322,6 +330,8 @@ class Connection:
             "status": self.last_status,
             "running_version": self.version(),
         }
+        if served_version is not None:
+            meta["kinotch.devflow.runtime"]["served_version"] = served_version
         payload["_meta"] = meta
         return types.CallToolResult.model_validate(payload)
 
@@ -381,30 +391,38 @@ class Connection:
                         return _reply(self._state("RESTARTED"))
             return _reply(self._state("SELECTION_CHANGED"), error=True)
 
-        async with self.lock:
-            task, state = self._schedule_refresh(explicit=False)
-            if self.worker is not None and self.worker.usable():
-                invalid = self._validate_call(params)
-                if invalid is not None:
-                    return self._with_runtime_status(invalid)
-                result = await self.worker.call(params.name, params.arguments or {})
-                if not self.worker.usable():
-                    self._schedule_refresh(explicit=False)
-                # No retry of a call already submitted, even after transport failure.
-                return self._with_runtime_status(result)
-
-        # No usable old worker: a not-yet-submitted request may wait for recovery.
-        if task is not None:
+        worker = None
+        future = None
+        # Selection and enqueue are one atomic routing operation. The child
+        # processes its existing queue before its retirement sentinel; no
+        # request is sent to it after the swap. Never await a domain call here.
+        for attempt in range(2):
+            async with self.lock:
+                if self.closed:
+                    return _reply(self._state("CONNECTION_CLOSED"), error=True)
+                task, state = self._schedule_refresh(explicit=False)
+                if self.worker is not None and self.worker.usable():
+                    invalid = self._validate_call(params)
+                    if invalid is not None:
+                        return self._with_runtime_status(invalid)
+                    worker = self.worker
+                    future = worker.submit(params.name, params.arguments or {})
+                    break
+                if task is None or attempt:
+                    if state["status"] == "AWAITING_CATALOG_REFRESH":
+                        return _reply(state, error=True)
+                    return _reply(self._state("WORKER_UNAVAILABLE"), error=True)
+            # Only an unsent request may wait for recovery.
             await asyncio.shield(task)
+
+        assert worker is not None and future is not None
+        result = await future
         async with self.lock:
-            if self.worker is None or not self.worker.usable():
-                return _reply(self._state("WORKER_UNAVAILABLE"), error=True)
-            invalid = self._validate_call(params)
-            if invalid is not None:
-                return self._with_runtime_status(invalid)
-            return self._with_runtime_status(
-                await self.worker.call(params.name, params.arguments or {}),
-            )
+            if worker is self.worker and not worker.usable():
+                self._schedule_refresh(explicit=False)
+            # The served version is not necessarily the current routing version.
+            # A sent request is never replayed.
+            return self._with_runtime_status(result, served_version=worker.launch.version)
 
     async def close(self):
         async with self.lock:
