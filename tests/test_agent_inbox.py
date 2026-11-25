@@ -712,6 +712,25 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(len(section["entries"]), 1)
         self.assertFalse(result["can_authorize_execution"])
 
+    def test_workspace_shared_truncated_mailbox_is_unknown_in_both_views(self):
+        root = message(issue=21)
+        self.index_mock.return_value = demo_index((21, 11, root))
+        rows = [issue_comment(11, root)] + [
+            {"id": n + 100, "body": "ordinary discussion",
+             "user": {"id": 79015263, "login": OWNER}}
+            for n in range(agent_inbox.MAX_ISSUE_COMMENTS)
+        ]
+        reader = fixture_reader([task()], comments={(REPO, 21): rows})
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        section = result["sections"]["messages"]
+        self.assertEqual(reader.calls.count((REPO, "comments", 21)), 1)
+        self.assertEqual(section["task_cohort_status"], "PARTIAL")
+        self.assertEqual(section["recent_discovery"]["status"], "PARTIAL_UNKNOWN")
+        self.assertIsNone(section["entries"])
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_b6_finds_strict_non_task_recipient_root_without_promotion(self):
         reader = fixture_reader(
             [task(), unclassified_issue()],
