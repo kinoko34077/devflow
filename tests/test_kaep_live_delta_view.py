@@ -35,6 +35,26 @@ def result(repositories, locators, **_kwargs):
 
 
 class LiveDeltaTests(unittest.TestCase):
+    def test_shared_recent_locators_preserve_order_and_validate_unmarked_rows(self):
+        rows = [
+            comment(number=590, cid=1),
+            comment(number=576, cid=2, actor="github-actions[bot]"),
+            comment(number=590, cid=3),
+            comment(number=610, cid=4, body="ordinary text"),
+        ]
+        self.assertEqual(live.recent_issue_numbers(
+            REPO, rows, locator_error="LIVE_SOURCE_LOCATOR_MISMATCH"),
+            [590, 576])
+        rows.append(comment(number=611, cid=5, body="ordinary text",
+                            repo="kinoko34077/other"))
+        with self.assertRaisesRegex(InvalidMessage, "LIVE_SOURCE_LOCATOR_MISMATCH"):
+            live.recent_issue_numbers(
+                REPO, rows, locator_error="LIVE_SOURCE_LOCATOR_MISMATCH")
+        with self.assertRaisesRegex(InvalidMessage, "INVALID_LIVE_COMMENT"):
+            live.recent_issue_numbers(
+                REPO, [None], locator_error="INVALID_LIVE_ISSUE_LOCATOR",
+                comment_error="INVALID_LIVE_COMMENT")
+
     def test_uses_request_time_updated_issue_comment_api_not_search(self):
         payload = [comment()]
         with mock.patch.object(live.subprocess, "run", return_value=subprocess.CompletedProcess(
