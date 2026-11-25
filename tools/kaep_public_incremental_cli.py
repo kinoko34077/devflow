@@ -168,10 +168,8 @@ def discover_incremental(
                     for i, r in enumerate(repositories[idx:], start=idx))
                 break
             calls += 1
-            path = (f"/repos/{repo}/issues/comments?sort=created&direction=desc"
-                    f"&per_page={locator.PAGE_SIZE}&page={page}")
             try:
-                comments = fetch(path)
+                comments = fetch(locator._created_comment_path(repo, page))
                 if type(comments) is not list or len(comments) > locator.PAGE_SIZE:
                     fail("INVALID_PUBLIC_COMMENT_PAGE")
                 if current_head is _NOT_FOUND:
