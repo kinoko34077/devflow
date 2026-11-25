@@ -57,3 +57,17 @@ not a completed write.
 Live owning Issues, PRs, exact workflow runs, current pinned SHAs, review, and
 post-main evidence remain authoritative. This route does not grant claims,
 permissions, credentials, deploys, publication, or general rollout authority.
+
+## Source-neutral payload layer
+
+\`tools/generated_artifact_contract.py:validate_payload_and_plan\` and
+\`tools/generated_artifact_packager.py:package_generated_bytes\` share exact
+output-set, bounded ZIP, content digest and byte-diff validation with the
+existing Actions v1 path. They support a non-Actions producer's pure payload
+without inventing a run ID or workflow reference. The caller independently
+derives exact paths and limits from its reviewed recipe; an untrusted payload
+cannot choose its own scope. These functions are read-only and are not a
+writer admission or a new execution route. The existing Actions v1 policy,
+producer authentication, branch fencing and writer activation stay mandatory.
+A local/PC writer still needs its own authenticated producer evidence and
+approved target/credential boundary before the shared writer may be invoked.
