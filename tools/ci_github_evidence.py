@@ -128,12 +128,14 @@ def _run_identity(run: dict, repository: str, run_id: int) -> dict | None:
             or not _text(run.get("event")) or not _text(run.get("status"))):
         return None
     # Identity is limited to this native record, not the execution environment.
+    repository_id = _object(run.get("repository")).get("id")
+    head_repository_id = _object(run.get("head_repository")).get("id")
     return {key: run[key] for key in (
         "id", "workflow_id", "run_attempt", "head_sha", "path", "event", "status",
     )} | {
         "conclusion": run.get("conclusion"),
-        "repository_id": _object(run.get("repository")).get("id"),
-        "head_repository_id": _object(run.get("head_repository")).get("id"),
+        "repository_id": repository_id if _id(repository_id) else None,
+        "head_repository_id": head_repository_id if _id(head_repository_id) else None,
         "head_branch": run.get("head_branch"),
     }
 
