@@ -390,9 +390,9 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 pass
 
             async def list_tools(self):
-                return SimpleNamespace(tools=[
-                    SimpleNamespace(name=f"tool{i}", input_schema={})
-                    for i in range(manager.EXPECTED_TOOLS)
+                return SimpleNamespace(next_cursor=None, tools=[
+                    SimpleNamespace(name=name, input_schema={"type": "object"})
+                    for name in manager.REQUIRED_CALLS
                 ])
 
         with (patch("mcp.client.stdio.stdio_client", fake_stdio),
@@ -401,7 +401,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 Path("/fake/python"), candidate, "fixture-token",
                 full=False, mcp_env=supplied_env,
             ))
-        self.assertEqual(len(result), manager.EXPECTED_TOOLS)
+        self.assertEqual(set(result), set(manager.REQUIRED_CALLS))
         self.assertEqual(observed[0].env["PYTHONPATH"], str(candidate.parent.parent.resolve()))
         self.assertEqual(observed[0].env["DFM_TEST_OTHER"], "keep")
         self.assertEqual(supplied_env["PYTHONPATH"], str(self.legacy.parent))
@@ -428,10 +428,7 @@ class ReleaseManagerContractTests(unittest.TestCase):
               patch.object(manager, "source_archive", side_effect=fake_archive),
               patch.object(manager, "run_unittests", return_value=None),
               patch.object(manager, "registered_mcp_env", return_value={}),
-              patch.object(manager, "smoke", side_effect=[
-                  {"bootstrap_repository": {"type": "object"}},
-                  manager.ReleaseError("new MCP smoke failed"),
-              ])):
+              patch.object(manager, "smoke", side_effect=manager.ReleaseError("new MCP smoke failed"))):
             with self.assertRaises(manager.ReleaseError):
                 manager.promote(**self._runner())
         self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
@@ -497,6 +494,8 @@ class ReleaseManagerContractTests(unittest.TestCase):
             self.assertEqual(len(replace.call_args_list), 1)
             self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
             self.assertNotIn(prior, [call.args[2] for call in invoke.call_args_list])
+            invoke.assert_called_once()
+            self.assertTrue(invoke.call_args.kwargs["full"])
         self.assertEqual(prior.read_bytes(), prior_bytes)
 
     def test_legacy_rollback_then_repromotion_preserves_original_release(self):
