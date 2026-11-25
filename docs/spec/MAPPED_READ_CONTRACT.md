@@ -38,3 +38,9 @@ python -m tools.devflow_read_cli mapped-read --request-file /absolute/path/reque
 ## 内部GitHub native query・ページ進行
 
 `devflow_mapped_read.github_pages` は既存Reader/KAEPのIssue・コメントnative取得を共通化する。信頼済みsource ownerは `RepositoryIssueQuery` へrepository/kind/state/sort/direction/native_since/per_pageを宣言し、既存認証付きGET callbackを `iter_list_pages` へ注入する。Linkのnextが明示される場合はその値を使い、観測不能なら短ページを終了/fullを継続候補とする。ページ予算到達時にhas_nextを保持し、途中停止は追加GETを行わない。native sinceはAPI引数そのもので、半開区間・重複・identity/actor・原典検証を置換しない。M1のoverlap/古い下限fallbackは既存Readerに残す。KAEPの既存gh経路・上限・error/locator/原典照合は保持。内部raw行は既存trusted process内のみ、公開CLIの許可属性を増やさない。IndexのLink経路への接続は #50 の代表検証で行う。
+
+## 宣言的な内部全ページ取得（#1154 R2）
+
+`read_linked_rows(plan.path, get_page, per_page=plan.per_page, max_pages=既存の予算)` は明示的なLinkヘッダーを返す既存GET経路向けの全ページ取得入口。GET callbackは既存transportの `(rows, Link文字列)` を返す（Linkなしは空文字列）。任意のLink URLへアクセスせず、宣言したpathの連番だけを使用。nextが残る予算到達や途中の読取失敗では正常な全件結果を返さない。Linkによるページ終了は原子的snapshot/全source完全性の保証ではない。公開CLIの許可属性は変更しない。
+
+Issue Index等の信頼済みローカル処理は、既存の検証済みdevflow固定checkoutを `PYTHONPATH` または既存のimport path設定で参照し、`RepositoryIssueQuery` と `read_linked_rows` を直接利用する。既存のrepo探索・認証・retry・body分類・保存境界はそのownerに残す。新規依存配布、個別loader、別HTTP実装は不要。固定版の選択は共通ホスト設定側で行い、利用先コードに個別の版文字列を埋め込まない。SourceMapは保存済み履歴/索引の意味・許可属性の登録にそのまま利用し、別schemaを新設しない。各consumerの実運用切替は個別受入による。

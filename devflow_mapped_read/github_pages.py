@@ -96,3 +96,31 @@ def iter_list_pages(
         yield observed
         if not observed.has_next:
             return
+
+
+def read_linked_rows(
+    path_for_page: Callable[[int], str],
+    get_page: Callable[[str], tuple[Any, str]],
+    *, per_page: int, max_pages: int,
+) -> list[Any]:
+    """Read a complete native page sequence with explicit Link evidence.
+
+    Trusted callers supply a fixed path plan and their existing GET transport
+    (rows, Link header; empty string means no Link). Preserve the legacy
+    GitHub rel="next" test. Never follow a URL supplied by the Link header.
+    If the budget is exhausted with a next page, raise instead of returning a
+    partial prefix as a complete result. This does not establish an atomic
+    snapshot, source-universe completeness, or authority.
+    """
+    def fetch(page: int) -> tuple[Any, bool]:
+        rows, link = get_page(path_for_page(page))
+        if type(link) is not str:
+            raise MappedReadError("INVALID_LINK_HEADER")
+        return rows, 'rel="next"' in link
+
+    rows = []
+    for observed in iter_list_pages(fetch, per_page=per_page, max_pages=max_pages):
+        rows.extend(observed.rows)
+        if not observed.has_next:
+            return rows
+    raise MappedReadError("PAGE_LIMIT")
