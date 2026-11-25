@@ -1088,7 +1088,11 @@ class DevflowService:
             # Group exact titles once. Even an untrusted same-title collision
             # is left visible for discovery rather than inferred away.
             groups: dict[str, list[dict[str, Any]]] = {}
+            number_counts: dict[int, int] = {}
             for issue in control_source:
+                number = issue.get("number")
+                if type(number) is int:
+                    number_counts[number] = number_counts.get(number, 0) + 1
                 title = str(issue.get("title") or "").strip()
                 if title.startswith("[REPO] "):
                     groups.setdefault(title, []).append(issue)
@@ -1098,6 +1102,7 @@ class DevflowService:
                 issue = candidates[0]
                 number = issue.get("number")
                 if (type(number) is not int or number not in unclassified
+                        or number_counts.get(number) != 1
                         or issue.get("state") != "open"
                         or not is_trusted_control_author(issue)):
                     continue
