@@ -29,6 +29,16 @@ REQUIRED_CALLS = {
     "get_agent_workspace": {"repository": REPOSITORY, "recipient": "codex", "limit": 1, "offset": 0},
 }
 SMOKE_CALLS = ("bootstrap_repository", "get_human_portfolio")
+# The original verified, annotation-free read-only interface is a bounded
+# compatibility exception, not a required inventory or a fixed tool count.
+LEGACY_UNANNOTATED_READS = frozenset({
+    "bootstrap_repository", "get_repository_control", "list_managed_repositories",
+    "get_repository_projection", "get_repository_work_view", "get_scoped_task_read",
+    "get_agent_inbox", "get_agent_workspace", "get_portfolio_projection",
+    "get_human_portfolio", "get_issue", "get_issue_goal_context",
+    "assess_issue_plan", "assess_outcome_observation", "get_sync_health",
+    "get_github_actions_billing_observation",
+})
 
 
 def _validator(schema: object):
@@ -53,8 +63,9 @@ def admit_catalog(
     """Validate the complete observed worker catalog, not its equality to old.
 
     Accept additive and optional changes; require known essential call inputs.
-    An explicit annotation incompatible with read-only operation is rejected.
-    Missing/positive annotations never prove that the implementation is safe.
+    Reject explicit incompatible effects and newly introduced tools without an
+    explicit read-only declaration. Only the verified legacy names may omit it.
+    An annotation never proves authority or actual implementation safety.
     SDK tools are retained so the connection can publish their actual schemas.
     """
     if next_cursor is not None:
@@ -74,6 +85,9 @@ def admit_catalog(
             or getattr(annotations, "destructive_hint", None) is True
         ):
             raise CatalogError("MCP tool declares incompatible side effects")
+        if (name not in LEGACY_UNANNOTATED_READS
+                and getattr(annotations, "read_only_hint", None) is not True):
+            raise CatalogError("new MCP tool lacks a read-only declaration")
         if name in required_calls:
             try:
                 validator.validate(dict(required_calls[name]))
