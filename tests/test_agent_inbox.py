@@ -660,6 +660,58 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
+    def test_workspace_reuses_successful_b6_comment_read_only_within_one_call(self):
+        root = message(issue=21)
+        self.index_mock.return_value = demo_index((21, 11, root))
+        reader = fixture_reader(
+            [task(), task(23)],
+            comments={(REPO, 21): [issue_comment(11, root)]},
+            recent_comments={REPO: [recent_marker(issue=21, cid=11, msg=root)]},
+        )
+        service = devflow_mcp_core.DevflowService(reader)
+        first = service.get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(reader.calls.count((REPO, "comments", 21)), 1)
+        self.assertEqual(reader.calls.count((REPO, "comments", 23)), 1)
+        self.assertEqual(reader.calls.count((REPO, 21)), 1)
+        self.assertLess(reader.calls.index((REPO, 21)),
+                        reader.calls.index((REPO, "comments", 21)))
+        self.assertEqual(first["sections"]["messages"]["status"], "TASK_AND_RECENT_ORIGINALS")
+        self.assertEqual(len(first["sections"]["messages"]["entries"]), 1)
+        # A later call must not reuse the old observation.
+        reader.comments[(REPO, 21)] = []
+        reader.recent_comments[REPO] = []
+        second = service.get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(reader.calls.count((REPO, "comments", 21)), 2)
+        self.assertEqual(reader.calls.count((REPO, 21)), 2)
+        self.assertEqual(second["sections"]["messages"]["entries"], [])
+        self.assertEqual(second["sections"]["messages"]["status"], "RECENT_DISCOVERY_PARTIAL")
+        self.assertTrue(second["has_unknown_work"])
+
+    def test_workspace_failed_b6_comment_read_does_not_poison_task_inbox(self):
+        root = message(issue=21)
+        self.index_mock.return_value = demo_index((21, 11, root))
+        reader = fixture_reader(
+            [task()], comments={(REPO, 21): [issue_comment(11, root)]})
+        original = reader.list_issue_comments
+        attempts = []
+        def fail_once(repository, number, *, max_comments=None):
+            attempts.append((repository, number, max_comments))
+            if len(attempts) == 1:
+                raise devflow_mcp_core.DevflowMCPError("temporary comment failure")
+            return original(repository, number, max_comments=max_comments)
+        reader.list_issue_comments = fail_once
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        section = result["sections"]["messages"]
+        self.assertEqual(section["recent_discovery"]["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(section["task_cohort_status"], "BOUNDED_OBSERVED")
+        self.assertEqual(len(section["entries"]), 1)
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_workspace_b6_finds_strict_non_task_recipient_root_without_promotion(self):
         reader = fixture_reader(
             [task(), unclassified_issue()],
