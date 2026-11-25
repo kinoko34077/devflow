@@ -179,6 +179,33 @@ class MappedReadCLITests(unittest.TestCase):
                     self.assertEqual(json.loads(out.getvalue())["reason_code"], code)
                     factory.assert_not_called()
 
+    def test_batch_file_reuses_existing_reader_and_keeps_single_request_compatibility(self):
+        calls = []
+        def transport(url, headers):
+            calls.append(url)
+            return [{"id": 3, "number": 1, "state": "open",
+                     "updated_at": "2026-11-20T00:00:00Z",
+                     "repository_url": "https://api.github.com/repos/" + self.REPO}]
+        service = SimpleNamespace(reader=GitHubReader(transport=transport))
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "request.json"
+            first = self.packet()
+            second = self.packet()
+            second["response"]["fields"] = ["number"]
+            f.write_text(json.dumps({"schema_version": "mapped-read-batch.v1",
+                                     "requests": [first, second]}), encoding="utf-8")
+            args = ["mapped-read", "--request-file", str(f),
+                    "--allowed-repository", self.REPO]
+            status, result = self.run_cli(args, service)
+            self.assertEqual(status, 0)
+            self.assertEqual((result["source_reads"], result["reused_observations"]), (1, 1))
+            self.assertEqual(len(calls), 1)
+            f.write_text(json.dumps(first), encoding="utf-8")
+            status, result = self.run_cli(args, service)
+            self.assertEqual(status, 0)
+            self.assertEqual(result["schema_version"], "mapped-read-result.v1")
+            self.assertEqual(len(calls), 2)
+
     def test_full_read_failure_is_nonzero_and_redacted(self):
         def fail(url, headers):
             raise RuntimeError("sensitive transport detail")

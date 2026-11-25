@@ -52,7 +52,8 @@ def github_source_maps(reader: GitHubReader) -> dict[str, SourceMap]:
                     read_units=result["read_pages"],
                 )
             return read
-        return SourceMap("kinoko34077/devflow", "github.updated_at", fields, prepare)
+        return SourceMap("kinoko34077/devflow", "github.updated_at", fields, prepare,
+                         batch_reusable=True)
 
     common = frozenset({"id", "html_url", "created_at", "updated_at"})
     return {
