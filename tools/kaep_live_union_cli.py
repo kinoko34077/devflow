@@ -135,30 +135,30 @@ def _validated_public_marker_hints(data: dict[str, Any]) -> tuple[set[tuple[str,
 
 def _recent_issue_keys(
     repo: str, comments: list[dict[str, Any]],
-) -> set[tuple[str, int]]:
-    """Untrusted markers supply locators ONLY. Strict codec runs afterwards."""
+) -> list[tuple[str, int]]:
+    """Untrusted markers supply ordered locators ONLY. Strict codec runs afterwards."""
     if type(comments) is not list or len(comments) > delta.MAX_WINDOW * delta.MAX_UPDATED_PAGES:
         fail("INVALID_LIVE_WINDOW")
-    return {
+    return [
         (repo, number)
         for number in delta.recent_issue_numbers(
             repo, comments, locator_error="INVALID_LIVE_ISSUE_LOCATOR",
             comment_error="INVALID_LIVE_COMMENT")
-    }
+    ]
 
 
 def _collect_recent_source_hints(
     repositories: list[str], *,
     recent_read: Callable[..., list[dict[str, Any]]], since: str | None,
 ) -> tuple[
-    set[tuple[str, int]], dict[str, int], dict[str, int], list[dict[str, str]]
+    list[tuple[str, int]], dict[str, int], dict[str, int], list[dict[str, str]]
 ]:
     """Interpret bounded updated-comment windows as untrusted source *hints*.
 
     Keep pagination uncertainty and warning ordering at this boundary.
     This function never validates original sources or grants a work assignment.
     """
-    recent_sources: set[tuple[str, int]] = set()
+    recent_sources: list[tuple[str, int]] = []
     counts: dict[str, int] = {}
     updated_pages_read: dict[str, int] = {}
     warnings: list[dict[str, str]] = []
@@ -188,7 +188,7 @@ def _collect_recent_source_hints(
             page_count = 1
         counts[repo] = len(comments)
         updated_pages_read[repo] = page_count
-        recent_sources.update(_recent_issue_keys(repo, comments))
+        recent_sources.extend(_recent_issue_keys(repo, comments))
         if truncated:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
     return recent_sources, counts, updated_pages_read, warnings
@@ -401,23 +401,35 @@ def read_union(
         (r["repository"], r["issue_number"], r["source_comment_id"], r["message_id"]): r
         for r in indexed_rows
     }
-    recent_sources, counts, updated_pages_read, warnings = (
+    ordered_recent_sources, counts, updated_pages_read, warnings = (
         _collect_recent_source_hints(
             repos, recent_read=recent_read, since=since,
         )
     )
 
+    recent_sources = set(ordered_recent_sources)
     all_candidate_sources = sorted(
         indexed_sources | recent_sources | marker_in_scope | prior_source_keys
     )
-    # Default remains fail-closed; an explicit offset selects one bounded
-    # batch from the fully validated candidate locations, never a source
-    # universe or a stable cross-call pagination snapshot.
+    # CLI default and explicit offset retain their existing contracts. A
+    # scoped Workspace read can still use the bounded original-source budget
+    # rather than dropping the whole indexed cohort when the union overflows.
     if source_offset is None:
         if len(all_candidate_sources) > MAX_SOURCES:
-            fail("UNION_SOURCE_LIMIT")
-        all_sources = all_candidate_sources
+            if scoped_repository is None:
+                fail("UNION_SOURCE_LIMIT")
+            # Recent comments are returned in updated-desc order. Their
+            # locators have priority only for discovery, never for authority.
+            remaining = [key for key in all_candidate_sources if key not in recent_sources]
+            all_sources = (ordered_recent_sources + remaining)[:MAX_SOURCES]
+            warnings.append({
+                "repository": scoped_repository,
+                "reason_code": "UNION_SOURCE_LIMIT_PARTIAL",
+            })
+        else:
+            all_sources = all_candidate_sources
         batch_offset = 0
+        # Recent-first selection is not a stable offset into the sorted set.
         next_source_offset = None
     else:
         if source_offset > len(all_candidate_sources):

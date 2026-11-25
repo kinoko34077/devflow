@@ -67,6 +67,48 @@ class LiveUnionTests(TestCase):
         self.assertFalse(output["can_authorize_execution"])
         self.assertNotIn("private test-only prompt", json.dumps(output))
 
+    def test_scoped_overflow_checks_recent_first_without_retiring_index(self):
+        # Older index entries fill the budget; a recent unindexed source
+        # must not be lost merely because its Issue number sorts last.
+        entries = [(n, 1000+n, root(number=n, issue=n))
+                   for n in range(100, 141)]
+        snap = index_with(*entries)
+        fresh = root(number=500, issue=900)
+        calls = []
+        def read_issue(repo, number):
+            calls.append((repo, number))
+            return issue_object(number)
+        def read_comments(repo, number):
+            if number == 900:
+                return source_page((9999, fresh, "kinoko34077"))
+            return source_page((1000+number, root(number=number, issue=number),
+                                "kinoko34077"))
+        out = union.read_union(
+            snap, recipient="claude-code", scoped_repository=REPO,
+            recent_read=lambda repo, since=None: [recent(900, cid=9999),
+                recent(140, cid=1140), recent(900, cid=9998)],
+            issue_read=read_issue, comments_read=read_comments,
+        )
+        self.assertEqual(len(calls), 40)
+        self.assertEqual(len(set(calls)), 40)
+        self.assertIn((REPO, 900), calls)
+        self.assertIn((REPO, 140), calls)
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["source_candidate_total_count"], 42)
+        self.assertEqual(out["source_candidates_not_checked"], 2)
+        self.assertEqual(out["source_issue_count"], 40)
+        self.assertEqual(out["indexed_issue_count_in_batch"], 39)
+        self.assertEqual(out["cached_rows_not_verified_live"], 0)
+        self.assertIn(900, [row["issue_number"] for row in out["live_rows"]])
+        self.assertIn("UNION_SOURCE_LIMIT_PARTIAL",
+                      [w["reason_code"] for w in out["warnings"]])
+        self.assertIsNone(out["source_next_offset"])
+        self.assertFalse(out["source_batch_snapshot_stable"])
+        self.assertTrue(out["has_unknown_work"])
+        self.assertFalse(out["complete_source_universe"])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["absence_of_work_proven"])
+
     def test_since_only_bounds_discovery_not_original_root_or_reply(self):
         msg = root(number=314, issue=576)
         reply = dict(msg)

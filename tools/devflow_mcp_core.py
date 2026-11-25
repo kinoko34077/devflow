@@ -1646,6 +1646,8 @@ class DevflowService:
             "source_coverage": union["source_coverage"],
             "observation_basis": "PUBLIC_INDEX_AND_LIVE_ORIGINAL_UNION",
             "searched_candidates": union["source_issue_count"],
+            "source_candidate_total_count": union["source_candidate_total_count"],
+            "source_candidates_not_checked": union["source_candidates_not_checked"],
             "validated_source_issues": sum(
                 item["source_observation"] != "SOURCE_VALIDATION_UNKNOWN"
                 for item in union["source_candidates"]
@@ -2010,6 +2012,8 @@ class DevflowService:
                     "source_coverage": recent["source_coverage"],
                     "observation_basis": recent["observation_basis"],
                     "source_candidates": recent["searched_candidates"],
+                    "source_candidate_total_count": recent.get("source_candidate_total_count"),
+                    "source_candidates_not_checked": recent.get("source_candidates_not_checked"),
                     "index_status": recent.get("index_status", "NOT_USED"),
                     "index_snapshot_stale": recent.get("index_snapshot_stale"),
                     "index_snapshot_age_seconds": recent.get("index_snapshot_age_seconds"),
