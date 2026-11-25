@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tools import devflow_mcp_stable_launcher as selector
-from tools.devflow_mcp_connection import Launch, serve_connection
+from tools.devflow_mcp_connection import serve_connection
 
 
 WORKER = """import os
@@ -68,20 +67,19 @@ def clean_env():
 
 def launch_front(root):
     async def run():
-        def revision():
-            marker = root / "active.json"
-            if marker.stat().st_size > 4096:
-                raise ValueError("marker too large")
-            return hashlib.sha256(marker.read_bytes()).hexdigest()
+        from types import SimpleNamespace
+        from unittest.mock import patch
 
         def launch():
-            script = selector.selected_script(str(root / "absent.py"), root=root)
-            env = {**clean_env(), "PYTHONPATH": str(script.parent.parent),
-                   "PYTHONDONTWRITEBYTECODE": "1"}
-            return Launch(script.parent.parent.name, StdioServerParameters(
-                command=sys.executable, args=["-B", str(script)], env=env))
+            # Same selector and environment path as the installed front;
+            # substitute only the credential acquisition for this fixture.
+            with patch.object(selector.subprocess, "run", return_value=SimpleNamespace(
+                    returncode=0, stdout="fixture-token")):
+                return selector.launch_parameters("fixture-gh", str(root / "absent.py"),
+                                                  root=root)
 
-        await serve_connection(revision, launch, required_calls={"read_version": {}},
+        await serve_connection(lambda: selector.selection_revision(root), launch,
+                               required_calls={"read_version": {}},
                                smoke_name="read_version", smoke_arguments={})
     asyncio.run(run())
 
@@ -197,6 +195,20 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         old = await client.call_tool("read_version", {})
                         self.assertFalse(old.is_error)
                         self.assertEqual(json.loads(old.content[0].text)["version"], "A")
+                        # An oversized marker must not break the old list or worker,
+                        # even while a changed catalog is pending publication.
+                        (root / "active.json").write_bytes(b"x" * 4097)
+                        retained = await client.list_tools()
+                        self.assertNotIn("new_read", {t.name for t in retained.tools})
+                        retained_read = await client.call_tool("read_version", {})
+                        self.assertFalse(retained_read.is_error)
+                        self.assertEqual(json.loads(retained_read.content[0].text)["version"], "A")
+                        self.assertEqual(retained_read.model_dump(by_alias=True)["_meta"]
+                                         ["kinotch.devflow.runtime"]["status"], "INVALID_SELECTION")
+                        notice.clear()
+                        select(root, b)
+                        self.assertFalse((await client.call_tool("read_version", {})).is_error)
+                        await asyncio.wait_for(notice.wait(), 30)
                         changed = await client.list_tools()
                         self.assertIn("new_read", {t.name for t in changed.tools})
                         current = await client.call_tool("read_version", {})
