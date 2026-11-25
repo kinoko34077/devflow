@@ -1535,7 +1535,7 @@ class DevflowService:
     def _agent_inbox_from_work_view(
         self, view: dict[str, Any], *, recipient: str,
         limit: int, offset: int, work_status: str | None,
-        observed_comments: dict[tuple[str, int], list[dict[str, Any]]] | None = None,
+        observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None,
     ) -> dict[str, Any]:
         """Reuse the live work view and, when supplied, this call's comment reads."""
         selected = agent_inbox.select_task_records(
@@ -1549,8 +1549,9 @@ class DevflowService:
                 number = record["issue_number"]
                 try:
                     key = (selected["repository"], number)
-                    if observed_comments is not None and key in observed_comments:
-                        comments_by_issue[number] = observed_comments[key]
+                    observed = observed_comments.get(key) if observed_comments is not None else None
+                    if observed is not None:
+                        comments_by_issue[number] = observed
                     else:
                         comments_by_issue[number] = self.reader.list_issue_comments(
                             selected["repository"], number,
@@ -1564,7 +1565,7 @@ class DevflowService:
 
     def _workspace_recent_kaep(
         self, repository: str, recipient: str,
-        *, observed_comments: dict[tuple[str, int], list[dict[str, Any]]] | None = None,
+        *, observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None,
     ) -> dict[str, Any]:
         """One selected-repository B6 union of untrusted index + fresh hints.
 
@@ -1584,11 +1585,11 @@ class DevflowService:
                 raise kaep_live_delta_view.InvalidMessage(
                     "SOURCE_READ_UNAVAILABLE"
                 ) from exc
-            if observed_comments is not None:
-                # The strict source reader has fetched the original Issue
-                # before these comments. Only successful transport reads
-                # are shared; each consumer still validates the raw rows.
-                observed_comments[(repo, number)] = rows
+            key = (repo, number)
+            if observed_comments is not None and key in observed_comments:
+                # Retain only selected Inbox mailboxes, not all B6 originals.
+                # Each consumer still validates the successful raw rows.
+                observed_comments[key] = rows
             pages = [
                 rows[i:i + 100] for i in range(0, len(rows), 100)
             ] or [[]]
@@ -1982,10 +1983,20 @@ class DevflowService:
         # first so Inbox can reuse those same bounded comment rows, not an
         # older mailbox snapshot read before recent discovery. This dictionary
         # lives only for this call, and no consumer trusts another's verdict.
-        observed_comments: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None
         recent: dict[str, Any] | None = None
         recent_discovery: dict[str, Any] | None = None
         if include_recent_kaep:
+            selected = agent_inbox.select_task_records(
+                view, recipient=recipient, limit=limit, offset=offset,
+                work_status=work_status,
+            )
+            # Same existing selection rule and maximum as Inbox. Do not
+            # retain non-selected B6 originals (up to 40 large mailboxes).
+            observed_comments = {
+                (selected["repository"], record["issue_number"]): None
+                for record in selected["selected"]
+            }
             recent_discovery = {
                 "status": "SOURCE_UNAVAILABLE",
                 "reason_code": "RECENT_DISCOVERY_UNAVAILABLE",
