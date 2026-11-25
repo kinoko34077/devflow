@@ -85,6 +85,27 @@ def _branch(value: Any) -> str:
     return value
 
 
+def _validate_payload_policy(paths: Any, raw_limits: Any) -> Mapping[str, Any]:
+    """Validate a trusted exact output set and its resource bounds, not authority."""
+    if not isinstance(paths, list) or not paths or len(paths) > _MAX_FILES_CEILING:
+        raise ArtifactRejected("recipe.paths: invalid number of paths")
+    normalized = [_path(item) for item in paths]
+    if len({path.casefold() for path in normalized}) != len(normalized):
+        raise ArtifactRejected("recipe.paths: duplicates or case-fold collisions")
+    limits = _object(raw_limits, "limits", {
+        "max_files", "max_file_bytes", "max_total_bytes",
+        "max_archive_bytes", "max_expansion_ratio",
+    })
+    if _positive_int(limits["max_files"], "max_files", _MAX_FILES_CEILING) < len(paths):
+        raise ArtifactRejected("policy allows too few files for its recipe")
+    for key in ("max_file_bytes", "max_total_bytes", "max_archive_bytes"):
+        _positive_int(limits[key], key, _MAX_BYTES_CEILING)
+    _positive_int(limits["max_expansion_ratio"], "max_expansion_ratio", _MAX_RATIO_CEILING)
+    if limits["max_file_bytes"] > limits["max_total_bytes"]:
+        raise ArtifactRejected("max_file_bytes exceeds max_total_bytes")
+    return limits
+
+
 def _policy(raw: Any) -> Mapping[str, Any]:
     p = _object(raw, "policy", {
         "schema", "repository", "allowed_actors", "default_branch",
@@ -113,25 +134,10 @@ def _policy(raw: Any) -> Mapping[str, Any]:
     _string(recipe["id"], "recipe.id")
     _string(recipe["version"], "recipe.version")
     paths = recipe["paths"]
-    if not isinstance(paths, list) or not paths or len(paths) > _MAX_FILES_CEILING:
-        raise ArtifactRejected("recipe.paths: invalid number of paths")
-    normalized = [_path(item) for item in paths]
-    if len({path.casefold() for path in normalized}) != len(normalized):
-        raise ArtifactRejected("recipe.paths: duplicates or case-fold collisions")
     ref = _string(p["producer_workflow_ref"], "producer_workflow_ref")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml@[0-9a-f]{40}", ref):
         raise ArtifactRejected("producer_workflow_ref must be an exact SHA pin")
-    limits = _object(p["limits"], "limits", {
-        "max_files", "max_file_bytes", "max_total_bytes",
-        "max_archive_bytes", "max_expansion_ratio",
-    })
-    if _positive_int(limits["max_files"], "max_files", _MAX_FILES_CEILING) < len(paths):
-        raise ArtifactRejected("policy allows too few files for its recipe")
-    for key in ("max_file_bytes", "max_total_bytes", "max_archive_bytes"):
-        _positive_int(limits[key], key, _MAX_BYTES_CEILING)
-    _positive_int(limits["max_expansion_ratio"], "max_expansion_ratio", _MAX_RATIO_CEILING)
-    if limits["max_file_bytes"] > limits["max_total_bytes"]:
-        raise ArtifactRejected("max_file_bytes exceeds max_total_bytes")
+    _validate_payload_policy(paths, p["limits"])
     return p
 
 
@@ -196,13 +202,42 @@ def validate_and_plan(
         raise ArtifactRejected("target branch is forbidden or outside approved prefix")
     if _sha(observed_head, "observed_head") != a["expected_head"]:
         raise ArtifactRejected("target branch head moved: retry requires new admission")
+    payload_plan = validate_payload_and_plan(
+        p["recipe"]["paths"], p["limits"], m["files"], archive_bytes,
+        existing_files=existing_files,
+    )
+    return {
+        "schema": "generated-artifacts-plan.v1",
+        "status": payload_plan["status"],
+        "repository": a["repository"],
+        "target_branch": a["branch"],
+        "expected_head": a["expected_head"],
+        "producer_run_id": a["producer_run_id"],
+        "manifest_sha256": manifest_digest(m),
+        "file_count": payload_plan["file_count"],
+        "total_bytes": payload_plan["total_bytes"],
+        "changes": payload_plan["changes"],
+        "writes_performed": False,
+    }
+
+
+def validate_payload_and_plan(
+    paths: list[str], raw_limits: Mapping[str, Any], items: list[dict[str, Any]],
+    archive_bytes: bytes, *, existing_files: Mapping[str, bytes | None],
+) -> dict[str, Any]:
+    """Shared byte verification for any producer; never grants write authority.
+
+    The caller derives the EXACT paths and limits from an independently trusted
+    recipe, not from the payload. This function does not authenticate a run,
+    actor, repository, branch, source SHA, freshness, or target head. Existing
+    v1 admission checks remain mandatory for the Actions writer.
+    """
+    limits = _validate_payload_policy(paths, raw_limits)
     if not isinstance(archive_bytes, bytes):
         raise ArtifactRejected("archive must be exact bytes")
-    limits = p["limits"]
     if len(archive_bytes) > limits["max_archive_bytes"]:
         raise ArtifactRejected("archive exceeds byte limit")
-    items = m["files"]
-    if not isinstance(items, list) or len(items) != len(p["recipe"]["paths"]):
+    if not isinstance(items, list) or len(items) != len(paths):
         raise ArtifactRejected("manifest file count differs from exact approved path set")
     expected: dict[str, dict[str, Any]] = {}
     total = 0
@@ -221,7 +256,7 @@ def validate_and_plan(
         total += size
         if total > limits["max_total_bytes"]:
             raise ArtifactRejected("manifest total bytes over limit")
-    allowed = set(p["recipe"]["paths"])
+    allowed = set(paths)
     if set(expected) != allowed or len(expected) > limits["max_files"]:
         raise ArtifactRejected("unknown/omitted manifest generated paths")
     if not isinstance(existing_files, Mapping) or not set(existing_files).issubset(allowed):
@@ -269,13 +304,7 @@ def validate_and_plan(
         if existing_files.get(path) != actual[path]
     ]
     return {
-        "schema": "generated-artifacts-plan.v1",
         "status": "CHANGE" if changes else "NO_OP",
-        "repository": a["repository"],
-        "target_branch": a["branch"],
-        "expected_head": a["expected_head"],
-        "producer_run_id": a["producer_run_id"],
-        "manifest_sha256": manifest_digest(m),
         "file_count": len(actual),
         "total_bytes": total,
         "changes": changes,
