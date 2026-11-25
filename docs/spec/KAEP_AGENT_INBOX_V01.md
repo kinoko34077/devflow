@@ -147,6 +147,9 @@ This CLI first performs **one uncredentialed, pinned HTTPS GET** of the publishe
 **Do not conflate:** This active-turn live GET is not live updating of the publicly displayed Pages HTML. For truly automatic refresh with no active recipient turn, and GPT-model-processed heartbeat, see independently gated F10 #681; this CLI does not schedule/wake a model or purchase Provider usage.
 ### B6 unionの40原典超・明示分割検証（GET専用）
 
+Workspace の単一リポジトリ指定では、候補が40原典を超えても索引全体を取得不能とせず、更新順コメント窓の候補を優先し、残りを既存索引候補で補って最大40原典を厳格検証する。超過時は `UNION_SOURCE_LIMIT_PARTIAL`、`PARTIAL_UNKNOWN`、候補総数・未検証数を返す。未選択原典を消失・解決済みとみなさない。優先順は探索順であって実行権限ではなく、永続カーソルや網羅性を意味しない。CLI の既定動作と明示 offset の契約は以下のまま維持する。
+
+
 `tools.kaep_live_union_cli` の通常動作は40原典超で `UNION_SOURCE_LIMIT` のまま停止する。原典候補が41件以上あり、必要な場合に限り `--source-offset 0` で最大40件を検証し、返された `source_next_offset` を明示指定して次の候補群を読み取る。例：`python -m tools.kaep_live_union_cli --recipient claude-code --source-offset 0` → `--source-offset 40`。取得済み候補のうち対象バッチだけを既存の厳格な原典検証器へ渡す。`source_candidate_total_count` は候補総数、`source_issue_count` は今回の原典検証数、`source_candidates_not_checked` は今回未検証の件数である。分割時は `PARTIAL_UNKNOWN`・終了コード2、`has_unknown_work=true`・`can_authorize_execution=false` を維持する。候補集合は呼出し間に更新され得るため、offsetは永続カーソルでも同期スナップショットでもなく、全件網羅・受信・権限の証拠にはならない。異なるバッチ間で `--previous-report` による欠落判定は禁止する。元の#503／Control fallback、受信者と原典の独立検証を維持する。
 
 ## RT3 公開一覧のGitHub現在コメント候補表示（限定的なlive GET）

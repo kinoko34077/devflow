@@ -143,6 +143,30 @@ python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
 
+### Unresolved Issue discovery within Work View
+
+`get_repository_work_view` additionally returns `unresolved_issue_discovery`:
+`verified_control_issue_numbers` identifies unique, directly trusted,
+identity- and schema-validated canonical Controls already present in the
+same devflow Open Issue listing. `role_review_issue_numbers` locates the
+remaining unresolved roles in that listing, including legacy, invalid and
+untrusted metadata. Resolve those numbers against the returned repository
+and inspect the originals only as needed. They are not TASKs, assignments
+or permissions. Controls may have independent Human/security/cross-repository
+attention; their verified role is not proof that no such attention exists.
+Bot-authored Controls that would require additional bootstrap-provenance
+reads and ambiguous or invalid identities remain unresolved. No title-only
+classification, per-Control extra GET, new store or metadata write is used.
+
+The existing role counts, `coverage_status`, M2 cache contract, manual
+fallback and execution authority are unchanged. These are read-only
+discovery locators, not a complete work inventory; unavailable sources
+return null lists. When the target is devflow itself, repository Control
+resolution and Projection use one request-local Open listing rather than
+fetching that same listing twice. This does not make GitHub's paginated
+reads transactional or extend authorization. Other repositories still
+require their own independent Issue listing.
+
 ### Targetless managed-repository discovery without registered MCP (portfolio)
 
 For user-authorized portfolio scope when no repository has yet been selected, the
@@ -587,6 +611,9 @@ Use a read-capable token only. Do not commit tokens to this repository, `.mcp.js
 The additive `get_agent_workspace(repository, recipient="codex", limit=20, offset=0, work_status=None, include_recent_kaep=False, include_published_supply=False)` MCP tool and `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex` reuse **one current repository work-view read** plus the existing bounded original-comment TASK Inbox read and one immutable-source coordinator snapshot read. Existing `get_repository_work_view`, `get_agent_inbox` and CLI operations are unchanged.
 
 This is a **read-only observation / U1 opt-in consumer**, not an authoritative task queue or all-work index. `known_tasks` means classified TASK records **without Claim eligibility assessment**. Without the U2 opt-in flag, `messages` covers only TASK-scoped Inbox roots; with it, verified indexed and recent non-TASK original roots can also appear. Historical originals outside both sources remain unknown (#531/#680/#771). **At U1 acceptance**, `ongoing`, `offers` and `waiting_recovery` were `NOT_INTEGRATED` with `entries=null`; the later R2 Claim observation is described below. Workspace `has_unknown_work=true` while the global KAEP source universe remains unproven; it retains the source `source_error` / `coverage_status`, Inbox page `next_offset`, error codes and `manual_control` fallback. `can_authorize_execution=false` and `can_replace_manual_active_work=false`.
+
+The top-level `coverage_status_scope=WORK_VIEW` identifies the existing `coverage_status` as the Work View inventory status, not a summary of every Workspace section. `sections.known_tasks.unresolved_issue_discovery` forwards the same Work View locator object without another Issue-list read. Role-review locators are not TASK entries or claims; a failed source retains null lists. For exact known TASK reads, use the existing scoped precedence; for recipient requests, use the message section's own cohort/recent diagnostics; for published supply, ongoing Claims and recovery, use the respective existing source status. An unrelated incomplete cohort does not invalidate an independently verified read, and none of these observations authorizes execution or proves all work is absent.
+
 
 Deployment/rollback: Clients must explicitly opt in; old MCP/CLI consumers are not migrated. If this view is unsuitable, call existing `get_repository_work_view` + `get_agent_inbox`. No new local MCP settings, permissions, credentials, automatic triggers, coordinator mutations or new stored state are involved. Do not switch the controller or retire #503/manual fallback on U1 evidence alone.
 
