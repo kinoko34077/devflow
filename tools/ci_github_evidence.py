@@ -130,7 +130,12 @@ def _run_identity(run: dict, repository: str, run_id: int) -> dict | None:
     # Identity is limited to this native record, not the execution environment.
     return {key: run[key] for key in (
         "id", "workflow_id", "run_attempt", "head_sha", "path", "event", "status",
-    )} | {"conclusion": run.get("conclusion")}
+    )} | {
+        "conclusion": run.get("conclusion"),
+        "repository_id": _object(run.get("repository")).get("id"),
+        "head_repository_id": _object(run.get("head_repository")).get("id"),
+        "head_branch": run.get("head_branch"),
+    }
 
 
 def _outcome(record: dict) -> str:
@@ -352,3 +357,100 @@ def read_execution_verification(
         "receipt_source_ref": receipt.source_ref, "decision": asdict(decision),
         "requires_source_revalidation": True,
     }
+
+
+@dataclass(frozen=True)
+class FixedSourceRequirement:
+    """Explicit pin selected by the trusted policy owner, not a client request."""
+    repository: str
+    repository_id: int
+    channel: str
+    policy_revision: str
+    commit: str
+    branch: str
+    workflow_id: int
+    workflow_path: str
+    required_jobs: tuple[str, ...]
+
+
+def read_fixed_source_verification(
+    reader: GitHubReader, required: FixedSourceRequirement,
+) -> dict:
+    """Observe exact native push evidence for an already selected fixed source.
+
+    No candidate search across revisions, checkout, trust-policy approval,
+    cache promotion, execution grant or test-equivalence claim. The host
+    separately authenticates its policy and authorizes the selected revision.
+    """
+    def result(status: str, reason: str, **evidence) -> dict:
+        return {
+            "status": status, "reason": reason,
+            "can_authorize_execution": False, "tested_tree": None,
+            "requires_source_revalidation": True, **evidence,
+        }
+
+    if (not isinstance(required, FixedSourceRequirement)
+            or not _text(required.repository) or not _id(required.repository_id)
+            or not all(_text(v) for v in (required.channel, required.policy_revision,
+                                         required.branch, required.workflow_path))
+            or not _sha(required.commit) or not _id(required.workflow_id)
+            or not isinstance(required.required_jobs, tuple) or not required.required_jobs
+            or not all(_text(v) for v in required.required_jobs)
+            or len(set(required.required_jobs)) != len(required.required_jobs)):
+        return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
+    try:
+        repository = normalize_repository(required.repository)
+        if repository != required.repository:
+            return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
+        packet = reader.get_fixed_push_workflow_runs(
+            repository, required.workflow_id, required.commit, required.branch,
+        )
+    except DevflowMCPError:
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_LOOKUP_UNAVAILABLE")
+    records = packet.get("workflow_runs")
+    count = packet.get("total_count")
+    if type(count) is not int or count != 1 or not isinstance(records, list) or len(records) != 1:
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_NOT_UNIQUE")
+    record = _object(records[0])
+    run_id = record.get("id")
+    if not _id(run_id):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+    identity = _run_identity(record, repository, run_id)
+    if identity is None or (
+        identity["repository_id"], identity["head_repository_id"], identity["head_branch"],
+        identity["head_sha"], identity["workflow_id"], identity["path"], identity["event"]
+    ) != (
+        required.repository_id, required.repository_id, required.branch,
+        required.commit, required.workflow_id, required.workflow_path, "push"
+    ):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+    # Reuse the original observer, including latest jobs and run revalidation.
+    native = read_run_verification(reader, repository, run_id)
+    if (native.get("status") != "OBSERVED" or native.get("job_coverage") != "COMPLETE_PAGE"
+            or native.get("run") != identity):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+    evidence = {"source_ref": native["source_ref"], "run_id": run_id,
+                "run_attempt": identity["run_attempt"], "commit": required.commit}
+    if _outcome(identity) != "success":
+        return result("NOT_SUCCESSFUL", "FIXED_SOURCE_RUN_NOT_SUCCESSFUL", **evidence)
+    job_refs = []
+    for name in required.required_jobs:
+        matches = [job for job in native["jobs"] if job["name"] == name]
+        if len(matches) != 1:
+            return result("UNKNOWN", "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE", **evidence)
+        if _outcome(matches[0]) != "success":
+            return result("NOT_SUCCESSFUL", "FIXED_SOURCE_REQUIRED_JOB_NOT_SUCCESSFUL", **evidence)
+        job_refs.append(matches[0]["source_ref"])
+    try:
+        commit = reader.get_git_commit(repository, required.commit)
+    except DevflowMCPError:
+        return result("UNKNOWN", "FIXED_SOURCE_COMMIT_UNAVAILABLE", **evidence)
+    tree = _object(commit.get("tree")).get("sha")
+    if commit.get("sha") != required.commit or not _sha(tree):
+        return result("UNKNOWN", "FIXED_SOURCE_TREE_UNPROVEN", **evidence)
+    return result(
+        "NATIVE_SOURCE_CANDIDATE", "EXACT_PUSH_AND_REQUIRED_JOBS_SUCCESS",
+        repository=repository, repository_id=required.repository_id,
+        channel=required.channel, policy_revision=required.policy_revision,
+        tree_sha=tree, job_source_refs=tuple(job_refs), **evidence,
+    )
