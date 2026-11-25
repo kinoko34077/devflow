@@ -354,6 +354,8 @@ class FixedSourceEvidenceTests(unittest.TestCase):
         for changes in (
             {"repository": {"full_name": REPO, "id": 1235}},
             {"head_repository": {"id": 1235}},
+            {"repository": {"full_name": REPO, "id": 1234.0}},
+            {"head_repository": {"id": 1234.0}},
             {"head_branch": "feature"}, {"head_sha": HEAD},
             {"workflow_id": 99}, {"event": "pull_request"}, {"path": "other.yml"},
         ):
