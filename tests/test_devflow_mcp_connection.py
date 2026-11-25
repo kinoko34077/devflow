@@ -30,7 +30,7 @@ mcp.run()
 """
 
 
-def prepare(root, sha, version, name="read_version", gate=None):
+def prepare(root, sha, version, name="read_version", gate=None, extra=False):
     directory = root / "releases" / sha
     script = directory / "tools" / "devflow_mcp.py"
     script.parent.mkdir(parents=True)
@@ -44,7 +44,13 @@ def prepare(root, sha, version, name="read_version", gate=None):
             "    if time.monotonic() > deadline: raise RuntimeError('fixture gate timeout')\n"
             "    time.sleep(0.05)\n"
         )
-    script.write_text(prefix + WORKER.format(name=name, version=version), encoding="utf-8")
+    body = WORKER.format(name=name, version=version)
+    if extra:
+        body = body.replace("mcp.run()", '''@mcp.tool()
+def new_read(value: str = "default") -> dict[str, str]:
+    return {"value": value}
+mcp.run()''')
+    script.write_text(prefix + body, encoding="utf-8")
     return {"schema_version": 2, "sha": sha,
             "tree_sha256": selector.release_tree_digest(directory)}
 
@@ -75,7 +81,7 @@ def launch_front(root):
             return Launch(script.parent.parent.name, StdioServerParameters(
                 command=sys.executable, args=["-B", str(script)], env=env))
 
-        await serve_connection(revision, launch, expected_tools=2,
+        await serve_connection(revision, launch, required_calls={"read_version": {}},
                                smoke_name="read_version", smoke_arguments={})
     asyncio.run(run())
 
@@ -153,6 +159,67 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(await read(), "A")
                         self.assertEqual({t.name for t in (await client.list_tools()).tools},
                                          {"read_version", "crash_worker", "restart_mcp"})
+
+
+    async def test_changed_catalog_notification_and_scoped_refresh(self):
+        from mcp import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", extra=True)
+            select(root, a)
+            env = {**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                   "PYTHONDONTWRITEBYTECODE": "1"}
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env=env,
+            )
+            notice = asyncio.Event()
+
+            async def observe(message):
+                if isinstance(message, types.ToolListChangedNotification):
+                    notice.set()
+
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr, message_handler=observe) as client:
+                        initialized = await asyncio.wait_for(client.initialize(), 35)
+                        self.assertTrue(initialized.capabilities.tools.list_changed)
+                        original = await client.list_tools()
+                        self.assertNotIn("new_read", {t.name for t in original.tools})
+                        select(root, b)
+                        restart = await asyncio.wait_for(client.call_tool("restart_mcp", {}), 35)
+                        self.assertTrue(restart.is_error)
+                        self.assertEqual(json.loads(restart.content[0].text)["status"],
+                                         "AWAITING_CATALOG_REFRESH")
+                        await asyncio.wait_for(notice.wait(), 5)
+                        old = await client.call_tool("read_version", {})
+                        self.assertFalse(old.is_error)
+                        self.assertEqual(json.loads(old.content[0].text)["version"], "A")
+                        changed = await client.list_tools()
+                        self.assertIn("new_read", {t.name for t in changed.tools})
+                        current = await client.call_tool("read_version", {})
+                        self.assertEqual(json.loads(current.content[0].text)["version"], "B")
+                        extra = await client.call_tool("new_read", {"value": "fresh"})
+                        self.assertFalse(extra.is_error)
+                        self.assertEqual(json.loads(extra.content[0].text), {"value": "fresh"})
+                        invalid = await client.call_tool("new_read", {"value": []})
+                        self.assertTrue(invalid.is_error)
+                        self.assertEqual(json.loads(invalid.content[0].text)["action"],
+                                         "REFRESH_TOOLS_LIST")
+                        notice.clear()
+                        select(root, a)
+                        old_result = await client.call_tool("read_version", {})
+                        self.assertFalse(old_result.is_error)
+                        await asyncio.wait_for(notice.wait(), 30)
+                        refreshed = await client.list_tools()
+                        self.assertNotIn("new_read", {t.name for t in refreshed.tools})
+                        missing = await client.call_tool("new_read", {})
+                        self.assertTrue(missing.is_error)
+                        stable = await client.call_tool("read_version", {})
+                        self.assertFalse(stable.is_error)
+                        self.assertEqual(json.loads(stable.content[0].text)["version"], "A")
 
 
 if __name__ == "__main__":
