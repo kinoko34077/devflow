@@ -6,12 +6,14 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from tools import devflow_mcp_release_manager as manager
+from tools.devflow_mcp_catalog import publication_schema
 from tools import devflow_mcp_stable_launcher as launcher
 
 
@@ -67,10 +69,28 @@ class StableLauncherTests(unittest.TestCase):
               patch.object(launcher.subprocess, "run", return_value=SimpleNamespace(
                   returncode=0, stdout="fixture-token",
               ))):
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            old = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(old.version, "LEGACY")
             self._marker(SHA_A)
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            new = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(new.version, SHA_A)
+            self.assertEqual(new.parameters.env["PYTHONPATH"], str(candidate.parent.parent))
             self.assertEqual(os.environ["PYTHONPATH"], str(self.legacy.parent.parent))
+        # Restore real subprocess.run before executing the fixture workers.
+        for launch in (old, new):
+            p = launch.parameters
+            self.assertEqual(subprocess.run([p.command, *p.args], env=p.env,
+                                            capture_output=True, timeout=10).returncode, 0)
+
+    def test_invalid_release_never_requests_token(self):
+        self._release(SHA_A)
+        self._marker(SHA_A)
+        (self.root / "releases" / SHA_A / "tools" / "devflow_mcp.py").write_text(
+            "# modified", encoding="utf-8")
+        with patch.object(launcher.subprocess, "run") as token:
+            with self.assertRaisesRegex(ValueError, "contents changed"):
+                launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            token.assert_not_called()
 
     def test_no_marker_preserves_original_legacy_launch(self):
         self.assertEqual(
@@ -220,8 +240,8 @@ class ReleaseManagerContractTests(unittest.TestCase):
              "properties": {"repository": {"type": "string", "title": "new"}}}
         c = {"type": "object", "required": [], "properties":
              {"repository": {"type": "string"}}}
-        self.assertEqual(manager._compatible_schema(a), manager._compatible_schema(b))
-        self.assertNotEqual(manager._compatible_schema(a), manager._compatible_schema(c))
+        self.assertEqual(publication_schema(a), publication_schema(b))
+        self.assertNotEqual(publication_schema(a), publication_schema(c))
 
     def test_schema_property_names_and_literal_objects_are_never_dropped(self):
         old = {
@@ -238,12 +258,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
         new = json.loads(json.dumps(old))
         new["description"] = "new documentation"
         new["properties"]["description"]["description"] = "new hint"
-        self.assertEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertEqual(publication_schema(old), publication_schema(new))
         new["properties"]["description"]["type"] = "integer"
-        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertNotEqual(publication_schema(old), publication_schema(new))
         new = json.loads(json.dumps(old))
         new["properties"]["payload"]["const"]["description"] = "changed data"
-        self.assertNotEqual(manager._compatible_schema(old), manager._compatible_schema(new))
+        self.assertNotEqual(publication_schema(old), publication_schema(new))
 
     def test_existing_inactive_release_never_executes_under_trusted_sha(self):
         self._release(SHA_A)
@@ -366,6 +386,22 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 )
             self.assertEqual(env, {"PYTHONPATH": "/allowed/repo"})
             self.assertIn('command = "/fake/python"', config.read_text())
+            original = config.read_text()
+            for flag, accepted in (("-I", True), ("-c", False), ("-m", False)):
+                with self.subTest(flag=flag):
+                    config.write_text(original.replace('args = [', f'args = ["{flag}", '),
+                                      encoding="utf-8")
+                    before = config.read_bytes()
+                    with patch("pathlib.Path.home", return_value=user):
+                        if accepted:
+                            self.assertEqual(manager.registered_mcp_env(
+                                Path("/fake/python"), Path("/fake/fallback")), env)
+                        else:
+                            with self.assertRaises(manager.ReleaseError):
+                                manager.registered_mcp_env(Path("/fake/python"),
+                                                           Path("/fake/fallback"))
+                    self.assertEqual(config.read_bytes(), before)
+
 
 
     def test_stdio_validation_uses_selected_script_root_not_registered_old_path(self):

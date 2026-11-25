@@ -30,9 +30,9 @@ ORIGIN_URLS = {
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED_CHECKS = frozenset({"verify", "mcp-stdio-python311"})
 # The installed manager and connection adapter use the same admission module.
-try:
+if __package__:
     from .devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
-except ImportError:
+else:
     from devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
 
 
@@ -372,46 +372,6 @@ def run_unittests(python: Path, source: Path) -> None:
         raise ReleaseError("local Python unit suite failed; release not activated")
 
 
-_SCHEMA_MAPS = frozenset({
-    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
-})
-_SCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
-_SCHEMA_CHILDREN = frozenset({
-    "items", "additionalProperties", "unevaluatedProperties", "contains",
-    "not", "if", "then", "else", "propertyNames",
-})
-
-
-def _compatible_schema(schema: object) -> object:
-    """Ignore only schema-node annotations, not property names/literal values.
-
-    Do not descend into const, enum, default, examples, or unknown extension
-    values: those may contain data keys named "title" or "description".
-    """
-    if not isinstance(schema, dict):
-        return schema
-    normalized = {}
-    for key, value in schema.items():
-        if key in {"title", "description", "examples"}:
-            continue
-        if key in _SCHEMA_MAPS and isinstance(value, dict):
-            normalized[key] = {
-                name: _compatible_schema(child)
-                for name, child in value.items()
-            }
-        elif key in _SCHEMA_LISTS and isinstance(value, list):
-            normalized[key] = [_compatible_schema(child) for child in value]
-        elif key in _SCHEMA_CHILDREN and isinstance(value, (dict, list)):
-            normalized[key] = (
-                [_compatible_schema(child) for child in value]
-                if isinstance(value, list)
-                else _compatible_schema(value)
-            )
-        else:
-            normalized[key] = value
-    return normalized
-
-
 def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
     """Reproduce exactly the existing registered Codex MCP runtime env."""
     config = Path.home() / ".codex" / "config.toml"
@@ -420,7 +380,11 @@ def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
         server = raw["mcp_servers"]["kinotch_devflow"]
         values = server.get("env", {})
         argv = server["args"]
+        if type(argv) is list and len(argv) == 4 and argv[0] == "-I":
+            # The one-time protected front migration adds only this flag.
+            argv = argv[1:]
         if (type(argv) is not list or len(argv) != 3
+                or not all(isinstance(value, str) for value in argv)
                 or Path(argv[2]).resolve() != fallback.resolve()
                 or Path(server["command"]).resolve() != python.resolve()):
             raise ReleaseError("registered Codex MCP launch paths have changed")
@@ -456,7 +420,7 @@ async def _stdio_test(
                 try:
                     catalog = admit_catalog(listing.tools, next_cursor=listing.next_cursor)
                 except CatalogError as error:
-                    raise ReleaseError("MCP candidate catalog rejected") from error
+                    raise ReleaseError(f"MCP candidate catalog rejected: {error}") from error
                 if full:
                     for name in SMOKE_CALLS:
                         result = await asyncio.wait_for(

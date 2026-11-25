@@ -1,11 +1,13 @@
 """Stable, read-only Codex Devflow MCP launcher.
 
 Installed once at ~/.codex/bin/devflow_mcp_launcher.py; existing Codex
-command and arguments remain unchanged. Never fetch, update, or test on launch.
+command and original script arguments are preserved after adding Python -I.
+Never fetch or promote on launch. The protected adapter replaces only verified local workers.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -105,17 +107,36 @@ def selected_script(fallback_script: str, *, root: Path | None = None) -> Path:
     return candidate
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 2:
-        _diagnose("devflow MCP launcher: invalid local configuration; server not started.")
-        return 78
-    gh_executable, fallback_script = args
+class AuthenticationUnavailable(RuntimeError):
+    """Safe diagnostic; never include the gh response or environment."""
+
+
+def selection_revision(root: Path) -> str:
+    """Observe selection only, not the release contents, on ordinary calls."""
+    marker = root / "active.json"
     try:
-        script = selected_script(fallback_script)
-    except (OSError, ValueError, json.JSONDecodeError, UnicodeError):
-        _diagnose("devflow MCP launcher: invalid active release; server not started.")
-        return 78
+        with marker.open("rb") as stream:
+            data = stream.read(4097)
+    except FileNotFoundError:
+        return "LEGACY"
+    if len(data) > 4096:
+        raise ValueError("invalid MCP release marker size")
+    return hashlib.sha256(data).hexdigest()
+
+
+def launch_parameters(gh_executable: str, fallback_script: str, *, root: Path):
+    """Fixed host selector and original gh authentication, per worker launch."""
+    # Import the protected, co-installed adapter, never code from the candidate.
+    if __package__:
+        from .devflow_mcp_connection import Launch
+    else:
+        from devflow_mcp_connection import Launch
+    from mcp import StdioServerParameters
+
+    before = selection_revision(root)
+    script = selected_script(fallback_script, root=root)
+    if selection_revision(root) != before:
+        raise ValueError("release selection changed")
     try:
         result = subprocess.run(
             [gh_executable, "auth", "token", "--hostname", "github.com"],
@@ -129,25 +150,66 @@ def main(argv: list[str] | None = None) -> int:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        _diagnose(AUTH_FAILURE)
-        return 78
+        raise AuthenticationUnavailable(AUTH_FAILURE) from None
     token = (result.stdout or "").strip()
     if result.returncode != 0 or not token or any(c.isspace() for c in token):
-        _diagnose(AUTH_FAILURE)
-        return 78
+        raise AuthenticationUnavailable(AUTH_FAILURE)
+    if selection_revision(root) != before:
+        raise ValueError("release selection changed")
     child_env = os.environ.copy()
-    # Bind package imports to the selected release, not a legacy registration.
+    # Do not use the old registered checkout as the candidate import root.
     child_env["PYTHONPATH"] = str(script.resolve().parent.parent)
     child_env["DEVFLOW_GITHUB_TOKEN"] = token
     child_env["PYTHONDONTWRITEBYTECODE"] = "1"
-    token = None
+    version = "LEGACY" if before == "LEGACY" else script.parent.parent.name
+    return Launch(version, StdioServerParameters(
+        command=sys.executable, args=[str(script)], env=child_env,
+    ))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) != 2:
+        _diagnose("devflow MCP launcher: invalid local configuration; server not started.")
+        return 78
+    gh_executable, fallback_script = args
+    root = release_root()
     try:
-        child = subprocess.Popen([sys.executable, str(script)], env=child_env)
-        child_env.pop("DEVFLOW_GITHUB_TOKEN", None)
-        return child.wait()
-    except OSError:
-        _diagnose("devflow MCP launcher: MCP server process could not be started.")
-        return 70
+        # The installer must co-install these fixed modules before replacing
+        # the launcher. Never import the connection adapter from a release.
+        if __package__:
+            from .devflow_mcp_connection import serve_connection
+            from .devflow_mcp_catalog import REQUIRED_CALLS
+            from .devflow_mcp_release_manager import updates_held
+        else:
+            # A registered legacy PYTHONPATH must not influence the protected
+            # front or SDK. The one-time installer adds -I before this script.
+            if not sys.flags.isolated:
+                raise ValueError("protected launcher requires isolated Python")
+            directory = Path(__file__).resolve().parent
+            for name in ("devflow_mcp_connection.py", "devflow_mcp_catalog.py",
+                         "devflow_mcp_release_manager.py"):
+                module = directory / name
+                if not module.is_file() or module.resolve() != module:
+                    raise ValueError("missing or redirected protected adapter")
+            sys.path.insert(0, str(directory))
+            from devflow_mcp_connection import serve_connection
+            from devflow_mcp_catalog import REQUIRED_CALLS
+            from devflow_mcp_release_manager import updates_held
+        asyncio.run(serve_connection(
+            lambda: selection_revision(root),
+            lambda: launch_parameters(gh_executable, fallback_script, root=root),
+            smoke_name="bootstrap_repository",
+            smoke_arguments=dict(REQUIRED_CALLS["bootstrap_repository"]),
+            updates_held=lambda: updates_held(root),
+        ))
+        return 0
+    except AuthenticationUnavailable:
+        _diagnose(AUTH_FAILURE)
+        return 78
+    except Exception:
+        _diagnose("devflow MCP launcher: protected connection could not be established.")
+        return 78
 
 
 if __name__ == "__main__":
