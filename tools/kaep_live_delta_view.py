@@ -7,9 +7,7 @@ original-Issue validator; preserve unknown/fallback for every result.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 import json
-import re
 import subprocess
 import sys
 from typing import Any, Callable
@@ -18,7 +16,7 @@ from tools import kaep_issue_search_view as search
 from tools.kaep_link_validation import API_ISSUE_URL, owner_issue_url
 from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER, has_kaep_marker
 from tools.kaep_repository_validation import REPOSITORY
-from devflow_mapped_read import MappedReadError
+from devflow_mapped_read import MappedReadError, parse_utc_timestamp
 from devflow_mapped_read.github_pages import RepositoryIssueQuery, iter_list_pages, observe_page
 
 MAX_REPOSITORIES = 3
@@ -43,14 +41,12 @@ def read_repository_recent(repository: str, *, since: str | None = None,
     if type(page) is not int or not 1 <= page <= MAX_UPDATED_PAGES:
         _error("INVALID_UPDATED_PAGE")
     if since is not None:
-        if type(since) is not str or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", since):
-            _error("INVALID_SINCE")
         try:
-            parsed = datetime.fromisoformat(since.replace("Z", "+00:00"))
-            if parsed.year < 2020:
-                _error("INVALID_SINCE")
-        except ValueError as exc:
+            parsed = parse_utc_timestamp(since, seconds_only=True)
+        except MappedReadError as exc:
             raise InvalidMessage("INVALID_SINCE") from exc
+        if parsed.year < 2020:
+            _error("INVALID_SINCE")
     try:
         path = RepositoryIssueQuery(repository, "issue_comment", per_page=MAX_WINDOW,
             sort="updated", direction="desc", native_since=since).path(page)
@@ -120,6 +116,36 @@ def read_repository_updated_pages(
     }
 
 
+def recent_issue_numbers(
+    repository: str, comments: list[dict[str, Any]], *,
+    locator_error: str, comment_error: str = "LIVE_INVALID_COMMENT",
+) -> list[int]:
+    """Validate every observed row; markers yield ordered unique locators only.
+
+    The caller retains its own window budget and legacy locator-error code.
+    Neither a marker nor its author grants authority: the original Issue and
+    full mailbox must still pass the existing strict verifier.
+    """
+    numbers: dict[int, None] = {}
+    for entry in comments:
+        if type(entry) is not dict:
+            _error(comment_error)
+        body, author, url, cid = (
+            entry.get("body"), entry.get("user"),
+            entry.get("issue_url"), entry.get("id"),
+        )
+        if (type(body) is not str or type(author) is not dict
+                or type(author.get("login")) is not str
+                or type(cid) is not int or cid <= 0):
+            _error(comment_error)
+        match = API_ISSUE.fullmatch(url) if type(url) is str else None
+        if match is None or match.group(1) != repository:
+            _error(locator_error)
+        if has_kaep_marker(body):
+            numbers[int(match.group(2))] = None
+    return list(numbers)
+
+
 def read_live_candidates(
     repositories: list[str], *, recipient: str, expected_actor: str,
     recent_read: Callable[..., list[dict[str, Any]]] = read_repository_recent,
@@ -150,30 +176,11 @@ def read_live_candidates(
         counts[repo] = len(comments)
         if len(comments) == MAX_WINDOW:
             warnings.append({"repository": repo, "reason_code": "RECENT_WINDOW_TRUNCATED"})
-        issues: dict[int, dict[str, Any]] = {}
-        for entry in comments:
-            if type(entry) is not dict:
-                _error("LIVE_INVALID_COMMENT")
-            body = entry.get("body")
-            author = entry.get("user")
-            issue_url = entry.get("issue_url")
-            cid = entry.get("id")
-            if (type(body) is not str or type(author) is not dict
-                    or type(author.get("login")) is not str
-                    or type(cid) is not int or cid <= 0):
-                _error("LIVE_INVALID_COMMENT")
-            match = API_ISSUE.fullmatch(issue_url) if type(issue_url) is str else None
-            if match is None or match.group(1) != repo:
-                _error("LIVE_SOURCE_LOCATOR_MISMATCH")
-            if not has_kaep_marker(body):
-                continue
-            # Discovery is independent of claimed sender identity. A bot/third
-            # party comment MAY point to a legitimate older root in the same
-            # Issue; canonical full-mailbox verification still gates trust.
-            num = int(match.group(2))
-            issues[num] = {
-                "html_url": owner_issue_url(repo, num),
-            }
+        issues = {
+            num: {"html_url": owner_issue_url(repo, num)}
+            for num in recent_issue_numbers(
+                repo, comments, locator_error="LIVE_SOURCE_LOCATOR_MISMATCH")
+        }
         source_results[repo] = {
             "items": list(issues.values()),
             "total_count": len(issues),

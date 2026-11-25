@@ -19,7 +19,7 @@ from tools import kaep_issue_search_view as strict
 from tools.kaep_agent_api_projection import project_agent_view
 from tools.kaep_link_validation import owner_comment_url, owner_issue_url
 from tools.kaep_mailbox_codec import (
-    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, has_kaep_marker, fail,
+    InvalidMessage, MARKER, MESSAGE_ID, RECIPIENTS, fail,
 )
 from tools.kaep_repository_validation import REPOSITORY
 
@@ -139,24 +139,12 @@ def _recent_issue_keys(
     """Untrusted markers supply locators ONLY. Strict codec runs afterwards."""
     if type(comments) is not list or len(comments) > delta.MAX_WINDOW * delta.MAX_UPDATED_PAGES:
         fail("INVALID_LIVE_WINDOW")
-    sources: set[tuple[str, int]] = set()
-    for comment in comments:
-        if type(comment) is not dict:
-            fail("INVALID_LIVE_COMMENT")
-        author = comment.get("user")
-        body, cid, url = (
-            comment.get("body"), comment.get("id"), comment.get("issue_url"),
-        )
-        if (type(body) is not str or type(cid) is not int or cid <= 0
-                or type(author) is not dict
-                or type(author.get("login")) is not str):
-            fail("INVALID_LIVE_COMMENT")
-        matched = delta.API_ISSUE.fullmatch(url) if type(url) is str else None
-        if not matched or matched.group(1) != repo:
-            fail("INVALID_LIVE_ISSUE_LOCATOR")
-        if has_kaep_marker(body):
-            sources.add((repo, int(matched.group(2))))
-    return sources
+    return {
+        (repo, number)
+        for number in delta.recent_issue_numbers(
+            repo, comments, locator_error="INVALID_LIVE_ISSUE_LOCATOR",
+            comment_error="INVALID_LIVE_COMMENT")
+    }
 
 
 def _collect_recent_source_hints(

@@ -81,6 +81,12 @@ WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 DEFAULT_OWNER = "kinoko34077"
 DEVFLOW_REPOSITORY = "kinoko34077/devflow"
 HEALTH_TITLE = "[SYSTEM] GitHub Project Sync Health"
+# Documented machine observation, not a general author-trust grant.
+HEALTH_ISSUE_NUMBER = 41
+HEALTH_ISSUE_ID = 5579583279
+HEALTH_ISSUE_AUTHOR_ID = 41898282
+HEALTH_ISSUE_AUTHOR_LOGIN = "github-actions[bot]"
+HEALTH_RESULTS = frozenset({"PASS", "DEGRADED", "FAIL", "NOT_CONFIGURED"})
 API_BASE = "https://api.github.com"
 MAX_GITHUB_REST_PER_PAGE = 100
 USER_AGENT = "kinotch-devflow-mcp"
@@ -2365,20 +2371,27 @@ class DevflowService:
         }
 
     def get_sync_health(self) -> dict[str, Any]:
-        issues = self.reader.list_issues(self.devflow_repository, state="all")
-        titled = [item for item in issues if str(item.get("title") or "").strip() == HEALTH_TITLE]
-        trusted = [item for item in titled if is_trusted_control_author(item)]
-        ignored = sorted(int(item.get("number") or 0) for item in titled if not is_trusted_control_author(item))
-        if not trusted:
-            raise DevflowMCPError(
-                f"No trusted Sync Health Issue titled {HEALTH_TITLE!r}"
-                + (f"; ignored untrusted candidates {ignored}." if ignored else ".")
-            )
-        if len(trusted) > 1:
-            # Prefer the single open trusted Issue over closed history.
-            trusted = [item for item in trusted if str(item.get("state") or "") == "open"]
-        issue = _exactly_one(trusted, lambda item: True, "trusted Sync Health Issue")
-        sections = parse_sections(str(issue.get("body") or ""))
+        # The canonical Project Sync observation has an established identity.
+        # Do not discover another issue by title or extend generic author trust.
+        issue = self.reader.get_issue(self.devflow_repository, HEALTH_ISSUE_NUMBER)
+        author = issue.get("user")
+        if (
+            type(issue.get("id")) is not int
+            or issue["id"] != HEALTH_ISSUE_ID
+            or issue.get("title") != HEALTH_TITLE
+            or issue.get("state") != "closed"
+            or not isinstance(author, dict)
+            or type(author.get("id")) is not int
+            or author["id"] != HEALTH_ISSUE_AUTHOR_ID
+            or author.get("login") != HEALTH_ISSUE_AUTHOR_LOGIN
+        ):
+            raise DevflowMCPError("Canonical Sync Health Issue identity or provenance mismatch.")
+        body = issue.get("body")
+        if not isinstance(body, str):
+            raise DevflowMCPError("Canonical Sync Health Issue body is invalid.")
+        sections = parse_sections(body, reject_duplicates=True)
+        if sections.get("Result") not in HEALTH_RESULTS:
+            raise DevflowMCPError("Canonical Sync Health Issue result is invalid.")
         return {
             "issue_number": int(issue.get("number") or 0),
             "url": _issue_url(issue),
@@ -2388,7 +2401,9 @@ class DevflowService:
             "mode": sections.get("Mode", ""),
             "coverage": sections.get("Coverage", ""),
             "drift_errors": sections.get("Drift / Errors", ""),
-            "ignored_untrusted_candidates": ignored,
+            # Compatibility field: no title candidates were enumerated.
+            "ignored_untrusted_candidates": [],
+            "candidate_scan_performed": False,
             "run": sections.get("Run", ""),
             "direct_verification_requirement": sections.get("Direct Verification Requirement", ""),
             "sections": sections,
