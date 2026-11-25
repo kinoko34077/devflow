@@ -29,3 +29,13 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 - `read_run_verification(reader, repository, run_id)`：native runのrepo/workflow/attempt/head/eventとlatest jobsを取得し、runを再読して変化を検出。jobのrun/attempt/head/idを照合。過去attemptのjobはlatest一覧に実在する場合に限り観測対象とする。異なるjob IDを持つ同名matrixを拒否しない。単一ページの不足・欠落・不正はPARTIALであり、完全な集合を推測しない。
 - native結果には共通コアを使うが保証は**当該run/jobの結果**に限る。REUSE_CANDIDATEは当該原典結果の再利用候補であって、別候補のテスト省略ではない。PR runのhead_sha/head_commitはhead branchで、実checkout・統合treeとは限らない（実PR #1143 run45507523861のpull_requestsは空）。mainでも任意workflowが実際にcheckoutした対象はrun情報だけでは証明できない。tested_treeはnull、code_equivalenceはUNKNOWNのまま。既存失敗/Review/native gateを解除しない。
 - 観測は原子的でない。実行直前には必要なsource revalidationを行う。R1残存/R3で信頼できる実checkout・検証定義・実解決依存・環境の証拠を最小限記録する契約を実証する。高価なログ走査や無条件再実行を前提にしない。native run/job観測と実コード保証の意味を混同しない。
+
+
+## 実行証拠の結合（R1）
+
+`read_execution_verification` は既存native run/job観測を利用する内部入口。特定のコード実行保証に限り、`ExecutionInputs` で実checkoutのtree SHA、検証定義、実解決環境、実解決依存、適用policyの各SHA-256を比較する。metadata等の別保証にこの次元を強制しない。ハッシュ対象と正規化は保証ownerの信頼済み収集契約が定める（この入口はハッシュから実行内容を推定しない）。
+
+- `TrustedExecutionReceipt` は保護された収集側が実際のテスト対象・入力・実行時環境と証拠鮮度を計測・認証して渡す内部型。型や自己申告のhash自体は真正性を証明しない。未信頼PRコードが生成したartifact・stdout・任意JSONをreceiptとして採用しない。公開CLI/MCP受付・真正receipt生成・永続化はこの段階では未接続。
+- repo/guarantee、run ID・workflow ID/path/event/head、最新job一覧上のjob ID/name/attemptを照合する。jobの実checkout SHAは既存GitHubReaderのcommit GETでtreeを再確認。PR event headのtreeをtested_treeへ転記しない。欠落・不一致・不正・部分観測はUNKNOWN/HOLDで当該保証の省略不可。
+- 正常結合後のみtested_treeを返し、既存 `assess_verification` で要求の全入力と観測・現在結果・期限を比較する。現行workflow/jobの非成功は成功証拠にならず、期限切れやidentity差はRUN。REUSE_CANDIDATEは既存gateの解除ではない。原典再検証が必要。
+- 本段階のfixtureは信頼済み収集側を模擬し、結合と同等判定のみ実証する。実GitHub runに真正receiptがない場合は従来通りtested_tree未知。次に保護された実行主体による測定・証拠配送・認証の実証を行う。既存MCP専用release gate、CI実行、権限、公開、保存、consumerは変更しない。
