@@ -180,12 +180,17 @@ def main(argv: list[str] | None = None) -> int:
             from .devflow_mcp_connection import serve_connection
             from .devflow_mcp_catalog import REQUIRED_CALLS
         else:
+            # A registered legacy PYTHONPATH must not influence the protected
+            # front or SDK. The one-time installer adds -I before this script.
+            if not sys.flags.isolated:
+                raise ValueError("protected launcher requires isolated Python")
             directory = Path(__file__).resolve().parent
             for name in ("devflow_mcp_connection.py", "devflow_mcp_catalog.py",
                          "devflow_mcp_release_manager.py"):
                 module = directory / name
                 if not module.is_file() or module.resolve() != module:
                     raise ValueError("missing or redirected protected adapter")
+            sys.path.insert(0, str(directory))
             from devflow_mcp_connection import serve_connection
             from devflow_mcp_catalog import REQUIRED_CALLS
         asyncio.run(serve_connection(
