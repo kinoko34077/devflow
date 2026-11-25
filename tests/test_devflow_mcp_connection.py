@@ -13,6 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tools import devflow_mcp_stable_launcher as selector
+from tools import devflow_mcp_release_manager as manager
 from tools.devflow_mcp_connection import serve_connection
 
 
@@ -92,7 +93,8 @@ def launch_front(root):
 
         await serve_connection(lambda: selector.selection_revision(root), launch,
                                required_calls={"read_version": {}},
-                               smoke_name="read_version", smoke_arguments={})
+                               smoke_name="read_version", smoke_arguments={},
+                               updates_held=lambda: manager.updates_held(root))
     asyncio.run(run())
 
 
@@ -288,6 +290,93 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         runtime = old.model_dump(by_alias=True)["_meta"]["kinotch.devflow.runtime"]
                         self.assertEqual(runtime["served_version"], "a" * 40)
                         self.assertEqual(runtime["running_version"], "b" * 40)
+
+
+    async def test_held_rollback_without_relist_preserves_only_unchanged_calls(self):
+        from mcp import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", extra=True)
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            notice = asyncio.Event()
+
+            async def observe(message):
+                if isinstance(message, types.ToolListChangedNotification):
+                    notice.set()
+
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr, message_handler=observe) as first:
+                        await asyncio.wait_for(first.initialize(), 35)
+                        self.assertIn("new_read", {t.name for t in (await first.list_tools()).tools})
+                        async with stdio_client(front, errlog=log) as (rd2, wr2):
+                            async with ClientSession(rd2, wr2) as second:
+                                await asyncio.wait_for(second.initialize(), 35)
+                                before = await second.call_tool("read_version", {})
+                                self.assertEqual(json.loads(before.content[0].text)["version"], "B")
+                                self.assertEqual(manager.rollback(root, root / "unused.py"),
+                                                 "ROLLED_BACK " + a["sha"])
+                                # Neither client has relisted. The held selection is
+                                # authoritative; safe unchanged calls must use A.
+                                for client in (first, second):
+                                    result = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                                    self.assertFalse(result.is_error)
+                                    self.assertEqual(json.loads(result.content[0].text)["version"], "A")
+                                    rejected = await client.call_tool("new_read", {})
+                                    self.assertTrue(rejected.is_error)
+                                    self.assertEqual(json.loads(rejected.content[0].text)["action"],
+                                                     "REFRESH_TOOLS_LIST")
+                                await asyncio.wait_for(notice.wait(), 5)
+                                self.assertNotIn("new_read", {t.name for t in (await first.list_tools()).tools})
+                                self.assertTrue(manager.updates_held(root))
+                            # EOF on second client cannot terminate first.
+                        stable = await first.call_tool("read_version", {})
+                        self.assertFalse(stable.is_error)
+                        self.assertEqual(json.loads(stable.content[0].text)["version"], "A")
+
+
+    async def test_cancelled_call_does_not_replay_or_block_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B")
+            select(root, a)
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            async def started():
+                while not (root / "slow-started").exists():
+                    await asyncio.sleep(0.05)
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        await client.list_tools()
+                        slow = asyncio.create_task(client.call_tool("slow_read", {}))
+                        try:
+                            await asyncio.wait_for(started(), 5)
+                            slow.cancel()
+                            with self.assertRaises(asyncio.CancelledError):
+                                await slow
+                            select(root, b)
+                            restart = await asyncio.wait_for(client.call_tool("restart_mcp", {}), 12)
+                            self.assertFalse(restart.is_error)
+                            new = await asyncio.wait_for(client.call_tool("read_version", {}), 3)
+                            self.assertEqual(json.loads(new.content[0].text)["version"], "B")
+                        finally:
+                            (root / "slow-finish").touch()
 
 
 if __name__ == "__main__":
