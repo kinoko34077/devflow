@@ -375,6 +375,23 @@ class FixedSourceRequirement:
     required_jobs: tuple[str, ...]
 
 
+def valid_fixed_source_requirement(required: object) -> bool:
+    """Shared structural validation for native observation and host policy."""
+    if (not isinstance(required, FixedSourceRequirement)
+            or not _text(required.repository) or not _id(required.repository_id)
+            or not all(_text(v) for v in (required.channel, required.policy_revision,
+                                         required.branch, required.workflow_path))
+            or not _sha(required.commit) or not _id(required.workflow_id)
+            or not isinstance(required.required_jobs, tuple) or not required.required_jobs
+            or not all(_text(v) for v in required.required_jobs)
+            or len(set(required.required_jobs)) != len(required.required_jobs)):
+        return False
+    try:
+        return normalize_repository(required.repository) == required.repository
+    except DevflowMCPError:
+        return False
+
+
 def read_fixed_source_verification(
     reader: GitHubReader, required: FixedSourceRequirement,
 ) -> dict:
@@ -391,19 +408,10 @@ def read_fixed_source_verification(
             "requires_source_revalidation": True, **evidence,
         }
 
-    if (not isinstance(required, FixedSourceRequirement)
-            or not _text(required.repository) or not _id(required.repository_id)
-            or not all(_text(v) for v in (required.channel, required.policy_revision,
-                                         required.branch, required.workflow_path))
-            or not _sha(required.commit) or not _id(required.workflow_id)
-            or not isinstance(required.required_jobs, tuple) or not required.required_jobs
-            or not all(_text(v) for v in required.required_jobs)
-            or len(set(required.required_jobs)) != len(required.required_jobs)):
+    if not valid_fixed_source_requirement(required):
         return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
     try:
         repository = normalize_repository(required.repository)
-        if repository != required.repository:
-            return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
         packet = reader.get_fixed_push_workflow_runs(
             repository, required.workflow_id, required.commit, required.branch,
         )
