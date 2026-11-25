@@ -29,8 +29,12 @@ python -m tools.devflow_read_cli mapped-read --request-file /absolute/path/reque
 - `--allowed-repository` は信頼済みローカル呼出側が指定（複数回可）。要求JSONから認可集合を生成しない。既存GitHubReaderの環境認証・GETのみ。要求側でURL/credentialを指定できない。新規公開MCP/サービス/認証変更なし。
 - JSONは既存CLIの100,000文字上限・重複キー拒否規則を使用。異常入力/全BLOCKEDはexit 2、限定・部分読取はexit 0でcoverageを必ず確認。stdoutはJSON、既存の有限reason_codeによる秘匿診断。実運用の版選択・既存Consumer接続は別受入。
 
-## 同一バッチの取得再利用（#1148候補）
+## 同一バッチの取得再利用
 
 既存CLIのrequest-fileまたはPythonの `read_mapped_batch` へ `{"schema_version":"mapped-read-batch.v1","requests":[<mapped-read.v1>,...]}` を渡す（requestsの各要素は通常要求）。同一の信頼済みregistry・認証reader・許可repo集合を持つ一回の明示batch内でのみ、ownerが `batch_reusable=True` を明示したdatasetの成功観測を再利用する。取得キーはdataset、repo、日時境界、filters、budgetの一致。response.fields/limitはキーから除外し、毎要求で検証・投影する。既定値の省略と明記は保守的に別キー。異なるrepo/条件・部分/失敗・不足属性・別batchは再取得。新規永続cache・他process共有なし。
 
 結果は `mapped-read-batch-result.v1`、入力順のresults、全体status、source_reads（source呼出数、GET数そのものではない）、reused_observations。各repoのsource_observed_atは元取得終了時刻を保持し、reused_observationとobserved_new_read_unitsで再利用を明示する。取得失敗で実GET数を観測できない場合はread_unitsを完全な通信計測とみなさない。単一要求の形式は維持。個別の契約拒否は固定コードINVALID_MAPPED_REQUESTで局所化する。全BLOCKEDはCLI exit2、部分はexit0。共通観測は原子的snapshot・最新状態・原典再検証の代替ではない。
+
+## 内部GitHub native query・ページ進行
+
+`devflow_mapped_read.github_pages` は既存Reader/KAEPのIssue・コメントnative取得を共通化する。信頼済みsource ownerは `RepositoryIssueQuery` へrepository/kind/state/sort/direction/native_since/per_pageを宣言し、既存認証付きGET callbackを `iter_list_pages` へ注入する。Linkのnextが明示される場合はその値を使い、観測不能なら短ページを終了/fullを継続候補とする。ページ予算到達時にhas_nextを保持し、途中停止は追加GETを行わない。native sinceはAPI引数そのもので、半開区間・重複・identity/actor・原典検証を置換しない。M1のoverlap/古い下限fallbackは既存Readerに残す。KAEPの既存gh経路・上限・error/locator/原典照合は保持。内部raw行は既存trusted process内のみ、公開CLIの許可属性を増やさない。IndexのLink経路への接続は #50 の代表検証で行う。

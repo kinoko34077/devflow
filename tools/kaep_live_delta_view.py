@@ -18,6 +18,8 @@ from tools import kaep_issue_search_view as search
 from tools.kaep_link_validation import API_ISSUE_URL, owner_issue_url
 from tools.kaep_mailbox_codec import ACTOR_LOGIN, InvalidMessage, MARKER, has_kaep_marker
 from tools.kaep_repository_validation import REPOSITORY
+from devflow_mapped_read import MappedReadError
+from devflow_mapped_read.github_pages import RepositoryIssueQuery, iter_list_pages, observe_page
 
 MAX_REPOSITORIES = 3
 MAX_WINDOW = 100
@@ -40,7 +42,6 @@ def read_repository_recent(repository: str, *, since: str | None = None,
         _error("INVALID_REPOSITORY")
     if type(page) is not int or not 1 <= page <= MAX_UPDATED_PAGES:
         _error("INVALID_UPDATED_PAGE")
-    path = f"/repos/{repository}/issues/comments?sort=updated&direction=desc&per_page={MAX_WINDOW}&page={page}"
     if since is not None:
         if type(since) is not str or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", since):
             _error("INVALID_SINCE")
@@ -50,7 +51,11 @@ def read_repository_recent(repository: str, *, since: str | None = None,
                 _error("INVALID_SINCE")
         except ValueError as exc:
             raise InvalidMessage("INVALID_SINCE") from exc
-        path += f"&since={since}"
+    try:
+        path = RepositoryIssueQuery(repository, "issue_comment", per_page=MAX_WINDOW,
+            sort="updated", direction="desc", native_since=since).path(page)
+    except MappedReadError as exc:
+        raise InvalidMessage("INVALID_REPOSITORY") from exc
     try:
         result = subprocess.run(
             ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
@@ -65,9 +70,10 @@ def read_repository_recent(repository: str, *, since: str | None = None,
         obj = json.loads(result.stdout)
     except (ValueError, UnicodeError) as exc:
         raise InvalidMessage("LIVE_INVALID_JSON") from exc
-    if type(obj) is not list or len(obj) > MAX_WINDOW:
-        _error("LIVE_INVALID_COMMENT_PAGE")
-    return obj
+    try:
+        return observe_page(page, obj, per_page=MAX_WINDOW).rows
+    except MappedReadError as exc:
+        raise InvalidMessage("LIVE_INVALID_COMMENT_PAGE") from exc
 
 
 def read_repository_updated_pages(
@@ -85,21 +91,26 @@ def read_repository_updated_pages(
     overlaps = 0
     page_count = 0
     truncated = False
-    for page in range(1, max_pages + 1):
-        entries = read_repository_recent(repository, since=since, page=page)
-        page_count += 1
-        for comment in entries:
-            if type(comment) is not dict or type(comment.get("id")) is not int or comment["id"] <= 0:
-                _error("INVALID_UPDATED_COMMENT")
-            if comment["id"] in comment_ids:
-                overlaps += 1
-                continue
-            comment_ids.add(comment["id"])
-            all_comments.append(comment)
-        if len(entries) < MAX_WINDOW:
-            break
-        if page == max_pages:
-            truncated = True
+    try:
+        for observed in iter_list_pages(
+                lambda page: (read_repository_recent(repository, since=since, page=page), None),
+                per_page=MAX_WINDOW, max_pages=max_pages):
+            page, entries = observed.number, observed.rows
+            page_count += 1
+            for comment in entries:
+                if type(comment) is not dict or type(comment.get("id")) is not int or comment["id"] <= 0:
+                    _error("INVALID_UPDATED_COMMENT")
+                if comment["id"] in comment_ids:
+                    overlaps += 1
+                    continue
+                comment_ids.add(comment["id"])
+                all_comments.append(comment)
+            if not observed.has_next:
+                break
+            if page == max_pages:
+                truncated = True
+    except MappedReadError as exc:
+        raise InvalidMessage("LIVE_INVALID_COMMENT_PAGE") from exc
     return {
         "comments": all_comments,
         "truncated": truncated,
