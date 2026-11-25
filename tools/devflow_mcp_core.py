@@ -443,6 +443,40 @@ class GitHubReader:
             raise DevflowMCPError("GitHub recent Issue comments response is invalid.")
         return result
 
+    def get_pull_request(self, repository: str, number: int) -> dict[str, Any]:
+        if type(number) is not int or number <= 0:
+            raise DevflowMCPError("Invalid pull request number.")
+        result = self._read(self._repository_url(repository, f"pulls/{number}"))
+        if not isinstance(result, dict):
+            raise DevflowMCPError("Invalid GitHub pull request response.")
+        return result
+
+    def get_git_commit(self, repository: str, sha: str) -> dict[str, Any]:
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise DevflowMCPError("Invalid Git commit SHA.")
+        result = self._read(self._repository_url(repository, f"git/commits/{sha}"))
+        if not isinstance(result, dict) or result.get("sha") != sha:
+            raise DevflowMCPError("Git commit identity unavailable.")
+        return result
+
+    def get_action_run(self, repository: str, run_id: int) -> dict[str, Any]:
+        if type(run_id) is not int or run_id <= 0:
+            raise DevflowMCPError("Invalid Actions run ID.")
+        result = self._read(self._repository_url(repository, f"actions/runs/{run_id}"))
+        if not isinstance(result, dict) or type(result.get("id")) is not int or result["id"] != run_id:
+            raise DevflowMCPError("Actions run identity unavailable.")
+        return result
+
+    def get_latest_action_jobs(self, repository: str, run_id: int) -> dict[str, Any]:
+        """One native latest-attempt page; callers must preserve partial coverage."""
+        if type(run_id) is not int or run_id <= 0:
+            raise DevflowMCPError("Invalid Actions run ID.")
+        query = urllib.parse.urlencode({"filter": "latest", "per_page": MAX_GITHUB_REST_PER_PAGE})
+        result = self._read(self._repository_url(repository, f"actions/runs/{run_id}/jobs?{query}"))
+        if not isinstance(result, dict):
+            raise DevflowMCPError("Invalid Actions jobs response.")
+        return result
+
     def get_file(self, repository: str, path: str) -> dict[str, Any] | None:
         if not isinstance(path, str) or not path.strip():
             raise DevflowMCPError("Repository file path is required.")

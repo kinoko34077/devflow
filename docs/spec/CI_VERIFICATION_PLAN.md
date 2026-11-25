@@ -21,3 +21,11 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 
 ## 初回検証と非目標
 `tests/test_ci_verification_plan.py` の代表同等tree・metadata独立・全入力差異・別repo/保証・非成功・進行中・矛盾・期限境界・欠落。GitHubのRequired workflowと既存MCP gateは変更しない。効果計測はR4で実際のjob起動数、runner job秒、判定overheadを比較する。今回は追加DB・認証・API・固定tool数・互換移行・個別repo適用なし。
+
+## GitHub原典の初期取得（R1）
+`tools.ci_github_evidence` は既存 `GitHubReader` に追加した固定GET入口を利用し、別認証・transport・汎用mapperを作らない。任意URLを受け取らない。#1144の共通マッパーは別owner。現行MCP/CLI公開入口とrelease gateは未変更。
+
+- `read_pr_verification(reader, repository, number)`：PR原典の番号・repo・head/baseを照合し、現行PR本文を既存owner metadata validatorで直接再判定（低コストなので過去のmetadata成功をキャッシュしない）。本文等の入力digestを表示する。openのsynthetic mergeはcommitとbase/headの両親を確認し、mergedの実commitと区別する。候補取得不能でもmetadata結果を保持する。現在の候補treeは**テスト済みtreeではない**。
+- `read_run_verification(reader, repository, run_id)`：native runのrepo/workflow/attempt/head/eventとlatest jobsを取得し、runを再読して変化を検出。jobのrun/attempt/head/idを照合。過去attemptのjobはlatest一覧に実在する場合に限り観測対象とする。異なるjob IDを持つ同名matrixを拒否しない。単一ページの不足・欠落・不正はPARTIALであり、完全な集合を推測しない。
+- native結果には共通コアを使うが保証は**当該run/jobの結果**に限る。REUSE_CANDIDATEは当該原典結果の再利用候補であって、別候補のテスト省略ではない。PR runのhead_sha/head_commitはhead branchで、実checkout・統合treeとは限らない（実PR #1143 run45507523861のpull_requestsは空）。mainでも任意workflowが実際にcheckoutした対象はrun情報だけでは証明できない。tested_treeはnull、code_equivalenceはUNKNOWNのまま。既存失敗/Review/native gateを解除しない。
+- 観測は原子的でない。実行直前には必要なsource revalidationを行う。R1残存/R3で信頼できる実checkout・検証定義・実解決依存・環境の証拠を最小限記録する契約を実証する。高価なログ走査や無条件再実行を前提にしない。native run/job観測と実コード保証の意味を混同しない。
