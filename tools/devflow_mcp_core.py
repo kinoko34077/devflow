@@ -1535,8 +1535,9 @@ class DevflowService:
     def _agent_inbox_from_work_view(
         self, view: dict[str, Any], *, recipient: str,
         limit: int, offset: int, work_status: str | None,
+        observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None,
     ) -> dict[str, Any]:
-        """Use a caller's already-observed live work view; no second Issue scan."""
+        """Reuse the live work view and, when supplied, this call's comment reads."""
         selected = agent_inbox.select_task_records(
             view, recipient=recipient, limit=limit,
             offset=offset, work_status=work_status)
@@ -1547,9 +1548,14 @@ class DevflowService:
             for record in selected["selected"]:
                 number = record["issue_number"]
                 try:
-                    comments_by_issue[number] = self.reader.list_issue_comments(
-                        selected["repository"], number,
-                        max_comments=agent_inbox.MAX_ISSUE_COMMENTS)
+                    key = (selected["repository"], number)
+                    observed = observed_comments.get(key) if observed_comments is not None else None
+                    if observed is not None:
+                        comments_by_issue[number] = observed
+                    else:
+                        comments_by_issue[number] = self.reader.list_issue_comments(
+                            selected["repository"], number,
+                            max_comments=agent_inbox.MAX_ISSUE_COMMENTS)
                 except DevflowMCPError:
                     errors_by_issue[number] = "GITHUB_COMMENT_READ_FAILED"
         return agent_inbox.build_agent_inbox(
@@ -1559,6 +1565,7 @@ class DevflowService:
 
     def _workspace_recent_kaep(
         self, repository: str, recipient: str,
+        *, observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None,
     ) -> dict[str, Any]:
         """One selected-repository B6 union of untrusted index + fresh hints.
 
@@ -1578,6 +1585,11 @@ class DevflowService:
                 raise kaep_live_delta_view.InvalidMessage(
                     "SOURCE_READ_UNAVAILABLE"
                 ) from exc
+            key = (repo, number)
+            if observed_comments is not None and key in observed_comments:
+                # Retain only selected Inbox mailboxes, not all B6 originals.
+                # Each consumer still validates the successful raw rows.
+                observed_comments[key] = rows
             pages = [
                 rows[i:i + 100] for i in range(0, len(rows), 100)
             ] or [[]]
@@ -1967,9 +1979,42 @@ class DevflowService:
         if type(include_published_supply) is not bool:
             raise ValueError("INVALID_SUPPLY_OBSERVATION_OPTION")
         view = self.get_repository_work_view(repository)
+        # B6 reads the exact original Issue before its mailbox. Observe it
+        # first so Inbox can reuse those same bounded comment rows, not an
+        # older mailbox snapshot read before recent discovery. This dictionary
+        # lives only for this call, and no consumer trusts another's verdict.
+        observed_comments: dict[tuple[str, int], list[dict[str, Any]] | None] | None = None
+        recent: dict[str, Any] | None = None
+        recent_discovery: dict[str, Any] | None = None
+        if include_recent_kaep:
+            selected = agent_inbox.select_task_records(
+                view, recipient=recipient, limit=limit, offset=offset,
+                work_status=work_status,
+            )
+            # Same existing selection rule and maximum as Inbox. Do not
+            # retain non-selected B6 originals (up to 40 large mailboxes).
+            observed_comments = {
+                (selected["repository"], record["issue_number"]): None
+                for record in selected["selected"]
+            }
+            recent_discovery = {
+                "status": "SOURCE_UNAVAILABLE",
+                "reason_code": "RECENT_DISCOVERY_UNAVAILABLE",
+                "source_coverage": "UNKNOWN",
+                "complete_source_universe": False,
+            }
+            try:
+                recent = self._workspace_recent_kaep(
+                    view["repository"], recipient,
+                    observed_comments=observed_comments,
+                )
+            except (DevflowMCPError, kaep_live_delta_view.InvalidMessage,
+                    TypeError, ValueError, KeyError):
+                # Independent TASK mailboxes remain readable even if B6 fails.
+                pass
         inbox = self._agent_inbox_from_work_view(
             view, recipient=recipient, limit=limit, offset=offset,
-            work_status=work_status,
+            work_status=work_status, observed_comments=observed_comments,
         )
         current = (
             view["source_status"] == "AVAILABLE"
@@ -2003,10 +2048,8 @@ class DevflowService:
             # Verified empty [] + failed peer mailbox is unknown; preserve
             # warnings but do not confuse them with source-coverage failures.
             messages = None
-        recent_discovery: dict[str, Any] | None = None
-        if include_recent_kaep:
+        if recent is not None:
             try:
-                recent = self._workspace_recent_kaep(view["repository"], recipient)
                 recent_discovery = {
                     "status": recent["status"],
                     "source_coverage": recent["source_coverage"],
