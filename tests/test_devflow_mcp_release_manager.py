@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -67,10 +68,28 @@ class StableLauncherTests(unittest.TestCase):
               patch.object(launcher.subprocess, "run", return_value=SimpleNamespace(
                   returncode=0, stdout="fixture-token",
               ))):
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            old = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(old.version, "LEGACY")
             self._marker(SHA_A)
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            new = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(new.version, SHA_A)
+            self.assertEqual(new.parameters.env["PYTHONPATH"], str(candidate.parent.parent))
             self.assertEqual(os.environ["PYTHONPATH"], str(self.legacy.parent.parent))
+        # Restore real subprocess.run before executing the fixture workers.
+        for launch in (old, new):
+            p = launch.parameters
+            self.assertEqual(subprocess.run([p.command, *p.args], env=p.env,
+                                            capture_output=True, timeout=10).returncode, 0)
+
+    def test_invalid_release_never_requests_token(self):
+        self._release(SHA_A)
+        self._marker(SHA_A)
+        (self.root / "releases" / SHA_A / "tools" / "devflow_mcp.py").write_text(
+            "# modified", encoding="utf-8")
+        with patch.object(launcher.subprocess, "run") as token:
+            with self.assertRaisesRegex(ValueError, "contents changed"):
+                launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            token.assert_not_called()
 
     def test_no_marker_preserves_original_legacy_launch(self):
         self.assertEqual(
