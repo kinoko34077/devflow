@@ -302,11 +302,25 @@ class Connection:
         if params.name == RESTART_TOOL:
             if params.arguments:
                 return _reply({"status": "INVALID_ARGUMENTS"}, error=True)
-            async with self.lock:
-                task, state = self._schedule_refresh(explicit=True)
-            if task is not None:
-                state = await asyncio.shield(task)
-            return _reply(state, error=state["status"] != "RESTARTED")
+            # A coalesced refresh can have committed a different revision
+            # before this request arrived (e.g. while closing its old child).
+            # Re-evaluate once, rather than claim an unrelated restart succeeded.
+            for _ in range(2):
+                async with self.lock:
+                    task, state = self._schedule_refresh(explicit=True)
+                if task is not None:
+                    state = await asyncio.shield(task)
+                if state["status"] != "RESTARTED":
+                    return _reply(state, error=True)
+                async with self.lock:
+                    try:
+                        selected = self.revision()
+                    except Exception:
+                        return _reply(self._state("INVALID_SELECTION"), error=True)
+                    if (self.worker is not None and self.worker.usable()
+                            and selected == self.current_revision):
+                        return _reply(self._state("RESTARTED"))
+            return _reply(self._state("SELECTION_CHANGED"), error=True)
 
         async with self.lock:
             if params.name not in self.contract:
