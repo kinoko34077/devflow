@@ -106,3 +106,43 @@ def arguments_supported(tool: Any, arguments: Mapping[str, Any]) -> bool:
     except Exception:
         return False
     return True
+
+
+_SCHEMA_MAPS = frozenset({
+    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+})
+_SCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+_SCHEMA_CHILDREN = frozenset({
+    "items", "additionalProperties", "unevaluatedProperties", "contains",
+    "not", "if", "then", "else", "propertyNames",
+})
+
+
+def publication_schema(schema: object) -> object:
+    """Ignore only schema-node annotations, not property names/literal values.
+
+    Do not descend into const, enum, default, examples, or unknown extension
+    values: those may contain data keys named "title" or "description".
+    """
+    if not isinstance(schema, dict):
+        return schema
+    normalized = {}
+    for key, value in schema.items():
+        if key in {"title", "description", "examples"}:
+            continue
+        if key in _SCHEMA_MAPS and isinstance(value, dict):
+            normalized[key] = {
+                name: publication_schema(child)
+                for name, child in value.items()
+            }
+        elif key in _SCHEMA_LISTS and isinstance(value, list):
+            normalized[key] = [publication_schema(child) for child in value]
+        elif key in _SCHEMA_CHILDREN and isinstance(value, (dict, list)):
+            normalized[key] = (
+                [publication_schema(child) for child in value]
+                if isinstance(value, list)
+                else publication_schema(value)
+            )
+        else:
+            normalized[key] = value
+    return normalized
