@@ -10,20 +10,22 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
-from mcp.server import Server
+from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
 try:
     from .devflow_mcp_release_manager import _compatible_schema
+    from .devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
+                                     admit_catalog, arguments_supported)
 except ImportError:
     from devflow_mcp_release_manager import _compatible_schema
+    from devflow_mcp_catalog import (CatalogError, RESTART_TOOL, REQUIRED_CALLS,
+                                    admit_catalog, arguments_supported)
 
-
-RESTART_TOOL = "restart_mcp"
 START_TIMEOUT = 20
 LIST_TIMEOUT = 10
 CALL_TIMEOUT = 90
@@ -39,11 +41,9 @@ class Launch:
 
 
 def catalog_contract(tools: list[types.Tool]) -> dict[str, Any]:
-    """Retain callable schema and semantic metadata; ignore documentation."""
+    """Detect a publication change; never use equality for admission."""
     result = {}
     for tool in tools:
-        if tool.name in result or tool.name == RESTART_TOOL:
-            raise ValueError("invalid worker tool catalog")
         data = tool.model_dump(by_alias=True, exclude_none=True)
         for key in ("title", "description"):
             data.pop(key, None)
@@ -64,9 +64,9 @@ def _reply(payload: dict[str, Any], *, error: bool = False) -> types.CallToolRes
 class Worker:
     """Own the child SDK context in one task, for its whole lifetime."""
 
-    def __init__(self, launch: Launch, expected_tools: int):
+    def __init__(self, launch: Launch, required_calls: Mapping[str, Mapping[str, Any]]):
         self.launch = launch
-        self.expected_tools = expected_tools
+        self.required_calls = required_calls
         self.queue: asyncio.Queue = asyncio.Queue()
         self.ready = asyncio.get_running_loop().create_future()
         self.task: asyncio.Task | None = None
@@ -95,9 +95,8 @@ class Worker:
                     async with ClientSession(rd, wr) as client:
                         init = await asyncio.wait_for(client.initialize(), START_TIMEOUT)
                         listing = await asyncio.wait_for(client.list_tools(), LIST_TIMEOUT)
-                        if (listing.next_cursor is not None
-                                or len(catalog_contract(listing.tools)) != self.expected_tools):
-                            raise ValueError("unexpected worker tool catalog")
+                        admit_catalog(listing.tools, next_cursor=listing.next_cursor,
+                                      required_calls=self.required_calls)
                         self.ready.set_result((init, listing.tools))
                         while True:
                             entry = await self.queue.get()
@@ -121,6 +120,9 @@ class Worker:
                             active = None
                             if self.failed:
                                 break
+        except CatalogError:
+            if not self.ready.done():
+                self.ready.set_exception(CatalogError("worker catalog rejected"))
         except Exception:
             if not self.ready.done():
                 self.ready.set_exception(RuntimeError("worker initialization failed"))
@@ -159,10 +161,11 @@ class Connection:
     """
 
     def __init__(self, revision: Callable[[], str], launch: Callable[[], Launch],
-                 *, expected_tools: int, smoke_name: str, smoke_arguments: dict[str, Any]):
+                 *, smoke_name: str, smoke_arguments: dict[str, Any],
+                 required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS):
         self.revision = revision
         self.launch = launch
-        self.expected_tools = expected_tools
+        self.required_calls = required_calls
         self.smoke_name = smoke_name
         self.smoke_arguments = smoke_arguments
         self.lock = asyncio.Lock()
@@ -177,10 +180,12 @@ class Connection:
         self.closed = False
         self.tools: list[types.Tool] = []
         self.contract: dict[str, Any] = {}
+        self.pending: tuple[str, Worker, list[types.Tool]] | None = None
+        self.session = None
 
     async def start(self) -> Any:
         revision = self.revision()
-        worker = Worker(await asyncio.to_thread(self.launch), self.expected_tools)
+        worker = Worker(await asyncio.to_thread(self.launch), self.required_calls)
         try:
             init, tools = await worker.start()
             if self.revision() != revision:
@@ -213,6 +218,9 @@ class Connection:
         except Exception:
             return None, self._state("INVALID_SELECTION")
         healthy = self.worker is not None and self.worker.usable()
+        if (self.pending is not None and self.pending[0] == revision
+                and self.pending[1].usable()):
+            return None, self._state("AWAITING_CATALOG_REFRESH")
         if not explicit and healthy and revision == self.current_revision:
             return None, self._state("UP_TO_DATE")
         if not explicit and revision == self.rejected_revision:
@@ -229,40 +237,58 @@ class Connection:
         self.refresh_task = asyncio.create_task(self._refresh(revision))
         return self.refresh_task, self._state("PREPARING")
 
+    def _commit(self, revision, worker, tools):
+        previous = self.worker
+        self.worker = worker
+        self.current_revision = revision
+        self.rejected_revision = None
+        self.retry_count = 0
+        self.retry_at = 0.0
+        self.tools = tools
+        self.contract = catalog_contract(tools)
+        return previous, self._state("RESTARTED")
+
     async def _refresh(self, revision: str) -> dict[str, Any]:
-        """Prepare outside the routing lock; commit only after in-flight calls."""
+        """Prepare outside routing lock; publish changed catalogs on re-list."""
         candidate = None
+        previous = None
         incompatible = False
         try:
-            candidate = Worker(await asyncio.to_thread(self.launch), self.expected_tools)
+            async with self.lock:
+                stale = self.pending
+                self.pending = None
+            if stale is not None:
+                await stale[1].close()
+            candidate = Worker(await asyncio.to_thread(self.launch), self.required_calls)
             _, tools = await candidate.start()
-            if catalog_contract(tools) != self.contract:
-                incompatible = True
-                raise ValueError("incompatible tool contract")
-            if self.smoke_name not in self.contract:
-                incompatible = True
-                raise ValueError("missing smoke tool")
+            if self.smoke_name not in {tool.name for tool in tools}:
+                raise CatalogError("missing smoke tool")
             result = await candidate.call(self.smoke_name, self.smoke_arguments)
             if result.is_error or not candidate.usable():
                 raise ValueError("candidate smoke failed")
             async with self.lock:
                 if self.closed or self.revision() != revision or not candidate.usable():
                     raise ValueError("selection changed or candidate unavailable")
-                previous = self.worker
-                self.worker = candidate
-                self.current_revision = revision
-                self.rejected_revision = None
-                self.retry_count = 0
-                self.retry_at = 0.0
-                self.tools = tools
-                state = self._state("RESTARTED")
-                candidate = None  # ownership transferred
+                if catalog_contract(tools) != self.contract:
+                    self.pending = (revision, candidate, tools)
+                    candidate = None
+                    state = self._state("AWAITING_CATALOG_REFRESH")
+                else:
+                    previous, state = self._commit(revision, candidate, tools)
+                    candidate = None
+            if state["status"] == "AWAITING_CATALOG_REFRESH" and self.session is not None:
+                try:
+                    await self.session.send_tool_list_changed()
+                except Exception:
+                    # Keep the old catalog/worker until an actual list request.
+                    pass
             if previous is not None:
                 await previous.close()
             return state
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
+            incompatible = isinstance(error, CatalogError)
             async with self.lock:
                 if incompatible:
                     self.rejected_revision = revision
@@ -287,18 +313,35 @@ class Connection:
         payload["_meta"] = meta
         return types.CallToolResult.model_validate(payload)
 
-    async def list_tools(self, _context, _params):
+    async def list_tools(self, context, _params):
+        previous = None
         async with self.lock:
-            # Catalog remains compatible across worker generations.
-            return types.ListToolsResult(tools=[*self.tools, types.Tool(
+            self.session = context.session
+            if self.pending is not None:
+                revision, worker, tools = self.pending
+                if worker.usable() and self.revision() == revision:
+                    self.pending = None
+                    previous, _ = self._commit(revision, worker, tools)
+            self._schedule_refresh(explicit=False)
+            result = types.ListToolsResult(tools=[*self.tools, types.Tool(
                 name=RESTART_TOOL,
                 description=("Restart this MCP connection's worker on the locally selected "
                              "verified release, without restarting the AI. No GitHub write, "
                              "fetch, arbitrary command, or other connection is affected."),
                 inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
             )])
+        if previous is not None:
+            await previous.close()
+        return result
 
-    async def call_tool(self, _context, params):
+    def _validate_call(self, params):
+        tool = next((tool for tool in self.tools if tool.name == params.name), None)
+        if tool is None or not arguments_supported(tool, params.arguments or {}):
+            return _reply({"status": "TOOL_CONTRACT_UNAVAILABLE", "action": "REFRESH_TOOLS_LIST"}, error=True)
+        return None
+
+    async def call_tool(self, context, params):
+        self.session = context.session
         if params.name == RESTART_TOOL:
             if params.arguments:
                 return _reply({"status": "INVALID_ARGUMENTS"}, error=True)
@@ -323,10 +366,11 @@ class Connection:
             return _reply(self._state("SELECTION_CHANGED"), error=True)
 
         async with self.lock:
-            if params.name not in self.contract:
-                return _reply({"status": "UNKNOWN_TOOL"}, error=True)
             task, state = self._schedule_refresh(explicit=False)
             if self.worker is not None and self.worker.usable():
+                invalid = self._validate_call(params)
+                if invalid is not None:
+                    return self._with_runtime_status(invalid)
                 result = await self.worker.call(params.name, params.arguments or {})
                 if not self.worker.usable():
                     self._schedule_refresh(explicit=False)
@@ -339,6 +383,9 @@ class Connection:
         async with self.lock:
             if self.worker is None or not self.worker.usable():
                 return _reply(self._state("WORKER_UNAVAILABLE"), error=True)
+            invalid = self._validate_call(params)
+            if invalid is not None:
+                return self._with_runtime_status(invalid)
             return self._with_runtime_status(
                 await self.worker.call(params.name, params.arguments or {}),
             )
@@ -348,18 +395,22 @@ class Connection:
             self.closed = True
             task = self.refresh_task
             worker = self.worker
+            pending = self.pending
+            self.pending = None
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        if pending is not None:
+            await pending[1].close()
         if worker is not None:
             await worker.close()
 
 
 async def serve_connection(revision: Callable[[], str], launch: Callable[[], Launch],
-                           *, expected_tools: int, smoke_name: str,
-                           smoke_arguments: dict[str, Any]) -> None:
+                           *, smoke_name: str, smoke_arguments: dict[str, Any],
+                           required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS) -> None:
     """Isolated pilot; the production installer is deliberately unchanged."""
-    connection = Connection(revision, launch, expected_tools=expected_tools,
+    connection = Connection(revision, launch, required_calls=required_calls,
                             smoke_name=smoke_name, smoke_arguments=smoke_arguments)
     try:
         initial = await connection.start()
@@ -369,6 +420,6 @@ async def serve_connection(revision: Callable[[], str], launch: Callable[[], Lau
             on_list_tools=connection.list_tools, on_call_tool=connection.call_tool,
         )
         async with stdio_server() as (read, write):
-            await server.run(read, write, server.create_initialization_options())
+            await server.run(read, write, server.create_initialization_options(NotificationOptions(tools_changed=True)))
     finally:
         await connection.close()
