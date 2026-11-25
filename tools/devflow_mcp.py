@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any, Literal
 
+from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from pydantic import Field, ValidationError
@@ -199,7 +200,7 @@ def _service():
     return default_service()
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def bootstrap_repository(repository: RepositoryName) -> dict[str, Any]:
     """Start a current-state task by reading the live Repository Control and its canonical entry order.
 
@@ -209,7 +210,7 @@ def bootstrap_repository(repository: RepositoryName) -> dict[str, Any]:
     return _service().bootstrap_repository(repository)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_repository_control(repository: RepositoryName) -> dict[str, Any]:
     """Read the exact open devflow `[REPO] <repository>` Control Issue for one managed repository.
 
@@ -219,7 +220,7 @@ def get_repository_control(repository: RepositoryName) -> dict[str, Any]:
     return _service().get_repository_control(repository)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_managed_repositories() -> list[str]:
     """List repository names with a currently open devflow Repository Control Issue.
 
@@ -229,7 +230,7 @@ def list_managed_repositories() -> list[str]:
     return _service().list_managed_repositories()
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_repository_projection(repository: RepositoryName) -> dict[str, Any]:
     """Read the repository-local Issue projection and its source, freshness, and coverage fields.
 
@@ -239,7 +240,7 @@ def get_repository_projection(repository: RepositoryName) -> dict[str, Any]:
     return _service().get_repository_projection(repository)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_repository_work_view(repository: RepositoryName) -> dict[str, Any]:
     """Discover current all-status owner TASKs with the explicit legacy Control fallback.
 
@@ -249,7 +250,7 @@ def get_repository_work_view(repository: RepositoryName) -> dict[str, Any]:
     return _service().get_repository_work_view(repository)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_scoped_task_read(
     repository: RepositoryName,
     issue_number: PositiveIssueNumber,
@@ -262,7 +263,7 @@ def get_scoped_task_read(
     return _service().get_scoped_task_read(repository, issue_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_agent_inbox(
     repository: RepositoryName, recipient: InboxRecipient = "claude-code",
     limit: InboxLimit = MAX_INBOX_TASKS, offset: InboxOffset = 0,
@@ -281,7 +282,7 @@ def get_agent_inbox(
         work_status=work_status)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_agent_workspace(
     repository: RepositoryName, recipient: InboxRecipient = "codex",
     limit: InboxLimit = MAX_INBOX_TASKS, offset: InboxOffset = 0,
@@ -302,7 +303,7 @@ def get_agent_workspace(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_portfolio_projection() -> dict[str, Any]:
     """Read observed aggregate counts and repository summaries across managed repositories.
 
@@ -312,7 +313,7 @@ def get_portfolio_projection() -> dict[str, Any]:
     return _service().get_portfolio_projection()
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_human_portfolio(repository: RepositoryName) -> dict[str, Any]:
     """Read the current Human Portfolio queue for one managed repository.
 
@@ -322,7 +323,7 @@ def get_human_portfolio(repository: RepositoryName) -> dict[str, Any]:
     return _service().get_human_portfolio(repository)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_issue(
     repository: RepositoryName,
     issue_number: PositiveIssueNumber,
@@ -335,7 +336,7 @@ def get_issue(
     return _service().get_issue(repository, issue_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_issue_goal_context(
     repository: RepositoryName,
     issue_number: PositiveIssueNumber,
@@ -348,7 +349,7 @@ def get_issue_goal_context(
     return _service().get_issue_goal_context(repository, issue_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def assess_issue_plan(
     repository: RepositoryName,
     issue_number: PositiveIssueNumber,
@@ -363,7 +364,7 @@ def assess_issue_plan(
     return _service().assess_issue_plan(repository, issue_number, plan)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def assess_outcome_observation(
     repository: RepositoryName,
     issue_number: PositiveIssueNumber,
@@ -379,7 +380,7 @@ def assess_outcome_observation(
     return _service().assess_outcome_observation(repository, issue_number, evidence)
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_sync_health() -> dict[str, Any]:
     """Read the machine-maintained devflow Project Sync Health record.
 
@@ -389,7 +390,7 @@ def get_sync_health() -> dict[str, Any]:
     return _service().get_sync_health()
 
 
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_github_actions_billing_observation(
     include_amounts: BillingIncludeAmounts = False,
 ) -> dict[str, Any]:

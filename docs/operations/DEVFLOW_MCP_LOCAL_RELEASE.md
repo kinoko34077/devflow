@@ -73,14 +73,19 @@ The updater and shared `devflow_mcp_catalog.py` admission module are installed t
 5. With existing `gh auth` and no stored token, launch real read-only MCP
    stdio and check `initialize`, the observed complete dynamic tool catalog, the
    shared required-call contract and live `bootstrap_repository` / `get_human_portfolio`.
-   The old release is retained, not started merely to compare catalogs. Preserve the registered MCP environment except
+   The old release is retained, not started merely to compare catalogs.
+   This intentionally does not re-prove old-worker startup on every promotion;
+   rollback selection remains integrity-checked and the actual runtime can recover. Preserve the registered MCP environment except
    for `PYTHONPATH`: the launcher and smoke both bind it to the selected script's
    own release root, and the unit test process uses its staged source root.
    A legacy checkout path would otherwise import old `tools.*` modules even
    when the new script is selected. The original fallback uses its own root.
    Do not persist credentials or print environment values. Reject duplicate or reserved names,
    invalid schemas, incomplete catalogs, explicit incompatible side-effect annotations,
-   or missing/incompatible essential calls. Do not require a fixed total tool count or
+   or missing/incompatible essential calls. New tool names must explicitly declare
+   readOnlyHint=true; only the verified original read-only names can omit the
+   declaration for legacy fallback compatibility. This does not establish authority.
+   Do not require a fixed total tool count or
    equality with the prior catalog. This is structural admission, not semantic proof;
    existing reviewed-source, CI, authority and runtime gates remain required.
 6. Record the verified staged tree SHA-256 digest alongside the active commit SHA,

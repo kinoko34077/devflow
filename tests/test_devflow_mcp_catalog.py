@@ -11,6 +11,7 @@ from tools.devflow_mcp_catalog import (
 
 
 def tool(name, schema=None, **kwargs):
+    kwargs.setdefault("annotations", types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
     return types.Tool(
         name=name, inputSchema=schema if schema is not None else {"type": "object"},
         **kwargs,
@@ -52,6 +53,14 @@ class CatalogAdmissionTests(unittest.TestCase):
         self.assertFalse(arguments_supported(catalog["bootstrap_repository"],
                                              {"repository": "kinoko34077/devflow",
                                               "include_details": "yes"}))
+
+    def test_legacy_exception_does_not_admit_unclassified_new_tool(self):
+        existing = baseline() + [tool("get_sync_health", annotations=None)]
+        self.assertIn("get_sync_health", admit_catalog(existing))
+        for annotation in (None, types.ToolAnnotations(), types.ToolAnnotations(readOnlyHint=False)):
+            with self.subTest(annotation=annotation), self.assertRaises(CatalogError):
+                admit_catalog(existing + [tool("unclassified_new", annotations=annotation)])
+        self.assertIn("new_read", admit_catalog(existing + [tool("new_read")]))
 
     def test_required_call_cannot_be_removed_or_made_invalid(self):
         with self.assertRaises(CatalogError):
