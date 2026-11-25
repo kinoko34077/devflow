@@ -1,5 +1,8 @@
 """Regression tests for the read-only Codex Cloud MCP-unavailable CLI."""
 import json
+import io
+from contextlib import redirect_stdout
+from types import SimpleNamespace
 from pathlib import Path
 import tempfile
 import unittest
@@ -7,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 from tools import devflow_read_cli as cli
-from tools.devflow_mcp_core import DevflowMCPError, DevflowService, _translate_read_error
+from tools.devflow_mcp_core import DevflowMCPError, DevflowService, GitHubReader, _translate_read_error
 
 
 class FakeService:
@@ -107,6 +110,115 @@ class FakeService:
             "acceptance_satisfied": False,
             "can_authorize_execution": False,
         }
+
+
+class MappedReadCLITests(unittest.TestCase):
+    REPO = "kinoko34077/devflow"
+
+    def packet(self):
+        return {"schema_version": "mapped-read.v1", "time": None,
+                "target": {"dataset": "github.issue", "repositories": [self.REPO]},
+                "response": {"fields": ["id", "number"]}}
+
+    def run_cli(self, args, service):
+        out = io.StringIO()
+        with patch("tools.devflow_read_cli.default_service", return_value=service):
+            with redirect_stdout(out):
+                status = cli.main(args)
+        return status, json.loads(out.getvalue())
+
+    def test_mapped_file_uses_existing_reader_and_projection(self):
+        calls = []
+        def transport(url, headers):
+            calls.append(url)
+            return [{"id": 3, "number": 1, "state": "open", "updated_at":
+                     "2026-11-20T00:00:00Z",
+                     "repository_url": "https://api.github.com/repos/" + self.REPO,
+                     "body": "not selected"}]
+        service = SimpleNamespace(reader=GitHubReader(transport=transport))
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "request.json"
+            f.write_text(json.dumps(self.packet()), encoding="utf-8")
+            args = ["mapped-read", "--request-file", str(f),
+                    "--allowed-repository", self.REPO]
+            status, result = self.run_cli(args, service)
+            self.assertEqual(status, 0)
+            self.assertEqual(result["items"], [{"repository": self.REPO,
+                                               "record": {"id": 3, "number": 1}}])
+            self.assertEqual(result["coverage"]["status"], "BOUNDED_READ")
+            self.assertEqual(len(calls), 1)
+            status, result = self.run_cli(args[:-1] + ["kinoko34077/other"], service)
+            self.assertEqual((status, result["reason_code"]),
+                             (2, "REPOSITORY_OUTSIDE_AUTHORIZED_SCOPE"))
+            self.assertEqual(len(calls), 1)
+            packet = self.packet()
+            packet["response"]["fields"] = ["body"]
+            f.write_text(json.dumps(packet), encoding="utf-8")
+            status, result = self.run_cli(args, service)
+            self.assertEqual((status, result["reason_code"]),
+                             (2, "UNSUPPORTED_RESPONSE_FIELDS"))
+            self.assertEqual(len(calls), 1)
+
+    def test_invalid_file_or_mixed_options_fail_before_service(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "request.json"
+            f.write_text('{"schema_version":"x","schema_version":"y"}', encoding="utf-8")
+            for args, code in (
+                (["mapped-read", "--request-file", str(f), "--allowed-repository", self.REPO],
+                 "MAPPED_READ_INVALID_REQUEST_FILE"),
+                (["mapped-read", "--request-file", str(f)], "MAPPED_READ_REQUEST_OR_SCOPE_REQUIRED"),
+                (["mapped-read", "--request-file", str(f), "--allowed-repository", self.REPO,
+                  "--repository", self.REPO], "MAPPED_READ_OPTIONS_CONFLICT"),
+                (["bootstrap", "--repository", self.REPO, "--request-file", str(f)],
+                 "MAPPED_READ_OPTIONS_ON_OTHER_OPERATION"),
+            ):
+                with self.subTest(args=args), patch("tools.devflow_read_cli.default_service") as factory:
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        self.assertEqual(cli.main(args), 2)
+                    self.assertEqual(json.loads(out.getvalue())["reason_code"], code)
+                    factory.assert_not_called()
+
+    def test_batch_file_reuses_existing_reader_and_keeps_single_request_compatibility(self):
+        calls = []
+        def transport(url, headers):
+            calls.append(url)
+            return [{"id": 3, "number": 1, "state": "open",
+                     "updated_at": "2026-11-20T00:00:00Z",
+                     "repository_url": "https://api.github.com/repos/" + self.REPO}]
+        service = SimpleNamespace(reader=GitHubReader(transport=transport))
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "request.json"
+            first = self.packet()
+            second = self.packet()
+            second["response"]["fields"] = ["number"]
+            f.write_text(json.dumps({"schema_version": "mapped-read-batch.v1",
+                                     "requests": [first, second]}), encoding="utf-8")
+            args = ["mapped-read", "--request-file", str(f),
+                    "--allowed-repository", self.REPO]
+            status, result = self.run_cli(args, service)
+            self.assertEqual(status, 0)
+            self.assertEqual((result["source_reads"], result["reused_observations"]), (1, 1))
+            self.assertEqual(len(calls), 1)
+            f.write_text(json.dumps(first), encoding="utf-8")
+            status, result = self.run_cli(args, service)
+            self.assertEqual(status, 0)
+            self.assertEqual(result["schema_version"], "mapped-read-result.v1")
+            self.assertEqual(len(calls), 2)
+
+    def test_full_read_failure_is_nonzero_and_redacted(self):
+        def fail(url, headers):
+            raise RuntimeError("sensitive transport detail")
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "request.json"
+            f.write_text(json.dumps(self.packet()), encoding="utf-8")
+            status, result = self.run_cli(
+                ["mapped-read", "--request-file", str(f), "--allowed-repository", self.REPO],
+                SimpleNamespace(reader=GitHubReader(transport=fail)))
+        self.assertEqual(status, 2)
+        self.assertEqual(result["coverage"]["status"], "BLOCKED")
+        self.assertEqual(result["items"], [])
+        self.assertNotIn("sensitive transport detail", repr(result))
 
 
 class CloudReadCLITests(unittest.TestCase):
