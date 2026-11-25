@@ -67,6 +67,46 @@ class LiveUnionTests(TestCase):
         self.assertFalse(output["can_authorize_execution"])
         self.assertNotIn("private test-only prompt", json.dumps(output))
 
+    def test_since_only_bounds_discovery_not_original_root_or_reply(self):
+        msg = root(number=314, issue=576)
+        reply = dict(msg)
+        reply.update({
+            "message_id": "msg_union_outside_window_answer",
+            "idempotency_key": "union.outside.window.answer.001",
+            "in_reply_to": msg["message_id"],
+            "recipient": "chatgpt",
+            "kind": "ANSWER",
+            "payload": {"text": "correlated read-only response"},
+        })
+        snap = index_with((576, 101, msg), status="BOUNDED_SEARCH_READ")
+        calls = []
+        since = "2026-11-20T00:00:00Z"
+
+        def read_recent(repo, since=None):
+            calls.append(("recent", repo, since))
+            return []
+
+        def read_issue(repo, number):
+            calls.append(("issue", repo, number))
+            return issue_object(number)
+
+        def read_comments(repo, number):
+            calls.append(("comments", repo, number))
+            return source_page((101, msg, "kinoko34077"), (102, reply, "kinoko34077"))
+
+        result = union.read_union(
+            snap, recipient="claude-code", since=since,
+            recent_read=read_recent, issue_read=read_issue, comments_read=read_comments)
+        self.assertEqual(result["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(calls, [("recent", REPO, since), ("issue", REPO, 576),
+                                 ("comments", REPO, 576)])
+        self.assertEqual(result["recent_marker_issue_count"], 0)
+        self.assertEqual(result["live_original_roots"], 1)
+        self.assertEqual(result["live_rows"][0]["reply_observation"], "ANSWER_OBSERVED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["complete_source_universe"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_issue_closed_without_new_comment_is_detected_for_indexed_source(self):
         msg = root(number=4)
         snap = index_with((576, 133, msg), status="BOUNDED_SEARCH_READ")
