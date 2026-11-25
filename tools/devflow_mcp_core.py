@@ -73,6 +73,9 @@ except ImportError:  # direct script execution
     import repository_projection_cache
     import workflow_contract
 
+from devflow_mapped_read import MappedReadError
+from devflow_mapped_read.github_pages import RepositoryIssueQuery, iter_list_pages
+
 WORKFLOW_CONTRACT = workflow_contract.WORKFLOW_CONTRACT
 
 DEFAULT_OWNER = "kinoko34077"
@@ -352,80 +355,77 @@ class GitHubReader:
         def parse_time(value: Any) -> datetime:
             return _parse_updated_range_time(value)
 
-        query: dict[str, Any] = {
-            "sort": "updated", "direction": "asc" if upper is not None else "desc",
-            "per_page": per_page,
-        }
-        endpoint = "issues" if kind == "issue" else "issues/comments"
-        if state is not None:
-            query["state"] = state
-        # GitHub Issue REST has returned a false empty page for epoch-era
-        # since values. Before the conservative 2008 pushdown floor, omit
-        # the optimization entirely and enforce the same range locally.
-        # This is not an input-date restriction. Keep a one-second overlap
-        # for supported native boundaries (observed inclusive).
+        # Keep the mapped window's overlap/fallback policy separate from
+        # the native query's exact since semantics.
+        native_since = None
         pushdown_floor = datetime(2008, 1, 1, tzinfo=timezone.utc)
         if lower is not None and lower > pushdown_floor:
-            query["since"] = (lower - timedelta(seconds=1)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            native_since = (lower - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            plan = RepositoryIssueQuery(repository, kind, per_page=per_page, state=state,
+                sort="updated", direction="asc" if upper is not None else "desc",
+                native_since=native_since)
+        except MappedReadError as exc:
+            raise DevflowMCPError("Invalid updated-range query.") from exc
         seen: set[int] = set()
         items: list[dict[str, Any]] = []
         reasons: set[str] = set()
         exhausted = False
         upper_bound_reached = False
         previous_updated: datetime | None = None
-        for page in range(1, max_pages + 1):
-            query["page"] = page
-            url = self._repository_url(repository, endpoint + "?" + urllib.parse.urlencode(query))
-            batch = self._read(url)
-            if not isinstance(batch, list) or len(batch) > per_page:
-                raise DevflowMCPError("Invalid updated-range response page.")
-            for item in batch:
-                if not isinstance(item, dict):
-                    raise DevflowMCPError("Invalid updated-range response row.")
-                updated = parse_time(item.get("updated_at"))
-                if previous_updated is not None and (
-                    (upper is not None and updated < previous_updated)
-                    or (upper is None and updated > previous_updated)
-                ):
-                    reasons.add("ORDER_DRIFT")
-                previous_updated = updated
-                # PR rows also participate in observed ordering and the page budget.
-                if kind == "issue" and "pull_request" in item:
-                    continue
-                identity = item.get("id")
-                if type(identity) is not int or identity <= 0:
-                    raise DevflowMCPError("Invalid updated-range record identity.")
-                if kind == "issue":
-                    number = item.get("number")
-                    if type(number) is not int or number <= 0:
-                        raise DevflowMCPError("Invalid updated-range Issue number.")
-                    verify_observed_issue_identity(item, repository, number)
-                    if item.get("state") not in ("open", "closed"):
-                        raise DevflowMCPError("Invalid updated-range Issue state.")
-                    if state != "all" and item["state"] != state:
-                        raise DevflowMCPError("Unexpected updated-range Issue state.")
-                else:
-                    origin = _parse_issue_identity_url(item.get("issue_url"), field="url")
-                    if (origin is None or origin[0].casefold() != repository.casefold()
-                            or origin[1] is None or origin[1] <= 0):
-                        raise DevflowMCPError("Invalid updated-range comment origin.")
-                if identity in seen:
-                    reasons.add("DUPLICATE_RECORD_ID")
-                    continue
-                seen.add(identity)
-                if (lower is None or updated >= lower) and (upper is None or updated < upper):
-                    items.append(item)
-            if len(batch) < per_page:
-                exhausted = True
-                break
-            # Inspect the entire page before stopping. A detected ordering
-            # violation or overlap makes early termination unsafe.
-            if (upper is not None and previous_updated is not None
-                    and previous_updated >= upper and not reasons):
-                upper_bound_reached = True
-                break
+        try:
+            pages = iter_list_pages(
+                lambda page: (self._read(self._api_base + plan.path(page)), None),
+                per_page=per_page, max_pages=max_pages)
+            for observed in pages:
+                page, batch = observed.number, observed.rows
+                for item in batch:
+                    if not isinstance(item, dict):
+                        raise DevflowMCPError("Invalid updated-range response row.")
+                    updated = parse_time(item.get("updated_at"))
+                    if previous_updated is not None and (
+                        (upper is not None and updated < previous_updated)
+                        or (upper is None and updated > previous_updated)
+                    ):
+                        reasons.add("ORDER_DRIFT")
+                    previous_updated = updated
+                    # PR rows also participate in observed ordering and the page budget.
+                    if kind == "issue" and "pull_request" in item:
+                        continue
+                    identity = item.get("id")
+                    if type(identity) is not int or identity <= 0:
+                        raise DevflowMCPError("Invalid updated-range record identity.")
+                    if kind == "issue":
+                        number = item.get("number")
+                        if type(number) is not int or number <= 0:
+                            raise DevflowMCPError("Invalid updated-range Issue number.")
+                        verify_observed_issue_identity(item, repository, number)
+                        if item.get("state") not in ("open", "closed"):
+                            raise DevflowMCPError("Invalid updated-range Issue state.")
+                        if state != "all" and item["state"] != state:
+                            raise DevflowMCPError("Unexpected updated-range Issue state.")
+                    else:
+                        origin = _parse_issue_identity_url(item.get("issue_url"), field="url")
+                        if (origin is None or origin[0].casefold() != repository.casefold()
+                                or origin[1] is None or origin[1] <= 0):
+                            raise DevflowMCPError("Invalid updated-range comment origin.")
+                    if identity in seen:
+                        reasons.add("DUPLICATE_RECORD_ID")
+                        continue
+                    seen.add(identity)
+                    if (lower is None or updated >= lower) and (upper is None or updated < upper):
+                        items.append(item)
+                if not observed.has_next:
+                    exhausted = True
+                    break
+                # Inspect the entire page before stopping. A detected ordering
+                # violation or overlap makes early termination unsafe.
+                if (upper is not None and previous_updated is not None
+                        and previous_updated >= upper and not reasons):
+                    upper_bound_reached = True
+                    break
+        except MappedReadError as exc:
+            raise DevflowMCPError("Invalid updated-range response page.") from exc
         if not exhausted and not upper_bound_reached:
             reasons.add("PAGE_LIMIT")
         return {
@@ -445,14 +445,14 @@ class GitHubReader:
         A full page is a potentially truncated window; the B6 reader marks
         it as partial. No GitHub Search or extra gh authentication path.
         """
-        query = urllib.parse.urlencode({
-            "sort": "updated", "direction": "desc",
-            "per_page": kaep_live_delta_view.MAX_WINDOW, "page": 1,
-        })
-        result = self._read(self._repository_url(repository, f"issues/comments?{query}"))
-        if not isinstance(result, list) or len(result) > kaep_live_delta_view.MAX_WINDOW:
-            raise DevflowMCPError("GitHub recent Issue comments response is invalid.")
-        return result
+        try:
+            plan = RepositoryIssueQuery(normalize_repository(repository), "issue_comment",
+                per_page=kaep_live_delta_view.MAX_WINDOW, sort="updated", direction="desc")
+            return next(iter_list_pages(
+                lambda page: (self._read(self._api_base + plan.path(page)), None),
+                per_page=plan.per_page, max_pages=1)).rows
+        except MappedReadError as exc:
+            raise DevflowMCPError("GitHub recent Issue comments response is invalid.") from exc
 
     def get_pull_request(self, repository: str, number: int) -> dict[str, Any]:
         if type(number) is not int or number <= 0:
