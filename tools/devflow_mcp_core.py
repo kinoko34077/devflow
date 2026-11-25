@@ -106,6 +106,38 @@ def _validate_github_page_size(per_page: int) -> None:
         )
 
 
+def _parse_updated_range_time(value: Any) -> datetime:
+    from devflow_mapped_read import parse_utc_timestamp
+    try:
+        return parse_utc_timestamp(value, seconds_only=True)
+    except ValueError:
+        raise DevflowMCPError("Expected a valid UTC second-resolution timestamp.") from None
+
+
+def validate_updated_range_options(
+    kind: str, state: str | None, from_utc: str | None,
+    to_utc: str | None, per_page: int, max_pages: int,
+) -> tuple[str | None, datetime | None, datetime | None]:
+    """Shared argument validation before any updated-window GET."""
+    _validate_github_page_size(per_page)
+    if type(max_pages) is not int or not 1 <= max_pages <= 40:
+        raise DevflowMCPError("Invalid updated-range page bound.")
+    if kind not in ("issue", "issue_comment"):
+        raise DevflowMCPError("Unsupported updated-range object kind.")
+    if kind == "issue":
+        if state is None:
+            state = "all"
+        if state not in ("open", "closed", "all"):
+            raise DevflowMCPError("Unsupported updated-range issue state.")
+    elif state is not None:
+        raise DevflowMCPError("Issue state is not a comment filter.")
+    lower = _parse_updated_range_time(from_utc) if from_utc is not None else None
+    upper = _parse_updated_range_time(to_utc) if to_utc is not None else None
+    if lower is not None and upper is not None and lower >= upper:
+        raise DevflowMCPError("Invalid half-open updated range.")
+    return state, lower, upper
+
+
 def parse_sections(body: str, *, reject_duplicates: bool = False) -> dict[str, str]:
     sections: dict[str, str] = {}
     for name, value in iter_h2_sections(body):
@@ -313,34 +345,13 @@ class GitHubReader:
         or execution authority. A live paginated read is never atomic.
         """
         repository = normalize_repository(repository)
-        _validate_github_page_size(per_page)
-        if type(max_pages) is not int or not 1 <= max_pages <= 40:
-            raise DevflowMCPError("Invalid updated-range page bound.")
-        if kind not in ("issue", "issue_comment"):
-            raise DevflowMCPError("Unsupported updated-range object kind.")
-        if kind == "issue":
-            if state is None:
-                state = "all"
-            if state not in ("open", "closed", "all"):
-                raise DevflowMCPError("Unsupported updated-range issue state.")
-        elif state is not None:
-            raise DevflowMCPError("Issue state is not a comment filter.")
+        state, lower, upper = validate_updated_range_options(
+            kind, state, from_utc, to_utc, per_page, max_pages
+        )
 
         def parse_time(value: Any) -> datetime:
-            if not isinstance(value, str) or not re.fullmatch(
-                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value
-            ):
-                raise DevflowMCPError("Expected a UTC second-resolution timestamp.")
-            try:
-                parsed = datetime.fromisoformat(value[:-1] + "+00:00")
-            except ValueError:
-                raise DevflowMCPError("Invalid UTC timestamp.") from None
-            return parsed
+            return _parse_updated_range_time(value)
 
-        lower = parse_time(from_utc) if from_utc is not None else None
-        upper = parse_time(to_utc) if to_utc is not None else None
-        if lower is not None and upper is not None and lower >= upper:
-            raise DevflowMCPError("Invalid half-open updated range.")
         query: dict[str, Any] = {
             "sort": "updated", "direction": "asc" if upper is not None else "desc",
             "per_page": per_page,
