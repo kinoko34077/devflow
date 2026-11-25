@@ -107,10 +107,10 @@ class DiscoveryReaderTests(unittest.TestCase):
             successor_issue=789, expected_notice_actor=ACTOR,
             expected_source_actor=ACTOR,
             fetch_source=lambda r, i: pages([comment(77, root), comment(79, cancel)]))
-        self.assertEqual(len(result["hints"]), 1)
-        self.assertEqual(result["hints"][0]["cancellation_observation"],
+        self.assertEqual(len(result["source_verified_roots"]), 1)
+        self.assertEqual(result["source_verified_roots"][0]["cancellation_observation"],
                          "CANCEL_REQUEST_OBSERVED")
-        self.assertEqual(result["hints"][0]["index_origins"], ["legacy", "successor"])
+        self.assertEqual(result["source_verified_roots"][0]["index_origins"], ["legacy", "successor"])
 
     def test_multiple_pointers_to_one_source_decode_one_complete_mailbox(self):
         root, first_notice, pointer = fixtures()
