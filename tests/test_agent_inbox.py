@@ -414,6 +414,11 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
             "demo", recipient="claude-code")
         self.assertEqual(result["schema_version"], "devflow.agent-workspace.read.v0.1")
+        self.assertEqual(result["coverage_status_scope"], "WORK_VIEW")
+        self.assertEqual(result["sections"]["known_tasks"]["unresolved_issue_discovery"], {
+            "status": "AVAILABLE", "verified_control_issue_numbers": [],
+            "role_review_issue_numbers": [],
+        })
         self.assertEqual(reader.calls.count((REPO, "open")), 1)
         self.assertEqual(reader.calls.count((REPO, "comments", 21)), 1)
         self.assertEqual(result["sections"]["messages"]["entries"][0]["recipient"], "claude-code")
@@ -480,6 +485,12 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(len(result["sections"]["known_tasks"]["entries"]), 1)
         self.assertEqual(result["coverage_status"], "INCOMPLETE")
         self.assertEqual(result["sections"]["known_tasks"]["unresolved_open_issue_count"], 1)
+        self.assertEqual(result["coverage_status_scope"], "WORK_VIEW")
+        self.assertEqual(result["sections"]["known_tasks"]["unresolved_issue_discovery"], {
+            "status": "AVAILABLE", "verified_control_issue_numbers": [],
+            "role_review_issue_numbers": [22],
+        })
+        self.assertEqual(reader.calls.count((REPO, "open")), 1)
         self.assertEqual(result["sections"]["known_tasks"]["scoped_read_precedence"], "LIVE_SOURCE_FOR_EXACT_KNOWN_TASKS")
         self.assertEqual(result["sections"]["messages"]["status"], "TASK_SOURCE_COHORT_ONLY")
         self.assertFalse(result["is_live_agent_delivery"])
@@ -503,6 +514,10 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertIn("HTTP 403", result["source_error"])
         self.assertIsNone(result["sections"]["known_tasks"]["entries"])
         self.assertEqual(result["sections"]["known_tasks"]["scoped_read_precedence"], "SOURCE_UNAVAILABLE")
+        self.assertEqual(result["sections"]["known_tasks"]["unresolved_issue_discovery"], {
+            "status": "SOURCE_UNAVAILABLE", "verified_control_issue_numbers": None,
+            "role_review_issue_numbers": None,
+        })
         self.assertIsNone(result["sections"]["messages"]["entries"])
         self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
@@ -716,6 +731,37 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(reader.calls.count((REPO, "comments", 22)), 1)
         self.assertEqual(reader.calls.count((REPO, "comments", 23)), 1)
         self.assertTrue(all(r["issue_role"] is None for r in rows))
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_b6_overflow_retains_index_and_reports_unchecked_sources(self):
+        old = {n: message(issue=n) for n in range(100, 141)}
+        newer = message(issue=900)
+        self.index_mock.return_value = demo_index(
+            *((n, 1000+n, msg) for n, msg in old.items()))
+        comments = {(REPO, n): [issue_comment(1000+n, msg)]
+                    for n, msg in old.items()}
+        comments[(REPO, 900)] = [issue_comment(9999, newer)]
+        reader = fixture_reader(
+            [unclassified_issue(n) for n in [*old, 900]],
+            comments=comments,
+            recent_comments={REPO: [recent_marker(issue=900, cid=9999, msg=newer)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        section = result["sections"]["messages"]
+        d = section["recent_discovery"]
+        self.assertEqual(section["status"], "RECENT_DISCOVERY_PARTIAL")
+        self.assertEqual(d["index_status"], "AVAILABLE")
+        self.assertEqual(d["source_candidate_total_count"], 42)
+        self.assertEqual(d["source_candidates"], 40)
+        self.assertEqual(d["source_candidates_not_checked"], 2)
+        self.assertEqual(len(section["entries"]), 40)
+        self.assertIn(f"https://github.com/{REPO}/issues/900",
+                      [row["subject_ref"] for row in section["entries"]])
+        self.assertIn("UNION_SOURCE_LIMIT_PARTIAL",
+                      [w["reason_code"] for w in d["warnings"]])
+        self.assertEqual(reader.calls.count((REPO, "open")), 1)
+        self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
     def test_workspace_b6_index_scope_does_not_fetch_other_repository(self):
