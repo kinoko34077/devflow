@@ -8,7 +8,28 @@ from tests.test_repository_bootstrap_main_protection import ProtectionApi
 
 NAME = "kinoko34077/example-repo"
 SPEC = "# Explicit Project specification\n"
-MANIFEST = {"schema_version": 1, "project": {"name": "example-repo", "type": "library"}}
+# Match the admitted Base's minimal-profile manifest and the persisted
+# ten-file seed. Do not declare src/ or tests/ until files exist there.
+MANIFEST = {
+    "schema_version": 1,
+    "project": {"name": "example-repo", "type": "library"},
+    "profile": "minimal",
+    "runtime": {"modules": []},
+    "surfaces": {
+        "cli": False, "gui_windows": False, "web": False, "api": False,
+        "mcp": False, "agent": False, "library": False,
+    },
+    "commands": {
+        "setup": "", "dev": "", "test": "", "build": "", "verify": "",
+        "smoke": "", "deploy": "",
+    },
+    "paths": {
+        "docs": "docs/",
+        "actions": "contracts/actions.json",
+        "surfaces": "contracts/surfaces.json",
+        "defaults": "defaults.json",
+    },
+}
 DEFAULTS = {"schema_version": 1, "packs": {}}
 
 
