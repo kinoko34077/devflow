@@ -95,6 +95,23 @@ class DiscoveryReaderTests(unittest.TestCase):
                 self.assertEqual(out["hints"][0]["observed_reply_kinds"], [])
                 self.assertEqual(out["hints"][0]["status"], "POINTER_SOURCE_VERIFIED_ONLY")
 
+    def test_dual_index_preserves_cooperative_cancellation_in_deduplicated_root(self):
+        from tools.kaep_discovery_reader import discover_dual_index_shadow
+        root, hint, _ = fixtures()
+        cancel = {**root, "message_id": "msg_dual_cancel_request",
+                  "in_reply_to": root["message_id"], "kind": "CANCEL_REQUEST",
+                  "intent": "CANCEL", "idempotency_key": "kaep.dual.cancel.request"}
+        successor_hint = {**hint, "task_ref": f"{DISCOVERY_REPOSITORY}#789"}
+        result = discover_dual_index_shadow(
+            pages([comment(88, hint)]), pages([comment(89, successor_hint)]),
+            successor_issue=789, expected_notice_actor=ACTOR,
+            expected_source_actor=ACTOR,
+            fetch_source=lambda r, i: pages([comment(77, root), comment(79, cancel)]))
+        self.assertEqual(len(result["hints"]), 1)
+        self.assertEqual(result["hints"][0]["cancellation_observation"],
+                         "CANCEL_REQUEST_OBSERVED")
+        self.assertEqual(result["hints"][0]["index_origins"], ["legacy", "successor"])
+
     def test_multiple_pointers_to_one_source_decode_one_complete_mailbox(self):
         root, first_notice, pointer = fixtures()
         second_notice = other_notice(
