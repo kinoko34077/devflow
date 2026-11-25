@@ -30,8 +30,8 @@ The old third argument remains the fallback.
 実行部だけに選択済みrelease rootのPYTHONPATHと既存gh tokenを渡す。
 不正marker/候補起動失敗では正常な旧実行部とcatalogを保つ。catalog変更はSDKの通知と
 実際のtools/list再取得後に反映し、退役した実行部を回収する。
-現行のholdは配布昇格停止であり、接続内のrollback切替とcatalog非対応clientの扱いは
-別途負例受入が必要。markerや実行ファイルの改変を許可するものではない。
+holdは配布昇格停止のまま維持する。明示rollbackで選択が変わった場合は、旧workerへ新規callを流さず、検証済み復旧先へ切り替える。catalog未再取得時は旧公開契約と一致するtoolだけ復旧先で実行し、変更・退役toolは再取得を案内する。通常切替では既送callを完了させ、接続EOFではその接続のchildを回収する。送信済みcallを自動再送しない。markerや実行ファイルの改変を許可するものではない。
+旧未注釈read-only名の互換例外は、運用上選択可能な全rollback/fallback版が明示宣言を満たし、旧版への復旧が不要と確認した時点で退役する。
 
 A local read-only state file determines which *newly started* server is selected:
 
