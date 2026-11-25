@@ -386,6 +386,22 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 )
             self.assertEqual(env, {"PYTHONPATH": "/allowed/repo"})
             self.assertIn('command = "/fake/python"', config.read_text())
+            original = config.read_text()
+            for flag, accepted in (("-I", True), ("-c", False), ("-m", False)):
+                with self.subTest(flag=flag):
+                    config.write_text(original.replace('args = [', f'args = ["{flag}", '),
+                                      encoding="utf-8")
+                    before = config.read_bytes()
+                    with patch("pathlib.Path.home", return_value=user):
+                        if accepted:
+                            self.assertEqual(manager.registered_mcp_env(
+                                Path("/fake/python"), Path("/fake/fallback")), env)
+                        else:
+                            with self.assertRaises(manager.ReleaseError):
+                                manager.registered_mcp_env(Path("/fake/python"),
+                                                           Path("/fake/fallback"))
+                    self.assertEqual(config.read_bytes(), before)
+
 
 
     def test_stdio_validation_uses_selected_script_root_not_registered_old_path(self):
