@@ -30,9 +30,9 @@ ORIGIN_URLS = {
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED_CHECKS = frozenset({"verify", "mcp-stdio-python311"})
 # The installed manager and connection adapter use the same admission module.
-try:
+if __package__:
     from .devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
-except ImportError:
+else:
     from devflow_mcp_catalog import CatalogError, admit_catalog, REQUIRED_CALLS, SMOKE_CALLS
 
 
@@ -456,7 +456,7 @@ async def _stdio_test(
                 try:
                     catalog = admit_catalog(listing.tools, next_cursor=listing.next_cursor)
                 except CatalogError as error:
-                    raise ReleaseError("MCP candidate catalog rejected") from error
+                    raise ReleaseError(f"MCP candidate catalog rejected: {error}") from error
                 if full:
                     for name in SMOKE_CALLS:
                         result = await asyncio.wait_for(
