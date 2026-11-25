@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from devflow_mapped_read import MappedReadError
 from devflow_mapped_read.github_pages import (RepositoryIssueQuery, iter_list_pages,
-                                             read_linked_rows)
+                                             iter_linked_pages, read_linked_rows)
 
 REPO = "kinoko34077/devflow"
 
@@ -113,3 +113,27 @@ class NativePagesTests(unittest.TestCase):
         with self.assertRaisesRegex(MappedReadError, "INVALID_LIST_PAGE"):
             read_linked_rows(plan.path, lambda path: ([], 'rel="next"'),
                              per_page=2, max_pages=2)
+
+    def test_link_iterator_preserves_page_boundaries_and_stops_at_consumer_break(self):
+        plan = RepositoryIssueQuery(REPO, "issue", per_page=2)
+        calls = []
+        def get(path):
+            calls.append(path)
+            return ([1], 'rel="next"') if len(calls) == 1 else ([2, 3], "")
+        result = list(iter_linked_pages(plan.path, get, per_page=2, max_pages=3))
+        self.assertEqual([p.rows for p in result], [[1], [2, 3]])
+        self.assertEqual([p.number for p in result], [1, 2])
+        self.assertEqual(calls, [plan.path(1), plan.path(2)])
+        calls.clear()
+        for page in iter_linked_pages(plan.path, get, per_page=2, max_pages=3):
+            self.assertTrue(page.has_next)
+            break
+        self.assertEqual(calls, [plan.path(1)])
+
+    def test_link_iterator_exhaustion_does_not_hide_budget_limit(self):
+        plan = RepositoryIssueQuery(REPO, "issue", per_page=2)
+        pages = iter_linked_pages(plan.path, lambda path: ([1], 'rel="next"'),
+                                  per_page=2, max_pages=1)
+        self.assertTrue(next(pages).has_next)
+        with self.assertRaisesRegex(MappedReadError, "PAGE_LIMIT"):
+            next(pages)

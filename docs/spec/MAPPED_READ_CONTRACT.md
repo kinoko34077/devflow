@@ -44,3 +44,5 @@ python -m tools.devflow_read_cli mapped-read --request-file /absolute/path/reque
 `read_linked_rows(plan.path, get_page, per_page=plan.per_page, max_pages=既存の予算)` は明示的なLinkヘッダーを返す既存GET経路向けの全ページ取得入口。GET callbackは既存transportの `(rows, Link文字列)` を返す（Linkなしは空文字列）。任意のLink URLへアクセスせず、宣言したpathの連番だけを使用。nextが残る予算到達や途中の読取失敗では正常な全件結果を返さない。Linkによるページ終了は原子的snapshot/全source完全性の保証ではない。公開CLIの許可属性は変更しない。
 
 Issue Index等の信頼済みローカル処理は、既存の検証済みdevflow固定checkoutを `PYTHONPATH` または既存のimport path設定で参照し、`RepositoryIssueQuery` と `read_linked_rows` を直接利用する。既存のrepo探索・認証・retry・body分類・保存境界はそのownerに残す。新規依存配布、個別loader、別HTTP実装は不要。固定版の選択は共通ホスト設定側で行い、利用先コードに個別の版文字列を埋め込まない。SourceMapは保存済み履歴/索引の意味・許可属性の登録にそのまま利用し、別schemaを新設しない。各consumerの実運用切替は個別受入による。
+
+ページ単位の既存利用者は `iter_linked_pages` を利用する。同じLink判定・予算・異常処理を `read_linked_rows` も利用し、別ループを実装しない。iteratorを完全に消費してnextが残る予算に到達した場合は例外。途中で停止した結果は全件として扱わない。
