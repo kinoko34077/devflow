@@ -46,3 +46,14 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 初回の承認済み固定版供給に一般的なコード等価性・全consumer展開を前提としない。保護されたpolicy側で選択済みの固定repo/ID、channel、policy revision、commit、branch、workflow ID/path、必須job名を `FixedSourceRequirement` に渡す。既存 `GitHubReader` のexact workflow push照会と `read_run_verification` の最新job・run再照合を使用し、対象runの一意性、repo/head repo ID、head/branch/workflow/event、成功・必須jobの一意な成功、commit treeを確認する。
 
 `NATIVE_SOURCE_CANDIDATE` は指定固定版のnative成功と供給元treeの観測結果だけを表す。実行済みtreeは推定せず `tested_tree=null`、`can_authorize_execution=false`。取得不能・曖昧・drift・欠落はUNKNOWN、非成功はNOT_SUCCESSFUL。正規policyの真正性、pin/チャネル採否、host保護、供給物検証、実行許可・offline承認は別責務。公開JSON/MCP/CLIからpolicyを受け取らない。既存専用MCP release managerの実運用gateは変更しない。初回供給後の自動候補選択や実行証拠の測定/認証は別受入。
+
+
+## 保護host固定承認resolver（R1・非稼働候補）
+
+`tools/reference_host_policy.py` は既存 `FixedSourceRequirement` / `read_fixed_source_verification` と Base #76/#77 の `ResolveApproved(repository,channel,policyRevision,pin)` を接続する一つのhost専用入口。別のCI判定・Git供給・cache・公開MCPは追加しない。
+
+- 保護host ownerが承認したUTF-8 TOMLの**実bytes SHA-256**をpolicy revisionとする。host側が絶対pathと期待digestを固定する。requestのrevisionはそのdigestと一致する必要がある。policyの採否・実行主体・path・digest・resolver実装をconsumerに選ばせない。
+- `schema_version=1`、`[[sources]]` の各項目は repository、repository_id、channel、commit、tree_sha、branch、workflow_id、workflow_path、required_jobs。repo/channelごとに固定承認版一つ。pin省略はpolicyの固定版、明示pinは完全一致だけ。policyの未知項目・重複・不正・digest不一致・対象外をGET前に拒否。64KiBは設定読み取り時の資源上限であってsource件数の固定ではない。
+- native evidenceは毎回既存入口で確認し、policyのtreeと照合する。成功時のみ `RESOLVED` と既存Base resolverの repository/repository_id/channel/policy_revision/commit/mode=CURRENT を返す。source_ref/tree_shaは診断素材、実行済みtreeではない。失敗は非zero終了かつmodeなし。OFFLINEへの自動降格、未承認版の探索・承認・昇格はしない。
+- 保護済みprofileから、固定されたPython 3.11以上・絶対script pathを `-I -B` で呼ぶ。host設定の `--host-policy` と `--approved-digest` はconsumer requestの値で上書きしない。残り `--repository --channel --policy-revision --pin` のみ既存resolver引数。JSON/終了値はこの保護された呼出経路内で確認し、任意の外部JSON/stdoutを真正承認として採用しない。引数でdigestを指定できること自体は真正性・権限の証明ではない。
+- 初回の明示固定版承認を一般CI等価性の完成まで遅延させない。将来の承認済み自動選択policyは別途受入する。既存保護manager・profile/credential/ACL・consumer・workflow・CI省略は未変更。試験policyは本番承認ではなく、実運用に用いるpolicy、信頼anchor、host配置/実行主体の保護、失効・差替え管理は独立Reviewと必要Human gateの対象。
