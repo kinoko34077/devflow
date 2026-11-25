@@ -17,14 +17,26 @@ from tools.devflow_mcp_connection import serve_connection
 
 
 WORKER = """import os
+import time
+from pathlib import Path
+from mcp import types
 from mcp.server import MCPServer
 mcp = MCPServer("fixture")
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def {name}() -> dict[str, str]:
     return {{"version": "{version}"}}
-@mcp.tool()
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def crash_worker() -> dict[str, str]:
     os._exit(9)
+@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def slow_read() -> dict[str, str]:
+    root = Path(__file__).parents[3]
+    (root / "slow-started").touch()
+    deadline = time.monotonic() + 15
+    while not (root / "slow-finish").exists():
+        if time.monotonic() > deadline: raise RuntimeError("fixture timeout")
+        time.sleep(0.05)
+    return {{"version": "{version}"}}
 mcp.run()
 """
 
@@ -45,7 +57,7 @@ def prepare(root, sha, version, name="read_version", gate=None, extra=False):
         )
     body = WORKER.format(name=name, version=version)
     if extra:
-        body = body.replace("mcp.run()", '''@mcp.tool()
+        body = body.replace("mcp.run()", '''@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def new_read(value: str = "default") -> dict[str, str]:
     return {"value": value}
 mcp.run()''')
@@ -107,7 +119,7 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.wait_for(client.initialize(), 35)
                         listing = await asyncio.wait_for(client.list_tools(), 15)
                         self.assertEqual({t.name for t in listing.tools},
-                                         {"read_version", "crash_worker", "restart_mcp"})
+                                         {"read_version", "crash_worker", "slow_read", "restart_mcp"})
 
                         async def read():
                             result = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
@@ -156,7 +168,7 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         # Same marker, same session. The failed call is not replayed.
                         self.assertEqual(await read(), "A")
                         self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                                         {"read_version", "crash_worker", "restart_mcp"})
+                                         {"read_version", "crash_worker", "slow_read", "restart_mcp"})
 
 
     async def test_changed_catalog_notification_and_scoped_refresh(self):
@@ -191,6 +203,7 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(restart.is_error)
                         self.assertEqual(json.loads(restart.content[0].text)["status"],
                                          "AWAITING_CATALOG_REFRESH")
+                        self.assertEqual(json.loads(restart.content[0].text)["action"], "REFRESH_TOOLS_LIST")
                         await asyncio.wait_for(notice.wait(), 5)
                         old = await client.call_tool("read_version", {})
                         self.assertFalse(old.is_error)
@@ -232,6 +245,49 @@ class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
                         stable = await client.call_tool("read_version", {})
                         self.assertFalse(stable.is_error)
                         self.assertEqual(json.loads(stable.content[0].text)["version"], "A")
+
+
+    async def test_restart_and_list_do_not_wait_for_inflight_old_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B")
+            select(root, a)
+            env = {**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                   "PYTHONDONTWRITEBYTECODE": "1"}
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env=env,
+            )
+            async def observe_start():
+                while not (root / "slow-started").exists():
+                    await asyncio.sleep(0.05)
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        await client.list_tools()
+                        slow = asyncio.create_task(client.call_tool("slow_read", {}))
+                        try:
+                            await asyncio.wait_for(observe_start(), 5)
+                            self.assertFalse(slow.done())
+                            listing = await asyncio.wait_for(client.list_tools(), 3)
+                            self.assertIn("restart_mcp", {t.name for t in listing.tools})
+                            select(root, b)
+                            restart = await asyncio.wait_for(client.call_tool("restart_mcp", {}), 12)
+                            self.assertFalse(restart.is_error)
+                            new = await asyncio.wait_for(client.call_tool("read_version", {}), 3)
+                            self.assertEqual(json.loads(new.content[0].text)["version"], "B")
+                            self.assertFalse(slow.done())
+                        finally:
+                            (root / "slow-finish").touch()
+                        old = await asyncio.wait_for(slow, 5)
+                        self.assertFalse(old.is_error)
+                        self.assertEqual(json.loads(old.content[0].text)["version"], "A")
+                        runtime = old.model_dump(by_alias=True)["_meta"]["kinotch.devflow.runtime"]
+                        self.assertEqual(runtime["served_version"], "a" * 40)
+                        self.assertEqual(runtime["running_version"], "b" * 40)
 
 
 if __name__ == "__main__":
