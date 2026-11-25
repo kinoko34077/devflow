@@ -1294,7 +1294,7 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         collision_b = control("duplicate", 21)
         wrong_url = {**control("wrong", 22), "html_url": "https://github.com/kinoko34077/other/issues/22"}
         malformed = {**control("marker", 23),
-                     "body": control("marker", 23)["body"] + "\\n" + repository_projection.ISSUE_METADATA_MARKER_BEGIN}
+                     "body": control("marker", 23)["body"] + "\n" + repository_projection.ISSUE_METADATA_MARKER_BEGIN}
         task = {**self._task_issue(25), "html_url": f"https://github.com/{repo}/issues/25"}
         reader = FakeReader([own, another, mismatch, bot, collision_a,
                              collision_b, wrong_url, malformed, unresolved(24), task])
@@ -1317,6 +1317,26 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertEqual(reader.calls, [(repo, "open")])
         self.assertEqual(projection["machine_task_count"], 1)
         self.assertEqual(projection["unclassified_count"], 8)
+
+    def test_role_discovery_keeps_duplicate_issue_identity_unresolved(self):
+        repo = devflow_mcp_core.DEVFLOW_REPOSITORY
+        own = {
+            **self._control("devflow", 16),
+            "repository_url": f"https://api.github.com/repos/{repo}",
+            "created_at": "2026-10-04T01:00:00Z",
+            "updated_at": "2026-10-04T02:00:00Z",
+        }
+        other = {**own, "title": "Issue changed title during pagination"}
+        view = devflow_mcp_core.DevflowService(
+            FakeReader([own, other])
+        ).get_repository_work_view("devflow")
+        self.assertEqual(view["unresolved_issue_discovery"], {
+            "status": "AVAILABLE",
+            "verified_control_issue_numbers": [],
+            "role_review_issue_numbers": [16],
+        })
+        self.assertEqual(view["coverage_status"], "INCOMPLETE")
+        self.assertFalse(view["observed_task_view"]["can_authorize_execution"])
 
     def test_role_discovery_for_other_repository_never_treats_control_title_as_proof(self):
         control = self._control("demo", 70)
