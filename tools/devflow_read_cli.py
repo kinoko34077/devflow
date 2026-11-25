@@ -14,10 +14,12 @@ from tools import agent_inbox
 from tools.devflow_mcp_core import DevflowMCPError, default_service
 from tools.devflow_read_errors import SAFE_READ_FAILURE_CODES, SAFE_ARGUMENT_FAILURE_CODES, failure_reason_code
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
+from tools.mapped_github_read import github_source_maps
+from devflow_mapped_read import read_mapped
 
 OPERATIONS = (
     "portfolio", "human-portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
-    "assess-issue-plan", "assess-outcome-observation",
+    "assess-issue-plan", "assess-outcome-observation", "mapped-read",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
 
@@ -29,8 +31,22 @@ def read_operation(
     outcome: dict[str, Any] | None = None,
     include_recent_kaep: bool = False,
     include_published_supply: bool = False,
+    mapped_request: dict[str, Any] | None = None,
+    allowed_repositories: list[str] | None = None,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
+    if operation == "mapped-read":
+        if (repository is not None or recipient != "codex" or limit != MAX_INBOX_LIMIT
+                or offset != 0 or work_status is not None or issue_number is not None
+                or plan is not None or outcome is not None
+                or include_recent_kaep is not False or include_published_supply is not False):
+            raise ValueError("MAPPED_READ_OPTIONS_CONFLICT")
+        if type(mapped_request) is not dict or type(allowed_repositories) is not list or not allowed_repositories:
+            raise ValueError("MAPPED_READ_REQUEST_OR_SCOPE_REQUIRED")
+        return read_mapped(mapped_request, sources=github_source_maps(service.reader),
+                           allowed_repositories=allowed_repositories)
+    if mapped_request is not None or allowed_repositories is not None:
+        raise ValueError("MAPPED_READ_OPTIONS_ON_OTHER_OPERATION")
     if operation == "portfolio":
         if repository is not None:
             raise ValueError("REPOSITORY_ON_PORTFOLIO_OPERATION")
@@ -117,9 +133,40 @@ def main(argv: list[str] | None = None) -> int:
         "--outcome-file", default=None,
         help="JSON file containing a declared outcome observation (assess-outcome-observation only).",
     )
+    parser.add_argument("--request-file", default=None,
+                        help="mapped-read only: UTF-8 JSON request file.")
+    parser.add_argument("--allowed-repository", action="append", default=None,
+                        help="mapped-read only: trusted caller's permitted repo (repeatable).")
     args = parser.parse_args(argv)
 
     try:
+        if args.operation == "mapped-read":
+            if (args.repository is not None or args.recipient != "codex"
+                    or args.limit != MAX_INBOX_LIMIT or args.offset != 0
+                    or args.work_status is not None or args.issue_number is not None
+                    or args.plan_file is not None or args.outcome_file is not None
+                    or args.include_recent_kaep or args.include_published_supply):
+                raise ValueError("MAPPED_READ_OPTIONS_CONFLICT")
+            if args.request_file is None or not args.allowed_repository:
+                raise ValueError("MAPPED_READ_REQUEST_OR_SCOPE_REQUIRED")
+            try:
+                # Same bounded JSON-file convention as existing assessment reads.
+                with open(args.request_file, encoding="utf-8") as request_file:
+                    raw = request_file.read(100_001)
+                if len(raw) > 100_000:
+                    raise ValueError("MAPPED_READ_INVALID_REQUEST_FILE")
+                packet = json.loads(raw, object_pairs_hook=_unique_object)
+                if type(packet) is not dict:
+                    raise ValueError("MAPPED_READ_INVALID_REQUEST_FILE")
+            except (OSError, UnicodeError, ValueError, RecursionError):
+                raise ValueError("MAPPED_READ_INVALID_REQUEST_FILE") from None
+            result = read_operation(default_service(), operation=args.operation,
+                                    mapped_request=packet,
+                                    allowed_repositories=args.allowed_repository)
+            print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
+            return 2 if result["coverage"]["status"] == "BLOCKED" else 0
+        if args.request_file is not None or args.allowed_repository is not None:
+            raise ValueError("MAPPED_READ_OPTIONS_ON_OTHER_OPERATION")
         plan = None
         if args.operation == "portfolio":
             if args.repository is not None:
