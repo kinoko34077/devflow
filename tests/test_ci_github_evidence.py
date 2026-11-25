@@ -389,5 +389,126 @@ class FixedSourceEvidenceTests(unittest.TestCase):
         self.assertEqual(self.read()["reason"], "FIXED_SOURCE_TREE_UNPROVEN")
 
 
+class HostFixedPolicyTests(unittest.TestCase):
+    def setUp(self):
+        import hashlib
+        from tools.reference_host_policy import resolve_fixed_reference
+        self.resolve = resolve_fixed_reference
+        self.hashlib = hashlib
+        self.f = ReaderFixture()
+        self.f.run.update(
+            head_sha=MERGE, event="push", head_branch="main",
+            repository={"full_name": REPO, "id": 1234},
+            head_repository={"full_name": REPO, "id": 1234},
+        )
+        self.f.jobs["jobs"][0]["head_sha"] = MERGE
+        self.policy = f"""schema_version = 1
+
+[[sources]]
+repository = "{REPO}"
+repository_id = 1234
+channel = "stable"
+commit = "{MERGE}"
+tree_sha = "{TREE}"
+branch = "main"
+workflow_id = 13
+workflow_path = "{RUN['path']}"
+required_jobs = ["verify"]
+""".encode("utf-8")
+        self.digest = self.hashlib.sha256(self.policy).hexdigest()
+
+    def read(self, policy=None, digest=None, **changes):
+        params = dict(repository=REPO, channel="stable", policy_revision=self.digest,
+                      pinned_commit="")
+        params.update(changes)
+        return self.resolve(
+            self.f.reader, self.policy if policy is None else policy,
+            self.digest if digest is None else digest, **params,
+        )
+
+    def read_changed_policy(self, policy):
+        digest = self.hashlib.sha256(policy).hexdigest()
+        return self.read(policy, digest, policy_revision=digest)
+
+    def test_approved_fixed_policy_selects_default_or_matching_pin(self):
+        for pin in ("", MERGE):
+            result = self.read(pinned_commit=pin)
+            self.assertEqual(result["status"], "RESOLVED")
+            self.assertEqual(result["mode"], "CURRENT")
+            self.assertEqual(result["repository"], REPO)
+            self.assertEqual(result["repository_id"], 1234)
+            self.assertEqual(result["policy_revision"], self.digest)
+            self.assertEqual(result["commit"], MERGE)
+            self.assertEqual(result["tree_sha"], TREE)
+            self.assertTrue(result["requires_source_revalidation"])
+        self.assertEqual(len(self.f.calls), 10)
+
+    def test_policy_identity_and_request_scope_rejected_before_read(self):
+        cases = [
+            self.read(self.policy + b"\n"),
+            self.read(digest="0" * 64),
+            self.read(policy_revision="0" * 64),
+            self.read(repository="other/repo"),
+            self.read(channel="preview"),
+            self.read(pinned_commit=HEAD),
+            self.read(pinned_commit="main"),
+        ]
+        for result in cases:
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertNotIn("mode", result)
+        self.assertEqual(self.f.calls, [])
+
+    def test_bad_policy_schema_and_duplicate_source_fail_before_read(self):
+        for raw in (
+            self.policy.replace(b"schema_version = 1", b"schema_version = true"),
+            self.policy.replace(b"repository_id = 1234", b"repository_id = 1234.0"),
+            self.policy.replace(b'channel = "stable"', b'channel = "stable"\nchannel = "other"'),
+            self.policy + b'\nunknown = "bad"\n',
+            self.policy.replace(b'required_jobs = ["verify"]', b'required_jobs = []'),
+            self.policy.replace(b'required_jobs = ["verify"]', b'required_jobs = [["verify"]]'),
+            self.policy + self.policy[self.policy.index(b"[[sources]]"):],
+            b"\xff",
+        ):
+            with self.subTest(raw=raw[:70]):
+                self.assertEqual(self.read_changed_policy(raw)["status"], "BLOCKED")
+        self.assertEqual(self.f.calls, [])
+
+    def test_matching_native_success_cannot_substitute_for_policy_tree(self):
+        policy = self.policy.replace(TREE.encode(), b"f" * 40)
+        result = self.read_changed_policy(policy)
+        self.assertEqual(result, {"status": "BLOCKED", "reason": "REFERENCE_TREE_MISMATCH"})
+
+    def test_native_failure_or_unavailable_never_falls_back_offline(self):
+        self.f.run["conclusion"] = "failure"
+        self.assertEqual(self.read(), {"status": "BLOCKED", "reason": "REFERENCE_NATIVE_EVIDENCE_UNAVAILABLE"})
+        self.f.run["conclusion"] = "success"
+        self.f.workflow_runs = {"total_count": 0, "workflow_runs": []}
+        self.assertEqual(self.read(), {"status": "BLOCKED", "reason": "REFERENCE_NATIVE_EVIDENCE_UNAVAILABLE"})
+
+    def test_direct_isolated_cli_rejects_unapproved_pin_and_bad_digest(self):
+        import json
+        from pathlib import Path
+        import subprocess
+        import sys
+        import tempfile
+        script = Path(__file__).resolve().parents[1] / "tools/reference_host_policy.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.toml"
+            path.write_bytes(self.policy)
+            args = [sys.executable, "-I", "-B", str(script),
+                    "--host-policy", str(path), "--approved-digest", self.digest,
+                    "--repository", REPO, "--channel", "stable",
+                    "--policy-revision", self.digest]
+            result = subprocess.run(args + ["--pin", HEAD], cwd=tmp, capture_output=True,
+                                    text=True, check=False, timeout=20)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout), {"status": "BLOCKED", "reason": "REFERENCE_PIN_NOT_APPROVED"})
+            path.write_bytes(self.policy + b"\n")
+            result = subprocess.run(args, cwd=tmp, capture_output=True, text=True,
+                                    check=False, timeout=20)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout), {"status": "BLOCKED", "reason": "HOST_POLICY_IDENTITY_MISMATCH"})
+
+
 if __name__ == "__main__":
     unittest.main()
