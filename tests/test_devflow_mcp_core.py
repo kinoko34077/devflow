@@ -1265,6 +1265,78 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         self.assertIsNone(scoped["unresolved_open_issue_count"])
         self.assertFalse(scoped["covers_all_local_work"])
 
+    def test_work_view_reuses_devflow_open_snapshot_and_partitions_role_review(self):
+        repo = devflow_mcp_core.DEVFLOW_REPOSITORY
+
+        def control(name, number):
+            return {
+                **self._control(name, number),
+                "repository_url": f"https://api.github.com/repos/{repo}",
+                "created_at": "2026-10-04T01:00:00Z",
+                "updated_at": "2026-10-04T02:00:00Z",
+            }
+
+        def unresolved(number, title="[WORK ORDER] genuine legacy work"):
+            return {
+                **self._task_issue(number, title=title),
+                "html_url": f"https://github.com/{repo}/issues/{number}",
+                "body": "Role not yet attested",
+            }
+
+        own = control("devflow", 16)
+        another = control("demo", 17)
+        # A title is never enough: mismatched repository, bot without
+        # checked provenance, duplicate title, and malformed markers remain.
+        mismatch = {**control("other", 18), "body": another["body"]}
+        bot = {**control("bot", 19),
+               "user": {"id": 41898282, "login": "github-actions[bot]"}}
+        collision_a = control("duplicate", 20)
+        collision_b = control("duplicate", 21)
+        wrong_url = {**control("wrong", 22), "html_url": "https://github.com/kinoko34077/other/issues/22"}
+        malformed = {**control("marker", 23),
+                     "body": control("marker", 23)["body"] + "\\n" + repository_projection.ISSUE_METADATA_MARKER_BEGIN}
+        task = {**self._task_issue(25), "html_url": f"https://github.com/{repo}/issues/25"}
+        reader = FakeReader([own, another, mismatch, bot, collision_a,
+                             collision_b, wrong_url, malformed, unresolved(24), task])
+        view = devflow_mcp_core.DevflowService(reader).get_repository_work_view("devflow")
+        self.assertEqual(reader.calls, [(repo, "open")])
+        self.assertEqual(view["unresolved_issue_discovery"], {
+            "status": "AVAILABLE",
+            "verified_control_issue_numbers": [16, 17],
+            "role_review_issue_numbers": [18, 19, 20, 21, 22, 23, 24],
+        })
+        self.assertEqual(view["coverage_status"], "INCOMPLETE")
+        self.assertEqual(view["observed_task_view"]["unresolved_open_issue_count"], 9)
+        self.assertEqual([row["issue_number"] for row in view["task_records"]], [25])
+        self.assertFalse(view["can_replace_manual_active_work"])
+        self.assertFalse(view["observed_task_view"]["can_authorize_execution"])
+        # The existing projection producer gets one listing as well; the
+        # underlying legacy role/count contract is unchanged.
+        reader.calls.clear()
+        projection = devflow_mcp_core.DevflowService(reader).get_repository_projection(repo)
+        self.assertEqual(reader.calls, [(repo, "open")])
+        self.assertEqual(projection["machine_task_count"], 1)
+        self.assertEqual(projection["unclassified_count"], 8)
+
+    def test_role_discovery_for_other_repository_never_treats_control_title_as_proof(self):
+        control = self._control("demo", 70)
+        unknown = {**self._task_issue(2, title="[REPO] spoof"), "body": "not metadata"}
+        reader = FakeReader([], issues_by_repository={
+            devflow_mcp_core.DEVFLOW_REPOSITORY: [control],
+            "kinoko34077/demo": [unknown],
+        })
+        view = devflow_mcp_core.DevflowService(reader).get_repository_work_view("demo")
+        self.assertEqual(reader.calls, [
+            (devflow_mcp_core.DEVFLOW_REPOSITORY, "open"),
+            ("kinoko34077/demo", "open"),
+        ])
+        self.assertEqual(view["unresolved_issue_discovery"], {
+            "status": "AVAILABLE",
+            "verified_control_issue_numbers": [],
+            "role_review_issue_numbers": [2],
+        })
+        self.assertEqual(view["coverage_status"], "INCOMPLETE")
+
     def test_m3_local_work_view_partial_and_untrusted_fall_back(self):
         control = self._control("demo", 70)
         issue = self._task_issue(1)
@@ -1332,6 +1404,11 @@ class RepositoryProjectionMCPTests(unittest.TestCase):
         })
         self.assertEqual(view["view_mode"], "MANUAL_CONTROL_FALLBACK")
         self.assertEqual(view["task_records"], [])
+        self.assertEqual(view["unresolved_issue_discovery"], {
+            "status": "SOURCE_UNAVAILABLE",
+            "verified_control_issue_numbers": None,
+            "role_review_issue_numbers": None,
+        })
         self.assertFalse(view["can_replace_manual_active_work"])
 
     def test_repository_projection_requires_managed_control(self):
