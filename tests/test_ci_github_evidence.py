@@ -5,7 +5,8 @@ import unittest
 from urllib.parse import urlsplit
 
 from tools.ci_github_evidence import (
-    ExecutionInputs, TrustedExecutionReceipt, read_execution_verification,
+    ExecutionInputs, FixedSourceRequirement, TrustedExecutionReceipt,
+    read_execution_verification, read_fixed_source_verification,
     read_pr_verification, read_run_verification,
 )
 from tools.devflow_mcp_core import GitHubReader, DevflowMCPError
@@ -42,6 +43,7 @@ class ReaderFixture:
         self.calls = []
         self.run_reads = 0
         self.changed_run = None
+        self.workflow_runs = None
         self.failed = set()
         self.reader = GitHubReader(transport=self.get)
 
@@ -55,6 +57,10 @@ class ReaderFixture:
             return self.pr
         if suffix == "git/commits/" + MERGE:
             return self.commit
+        if suffix == "actions/workflows/13/runs":
+            self.fixed_query = urlsplit(url).query
+            return (self.workflow_runs if self.workflow_runs is not None
+                    else {"total_count": 1, "workflow_runs": [self.run]})
         if suffix == "actions/runs/42/jobs":
             self.query = urlsplit(url).query
             return self.jobs
@@ -283,6 +289,102 @@ class ExecutionEvidenceTests(unittest.TestCase):
         self.f.jobs["jobs"][0].update(status="completed", conclusion="success")
         self.f.run.update(status="completed", conclusion="failure")
         self.assertEqual(self.read()["decision"]["action"], "RUN")
+
+
+class FixedSourceEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.f = ReaderFixture()
+        self.f.run.update(
+            head_sha=MERGE, event="push", head_branch="main",
+            repository={"full_name": REPO, "id": 1234},
+            head_repository={"full_name": REPO, "id": 1234},
+        )
+        self.f.jobs["jobs"][0]["head_sha"] = MERGE
+        self.required = FixedSourceRequirement(
+            REPO, 1234, "stable", "policy-1", MERGE, "main", 13,
+            RUN["path"], ("verify",),
+        )
+
+    def read(self, required=None):
+        return read_fixed_source_verification(
+            self.f.reader, self.required if required is None else required,
+        )
+
+    def test_fixed_native_success_distinct_from_code_equivalence_and_authority(self):
+        r = self.read()
+        self.assertEqual(r["status"], "NATIVE_SOURCE_CANDIDATE")
+        self.assertEqual(r["tree_sha"], TREE)
+        self.assertEqual(r["commit"], MERGE)
+        self.assertEqual(r["repository_id"], 1234)
+        self.assertEqual(r["channel"], "stable")
+        self.assertEqual(r["policy_revision"], "policy-1")
+        self.assertEqual(r["run_id"], 42)
+        self.assertEqual(len(r["job_source_refs"]), 1)
+        self.assertFalse(r["can_authorize_execution"])
+        self.assertIsNone(r["tested_tree"])
+        self.assertTrue(r["requires_source_revalidation"])
+        self.assertEqual(len(self.f.calls), 5)
+        self.assertIn("head_sha=" + MERGE, self.f.fixed_query)
+        self.assertIn("event=push", self.f.fixed_query)
+        self.assertIn("branch=main", self.f.fixed_query)
+
+    def test_invalid_requirements_stop_before_read(self):
+        for changes in (
+            {"repository_id": True}, {"commit": "main"}, {"workflow_id": 0},
+            {"channel": ""}, {"policy_revision": ""}, {"branch": ""},
+            {"required_jobs": ()}, {"required_jobs": ("verify", "verify")},
+            {"required_jobs": "verify"},
+        ):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.read(replace(self.required, **changes))["status"], "UNKNOWN")
+        self.assertEqual(self.f.calls, [])
+
+    def test_native_lookup_must_be_complete_and_unique(self):
+        for packet in (
+            {"total_count": 0, "workflow_runs": []},
+            {"total_count": 2, "workflow_runs": [self.f.run]},
+            {"total_count": 2, "workflow_runs": [self.f.run, self.f.run]},
+            {"total_count": True, "workflow_runs": [self.f.run]},
+        ):
+            self.f.workflow_runs = packet
+            self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_NOT_UNIQUE")
+
+    def test_wrong_repo_id_head_branch_workflow_event_or_commit_rejected(self):
+        original = copy.deepcopy(self.f.run)
+        for changes in (
+            {"repository": {"full_name": REPO, "id": 1235}},
+            {"head_repository": {"id": 1235}},
+            {"head_branch": "feature"}, {"head_sha": HEAD},
+            {"workflow_id": 99}, {"event": "pull_request"}, {"path": "other.yml"},
+        ):
+            with self.subTest(changes=changes):
+                self.f.run = original | changes
+                self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+
+    def test_partial_latest_jobs_or_run_drift_is_not_success(self):
+        self.f.workflow_runs = {"total_count": 1, "workflow_runs": [copy.deepcopy(self.f.run)]}
+        self.f.run["run_attempt"] = 3
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+        self.f.workflow_runs = None
+        self.f.jobs["total_count"] = 2
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+
+    def test_missing_duplicate_or_unsuccessful_required_job(self):
+        self.assertEqual(self.read(replace(self.required, required_jobs=("missing",)))
+                         ["reason"], "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE")
+        self.f.jobs["jobs"][0]["conclusion"] = "skipped"
+        self.assertEqual(self.read()["status"], "NOT_SUCCESSFUL")
+        self.f.jobs["jobs"][0]["conclusion"] = "success"
+        self.f.jobs["jobs"].append(dict(self.f.jobs["jobs"][0], id=11))
+        self.f.jobs["total_count"] = 2
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE")
+
+    def test_nonsuccessful_run_and_missing_tree_do_not_qualify(self):
+        self.f.run["conclusion"] = "failure"
+        self.assertEqual(self.read()["status"], "NOT_SUCCESSFUL")
+        self.f.run["conclusion"] = "success"
+        self.f.commit["tree"]["sha"] = None
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_TREE_UNPROVEN")
 
 
 if __name__ == "__main__":
