@@ -380,7 +380,11 @@ def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
         server = raw["mcp_servers"]["kinotch_devflow"]
         values = server.get("env", {})
         argv = server["args"]
+        if type(argv) is list and len(argv) == 4 and argv[0] == "-I":
+            # The one-time protected front migration adds only this flag.
+            argv = argv[1:]
         if (type(argv) is not list or len(argv) != 3
+                or not all(isinstance(value, str) for value in argv)
                 or Path(argv[2]).resolve() != fallback.resolve()
                 or Path(server["command"]).resolve() != python.resolve()):
             raise ReleaseError("registered Codex MCP launch paths have changed")
