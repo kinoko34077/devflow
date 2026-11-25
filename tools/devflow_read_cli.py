@@ -11,7 +11,8 @@ import sys
 from typing import Any
 
 from tools import agent_inbox
-from tools.devflow_mcp_core import DevflowMCPError, default_service
+from tools.ci_github_evidence import read_pr_verification, read_run_verification
+from tools.devflow_mcp_core import DevflowMCPError, default_service, normalize_repository
 from tools.devflow_read_errors import SAFE_READ_FAILURE_CODES, SAFE_ARGUMENT_FAILURE_CODES, failure_reason_code
 from tools.goal_plan_assessment import PlanAssessmentError, assess_plan, parse_plan_json
 from tools.mapped_github_read import github_source_maps
@@ -20,8 +21,25 @@ from devflow_mapped_read import BATCH_SCHEMA, read_mapped, read_mapped_batch
 OPERATIONS = (
     "portfolio", "human-portfolio", "bootstrap", "work-view", "scoped-task", "inbox", "workspace", "issue-goal-context",
     "assess-issue-plan", "assess-outcome-observation", "mapped-read",
+    "ci-pr-evidence", "ci-run-evidence",
 )
 MAX_INBOX_LIMIT = agent_inbox.MAX_INBOX_TASKS
+CI_OPERATIONS = frozenset({"ci-pr-evidence", "ci-run-evidence"})
+
+
+def _validate_ci_target(operation, repository, pr_number, run_id):
+    if operation not in CI_OPERATIONS:
+        if pr_number is not None or run_id is not None:
+            raise ValueError("CI_TARGET_ON_OTHER_OPERATION")
+        return None
+    if type(repository) is not str or not repository.strip():
+        raise ValueError("INVALID_REPOSITORY")
+    repo = normalize_repository(repository)
+    target, other = (pr_number, run_id) if operation == "ci-pr-evidence" else (run_id, pr_number)
+    if type(target) is not int or target < 1 or other is not None:
+        raise ValueError("INVALID_CI_TARGET")
+    return repo, target
+
 
 def read_operation(
     service: Any, *, operation: str, repository: str | None = None,
@@ -33,8 +51,22 @@ def read_operation(
     include_published_supply: bool = False,
     mapped_request: dict[str, Any] | None = None,
     allowed_repositories: list[str] | None = None,
+    pr_number: int | None = None, run_id: int | None = None,
 ) -> Any:
     """Delegate directly to the accepted, read-only MCP core implementation."""
+    ci_target = _validate_ci_target(operation, repository, pr_number, run_id)
+    if ci_target is not None:
+        if (recipient != "codex" or limit != MAX_INBOX_LIMIT or offset != 0
+                or work_status is not None or issue_number is not None
+                or plan is not None or outcome is not None
+                or include_recent_kaep is not False or include_published_supply is not False
+                or mapped_request is not None or allowed_repositories is not None):
+            raise ValueError("CI_OPTIONS_CONFLICT")
+        observe = read_pr_verification if operation == "ci-pr-evidence" else read_run_verification
+        result = observe(service.reader, *ci_target)
+        # Native status and current candidate metadata are observations only.
+        return result | {"can_authorize_execution": False, "can_skip_verification": False,
+                         "requires_source_revalidation": True}
     if operation == "mapped-read":
         if (repository is not None or recipient != "codex" or limit != MAX_INBOX_LIMIT
                 or offset != 0 or work_status is not None or issue_number is not None
@@ -130,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Workspace only: observe published Control candidates, not Claim eligibility",
     )
     parser.add_argument("--issue-number", type=int, default=None)
+    parser.add_argument("--pr-number", type=int, default=None, help="ci-pr-evidence only.")
+    parser.add_argument("--run-id", type=int, default=None, help="ci-run-evidence only.")
     parser.add_argument("--plan-file", default=None, help="JSON file containing a declared plan (assess-issue-plan only).")
     parser.add_argument(
         "--outcome-file", default=None,
@@ -142,6 +176,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        ci_target = _validate_ci_target(args.operation, args.repository, args.pr_number, args.run_id)
+        if ci_target is not None:
+            if (args.recipient != "codex" or args.limit != MAX_INBOX_LIMIT or args.offset != 0
+                    or args.work_status is not None or args.issue_number is not None
+                    or args.plan_file is not None or args.outcome_file is not None
+                    or args.include_recent_kaep or args.include_published_supply
+                    or args.request_file is not None or args.allowed_repository is not None):
+                raise ValueError("CI_OPTIONS_CONFLICT")
+            result = read_operation(default_service(), operation=args.operation,
+                                    repository=args.repository, pr_number=args.pr_number,
+                                    run_id=args.run_id)
+            print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
+            return 0 if result["status"] == "OBSERVED" else 2
         if args.operation == "mapped-read":
             if (args.repository is not None or args.recipient != "codex"
                     or args.limit != MAX_INBOX_LIMIT or args.offset != 0
