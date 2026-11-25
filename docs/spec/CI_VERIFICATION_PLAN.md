@@ -39,3 +39,10 @@ Owner: [devflow #1121](https://github.com/kinoko34077/devflow/issues/1121)。状
 - repo/guarantee、run ID・workflow ID/path/event/head、最新job一覧上のjob ID/name/attemptを照合する。jobの実checkout SHAは既存GitHubReaderのcommit GETでtreeを再確認。PR event headのtreeをtested_treeへ転記しない。欠落・不一致・不正・部分観測はUNKNOWN/HOLDで当該保証の省略不可。
 - 正常結合後のみtested_treeを返し、既存 `assess_verification` で要求の全入力と観測・現在結果・期限を比較する。現行workflow/jobの非成功は成功証拠にならず、期限切れやidentity差はRUN。REUSE_CANDIDATEは既存gateの解除ではない。原典再検証が必要。
 - 本段階のfixtureは信頼済み収集側を模擬し、結合と同等判定のみ実証する。実GitHub runに真正receiptがない場合は従来通りtested_tree未知。次に保護された実行主体による測定・証拠配送・認証の実証を行う。既存MCP専用release gate、CI実行、権限、公開、保存、consumerは変更しない。
+
+
+## 固定供給候補のnative証拠（R1・Base #66接続）
+
+初回の承認済み固定版供給に一般的なコード等価性・全consumer展開を前提としない。保護されたpolicy側で選択済みの固定repo/ID、channel、policy revision、commit、branch、workflow ID/path、必須job名を `FixedSourceRequirement` に渡す。既存 `GitHubReader` のexact workflow push照会と `read_run_verification` の最新job・run再照合を使用し、対象runの一意性、repo/head repo ID、head/branch/workflow/event、成功・必須jobの一意な成功、commit treeを確認する。
+
+`NATIVE_SOURCE_CANDIDATE` は指定固定版のnative成功と供給元treeの観測結果だけを表す。実行済みtreeは推定せず `tested_tree=null`、`can_authorize_execution=false`。取得不能・曖昧・drift・欠落はUNKNOWN、非成功はNOT_SUCCESSFUL。正規policyの真正性、pin/チャネル採否、host保護、供給物検証、実行許可・offline承認は別責務。公開JSON/MCP/CLIからpolicyを受け取らない。既存専用MCP release managerの実運用gateは変更しない。初回供給後の自動候補選択や実行証拠の測定/認証は別受入。

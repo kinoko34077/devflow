@@ -484,6 +484,25 @@ class GitHubReader:
             raise DevflowMCPError("Actions run identity unavailable.")
         return result
 
+    def get_fixed_push_workflow_runs(
+        self, repository: str, workflow_id: int, sha: str, branch: str,
+    ) -> dict[str, Any]:
+        """Bounded exact-source lookup, not an approval or all-run inventory."""
+        if (type(workflow_id) is not int or workflow_id <= 0
+                or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                or not isinstance(branch, str) or not branch.strip()):
+            raise DevflowMCPError("Invalid fixed workflow source identity.")
+        query = urllib.parse.urlencode({
+            "head_sha": sha, "event": "push", "branch": branch,
+            "per_page": MAX_GITHUB_REST_PER_PAGE,
+        })
+        result = self._read(self._repository_url(
+            repository, f"actions/workflows/{workflow_id}/runs?{query}",
+        ))
+        if not isinstance(result, dict):
+            raise DevflowMCPError("Invalid Actions workflow runs response.")
+        return result
+
     def get_latest_action_jobs(self, repository: str, run_id: int) -> dict[str, Any]:
         """One native latest-attempt page; callers must preserve partial coverage."""
         if type(run_id) is not int or run_id <= 0:
