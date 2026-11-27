@@ -35,7 +35,7 @@ def comment(cid, msg, actor=ACTOR):
 def invalid_ref_comment(cid, msg):
     """Valid outer envelope, invalid evidence URL. The codec must reject it."""
     payload = {**msg, "evidence_refs": [
-        "https://github.com/kinoko34077/devflow/pull/252#pullrequestreview-1234",
+        "https://github.com/kinoko34077/devflow/pull/252#pullrequestreview-0",
     ]}
     fence = chr(96) * 3
     return {"id": cid,
