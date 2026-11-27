@@ -49,6 +49,20 @@ class AgentInboxCLITests(unittest.TestCase):
         self.assertFalse(result["can_authorize_execution"])
         self.assertFalse(result["can_modify_checkin_schedule"])
 
+    def test_pending_only_keeps_unacknowledged_cancellation_not_received_one(self):
+        data = view()
+        data["issues"] = [
+            {"issue_number": 1, "requests": [{"status": "CANCEL_REQUEST_OBSERVED"}]},
+            {"issue_number": 2, "requests": [{"status": "CANCEL_ACK_OBSERVED"}]},
+        ]
+        result = cli.read_checkin(
+            FakeService({"kinoko34077/devflow": data}),
+            repositories=["kinoko34077/devflow"], recipient="claude-code",
+            work_status=None, limit=20, offset=0, pending_only=True,
+        )
+        self.assertEqual(
+            [x["issue_number"] for x in result["repositories"][0]["issues"]], [1])
+
     def test_read_all_keeps_separate_task_and_message_views(self):
         service = FakeService({"kinoko34077/devflow": view()})
         result = cli.read_checkin(

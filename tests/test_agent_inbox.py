@@ -78,6 +78,20 @@ def issue_comment(cid, msg, login=OWNER):
             "user": {"id": 79015263 if login == OWNER else 123456789, "login": login}}
 
 
+def cancellation(parent, *, ack=False):
+    suffix = "ack" if ack else "request"
+    return {
+        **parent,
+        "message_id": f"msg_cancel_{suffix}_{parent['message_id'][4:]}",
+        "in_reply_to": parent["message_id"],
+        "kind": "CANCEL_ACK" if ack else "CANCEL_REQUEST",
+        "intent": "CANCEL",
+        "recipient": "chatgpt" if ack else parent["recipient"],
+        "idempotency_key": f"kaep.cancel.{suffix}.{parent['message_id']}",
+        "payload": {"text": "cooperative cancellation only"},
+    }
+
+
 def fixture_reader(issues, comments=None, recent_comments=None):
     return FakeReader([], issues_by_repository={
         "kinoko34077/devflow": [control()],
@@ -633,6 +647,28 @@ class AgentWorkspaceProjectionTests(unittest.TestCase):
         self.assertEqual(section["status"], "TASK_AND_RECENT_ORIGINALS")
         self.assertEqual(section["entries"], [])
         self.assertTrue(section["has_unknown_work"])
+        self.assertFalse(result["can_authorize_execution"])
+
+    def test_workspace_b6_observes_cancellation_on_non_task_original(self):
+        root = message(issue=22)
+        cancel = cancellation(root)
+        receipt = cancellation(cancel, ack=True)
+        self.index_mock.return_value = demo_index((22, 31, root))
+        reader = fixture_reader(
+            [unclassified_issue(22)],
+            comments={(REPO, 22): [
+                issue_comment(31, root), issue_comment(32, cancel),
+                issue_comment(33, receipt),
+            ]},
+            recent_comments={REPO: [recent_marker(issue=22, cid=32, msg=cancel)]},
+        )
+        result = devflow_mcp_core.DevflowService(reader).get_agent_workspace(
+            "demo", recipient="claude-code", include_recent_kaep=True)
+        entries = result["sections"]["messages"]["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["source_message_id"], root["message_id"])
+        self.assertEqual(entries[0]["observed_state"], "CANCEL_ACK_OBSERVED")
+        self.assertTrue(result["has_unknown_work"])
         self.assertFalse(result["can_authorize_execution"])
 
     def test_workspace_b6_same_task_root_is_not_delivered_twice(self):
@@ -1542,6 +1578,82 @@ class AgentInboxProjectionTests(unittest.TestCase):
         self.assertNotIn("review this real work", json.dumps(res))
         self.assertNotIn("audit complete", json.dumps(res))
         self.assertIn((REPO, "comments", 21), reader.calls)
+
+    def test_cooperative_cancel_request_and_receipt_are_not_task_completion(self):
+        root = message()
+        cancel = cancellation(root)
+        receipt = cancellation(cancel, ack=True)
+        rows = [issue_comment(11, root), issue_comment(12, cancel)]
+        reader = fixture_reader([task()], {(REPO, 21): rows})
+        service = devflow_mcp_core.DevflowService(reader)
+        before = service.get_agent_inbox("demo")
+        self.assertEqual(before["issues"][0]["requests"][0]["status"],
+                         "CANCEL_REQUEST_OBSERVED")
+        rows.append(issue_comment(13, receipt))
+        after = service.get_agent_inbox("demo")
+        req = after["issues"][0]["requests"][0]
+        self.assertEqual(req["status"], "CANCEL_ACK_OBSERVED")
+        self.assertEqual(req["cancellation_observation"], "CANCEL_ACK_OBSERVED")
+        self.assertEqual(req["reply_kinds_observed"], [])
+        self.assertEqual(after["issues"][0]["work_status"], "AWAITING_REVIEW")
+        self.assertFalse(after["can_authorize_execution"])
+
+    def test_unmatched_or_untrusted_cancellation_never_hides_original(self):
+        root = message()
+        cancel = cancellation(root)
+        for label, rows in (
+            ("other recipient", [issue_comment(12, {**cancel, "recipient": "codex"})]),
+            ("other scope", [issue_comment(12, {**cancel, "scope": {
+                **cancel["scope"], "expected_head": "b" * 40}})]),
+            ("other exchange", [issue_comment(12, {**cancel, "exchange_id": "ex_wrong"})]),
+            ("other intent", [issue_comment(12, {**cancel, "intent": "REPORT"})]),
+            ("outsider", [issue_comment(12, cancel, login="outsider")]),
+            ("future parent", [issue_comment(10, cancel)]),
+            ("receipt without cancellation", [issue_comment(12, {
+                **cancellation(cancel, ack=True), "in_reply_to": root["message_id"]})]),
+            ("prose", [{"id": 12, "body": "旧依頼には応答不要",
+                       "user": {"id": 79015263, "login": OWNER}}]),
+        ):
+            with self.subTest(label=label):
+                reader = fixture_reader([task()], {
+                    (REPO, 21): [issue_comment(11, root), *rows]})
+                result = devflow_mcp_core.DevflowService(reader).get_agent_inbox("demo")
+                req = result["issues"][0]["requests"][0]
+                self.assertEqual(req["status"], "PENDING_REPLY")
+                self.assertNotIn("cancellation_observation", req)
+
+    def test_wrong_cancellation_receipt_does_not_ack_and_existing_answer_remains(self):
+        root = message()
+        cancel = cancellation(root)
+        receipt = cancellation(cancel, ack=True)
+        wrong = {**receipt, "recipient": root["recipient"]}
+        rows = [issue_comment(11, root), issue_comment(12, cancel), issue_comment(13, wrong)]
+        reader = fixture_reader([task()], {(REPO, 21): rows})
+        service = devflow_mcp_core.DevflowService(reader)
+        req = service.get_agent_inbox("demo")["issues"][0]["requests"][0]
+        self.assertEqual(req["status"], "CANCEL_REQUEST_OBSERVED")
+        answer = {**root, "message_id": "msg_answer_after_cancel",
+                  "kind": "ANSWER", "recipient": "chatgpt",
+                  "in_reply_to": root["message_id"],
+                  "idempotency_key": "kaep.answer.after.cancel"}
+        rows.append(issue_comment(14, answer))
+        req = service.get_agent_inbox("demo")["issues"][0]["requests"][0]
+        self.assertEqual(req["status"], "ANSWER_OBSERVED")
+        self.assertEqual(req["cancellation_observation"], "CANCEL_REQUEST_OBSERVED")
+        self.assertEqual(req["reply_kinds_observed"], ["ANSWER"])
+
+    def test_cancellation_does_not_affect_write_intent_or_other_root(self):
+        root = message()
+        review = {**root, "message_id": "msg_other_review",
+                  "idempotency_key": "kaep.other.review", "kind": "REVIEW_REQUEST",
+                  "intent": "REVIEW", "scope": {**root["scope"], "effect": "WRITE_INTENT"}}
+        cancel = cancellation(review)
+        reader = fixture_reader([task()], {(REPO, 21): [
+            issue_comment(11, root), issue_comment(12, review),
+            issue_comment(13, cancel)]})
+        requests = devflow_mcp_core.DevflowService(reader).get_agent_inbox(
+            "demo")["issues"][0]["requests"]
+        self.assertEqual([x["status"] for x in requests], ["PENDING_REPLY", "PENDING_REPLY"])
 
     def test_reply_correlation_scans_decoded_mailbox_once_for_many_roots(self):
         # Multiple legitimate roots share one Issue mailbox. Unrelated

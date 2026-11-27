@@ -52,7 +52,17 @@ No new wire schema, public discovery index entries, agent auto-wake, private-dat
 - For each response, require the matching `exchange_id`, `task_ref`, and known prior `in_reply_to`, independently check its GitHub actor and actual head/authority. Cursor is an optimization; pagination gaps or incomplete history fail closed.
 - Malformed wrappers, duplicate JSON keys, unknown fields, forged actors, missing owner evidence and stale heads fail closed. Do not echo untrusted raw text into logs.
 - Cancellation is cooperative messaging only; Claim is changed only by the existing serialized runtime path.
+
 - No automatic ChatGPT wakeup from a GitHub comment. GPT reads/replies while a user-initiated chat is running, or through a *separately* authorized future Codex/GPT API worker.
+
+### 取消・訂正の限定読取契約（#503）
+
+既存の `CANCEL_REQUEST` / `CANCEL_ACK` を使用する。新規wire形式・別台帳は作らない。対象は既存の非chatgpt宛 READ_ONLY 相談REQUEST（PING / ANALYZE / TEST / REPORT）に限定する。
+
+- 取消要求は、同一原典mailboxに先行するroot REQUESTを `in_reply_to` で直接指し、kind=CANCEL_REQUEST、intent=CANCEL、rootと同じexchange_id / task_ref / scope / recipientを持つ。双方のGitHub transport actorを既存の数値ID信頼規則で独立に検証する。モデル・セッション本人性を証明するものではない。
+- 取消受領は先行する有効な取消要求を直接指し、kind=CANCEL_ACK、intent=CANCEL、同じexchange_id / task_ref / scope、recipient=chatgptとする。これも同じactor検査を行う。取消受領は実処理停止を証明しない。
+- Inbox/B6/Workspaceでは `CANCEL_REQUEST_OBSERVED`（元依頼を再処理せず取消を確認）／`CANCEL_ACK_OBSERVED`（取消受領を観測）を通常の未回答・受領済みと区別する。既存のANSWERを消さない。pending-onlyは未回答rootの未受領取消要求を保持する。既にANSWERを観測したrootの回答状態は維持する。dual pointer Readerは同じ原典観測を `cancellation_observation` として添える。既存の索引・返信・完全性・source unknown判定を維持する。
+- 不一致・将来のparent・未信頼actor・本文の訂正文だけから取消を認定しない。過去原典を編集せず、既存の明示取消がなければ機械的に終端化しない。WRITE_INTENT、Review、Claim、実行中処理の停止・送信コマンド拡張は別受入。今回のread-only契約は取消送信の許可を与えない。
 
 ## Narrow cross-exchange containment (2026-11-01)
 

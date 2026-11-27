@@ -101,6 +101,50 @@ def select_task_records(
     }
 
 
+def observe_request_cancellations(
+    items: Sequence[tuple[int, dict[str, Any]]],
+    *, trusted_actor_ids: set[int],
+) -> dict[str, str]:
+    """Observe cooperative cancellation on already decoded original comments.
+
+    No runtime/Claim authority. Only the existing READ_ONLY consultation
+    route to a non-chatgpt recipient and return to chatgpt is covered.
+    The caller must supply independently verified original transport actors.
+    """
+    roots: dict[str, dict[str, Any]] = {}
+    cancels: dict[str, tuple[str, dict[str, Any]]] = {}
+    observations: dict[str, str] = {}
+    for cid, msg in items:
+        if cid not in trusted_actor_ids:
+            continue
+        parent = msg["in_reply_to"]
+        kind = msg["kind"]
+        if (parent is None and kind == "REQUEST"
+                and msg["scope"]["effect"] == "READ_ONLY"
+                and msg["intent"] in ("PING", "ANALYZE", "TEST", "REPORT")
+                and msg["recipient"] != "chatgpt"):
+            roots[msg["message_id"]] = msg
+            continue
+        if msg["intent"] != "CANCEL":
+            continue
+        if kind == "CANCEL_REQUEST" and parent in roots:
+            root = roots[parent]
+            if (msg["exchange_id"] == root["exchange_id"]
+                    and msg["task_ref"] == root["task_ref"]
+                    and msg["scope"] == root["scope"]
+                    and msg["recipient"] == root["recipient"]):
+                cancels[msg["message_id"]] = (parent, msg)
+                observations.setdefault(parent, "CANCEL_REQUEST_OBSERVED")
+        elif kind == "CANCEL_ACK" and parent in cancels:
+            root_id, request = cancels[parent]
+            if (msg["exchange_id"] == request["exchange_id"]
+                    and msg["task_ref"] == request["task_ref"]
+                    and msg["scope"] == request["scope"]
+                    and msg["recipient"] == "chatgpt"):
+                observations[root_id] = "CANCEL_ACK_OBSERVED"
+    return observations
+
+
 def _issue_messages_for_recipients(
     comments: Sequence[Mapping[str, Any]], *, repository: str,
     issue_number: int, recipients: Sequence[str], expected_actor: str,
@@ -139,6 +183,9 @@ def _issue_messages_for_recipients(
             trusted_actor_ids.add(cid)
         trusted_comments.append(comment)
     parsed = read_mailbox(trusted_comments, task_ref=task_ref)
+    cancellations = observe_request_cancellations(
+        parsed, trusted_actor_ids=trusted_actor_ids,
+    )
     roots_by_recipient: dict[str, dict[str, tuple[int, dict[str, Any]]]] = {
         target: {} for target in recipients
     }
@@ -198,10 +245,13 @@ def _issue_messages_for_recipients(
                     root["kind"] == "REVIEW_REQUEST"
                     and "REVIEW_FEEDBACK" in reply_kinds
                 ) else "ANSWER_OBSERVED" if "ANSWER" in reply_kinds else
+                          cancellations[message_id] if message_id in cancellations else
                           "BLOCKED_OBSERVED" if "BLOCKED" in reply_kinds else
                           "ACK_OBSERVED" if "ACK" in reply_kinds else "PENDING_REPLY",
                 "source_url": f"https://github.com/{repository}/issues/{issue_number}#issuecomment-{cid}",
                 "actor_login_verified_only": True,
+                **({"cancellation_observation": cancellations[message_id]}
+                   if message_id in cancellations else {}),
             })
         out.sort(key=lambda row: row["source_comment_id"])
         out_by_recipient[target] = out
