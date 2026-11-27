@@ -359,6 +359,9 @@ class Connection:
                 if (self.closed or self.revision() != revision
                         or self.rollback_epoch() != epoch or not candidate.usable()):
                     raise ValueError("selection changed or candidate unavailable")
+                if (self.rollback_pending()
+                        and epoch.partition(":")[2] != candidate.launch.version):
+                    raise ValueError("rollback selection is not yet active")
                 if epoch != self.current_epoch and revision == self.current_revision and self.updates_held():
                     raise ValueError("rollback selection has not changed")
                 if catalog_contract(tools) != self.contract:

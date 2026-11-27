@@ -113,6 +113,54 @@ def launch_front(root):
 
 
 class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_rollback_refuses_refresh_to_non_target_release(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", extra=True)
+            manager.write_marker(root, a["sha"], None,
+                                 tree_sha256=a["tree_sha256"])
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        initial = await asyncio.wait_for(
+                            client.call_tool("read_version", {}), 35)
+                        self.assertEqual(json.loads(initial.content[0].text)["version"], "A")
+
+                        manager.write_marker(root, b["sha"], a["sha"],
+                                             tree_sha256=b["tree_sha256"],
+                                             previous_tree_sha256=a["tree_sha256"])
+                        prepared = await asyncio.wait_for(
+                            client.call_tool("restart_mcp", {}), 35)
+                        self.assertTrue(prepared.is_error)
+                        self.assertEqual(json.loads(prepared.content[0].text)["status"],
+                                         "AWAITING_CATALOG_REFRESH")
+
+                        # rollback publishes PENDING and hold before its marker
+                        # replacement fails, leaving B selected but A as target.
+                        with patch.object(manager, "write_marker",
+                                          side_effect=OSError("marker write failed")):
+                            with self.assertRaises(manager.ReleaseError):
+                                manager.rollback(root, root / "unused.py")
+                        self.assertTrue(manager.rollback_pending(root))
+                        self.assertEqual(manager.read_marker(root)["sha"], b["sha"])
+                        self.assertTrue(manager.updates_held(root))
+
+                        blocked = await asyncio.wait_for(
+                            client.call_tool("read_version", {}), 35)
+                        self.assertTrue(blocked.is_error)
+                        self.assertEqual(json.loads(blocked.content[0].text)["status"],
+                                         "ROLLBACK_SELECTION_UNAVAILABLE")
+
     async def test_failed_later_rollback_does_not_reject_new_connection(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
