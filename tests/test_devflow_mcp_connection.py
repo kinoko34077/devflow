@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 
 from mcp import ClientSession, StdioServerParameters
@@ -42,7 +43,7 @@ mcp.run()
 """
 
 
-def prepare(root, sha, version, name="read_version", gate=None, extra=False):
+def prepare(root, sha, version, name="read_version", gate=None, extra=False, identity=False):
     directory = root / "releases" / sha
     script = directory / "tools" / "devflow_mcp.py"
     script.parent.mkdir(parents=True)
@@ -61,6 +62,11 @@ def prepare(root, sha, version, name="read_version", gate=None, extra=False):
         body = body.replace("mcp.run()", '''@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def new_read(value: str = "default") -> dict[str, str]:
     return {"value": value}
+mcp.run()''')
+    if identity:
+        body = body.replace("mcp.run()", '''@mcp.tool(annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def worker_identity() -> dict[str, int]:
+    return {"pid": os.getpid()}
 mcp.run()''')
     script.write_text(prefix + body, encoding="utf-8")
     return {"schema_version": 2, "sha": sha,
@@ -88,7 +94,8 @@ def launch_front(root):
             # substitute only the credential acquisition for this fixture.
             with patch.object(selector.subprocess, "run", return_value=SimpleNamespace(
                     returncode=0, stdout="fixture-token")):
-                return selector.launch_parameters("fixture-gh", str(root / "absent.py"),
+                fallback = root / "fallback" / "tools" / "devflow_mcp.py"
+                return selector.launch_parameters("fixture-gh", str(fallback),
                                                   root=root)
 
         def observe_hold():
@@ -99,11 +106,193 @@ def launch_front(root):
         await serve_connection(lambda: selector.selection_revision(root), launch,
                                required_calls={"read_version": {}},
                                smoke_name="read_version", smoke_arguments={},
-                               updates_held=observe_hold)
+                               updates_held=observe_hold,
+                               rollback_epoch=lambda: manager.rollback_epoch(root))
     asyncio.run(run())
 
 
 class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_idle_rollback_resume_continues_only_unchanged_catalog_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", extra=True)
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        self.assertIn("new_read", {t.name for t in (await client.list_tools()).tools})
+                        manager.rollback(root, root / "unused.py")
+                        manager.resume_updates(root, root / "unused.py")
+                        same = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertFalse(same.is_error)
+                        self.assertEqual(json.loads(same.content[0].text)["version"], "A")
+                        removed = await client.call_tool("new_read", {})
+                        self.assertTrue(removed.is_error)
+                        self.assertEqual(json.loads(removed.content[0].text)["action"], "REFRESH_TOOLS_LIST")
+
+    async def test_invalid_rollback_epoch_refuses_then_recovers_same_worker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            select(root, prepare(root, "a" * 40, "A"))
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        (root / "rollback.epoch").write_bytes(b"invalid")
+                        failed = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertTrue(failed.is_error)
+                        self.assertEqual(json.loads(failed.content[0].text)["status"],
+                                         "ROLLBACK_SELECTION_UNAVAILABLE")
+                        (root / "rollback.epoch").unlink()
+                        recovered = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertFalse(recovered.is_error)
+                        self.assertEqual(json.loads(recovered.content[0].text)["version"], "A")
+
+    async def test_idle_connection_switches_to_legacy_after_rollback_and_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            fallback = root / "fallback" / "tools" / "devflow_mcp.py"
+            fallback.parent.mkdir(parents=True)
+            fallback.write_text(WORKER.format(name="read_version", version="LEGACY"), encoding="utf-8")
+            manager.write_marker(root, a["sha"], None, tree_sha256=a["tree_sha256"])
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        self.assertEqual(manager.rollback(root, fallback), "ROLLED_BACK_TO_LEGACY")
+                        self.assertEqual(manager.resume_updates(root, fallback), "RESUMED LEGACY")
+                        result = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertFalse(result.is_error)
+                        self.assertEqual(json.loads(result.content[0].text)["version"], "LEGACY")
+
+    async def test_idle_connection_replaces_worker_even_if_old_marker_is_reselected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", identity=True)
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            original_revision = selector.selection_revision(root)
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        old_pid = json.loads((await client.call_tool("worker_identity", {})).content[0].text)["pid"]
+                        manager.rollback(root, root / "unused.py")
+                        manager.resume_updates(root, root / "unused.py")
+                        # Simulate verified re-promotion with byte-identical original marker.
+                        manager.write_marker(root, b["sha"], a["sha"],
+                                             tree_sha256=b["tree_sha256"],
+                                             previous_tree_sha256=a["tree_sha256"])
+                        self.assertEqual(selector.selection_revision(root), original_revision)
+                        result = await asyncio.wait_for(client.call_tool("worker_identity", {}), 35)
+                        self.assertFalse(result.is_error)
+                        self.assertNotEqual(json.loads(result.content[0].text)["pid"], old_pid)
+
+    async def test_connection_started_during_rollback_does_not_start_old_selection(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B")
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            entered = threading.Event()
+            finish = threading.Event()
+            write_marker = manager.write_marker
+
+            def gated_write(*args, **kwargs):
+                entered.set()
+                if not finish.wait(30):
+                    raise TimeoutError("rollback fixture gate timed out")
+                return write_marker(*args, **kwargs)
+
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with patch.object(manager, "write_marker", side_effect=gated_write):
+                rollback = asyncio.create_task(asyncio.to_thread(manager.rollback, root, root / "unused.py"))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 10))
+                    rejected = False
+                    with open(os.devnull, "w") as log:
+                        async with stdio_client(front, errlog=log) as (rd, wr):
+                            async with ClientSession(rd, wr) as client:
+                                try:
+                                    await asyncio.wait_for(client.initialize(), 20)
+                                except Exception:
+                                    rejected = True
+                    self.assertTrue(rejected, "connection started the old release during rollback")
+                finally:
+                    finish.set()
+                    await asyncio.wait_for(rollback, 20)
+
+    async def test_idle_connection_does_not_use_revoked_worker_after_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate = root / "allow-rollback-worker"
+            a = prepare(root, "a" * 40, "A", gate=gate)
+            b = prepare(root, "b" * 40, "B")
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        self.assertEqual(json.loads((await client.call_tool("read_version", {})).content[0].text)["version"], "B")
+                        self.assertEqual(manager.rollback(root, root / "unused.py"), "ROLLED_BACK " + a["sha"])
+                        self.assertEqual(manager.resume_updates(root, root / "unused.py"), "RESUMED ACTIVE " + a["sha"])
+                        call = asyncio.create_task(client.call_tool("read_version", {}))
+                        try:
+                            with self.assertRaises(asyncio.TimeoutError):
+                                await asyncio.wait_for(asyncio.shield(call), 2)
+                        finally:
+                            gate.touch()
+                        result = await asyncio.wait_for(call, 35)
+                        self.assertFalse(result.is_error)
+                        self.assertEqual(json.loads(result.content[0].text)["version"], "A")
+
     async def test_hold_observation_failure_preserves_only_known_current_selection(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

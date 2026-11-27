@@ -177,6 +177,38 @@ def hold_updates(root: Path) -> None:
         pass
 
 
+def rollback_epoch(root: Path) -> str:
+    """Persistent rollback generation, including after the hold is removed."""
+    try:
+        with (root / "rollback.epoch").open("rb") as stream:
+            raw = stream.read(81)
+    except FileNotFoundError:
+        return "INITIAL"
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ReleaseError("invalid rollback generation") from error
+    if re.fullmatch(r"[0-9a-f]{32}:(?:[0-9a-f]{40}|LEGACY)", value) is None:
+        raise ReleaseError("invalid rollback generation")
+    return value
+
+
+def record_rollback_epoch(root: Path, target: str) -> None:
+    """Publish before selecting an older version; never remove on resume."""
+    if target != "LEGACY":
+        validate_sha(target)
+    fd, name = tempfile.mkstemp(prefix=".rollback-", suffix=".tmp", dir=root)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write((os.urandom(16).hex() + ":" + target).encode("ascii"))
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(name, root / "rollback.epoch")
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
 def selection_label(state: dict | None) -> str:
     return "ACTIVE " + state["sha"] if state else "LEGACY"
 
@@ -531,11 +563,13 @@ def rollback(root: Path, fallback: Path) -> str:
         if previous is None:
             if not fallback.is_file():
                 raise ReleaseError("original fallback MCP is unavailable")
+            record_rollback_epoch(root, "LEGACY")
             (root / "active.json").unlink()
             return "ROLLED_BACK_TO_LEGACY"
         release_script(root, previous)
         # 旧版のdigestを作り直して「未検証の改変」を再承認しない。
         require_integrity(root, previous, state["previous_tree_sha256"])
+        record_rollback_epoch(root, previous)
         write_marker(
             root, previous, state["sha"],
             tree_sha256=state["previous_tree_sha256"],
@@ -554,6 +588,7 @@ def resume_updates(root: Path, fallback: Path) -> str:
             raise ReleaseError("original fallback MCP is unavailable")
         if not updates_held(root):
             return "ALREADY_ENABLED " + selection_label(state)
+        rollback_epoch(root)  # An unreadable generation must not clear the hold.
         (root / "updates.hold").unlink()
         return "RESUMED " + selection_label(state)
 

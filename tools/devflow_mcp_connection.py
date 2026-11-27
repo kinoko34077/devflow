@@ -169,9 +169,11 @@ class Connection:
     def __init__(self, revision: Callable[[], str], launch: Callable[[], Launch],
                  *, smoke_name: str, smoke_arguments: dict[str, Any],
                  required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
-                 updates_held: Callable[[], bool] = lambda: False):
+                 updates_held: Callable[[], bool] = lambda: False,
+                 rollback_epoch: Callable[[], str] = lambda: "INITIAL"):
         self.revision = revision
         self.updates_held = updates_held
+        self.rollback_epoch = rollback_epoch
         self.launch = launch
         self.required_calls = required_calls
         self.smoke_name = smoke_name
@@ -179,29 +181,39 @@ class Connection:
         self.lock = asyncio.Lock()
         self.worker: Worker | None = None
         self.current_revision: str | None = None
+        self.current_epoch: str | None = None
         self.rejected_revision: str | None = None
+        self.rejected_epoch: str | None = None
         self.refresh_task: asyncio.Task | None = None
         self.retry_revision: str | None = None
+        self.retry_epoch: str | None = None
         self.retry_count = 0
         self.retry_at = 0.0
         self.last_status = "STARTING"
         self.closed = False
         self.tools: list[types.Tool] = []
         self.contract: dict[str, Any] = {}
-        self.pending: tuple[str, Worker, list[types.Tool]] | None = None
+        self.pending: tuple[str, Worker, list[types.Tool], str] | None = None
         self.session = None
         self.retired: dict[asyncio.Task, Worker] = {}
         self.stale_contract: dict[str, Any] | None = None
 
     async def start(self) -> Any:
+        epoch = self.rollback_epoch()
         revision = self.revision()
         worker = Worker(await asyncio.to_thread(self.launch), self.required_calls)
         try:
             init, tools = await worker.start()
-            if self.revision() != revision:
+            if self.revision() != revision or self.rollback_epoch() != epoch:
                 raise RuntimeError("marker changed during initialization")
+            # The generation is written before rollback changes selection.
+            # A new connection must not capture the old selection in that gap.
+            if (epoch != "INITIAL" and self.updates_held()
+                    and epoch.partition(":")[2] != worker.launch.version):
+                raise RuntimeError("rollback selection is not yet active")
             self.worker = worker
             self.current_revision = revision
+            self.current_epoch = epoch
             self.tools = tools
             self.contract = catalog_contract(tools)
             self.last_status = "UP_TO_DATE"
@@ -237,6 +249,11 @@ class Connection:
         # If selection is unknown or changed, an unobservable hold cannot
         # authorize continued use of a potentially superseded worker.
         try:
+            if self.rollback_epoch() != self.current_epoch:
+                return True
+        except Exception:
+            return True
+        try:
             if self.revision() == self.current_revision:
                 return False
         except Exception:
@@ -249,13 +266,17 @@ class Connection:
     def _commit_pending_rollback(self, revision: str) -> bool:
         if self.pending is None:
             return False
-        selected, worker, tools = self.pending
-        if selected != revision or not worker.usable():
+        selected, worker, tools, epoch = self.pending
+        try:
+            still_selected = self.revision() == revision and self.rollback_epoch() == epoch
+        except Exception:
+            return False
+        if selected != revision or not worker.usable() or not still_selected:
             return False
         if self.stale_contract is None:
             self.stale_contract = self.contract
         self.pending = None
-        previous, _ = self._commit(revision, worker, tools)
+        previous, _ = self._commit(revision, worker, tools, epoch)
         self._retire(previous)
         self._state("CATALOG_REFRESH_REQUIRED")
         return True
@@ -268,25 +289,34 @@ class Connection:
             return self.refresh_task, self._state("PREPARING")
         try:
             revision = self.revision()
+            epoch = self.rollback_epoch()
         except Exception:
             self._discard_pending()
             return None, self._state("INVALID_SELECTION")
         if self.pending is not None and (
-            self.pending[0] != revision or not self.pending[1].usable()
+            self.pending[0] != revision or self.pending[3] != epoch
+            or not self.pending[1].usable()
         ):
             self._discard_pending()
+        if epoch != self.current_epoch and revision == self.current_revision:
+            try:
+                if self.updates_held():
+                    return None, self._state("ROLLBACK_SELECTION_UNAVAILABLE")
+            except Exception:
+                return None, self._state("ROLLBACK_SELECTION_UNAVAILABLE")
         if self._held_selection_differs() and self._commit_pending_rollback(revision):
             return None, self._state("CATALOG_REFRESH_REQUIRED")
         healthy = self.worker is not None and self.worker.usable()
         if (self.pending is not None and self.pending[0] == revision
                 and self.pending[1].usable()):
             return None, self._state("AWAITING_CATALOG_REFRESH")
-        if not explicit and healthy and revision == self.current_revision:
+        if not explicit and healthy and revision == self.current_revision and epoch == self.current_epoch:
             return None, self._state("CATALOG_REFRESH_REQUIRED" if self.stale_contract is not None else "UP_TO_DATE")
-        if not explicit and revision == self.rejected_revision:
+        if not explicit and revision == self.rejected_revision and epoch == self.rejected_epoch:
             return None, self._state("PREVIOUSLY_REJECTED")
-        if revision != self.retry_revision:
+        if revision != self.retry_revision or epoch != self.retry_epoch:
             self.retry_revision = revision
+            self.retry_epoch = epoch
             self.retry_count = 0
             self.retry_at = 0.0
         now = time.monotonic()
@@ -294,21 +324,23 @@ class Connection:
             return None, self._state("RETRY_DEFERRED")
         if self.retry_count >= MAX_RETRY_BURST:
             self.retry_count = 0
-        self.refresh_task = asyncio.create_task(self._refresh(revision))
+        self.refresh_task = asyncio.create_task(self._refresh(revision, epoch))
         return self.refresh_task, self._state("PREPARING")
 
-    def _commit(self, revision, worker, tools):
+    def _commit(self, revision, worker, tools, epoch):
         previous = self.worker
         self.worker = worker
         self.current_revision = revision
+        self.current_epoch = epoch
         self.rejected_revision = None
+        self.rejected_epoch = None
         self.retry_count = 0
         self.retry_at = 0.0
         self.tools = tools
         self.contract = catalog_contract(tools)
         return previous, self._state("RESTARTED")
 
-    async def _refresh(self, revision: str) -> dict[str, Any]:
+    async def _refresh(self, revision: str, epoch: str) -> dict[str, Any]:
         """Prepare outside routing lock; publish changed catalogs on re-list."""
         candidate = None
         try:
@@ -322,18 +354,21 @@ class Connection:
             if result.is_error or not candidate.usable():
                 raise ValueError("candidate smoke failed")
             async with self.lock:
-                if self.closed or self.revision() != revision or not candidate.usable():
+                if (self.closed or self.revision() != revision
+                        or self.rollback_epoch() != epoch or not candidate.usable()):
                     raise ValueError("selection changed or candidate unavailable")
+                if epoch != self.current_epoch and revision == self.current_revision and self.updates_held():
+                    raise ValueError("rollback selection has not changed")
                 if catalog_contract(tools) != self.contract:
-                    self.pending = (revision, candidate, tools)
+                    self.pending = (revision, candidate, tools, epoch)
                     candidate = None
-                    if self._held_selection_differs():
-                        self._commit_pending_rollback(revision)
+                    if (self._held_selection_differs()
+                            and self._commit_pending_rollback(revision)):
                         state = self._state("CATALOG_REFRESH_REQUIRED")
                     else:
                         state = self._state("AWAITING_CATALOG_REFRESH")
                 else:
-                    previous, state = self._commit(revision, candidate, tools)
+                    previous, state = self._commit(revision, candidate, tools, epoch)
                     candidate = None
                     self._retire(previous)
             if state["status"] in {"AWAITING_CATALOG_REFRESH", "CATALOG_REFRESH_REQUIRED"} and self.session is not None:
@@ -350,6 +385,7 @@ class Connection:
             async with self.lock:
                 if incompatible:
                     self.rejected_revision = revision
+                    self.rejected_epoch = epoch
                 else:
                     self.retry_count += 1
                     delay = (RETRY_COOLDOWN if self.retry_count >= MAX_RETRY_BURST
@@ -377,14 +413,16 @@ class Connection:
         async with self.lock:
             self.session = context.session
             if self.pending is not None:
-                revision, worker, tools = self.pending
+                revision, worker, tools, epoch = self.pending
                 try:
                     current = self.revision()
+                    current_epoch = self.rollback_epoch()
                 except Exception:
                     current = None
-                if worker.usable() and current == revision:
+                    current_epoch = None
+                if worker.usable() and current == revision and current_epoch == epoch:
                     self.pending = None
-                    previous, _ = self._commit(revision, worker, tools)
+                    previous, _ = self._commit(revision, worker, tools, epoch)
                     self._retire(previous)
                 else:
                     self._discard_pending()
@@ -494,11 +532,12 @@ class Connection:
 async def serve_connection(revision: Callable[[], str], launch: Callable[[], Launch],
                            *, smoke_name: str, smoke_arguments: dict[str, Any],
                            required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
-                           updates_held: Callable[[], bool] = lambda: False) -> None:
+                           updates_held: Callable[[], bool] = lambda: False,
+                           rollback_epoch: Callable[[], str] = lambda: "INITIAL") -> None:
     """Isolated pilot; the production installer is deliberately unchanged."""
     connection = Connection(revision, launch, required_calls=required_calls,
                             smoke_name=smoke_name, smoke_arguments=smoke_arguments,
-                            updates_held=updates_held)
+                            updates_held=updates_held, rollback_epoch=rollback_epoch)
     try:
         initial = await connection.start()
         server = Server(
