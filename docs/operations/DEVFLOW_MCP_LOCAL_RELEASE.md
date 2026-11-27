@@ -17,6 +17,25 @@ registration environment and unrelated settings. Install
 launcher. Routine release updates must not edit either registration or launcher.
 The old third argument remains the fallback.
 
+### 接続内更新への移行案（#1138、実機導入未受入）
+
+保護された同じ入口ディレクトリへ stable launcher、release manager、
+`devflow_mcp_catalog.py`、`devflow_mcp_connection.py` を同じ検証済み版から配置する。
+長寿命の入口が旧登録の Python 検索パスからSDK等を読まないよう、Pythonの既存argsの
+先頭に `-I` を追加する。既存launcher/manager、config.tomlのbyte-exact backup、
+保護ACL・候補SHA・Python隔離環境・既存args/env/認証の同一性を確認する。
+この変更は初回の限定実機移行に含め、明示承認と独立Review前に本番適用しない。
+旧版launcherを稼働させた既存会話を強制終了しない。新入口は既存SDKで接続を保持し、
+検証済みmarkerの変更を通常の呼出しで観測する。取得・昇格・hold解除は行わない。
+実行部だけに選択済みrelease rootのPYTHONPATHと既存gh tokenを渡す。
+不正marker/候補起動失敗では正常な旧実行部とcatalogを保つ。catalog変更はSDKの通知と
+実際のtools/list再取得後に反映し、退役した実行部を回収する。
+holdは配布昇格停止のまま維持する。明示rollbackで選択が変わった場合は、旧workerへ新規callを流さず、検証済み復旧先へ切り替える。catalog未再取得時は旧公開契約と一致するtoolだけ復旧先で実行し、変更・退役toolは再取得を案内する。通常切替では既送callを完了させ、接続EOFではその接続のchildを回収する。送信済みcallを自動再送しない。markerや実行ファイルの改変を許可するものではない。
+rollback は選択変更前に `rollback.epoch` を原子的に更新する。各接続は起動時の世代を保持し、hold解除後や同じ版の再昇格後でも世代差があれば旧workerを使わず、現在選択された検証済みworkerへ切り替える。世代には `PENDING` / `DONE` の段階を記録し、新規接続を止めるのは rollback が選択変更を完了する前の `PENDING` 中だけとする。既存の2フィールド世代形式は完了済みとして読み、resumeや通常更新後も世代記録を保持する。世代の保存に失敗した場合は選択を変更せずholdを維持する。世代が不正・読取不能なら当該接続を安全に拒否し、保護入口のファイル権限と内容を確認して復旧する。
+
+世代を保存した後に選択markerの書込みが失敗した場合もholdを維持する。状態と検証済みreleaseを確認して明示 `resume` を行うと、現在の選択版を復旧先として pending 段階を完了し、holdを解除する。rollback途中で停止した状態を通常更新で自動解除しない。
+旧未注釈read-only名の互換例外は、運用上選択可能な全rollback/fallback版が明示宣言を満たし、旧版への復旧が不要と確認した時点で退役する。
+
 A local read-only state file determines which *newly started* server is selected:
 
 ```text
@@ -24,6 +43,7 @@ A local read-only state file determines which *newly started* server is selected
   active.json                    {"schema_version":2,"sha":"<40-hex>","tree_sha256":"<64-hex>",
                                  "previous_sha":null,"previous_tree_sha256":null}
   updates.hold                   存在中は自動更新停止（rollbackが作成）
+  rollback.epoch                 rollback世代・復旧先・進行段階（resume後も保持）
   releases/<sha>/tools/devflow_mcp.py
   releases/<prior_sha>/...
 ```
@@ -98,7 +118,7 @@ rollbackの受入後のみ有効化する。既存ジョブとTaskの権限を�
 
 `rollback` first creates a durable `updates.hold` under the manager lock, then switches back to the previous verified SHA. On the first activation, it removes the active marker and restores the **original immutable fallback** without editing `config.toml`. The hold remains even after failed rollback or a crash between the two steps; the scheduler does not automatically promote any SHA while held. `status` reports the held selection. Only an explicit `resume` verifies the selected release (or the original fallback path) and removes the hold; it does not itself promote or launch a candidate. The next `check` uses the normal verification gates. Keep the backed-up launcher separately for full uninstall.
 
-Only **newly created MCP processes** observe a changed marker. Existing Codex
+Before the #1138 migration, only **newly created MCP processes** observe a changed marker. Existing Codex
 chat tool catalogs and running MCP servers do not become new code by changing a
 file. Never automatically kill the Codex app, call global MCP reload, or
 resend an ambiguous write call. Codex connection recovery and dynamic tool

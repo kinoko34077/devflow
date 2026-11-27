@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -68,10 +69,28 @@ class StableLauncherTests(unittest.TestCase):
               patch.object(launcher.subprocess, "run", return_value=SimpleNamespace(
                   returncode=0, stdout="fixture-token",
               ))):
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            old = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(old.version, "LEGACY")
             self._marker(SHA_A)
-            self.assertEqual(launcher.main(["fixture-gh", str(self.legacy)]), 0)
+            new = launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            self.assertEqual(new.version, SHA_A)
+            self.assertEqual(new.parameters.env["PYTHONPATH"], str(candidate.parent.parent))
             self.assertEqual(os.environ["PYTHONPATH"], str(self.legacy.parent.parent))
+        # Restore real subprocess.run before executing the fixture workers.
+        for launch in (old, new):
+            p = launch.parameters
+            self.assertEqual(subprocess.run([p.command, *p.args], env=p.env,
+                                            capture_output=True, timeout=10).returncode, 0)
+
+    def test_invalid_release_never_requests_token(self):
+        self._release(SHA_A)
+        self._marker(SHA_A)
+        (self.root / "releases" / SHA_A / "tools" / "devflow_mcp.py").write_text(
+            "# modified", encoding="utf-8")
+        with patch.object(launcher.subprocess, "run") as token:
+            with self.assertRaisesRegex(ValueError, "contents changed"):
+                launcher.launch_parameters("fixture-gh", str(self.legacy), root=self.root)
+            token.assert_not_called()
 
     def test_no_marker_preserves_original_legacy_launch(self):
         self.assertEqual(
@@ -367,6 +386,22 @@ class ReleaseManagerContractTests(unittest.TestCase):
                 )
             self.assertEqual(env, {"PYTHONPATH": "/allowed/repo"})
             self.assertIn('command = "/fake/python"', config.read_text())
+            original = config.read_text()
+            for flag, accepted in (("-I", True), ("-c", False), ("-m", False)):
+                with self.subTest(flag=flag):
+                    config.write_text(original.replace('args = [', f'args = ["{flag}", '),
+                                      encoding="utf-8")
+                    before = config.read_bytes()
+                    with patch("pathlib.Path.home", return_value=user):
+                        if accepted:
+                            self.assertEqual(manager.registered_mcp_env(
+                                Path("/fake/python"), Path("/fake/fallback")), env)
+                        else:
+                            with self.assertRaises(manager.ReleaseError):
+                                manager.registered_mcp_env(Path("/fake/python"),
+                                                           Path("/fake/fallback"))
+                    self.assertEqual(config.read_bytes(), before)
+
 
 
     def test_stdio_validation_uses_selected_script_root_not_registered_old_path(self):
@@ -477,8 +512,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
         prior = self._release(SHA_B)
         prior_bytes = prior.read_bytes()
         self._marker(SHA_B, SHA_A)
+        self.assertEqual(manager.rollback_epoch(self.root), "INITIAL")
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK " + SHA_A)
+        epoch = manager.rollback_epoch(self.root)
+        self.assertRegex(epoch, r"^[0-9a-f]{32}:" + SHA_A + r"$")
         self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED ACTIVE " + SHA_A)
+        self.assertEqual(manager.rollback_epoch(self.root), epoch)
 
         def fresh_archive(_repo, _sha, destination):
             script = destination / "tools" / "devflow_mcp.py"
@@ -499,13 +538,17 @@ class ReleaseManagerContractTests(unittest.TestCase):
             invoke.assert_called_once()
             self.assertTrue(invoke.call_args.kwargs["full"])
         self.assertEqual(prior.read_bytes(), prior_bytes)
+        self.assertEqual(manager.rollback_epoch(self.root), epoch)
 
     def test_legacy_rollback_then_repromotion_preserves_original_release(self):
         prior = self._release(SHA_A)
         prior_bytes = prior.read_bytes()
         self._marker(SHA_A)
         self.assertEqual(manager.rollback(self.root, self.legacy), "ROLLED_BACK_TO_LEGACY")
+        epoch = manager.rollback_epoch(self.root)
+        self.assertRegex(epoch, r"^[0-9a-f]{32}:LEGACY$")
         self.assertEqual(manager.resume_updates(self.root, self.legacy), "RESUMED LEGACY")
+        self.assertEqual(manager.rollback_epoch(self.root), epoch)
 
         def fresh_archive(_repo, _sha, destination):
             script = destination / "tools" / "devflow_mcp.py"
@@ -522,6 +565,24 @@ class ReleaseManagerContractTests(unittest.TestCase):
             self.assertEqual(len(replace.call_args_list), 1)
             self.assertEqual(Path(replace.call_args.args[1]), self.root / "active.json")
         self.assertEqual(prior.read_bytes(), prior_bytes)
+        self.assertEqual(manager.rollback_epoch(self.root), epoch)
+
+    def test_rollback_epoch_write_failure_keeps_previous_selection_held(self):
+        self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        with patch.object(manager, "record_rollback_epoch", side_effect=OSError("locked")):
+            with self.assertRaises(manager.ReleaseError):
+                manager.rollback(self.root, self.legacy)
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_B)
+        self.assertTrue(manager.updates_held(self.root))
+        self.assertEqual(manager.rollback_epoch(self.root), "INITIAL")
+
+    def test_legacy_rollback_epoch_is_read_as_completed(self):
+        (self.root / "rollback.epoch").write_text(
+            "1" * 32 + ":" + SHA_A, encoding="ascii")
+        self.assertEqual(manager.rollback_epoch(self.root), "1" * 32 + ":" + SHA_A)
+        self.assertFalse(manager.rollback_pending(self.root))
 
     def test_failed_rollback_keeps_hold_even_when_marker_write_fails(self):
         self._release(SHA_A)
@@ -531,9 +592,15 @@ class ReleaseManagerContractTests(unittest.TestCase):
             with self.assertRaises(manager.ReleaseError):
                 manager.rollback(self.root, self.legacy)
         self.assertEqual(manager.status(self.root), "HELD ACTIVE " + SHA_B)
+        self.assertTrue(manager.rollback_pending(self.root))
         with patch.object(manager, "trusted_latest") as fetch:
             self.assertEqual(manager.promote(**self._runner()), "HELD ACTIVE " + SHA_B)
             fetch.assert_not_called()
+        self.assertEqual(manager.resume_updates(self.root, self.legacy),
+                         "RESUMED ACTIVE " + SHA_B)
+        self.assertFalse(manager.rollback_pending(self.root))
+        self.assertFalse(manager.updates_held(self.root))
+        self.assertEqual(manager.status(self.root), "ACTIVE " + SHA_B)
 
     def test_resume_rejects_tampered_active_release_without_clearing_hold(self):
         old = self._release(SHA_A)
@@ -544,6 +611,17 @@ class ReleaseManagerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(manager.ReleaseError, "differ"):
             manager.resume_updates(self.root, self.legacy)
         self.assertTrue(manager.updates_held(self.root))
+
+    def test_resume_rejects_corrupt_rollback_epoch_without_clearing_hold(self):
+        self._release(SHA_A)
+        self._release(SHA_B)
+        self._marker(SHA_B, SHA_A)
+        manager.rollback(self.root, self.legacy)
+        (self.root / "rollback.epoch").write_bytes(b"corrupt")
+        with self.assertRaisesRegex(manager.ReleaseError, "rollback generation"):
+            manager.resume_updates(self.root, self.legacy)
+        self.assertTrue(manager.updates_held(self.root))
+        self.assertEqual(manager.read_marker(self.root)["sha"], SHA_A)
 
     def test_empty_hold_file_is_still_held(self):
         (self.root / "updates.hold").touch()

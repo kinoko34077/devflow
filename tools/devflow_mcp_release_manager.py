@@ -177,6 +177,67 @@ def hold_updates(root: Path) -> None:
         pass
 
 
+def _rollback_record(root: Path) -> tuple[str, str, bool]:
+    """Return (generation, target, pending), accepting the original format."""
+    try:
+        with (root / "rollback.epoch").open("rb") as stream:
+            raw = stream.read(90)
+    except FileNotFoundError:
+        return "INITIAL", "", False
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ReleaseError("invalid rollback generation") from error
+    match = re.fullmatch(
+        r"(?P<generation>[0-9a-f]{32}):(?P<target>[0-9a-f]{40}|LEGACY)"
+        r"(?::(?P<phase>PENDING|DONE))?", value,
+    )
+    if match is None:
+        raise ReleaseError("invalid rollback generation")
+    # The two-field format is written by older releases and records completed
+    # rollbacks. It remains readable after the phase field is introduced.
+    return (match.group("generation"), match.group("target"),
+            match.group("phase") == "PENDING")
+
+
+def rollback_epoch(root: Path) -> str:
+    """Persistent rollback generation, including after the hold is removed."""
+    generation, target, _pending = _rollback_record(root)
+    return "INITIAL" if generation == "INITIAL" else generation + ":" + target
+
+
+def rollback_pending(root: Path) -> bool:
+    """Whether a rollback has published intent but not completed selection."""
+    return _rollback_record(root)[2]
+
+
+def _write_rollback_record(root: Path, value: str) -> None:
+    fd, name = tempfile.mkstemp(prefix=".rollback-", suffix=".tmp", dir=root)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(value.encode("ascii"))
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(name, root / "rollback.epoch")
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def record_rollback_epoch(root: Path, target: str) -> None:
+    """Publish a pending rollback before selecting an older version."""
+    if target != "LEGACY":
+        validate_sha(target)
+    _write_rollback_record(root, os.urandom(16).hex() + ":" + target + ":PENDING")
+
+
+def complete_rollback_epoch(root: Path) -> None:
+    """Persist completion after the fallback/marker selection is changed."""
+    generation, target, pending = _rollback_record(root)
+    if pending:
+        _write_rollback_record(root, generation + ":" + target + ":DONE")
+
+
 def selection_label(state: dict | None) -> str:
     return "ACTIVE " + state["sha"] if state else "LEGACY"
 
@@ -380,7 +441,11 @@ def registered_mcp_env(python: Path, fallback: Path) -> dict[str, str]:
         server = raw["mcp_servers"]["kinotch_devflow"]
         values = server.get("env", {})
         argv = server["args"]
+        if type(argv) is list and len(argv) == 4 and argv[0] == "-I":
+            # The one-time protected front migration adds only this flag.
+            argv = argv[1:]
         if (type(argv) is not list or len(argv) != 3
+                or not all(isinstance(value, str) for value in argv)
                 or Path(argv[2]).resolve() != fallback.resolve()
                 or Path(server["command"]).resolve() != python.resolve()):
             raise ReleaseError("registered Codex MCP launch paths have changed")
@@ -527,16 +592,20 @@ def rollback(root: Path, fallback: Path) -> str:
         if previous is None:
             if not fallback.is_file():
                 raise ReleaseError("original fallback MCP is unavailable")
+            record_rollback_epoch(root, "LEGACY")
             (root / "active.json").unlink()
+            complete_rollback_epoch(root)
             return "ROLLED_BACK_TO_LEGACY"
         release_script(root, previous)
         # 旧版のdigestを作り直して「未検証の改変」を再承認しない。
         require_integrity(root, previous, state["previous_tree_sha256"])
+        record_rollback_epoch(root, previous)
         write_marker(
             root, previous, state["sha"],
             tree_sha256=state["previous_tree_sha256"],
             previous_tree_sha256=state["tree_sha256"],
         )
+        complete_rollback_epoch(root)
         return "ROLLED_BACK " + previous
 
 
@@ -550,6 +619,10 @@ def resume_updates(root: Path, fallback: Path) -> str:
             raise ReleaseError("original fallback MCP is unavailable")
         if not updates_held(root):
             return "ALREADY_ENABLED " + selection_label(state)
+        rollback_epoch(root)  # An unreadable generation must not clear the hold.
+        # Explicit resume accepts the currently verified selection as the
+        # recovery point if a rollback stopped between intent and marker write.
+        complete_rollback_epoch(root)
         (root / "updates.hold").unlink()
         return "RESUMED " + selection_label(state)
 
