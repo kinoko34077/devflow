@@ -91,14 +91,53 @@ def launch_front(root):
                 return selector.launch_parameters("fixture-gh", str(root / "absent.py"),
                                                   root=root)
 
+        def observe_hold():
+            if (root / "hold-observation-error").exists():
+                raise PermissionError("fixture hold observation failure")
+            return manager.updates_held(root)
+
         await serve_connection(lambda: selector.selection_revision(root), launch,
                                required_calls={"read_version": {}},
                                smoke_name="read_version", smoke_arguments={},
-                               updates_held=lambda: manager.updates_held(root))
+                               updates_held=observe_hold)
     asyncio.run(run())
 
 
 class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_hold_observation_failure_preserves_only_known_current_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B", name="different_read")
+            select(root, a)
+            env = {**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                   "PYTHONDONTWRITEBYTECODE": "1"}
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env=env,
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        (root / "hold-observation-error").touch()
+                        same = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertFalse(same.is_error)
+                        self.assertEqual(json.loads(same.content[0].text)["version"], "A")
+
+                        select(root, b)
+                        changed = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertTrue(changed.is_error)
+                        self.assertEqual(json.loads(changed.content[0].text)["status"],
+                                         "ROLLBACK_SELECTION_UNAVAILABLE")
+
+                        (root / "active.json").write_bytes(b"x" * 4097)
+                        unknown = await asyncio.wait_for(client.call_tool("read_version", {}), 35)
+                        self.assertTrue(unknown.is_error)
+                        self.assertEqual(json.loads(unknown.content[0].text)["status"],
+                                         "ROLLBACK_SELECTION_UNAVAILABLE")
+
     async def test_same_stdio_session_explicit_automatic_and_rejected_update(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

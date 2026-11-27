@@ -233,10 +233,16 @@ class Connection:
             self.pending = None
 
     def _held_selection_differs(self) -> bool:
-        # Failure to observe the hold is not permission to keep a superseded
-        # worker in service. Ordinary (unheld) candidate failure is recoverable.
+        # A known unchanged selection remains safe regardless of hold state.
+        # If selection is unknown or changed, an unobservable hold cannot
+        # authorize continued use of a potentially superseded worker.
         try:
-            return self.updates_held() and self.revision() != self.current_revision
+            if self.revision() == self.current_revision:
+                return False
+        except Exception:
+            pass
+        try:
+            return self.updates_held()
         except Exception:
             return True
 
