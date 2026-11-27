@@ -1,6 +1,9 @@
 """Pure KAEP v0.2 conformance tests; no GitHub writes or agent launches."""
 from __future__ import annotations
 import copy
+import json
+from pathlib import Path
+import re
 import unittest
 from tools.kaep_mailbox_codec import (
     InvalidMessage, MARKER, decode_comment, encode_comment, has_kaep_marker, fingerprint,
@@ -36,6 +39,27 @@ class KAEPMailboxContract(unittest.TestCase):
     def test_roundtrip(self):
         d = envelope()
         self.assertEqual(decode_comment(encode_comment(d), task_ref=TASK), d)
+
+    def test_native_review_reference_matches_codec_and_schema(self):
+        ref = "https://github.com/kinoko34077/devflow/pull/1139#pullrequestreview-6088735605"
+        pattern = json.loads((Path(__file__).resolve().parents[1] / "docs/spec/kaep_message_v02.schema.json").read_text(encoding="utf-8"))["properties"]["evidence_refs"]["items"]["pattern"]
+        self.assertIsNotNone(re.fullmatch(pattern, ref))
+        message = envelope(evidence_refs=[ref])
+        self.assertEqual(decode_comment(encode_comment(message), task_ref=TASK), message)
+
+    def test_native_review_reference_rejects_noncanonical_variants(self):
+        base = "https://github.com/kinoko34077/devflow/pull/1139"
+        invalid = [base + "#pullrequestreview-0", base + "#pullrequestreview-01",
+                   base + "#pullrequestreview-1?x=1", base + "?x=1#pullrequestreview-1",
+                   base + "#issuecomment-1", base + "/files#pullrequestreview-1",
+                   "https://github.com.evil.invalid/kinoko34077/devflow/pull/1139#pullrequestreview-1",
+                   "https://github.com/other/devflow/pull/1139#pullrequestreview-1"]
+        pattern = json.loads((Path(__file__).resolve().parents[1] / "docs/spec/kaep_message_v02.schema.json").read_text(encoding="utf-8"))["properties"]["evidence_refs"]["items"]["pattern"]
+        for ref in invalid:
+            with self.subTest(ref=ref):
+                self.assertIsNone(re.fullmatch(pattern, ref))
+                with self.assertRaisesRegex(InvalidMessage, "INVALID_REF"):
+                    validate(envelope(evidence_refs=[ref]))
 
     def test_unicode(self):
         d = envelope(payload={"text": "日本語の疎通だけ"})

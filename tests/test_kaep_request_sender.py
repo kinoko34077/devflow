@@ -34,6 +34,24 @@ def prepare(text=None, **kw):
 
 
 class RequestSenderTests(unittest.TestCase):
+    def test_preflight_preserves_existing_correlated_native_review_answer(self):
+        original, _ = make_request(
+            pages([]), repository=REPO, issue=503, recipient="claude-code",
+            intent="ANALYZE", request_key="kaep.request.old-review",
+            request_text="review old head", expect_existing_actor="kinoko34077",
+            expected_head=HEAD,
+        )
+        answer = dict(original)
+        answer.update(message_id="msg_review_answer", in_reply_to=original["message_id"],
+                      recipient="chatgpt", kind="ANSWER", idempotency_key="kaep.answer.old-review",
+                      evidence_refs=["https://github.com/kinoko34077/devflow/pull/1139#pullrequestreview-6088735605"])
+        raw = "<!-- kaep:message:v0.2 -->\n```json\n" + json.dumps(answer) + "\n```"
+        source = pages([comment(11, original),
+                        {"id": 12, "body": raw, "user": {"login": "kinoko34077", "id": 79015263}}])
+        request, existing = prepare(source, expected_head=OTHER_HEAD)
+        self.assertIsNone(existing)
+        self.assertEqual(request["scope"]["expected_head"], OTHER_HEAD)
+
     def test_sender_preflight_decodes_each_issue_mailbox_once(self):
         with patch("tools.kaep_mailbox_support.read_mailbox",
                    wraps=read_mailbox) as read:
