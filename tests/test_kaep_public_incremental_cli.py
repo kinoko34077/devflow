@@ -34,6 +34,22 @@ def ptr(name, issue, cid, *, marker=True):
 
 
 class PublicIncrementalTests(TestCase):
+    def test_created_cursor_and_updated_window_keep_distinct_native_plans(self):
+        from devflow_mapped_read.github_pages import RepositoryIssueQuery
+
+        repository = f"{OWNER}/devflow"
+        created = inc.locator._created_comment_path(repository, 2)
+        self.assertEqual(created,
+            f"/repos/{repository}/issues/comments?sort=created&direction=desc&per_page=100&page=2")
+        self.assertEqual(created, RepositoryIssueQuery(
+            repository, "issue_comment", sort="created", direction="desc").path(2))
+        updated = RepositoryIssueQuery(
+            repository, "issue_comment", sort="updated", direction="desc",
+            native_since="2026-11-20T00:00:00Z").path(2)
+        self.assertEqual(updated,
+            f"/repos/{repository}/issues/comments?sort=updated&direction=desc&per_page=100&page=2&since=2026-11-20T00:00:00Z")
+        self.assertNotEqual(created, updated)
+
     def test_baseline_reuses_existing_scanner_and_provides_head_for_ordinary_comment(self):
         get, calls = stream(["devflow"], {"devflow": {
             1: [ptr("devflow", 200, 900, marker=False), ptr("devflow", 503, 899)]}})

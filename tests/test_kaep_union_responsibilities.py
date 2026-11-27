@@ -51,7 +51,7 @@ class UnionReadResponsibilityTests(unittest.TestCase):
         sources, counts, pages, warnings = union._collect_recent_source_hints(
             [REPO], recent_read=recent_window, since=None,
         )
-        self.assertEqual(sources, set())
+        self.assertEqual(sources, [])
         self.assertEqual(counts, {REPO: 1})
         self.assertEqual(pages, {REPO: 2})
         self.assertEqual(warnings, [

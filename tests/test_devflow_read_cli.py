@@ -791,5 +791,78 @@ class CloudReadCLITests(unittest.TestCase):
                 )
 
 
+class NativeCIEvidenceCLITests(unittest.TestCase):
+    def setUp(self):
+        from tests.test_ci_github_evidence import ReaderFixture, REPO
+        self.f = ReaderFixture()
+        self.repo = REPO
+        self.service = SimpleNamespace(reader=self.f.reader)
+
+    def run_cli(self, args):
+        out = io.StringIO()
+        with patch("tools.devflow_read_cli.default_service", return_value=self.service) as factory:
+            with redirect_stdout(out):
+                status = cli.main(args)
+        return status, json.loads(out.getvalue()), factory.call_count
+
+    def test_pr_native_metadata_and_candidate_not_tested_tree(self):
+        self.f.pr["body"] += "\nPRIVATE_BODY_NOT_RETURNED"
+        status, result, calls = self.run_cli(
+            ["ci-pr-evidence", "--repository", self.repo, "--pr-number", "7"])
+        self.assertEqual((status, calls, len(self.f.calls)), (0, 1, 2))
+        self.assertEqual(result["metadata"]["status"], "VALID")
+        self.assertEqual(result["candidate"]["kind"], "SYNTHETIC_MERGE")
+        self.assertIsNone(result["tested_tree"])
+        self.assertNotIn("PRIVATE_BODY_NOT_RETURNED", json.dumps(result))
+        self.assertFalse(result["can_authorize_execution"])
+        self.assertFalse(result["can_skip_verification"])
+
+    def test_native_run_job_result_not_code_equivalence(self):
+        status, result, calls = self.run_cli(
+            ["ci-run-evidence", "--repository", self.repo, "--run-id", "42"])
+        self.assertEqual((status, calls, len(self.f.calls)), (0, 1, 3))
+        self.assertEqual(result["jobs"][0]["native_decision"]["action"], "REUSE_CANDIDATE")
+        self.assertIsNone(result["tested_tree"])
+        self.assertEqual(result["code_equivalence"]["status"], "UNKNOWN")
+        self.assertFalse(result["can_skip_verification"])
+        self.assertTrue(result["requires_source_revalidation"])
+
+    def test_partial_unknown_and_native_failure_distinct(self):
+        args = ["ci-run-evidence", "--repository", self.repo, "--run-id", "42"]
+        self.f.jobs["total_count"] = 2
+        code, result, _ = self.run_cli(args)
+        self.assertEqual((code, result["status"]), (2, "PARTIAL"))
+        self.f.jobs["total_count"] = 1
+        self.f.run["conclusion"] = "failure"
+        code, result, _ = self.run_cli(args)
+        self.assertEqual((code, result["status"], result["run"]["conclusion"]), (0, "OBSERVED", "failure"))
+        self.f.failed.add(f"/repos/{self.repo}/actions/runs/42")
+        code, result, _ = self.run_cli(args)
+        self.assertEqual((code, result["status"]), (2, "UNKNOWN"))
+
+    def test_mixed_or_missing_targets_fail_before_service(self):
+        for args, reason in (
+            (["ci-pr-evidence", "--repository", self.repo], "INVALID_CI_TARGET"),
+            (["ci-run-evidence", "--repository", self.repo, "--run-id", "0"], "INVALID_CI_TARGET"),
+            (["ci-pr-evidence", "--repository", self.repo, "--pr-number", "7", "--run-id", "42"], "INVALID_CI_TARGET"),
+            (["bootstrap", "--repository", self.repo, "--pr-number", "7"], "CI_TARGET_ON_OTHER_OPERATION"),
+            (["ci-run-evidence", "--repository", self.repo, "--run-id", "42", "--request-file", "untrusted.json"], "CI_OPTIONS_CONFLICT"),
+            (["ci-pr-evidence", "--repository", self.repo, "--pr-number", "7", "--issue-number", "7"], "CI_OPTIONS_CONFLICT"),
+        ):
+            with self.subTest(args=args):
+                code, result, calls = self.run_cli(args)
+                self.assertEqual((code, result["reason_code"], calls), (2, reason, 0))
+        self.assertEqual(self.f.calls, [])
+
+    def test_in_process_options_and_exact_types(self):
+        for kwargs in ({"pr_number": True}, {"pr_number": 7, "run_id": 42},
+                       {"pr_number": 7, "mapped_request": {}},
+                       {"pr_number": 7, "allowed_repositories": [self.repo]}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                cli.read_operation(self.service, operation="ci-pr-evidence",
+                                   repository=self.repo, **kwargs)
+        self.assertEqual(self.f.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

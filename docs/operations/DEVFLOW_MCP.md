@@ -143,6 +143,30 @@ python -m tools.devflow_read_cli bootstrap --repository kinoko34077/devflow
 python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep --include-published-supply
 ```
 
+### Unresolved Issue discovery within Work View
+
+`get_repository_work_view` additionally returns `unresolved_issue_discovery`:
+`verified_control_issue_numbers` identifies unique, directly trusted,
+identity- and schema-validated canonical Controls already present in the
+same devflow Open Issue listing. `role_review_issue_numbers` locates the
+remaining unresolved roles in that listing, including legacy, invalid and
+untrusted metadata. Resolve those numbers against the returned repository
+and inspect the originals only as needed. They are not TASKs, assignments
+or permissions. Controls may have independent Human/security/cross-repository
+attention; their verified role is not proof that no such attention exists.
+Bot-authored Controls that would require additional bootstrap-provenance
+reads and ambiguous or invalid identities remain unresolved. No title-only
+classification, per-Control extra GET, new store or metadata write is used.
+
+The existing role counts, `coverage_status`, M2 cache contract, manual
+fallback and execution authority are unchanged. These are read-only
+discovery locators, not a complete work inventory; unavailable sources
+return null lists. When the target is devflow itself, repository Control
+resolution and Projection use one request-local Open listing rather than
+fetching that same listing twice. This does not make GitHub's paginated
+reads transactional or extend authorization. Other repositories still
+require their own independent Issue listing.
+
 ### Targetless managed-repository discovery without registered MCP (portfolio)
 
 For user-authorized portfolio scope when no repository has yet been selected, the
@@ -588,11 +612,16 @@ The additive `get_agent_workspace(repository, recipient="codex", limit=20, offse
 
 This is a **read-only observation / U1 opt-in consumer**, not an authoritative task queue or all-work index. `known_tasks` means classified TASK records **without Claim eligibility assessment**. Without the U2 opt-in flag, `messages` covers only TASK-scoped Inbox roots; with it, verified indexed and recent non-TASK original roots can also appear. Historical originals outside both sources remain unknown (#531/#680/#771). **At U1 acceptance**, `ongoing`, `offers` and `waiting_recovery` were `NOT_INTEGRATED` with `entries=null`; the later R2 Claim observation is described below. Workspace `has_unknown_work=true` while the global KAEP source universe remains unproven; it retains the source `source_error` / `coverage_status`, Inbox page `next_offset`, error codes and `manual_control` fallback. `can_authorize_execution=false` and `can_replace_manual_active_work=false`.
 
+The top-level `coverage_status_scope=WORK_VIEW` identifies the existing `coverage_status` as the Work View inventory status, not a summary of every Workspace section. `sections.known_tasks.unresolved_issue_discovery` forwards the same Work View locator object without another Issue-list read. Role-review locators are not TASK entries or claims; a failed source retains null lists. For exact known TASK reads, use the existing scoped precedence; for recipient requests, use the message section's own cohort/recent diagnostics; for published supply, ongoing Claims and recovery, use the respective existing source status. An unrelated incomplete cohort does not invalidate an independently verified read, and none of these observations authorizes execution or proves all work is absent.
+
+
 Deployment/rollback: Clients must explicitly opt in; old MCP/CLI consumers are not migrated. If this view is unsuitable, call existing `get_repository_work_view` + `get_agent_inbox`. No new local MCP settings, permissions, credentials, automatic triggers, coordinator mutations or new stored state are involved. Do not switch the controller or retire #503/manual fallback on U1 evidence alone.
 
 ### U2 opt-in bounded indexed + recent KAEP discovery (devflow #869 / #872 / #881)
 
 Add `include_recent_kaep=true` to `get_agent_workspace`, or use `python -m tools.devflow_read_cli workspace --repository kinoko34077/devflow --recipient codex --include-recent-kaep`. The **same existing flag** now reuses B6 `kaep_live_union_cli.read_union`: the pinned **uncredentialed** public Pages candidate index and the latest authenticated GitHub updated-comment window are combined, then each deduplicated original Issue is checked by the existing canonical B6 verifier once. The entire public index is validated, but only the explicitly selected Workspace repository is queried or returned; no GitHub bearer token goes to Pages. Original Issue TASK classification is **not** required for KAEP discovery. Indexed old non-TASK requests and live unindexed recent requests may be visible together, without converting messages into task assignments.
+
+Within a single Workspace call, B6 first checks the exact original Issue and its bounded comment history. The TASK Inbox then reuses successful comment rows for the same repository and Issue (identical read bounds); both consumers retain their own strict validation and diagnostics. Failed reads are not reused as empty results, and later Workspace calls fetch current sources again. This avoids duplicate comment requests without adding a persistent cache, changing source coverage, or granting execution authority.
 
 The updated-comment window is bounded to 100 entries per requested repository. A full window, stale/partial index, missing originals or other source uncertainty stays `PARTIAL_UNKNOWN`, **not** complete Inbox. If **only** the recent-comment GET fails, already-indexed sources are still strictly revalidated and displayed with `RECENT_WINDOW_SOURCE_UNAVAILABLE` warning and `PARTIAL_UNKNOWN`; the missing recent hint cohort is not proof of an empty window. Older original roots that appear in neither the public index nor recent window remain unknown. When Pages index GET/validation fails, the same flag falls back to the previous strict recent-only B6 path, marks `index_status=UNAVAILABLE`, and retains an explicit partial warning; if the live GET also fails, existing TASK-cohort roots remain observable with failure recorded. Results include source provenance (`INDEXED_SOURCE`, `LATEST_COMMENT_SOURCE`, `BOTH`), not Claim eligibility or current HEAD verification. Neither a verified pointer nor an indexed root permits Agent wake, task Claim, #503/#789 fallback retirement, or full B5 acceptance. The `limit`, `offset` and `work_status` arguments page/filter only the TASK-scoped Inbox comment reads; they do **not** page/filter the optional indexed+recent B6 source roots or the `known_tasks` list, which have separate bounds/coverage. Default `include_recent_kaep=false` remains unchanged; old `get_agent_inbox` and manual Control continue working.
 

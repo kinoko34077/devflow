@@ -19,6 +19,7 @@ from tools.kaep_link_validation import (
 )
 from tools.kaep_mailbox_codec import InvalidMessage, MARKER, has_kaep_marker, fail
 from tools.kaep_repository_validation import REPOSITORY
+from devflow_mapped_read.github_pages import RepositoryIssueQuery
 
 OWNER = "kinoko34077"
 # Compatibility import for the incremental scanner; the shared validator owns
@@ -80,6 +81,14 @@ def _validated_public_repository_page(data: Any) -> list[str]:
             fail("INVALID_PUBLIC_REPOSITORY_PAGE")
         names.append(full)
     return names
+
+
+def _created_comment_path(repository: str, page: int) -> str:
+    """Shared native plan; created order is the existing exact-ID cursor basis."""
+    return RepositoryIssueQuery(
+        repository, "issue_comment", per_page=PAGE_SIZE,
+        sort="created", direction="desc",
+    ).path(page)
 
 
 def _validated_locator_candidate(
@@ -173,10 +182,8 @@ def discover(
                 )
                 break
             calls += 1
-            path = (f"/repos/{repo}/issues/comments?sort=created&direction=desc"
-                    f"&per_page={PAGE_SIZE}&page={page}")
             try:
-                comments = fetch(path)
+                comments = fetch(_created_comment_path(repo, page))
                 if type(comments) is not list or len(comments) > PAGE_SIZE:
                     fail("INVALID_PUBLIC_COMMENT_PAGE")
                 for comment in comments:

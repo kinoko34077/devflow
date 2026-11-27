@@ -6,7 +6,7 @@ test recipe, resolved environment or historical PR body. No merge/skip grant.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -128,9 +128,16 @@ def _run_identity(run: dict, repository: str, run_id: int) -> dict | None:
             or not _text(run.get("event")) or not _text(run.get("status"))):
         return None
     # Identity is limited to this native record, not the execution environment.
+    repository_id = _object(run.get("repository")).get("id")
+    head_repository_id = _object(run.get("head_repository")).get("id")
     return {key: run[key] for key in (
         "id", "workflow_id", "run_attempt", "head_sha", "path", "event", "status",
-    )} | {"conclusion": run.get("conclusion")}
+    )} | {
+        "conclusion": run.get("conclusion"),
+        "repository_id": repository_id if _id(repository_id) else None,
+        "head_repository_id": head_repository_id if _id(head_repository_id) else None,
+        "head_branch": run.get("head_branch"),
+    }
 
 
 def _outcome(record: dict) -> str:
@@ -233,3 +240,219 @@ def read_run_verification(reader: GitHubReader, repository: str, run_id: int) ->
     result["jobs"] = rows
     result["job_coverage"] = "COMPLETE_PAGE"
     return result
+
+
+# This is a specific code-execution identity, not a mandatory dimension set
+# for metadata or external-state guarantees. Only a trusted host may supply
+# these measurements; a PR artifact, log line or user JSON is not a receipt.
+@dataclass(frozen=True)
+class ExecutionInputs:
+    tree_sha: str
+    recipe_sha256: str
+    environment_sha256: str
+    dependencies_sha256: str
+    policy_sha256: str
+
+    def valid(self) -> bool:
+        return _sha(self.tree_sha) and all(
+            isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v)
+            for v in (self.recipe_sha256, self.environment_sha256,
+                      self.dependencies_sha256, self.policy_sha256)
+        )
+
+
+@dataclass(frozen=True)
+class TrustedExecutionReceipt:
+    repository: str
+    guarantee: str
+    run_id: int
+    workflow_id: int
+    workflow_path: str
+    event: str
+    event_head_sha: str
+    job_id: int
+    job_name: str
+    job_attempt: int
+    checkout_sha: str
+    inputs: ExecutionInputs
+    source_ref: str
+    valid_until: datetime | None
+
+
+def read_execution_verification(
+    reader: GitHubReader, repository: str, guarantee: str,
+    required: ExecutionInputs, receipt: TrustedExecutionReceipt | None,
+    *, now: datetime,
+) -> dict:
+    """Bind trusted, measured execution inputs to a current native job.
+
+    This is an internal adapter, not a receipt authentication mechanism.
+    The protected collector must measure the actual tested bytes, recipe,
+    resolved environment/dependencies and policy, bind them to the job,
+    establish freshness and authenticate its receipt before calling here.
+    None means no such evidence exists. No public JSON/CLI receipt input.
+    A matching Git commit alone cannot establish what a job executed.
+    """
+    repository = normalize_repository(repository)
+
+    def unknown(reason: str) -> dict:
+        return {
+            "status": "UNKNOWN", "reason": reason, "tested_tree": None,
+            "decision": {"action": "HOLD", "reason": reason, "evidence_refs": ()},
+            "requires_source_revalidation": True,
+        }
+
+    if (not isinstance(required, ExecutionInputs) or not required.valid()
+            or not _text(guarantee) or not isinstance(now, datetime)
+            or now.utcoffset() is None):
+        return unknown("EXECUTION_REQUIREMENT_UNKNOWN")
+    if receipt is None:
+        return unknown("TRUSTED_EXECUTION_RECEIPT_UNAVAILABLE")
+    if (not isinstance(receipt, TrustedExecutionReceipt)
+            or receipt.repository != repository or receipt.guarantee != guarantee
+            or not all(_id(v) for v in (receipt.run_id, receipt.workflow_id,
+                                      receipt.job_id, receipt.job_attempt))
+            or not all(_text(v) for v in (receipt.workflow_path, receipt.event,
+                                          receipt.job_name, receipt.source_ref))
+            or not _sha(receipt.event_head_sha) or not _sha(receipt.checkout_sha)
+            or not isinstance(receipt.inputs, ExecutionInputs) or not receipt.inputs.valid()
+            or (receipt.valid_until is not None and (
+                not isinstance(receipt.valid_until, datetime)
+                or receipt.valid_until.utcoffset() is None))):
+        return unknown("EXECUTION_RECEIPT_INVALID")
+    native = read_run_verification(reader, repository, receipt.run_id)
+    if native.get("status") != "OBSERVED" or native.get("job_coverage") != "COMPLETE_PAGE":
+        return unknown("NATIVE_EXECUTION_EVIDENCE_UNKNOWN")
+    run = native["run"]
+    if (run["workflow_id"], run["path"], run["event"], run["head_sha"]) != (
+            receipt.workflow_id, receipt.workflow_path, receipt.event, receipt.event_head_sha):
+        return unknown("EXECUTION_RUN_IDENTITY_MISMATCH")
+    jobs = [job for job in native["jobs"] if job["id"] == receipt.job_id]
+    if (len(jobs) != 1 or jobs[0]["name"] != receipt.job_name
+            or jobs[0]["attempt"] != receipt.job_attempt):
+        return unknown("EXECUTION_JOB_IDENTITY_MISMATCH")
+    job = jobs[0]
+    try:
+        commit = reader.get_git_commit(repository, receipt.checkout_sha)
+    except DevflowMCPError:
+        return unknown("EXECUTION_CHECKOUT_UNAVAILABLE")
+    if (commit.get("sha") != receipt.checkout_sha
+            or _object(commit.get("tree")).get("sha") != receipt.inputs.tree_sha):
+        return unknown("EXECUTION_CHECKOUT_TREE_MISMATCH")
+
+    # The original guarantee is owned by trusted policy. Never compare only
+    # HEAD or one hash, nor treat a current native job failure as a success.
+    # A non-successful/in-progress workflow is conservatively not reusable.
+    outcome = _outcome(job) if _outcome(run) == "success" else _outcome(run)
+    # In particular, a successful workflow with a queued/failed/skipped job
+    # is not successful evidence for that job's guarantee.
+    required_identity = Requirement(repository, guarantee, asdict(required))
+    observed_identity = Requirement(repository, guarantee, asdict(receipt.inputs))
+    decision = assess_verification(
+        required_identity,
+        (Observation(observed_identity, outcome, job["source_ref"], receipt.valid_until),),
+        now=now,
+    )
+    return {
+        "status": "OBSERVED", "tested_tree": receipt.inputs.tree_sha,
+        "checkout_sha": receipt.checkout_sha, "job_source_ref": job["source_ref"],
+        "receipt_source_ref": receipt.source_ref, "decision": asdict(decision),
+        "requires_source_revalidation": True,
+    }
+
+
+@dataclass(frozen=True)
+class FixedSourceRequirement:
+    """Explicit pin selected by the trusted policy owner, not a client request."""
+    repository: str
+    repository_id: int
+    channel: str
+    policy_revision: str
+    commit: str
+    branch: str
+    workflow_id: int
+    workflow_path: str
+    required_jobs: tuple[str, ...]
+
+
+def read_fixed_source_verification(
+    reader: GitHubReader, required: FixedSourceRequirement,
+) -> dict:
+    """Observe exact native push evidence for an already selected fixed source.
+
+    No candidate search across revisions, checkout, trust-policy approval,
+    cache promotion, execution grant or test-equivalence claim. The host
+    separately authenticates its policy and authorizes the selected revision.
+    """
+    def result(status: str, reason: str, **evidence) -> dict:
+        return {
+            "status": status, "reason": reason,
+            "can_authorize_execution": False, "tested_tree": None,
+            "requires_source_revalidation": True, **evidence,
+        }
+
+    if (not isinstance(required, FixedSourceRequirement)
+            or not _text(required.repository) or not _id(required.repository_id)
+            or not all(_text(v) for v in (required.channel, required.policy_revision,
+                                         required.branch, required.workflow_path))
+            or not _sha(required.commit) or not _id(required.workflow_id)
+            or not isinstance(required.required_jobs, tuple) or not required.required_jobs
+            or not all(_text(v) for v in required.required_jobs)
+            or len(set(required.required_jobs)) != len(required.required_jobs)):
+        return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
+    try:
+        repository = normalize_repository(required.repository)
+        if repository != required.repository:
+            return result("UNKNOWN", "FIXED_SOURCE_REQUIREMENT_INVALID")
+        packet = reader.get_fixed_push_workflow_runs(
+            repository, required.workflow_id, required.commit, required.branch,
+        )
+    except DevflowMCPError:
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_LOOKUP_UNAVAILABLE")
+    records = packet.get("workflow_runs")
+    count = packet.get("total_count")
+    if type(count) is not int or count != 1 or not isinstance(records, list) or len(records) != 1:
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_NOT_UNIQUE")
+    record = _object(records[0])
+    run_id = record.get("id")
+    if not _id(run_id):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+    identity = _run_identity(record, repository, run_id)
+    if identity is None or (
+        identity["repository_id"], identity["head_repository_id"], identity["head_branch"],
+        identity["head_sha"], identity["workflow_id"], identity["path"], identity["event"]
+    ) != (
+        required.repository_id, required.repository_id, required.branch,
+        required.commit, required.workflow_id, required.workflow_path, "push"
+    ):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+    # Reuse the original observer, including latest jobs and run revalidation.
+    native = read_run_verification(reader, repository, run_id)
+    if (native.get("status") != "OBSERVED" or native.get("job_coverage") != "COMPLETE_PAGE"
+            or native.get("run") != identity):
+        return result("UNKNOWN", "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+    evidence = {"source_ref": native["source_ref"], "run_id": run_id,
+                "run_attempt": identity["run_attempt"], "commit": required.commit}
+    if _outcome(identity) != "success":
+        return result("NOT_SUCCESSFUL", "FIXED_SOURCE_RUN_NOT_SUCCESSFUL", **evidence)
+    job_refs = []
+    for name in required.required_jobs:
+        matches = [job for job in native["jobs"] if job["name"] == name]
+        if len(matches) != 1:
+            return result("UNKNOWN", "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE", **evidence)
+        if _outcome(matches[0]) != "success":
+            return result("NOT_SUCCESSFUL", "FIXED_SOURCE_REQUIRED_JOB_NOT_SUCCESSFUL", **evidence)
+        job_refs.append(matches[0]["source_ref"])
+    try:
+        commit = reader.get_git_commit(repository, required.commit)
+    except DevflowMCPError:
+        return result("UNKNOWN", "FIXED_SOURCE_COMMIT_UNAVAILABLE", **evidence)
+    tree = _object(commit.get("tree")).get("sha")
+    if commit.get("sha") != required.commit or not _sha(tree):
+        return result("UNKNOWN", "FIXED_SOURCE_TREE_UNPROVEN", **evidence)
+    return result(
+        "NATIVE_SOURCE_CANDIDATE", "EXACT_PUSH_AND_REQUIRED_JOBS_SUCCESS",
+        repository=repository, repository_id=required.repository_id,
+        channel=required.channel, policy_revision=required.policy_revision,
+        tree_sha=tree, job_source_refs=tuple(job_refs), **evidence,
+    )

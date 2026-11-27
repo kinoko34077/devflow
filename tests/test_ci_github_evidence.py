@@ -1,8 +1,14 @@
 import copy
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import unittest
 from urllib.parse import urlsplit
 
-from tools.ci_github_evidence import read_pr_verification, read_run_verification
+from tools.ci_github_evidence import (
+    ExecutionInputs, FixedSourceRequirement, TrustedExecutionReceipt,
+    read_execution_verification, read_fixed_source_verification,
+    read_pr_verification, read_run_verification,
+)
 from tools.devflow_mcp_core import GitHubReader, DevflowMCPError
 
 REPO = "kinoko34077/testapp"
@@ -37,6 +43,7 @@ class ReaderFixture:
         self.calls = []
         self.run_reads = 0
         self.changed_run = None
+        self.workflow_runs = None
         self.failed = set()
         self.reader = GitHubReader(transport=self.get)
 
@@ -50,6 +57,10 @@ class ReaderFixture:
             return self.pr
         if suffix == "git/commits/" + MERGE:
             return self.commit
+        if suffix == "actions/workflows/13/runs":
+            self.fixed_query = urlsplit(url).query
+            return (self.workflow_runs if self.workflow_runs is not None
+                    else {"total_count": 1, "workflow_runs": [self.run]})
         if suffix == "actions/runs/42/jobs":
             self.query = urlsplit(url).query
             return self.jobs
@@ -186,6 +197,196 @@ class NativeEvidenceTests(unittest.TestCase):
         with self.assertRaises(DevflowMCPError):
             f.reader.get_git_commit(REPO, "../main")
         self.assertEqual(f.calls, [])
+
+
+class ExecutionEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.f = ReaderFixture()
+        self.now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+        self.inputs = ExecutionInputs(TREE, "1" * 64, "2" * 64, "3" * 64, "4" * 64)
+        # The fixture stands in for a protected collector. The REST event head
+        # deliberately differs from the actual tested checkout.
+        self.receipt = TrustedExecutionReceipt(
+            REPO, "code-verification", 42, 13, RUN["path"], RUN["event"],
+            HEAD, 10, "verify", 1, MERGE, self.inputs,
+            "trusted-host:fixture", self.now + timedelta(hours=1),
+        )
+
+    def read(self, required=None, receipt="default"):
+        return read_execution_verification(
+            self.f.reader, REPO, "code-verification",
+            self.inputs if required is None else required,
+            self.receipt if receipt == "default" else receipt, now=self.now,
+        )
+
+    def test_exact_job_and_actual_checkout_bind_measured_identity(self):
+        result = self.read()
+        self.assertEqual(result["status"], "OBSERVED")
+        self.assertEqual(result["tested_tree"], TREE)
+        self.assertEqual(result["checkout_sha"], MERGE)
+        self.assertEqual(result["decision"]["action"], "REUSE_CANDIDATE")
+        self.assertTrue(result["requires_source_revalidation"])
+        self.assertEqual(len(self.f.calls), 4)
+
+    def test_absent_or_untyped_receipt_is_not_inferred_from_success(self):
+        for receipt in (None, {"run_id": 42, "tested_tree": TREE}):
+            result = self.read(receipt=receipt)
+            self.assertEqual(result["status"], "UNKNOWN")
+            self.assertIsNone(result["tested_tree"])
+            self.assertEqual(result["decision"]["action"], "HOLD")
+        self.assertEqual(self.f.calls, [])
+
+    def test_all_code_input_dimensions_must_match(self):
+        for field, value in (
+            ("tree_sha", "f" * 40), ("recipe_sha256", "f" * 64),
+            ("environment_sha256", "f" * 64), ("dependencies_sha256", "f" * 64),
+            ("policy_sha256", "f" * 64),
+        ):
+            with self.subTest(field=field):
+                result = self.read(required=replace(self.inputs, **{field: value}))
+                self.assertEqual(result["decision"]["action"], "RUN")
+                self.assertEqual(result["tested_tree"], TREE)
+        self.assertEqual(self.read(required=replace(self.inputs, recipe_sha256="unknown"))
+                         ["status"], "UNKNOWN")
+
+    def test_invalid_or_mismatched_run_job_or_guarantee_cannot_bind(self):
+        for changes in (
+            {"repository": "other/repo"}, {"guarantee": "metadata"},
+            {"job_id": True}, {"job_id": 99}, {"job_attempt": 2},
+            {"job_name": "different"}, {"workflow_id": 14},
+            {"event_head_sha": BASE}, {"workflow_path": "other.yml"},
+            {"event": "push"}, {"source_ref": ""}, {"checkout_sha": "../main"},
+        ):
+            with self.subTest(changes=changes):
+                r = self.read(receipt=replace(self.receipt, **changes))
+                self.assertEqual(r["status"], "UNKNOWN")
+                self.assertIsNone(r["tested_tree"])
+                self.assertEqual(r["decision"]["action"], "HOLD")
+
+    def test_native_commit_tree_must_match_receipt_not_event_head(self):
+        self.f.commit["tree"]["sha"] = "f" * 40
+        r = self.read()
+        self.assertEqual(r["reason"], "EXECUTION_CHECKOUT_TREE_MISMATCH")
+        self.assertIsNone(r["tested_tree"])
+
+    def test_missing_commit_or_partial_latest_attempt_is_unknown(self):
+        self.f.failed.add(f"/repos/{REPO}/git/commits/{MERGE}")
+        self.assertEqual(self.read()["reason"], "EXECUTION_CHECKOUT_UNAVAILABLE")
+        self.f.failed.clear()
+        self.f.jobs["total_count"] = 2
+        self.assertEqual(self.read()["reason"], "NATIVE_EXECUTION_EVIDENCE_UNKNOWN")
+
+    def test_expiry_and_native_nonsuccess_do_not_reuse(self):
+        self.assertEqual(self.read(receipt=replace(self.receipt, valid_until=self.now))
+                         ["decision"]["action"], "RUN")
+        for status, conclusion, action in (
+            ("completed", "failure", "RUN"), ("completed", "skipped", "RUN"),
+            ("completed", "cancelled", "RUN"), ("in_progress", None, "WAIT"),
+        ):
+            with self.subTest(status=status, conclusion=conclusion):
+                self.f.jobs["jobs"][0].update(status=status, conclusion=conclusion)
+                self.assertEqual(self.read()["decision"]["action"], action)
+        self.f.jobs["jobs"][0].update(status="completed", conclusion="success")
+        self.f.run.update(status="completed", conclusion="failure")
+        self.assertEqual(self.read()["decision"]["action"], "RUN")
+
+
+class FixedSourceEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.f = ReaderFixture()
+        self.f.run.update(
+            head_sha=MERGE, event="push", head_branch="main",
+            repository={"full_name": REPO, "id": 1234},
+            head_repository={"full_name": REPO, "id": 1234},
+        )
+        self.f.jobs["jobs"][0]["head_sha"] = MERGE
+        self.required = FixedSourceRequirement(
+            REPO, 1234, "stable", "policy-1", MERGE, "main", 13,
+            RUN["path"], ("verify",),
+        )
+
+    def read(self, required=None):
+        return read_fixed_source_verification(
+            self.f.reader, self.required if required is None else required,
+        )
+
+    def test_fixed_native_success_distinct_from_code_equivalence_and_authority(self):
+        r = self.read()
+        self.assertEqual(r["status"], "NATIVE_SOURCE_CANDIDATE")
+        self.assertEqual(r["tree_sha"], TREE)
+        self.assertEqual(r["commit"], MERGE)
+        self.assertEqual(r["repository_id"], 1234)
+        self.assertEqual(r["channel"], "stable")
+        self.assertEqual(r["policy_revision"], "policy-1")
+        self.assertEqual(r["run_id"], 42)
+        self.assertEqual(len(r["job_source_refs"]), 1)
+        self.assertFalse(r["can_authorize_execution"])
+        self.assertIsNone(r["tested_tree"])
+        self.assertTrue(r["requires_source_revalidation"])
+        self.assertEqual(len(self.f.calls), 5)
+        self.assertIn("head_sha=" + MERGE, self.f.fixed_query)
+        self.assertIn("event=push", self.f.fixed_query)
+        self.assertIn("branch=main", self.f.fixed_query)
+
+    def test_invalid_requirements_stop_before_read(self):
+        for changes in (
+            {"repository_id": True}, {"commit": "main"}, {"workflow_id": 0},
+            {"channel": ""}, {"policy_revision": ""}, {"branch": ""},
+            {"required_jobs": ()}, {"required_jobs": ("verify", "verify")},
+            {"required_jobs": "verify"},
+        ):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.read(replace(self.required, **changes))["status"], "UNKNOWN")
+        self.assertEqual(self.f.calls, [])
+
+    def test_native_lookup_must_be_complete_and_unique(self):
+        for packet in (
+            {"total_count": 0, "workflow_runs": []},
+            {"total_count": 2, "workflow_runs": [self.f.run]},
+            {"total_count": 2, "workflow_runs": [self.f.run, self.f.run]},
+            {"total_count": True, "workflow_runs": [self.f.run]},
+        ):
+            self.f.workflow_runs = packet
+            self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_NOT_UNIQUE")
+
+    def test_wrong_repo_id_head_branch_workflow_event_or_commit_rejected(self):
+        original = copy.deepcopy(self.f.run)
+        for changes in (
+            {"repository": {"full_name": REPO, "id": 1235}},
+            {"head_repository": {"id": 1235}},
+            {"repository": {"full_name": REPO, "id": 1234.0}},
+            {"head_repository": {"id": 1234.0}},
+            {"head_branch": "feature"}, {"head_sha": HEAD},
+            {"workflow_id": 99}, {"event": "pull_request"}, {"path": "other.yml"},
+        ):
+            with self.subTest(changes=changes):
+                self.f.run = original | changes
+                self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_IDENTITY_UNPROVEN")
+
+    def test_partial_latest_jobs_or_run_drift_is_not_success(self):
+        self.f.workflow_runs = {"total_count": 1, "workflow_runs": [copy.deepcopy(self.f.run)]}
+        self.f.run["run_attempt"] = 3
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+        self.f.workflow_runs = None
+        self.f.jobs["total_count"] = 2
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_RUN_CHANGED_OR_INCOMPLETE")
+
+    def test_missing_duplicate_or_unsuccessful_required_job(self):
+        self.assertEqual(self.read(replace(self.required, required_jobs=("missing",)))
+                         ["reason"], "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE")
+        self.f.jobs["jobs"][0]["conclusion"] = "skipped"
+        self.assertEqual(self.read()["status"], "NOT_SUCCESSFUL")
+        self.f.jobs["jobs"][0]["conclusion"] = "success"
+        self.f.jobs["jobs"].append(dict(self.f.jobs["jobs"][0], id=11))
+        self.f.jobs["total_count"] = 2
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_REQUIRED_JOB_NOT_UNIQUE")
+
+    def test_nonsuccessful_run_and_missing_tree_do_not_qualify(self):
+        self.f.run["conclusion"] = "failure"
+        self.assertEqual(self.read()["status"], "NOT_SUCCESSFUL")
+        self.f.run["conclusion"] = "success"
+        self.f.commit["tree"]["sha"] = None
+        self.assertEqual(self.read()["reason"], "FIXED_SOURCE_TREE_UNPROVEN")
 
 
 if __name__ == "__main__":

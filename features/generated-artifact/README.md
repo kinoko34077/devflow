@@ -57,3 +57,46 @@ not a completed write.
 Live owning Issues, PRs, exact workflow runs, current pinned SHAs, review, and
 post-main evidence remain authoritative. This route does not grant claims,
 permissions, credentials, deploys, publication, or general rollout authority.
+
+## Source-neutral payload layer
+
+\`tools/generated_artifact_contract.py:validate_payload_and_plan\` and
+\`tools/generated_artifact_packager.py:package_generated_bytes\` share exact
+output-set, bounded ZIP, content digest and byte-diff validation with the
+existing Actions v1 path. They support a non-Actions producer's pure payload
+without inventing a run ID or workflow reference. The caller independently
+derives exact paths and limits from its reviewed recipe; an untrusted payload
+cannot choose its own scope. These functions are read-only and are not a
+writer admission or a new execution route. The existing Actions v1 policy,
+producer authentication, branch fencing and writer activation stay mandatory.
+A local/PC writer still needs its own authenticated producer evidence and
+approved target/credential boundary before the shared writer may be invoked.
+
+## First PR bootstrap (dormant, no production admission)
+
+The existing writer assumes an open same-repository PR. For the first PR,
+\`tools/generated_artifact_pr_bootstrap.py\` provides a source-neutral read-only
+plan and an offline-tested dormant effect core. It reuses the existing exact
+payload validation, Git tree/blob reads and immutable commit construction.
+A receipt over the trusted repository/recipe, source main and output digests
+derives a deterministic new branch. Only a single-parent verified commit with
+the exact changed files can be reused. Branch creation is non-overwriting,
+and a branch-created/PR-failed or lost-response retry re-observes branch and
+PR instead of making another commit. Closed, conflicting, stale, unprotected
+or mismatched targets are refused. No force update or merge is part of this
+engine. No production CLI, transport, token, recipe activation or scheduler
+is provided; independent review and explicit admission of a constrained
+producer and writer remain necessary. Existing Actions paths stay unchanged.
+GitHub Free private repositories cannot provide the required protected main;
+do not remove the gate or assume a repo-scoped token restricts branch writes.
+
+PR creation has no atomic expected-head field; the engine checks branch/main
+immediately before creation and verifies the exact resulting PR/head/bytes
+afterward. Remaining external races require the admitted single writer and
+merge-time verification. Uncertain responses are re-observed, not blindly
+retried. No claim of global CAS or automatic merge is made.
+
+The trusted recipe also binds the owning Issue. Created PRs carry the canonical
+Owning-Issue and formal/different-reviewer metadata with deterministic producer
+attribution, not a fabricated human/AI review. The PR base SHA and final main
+readback must agree with the observed source before reporting success.

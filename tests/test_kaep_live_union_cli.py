@@ -67,6 +67,88 @@ class LiveUnionTests(TestCase):
         self.assertFalse(output["can_authorize_execution"])
         self.assertNotIn("private test-only prompt", json.dumps(output))
 
+    def test_scoped_overflow_checks_recent_first_without_retiring_index(self):
+        # Older index entries fill the budget; a recent unindexed source
+        # must not be lost merely because its Issue number sorts last.
+        entries = [(n, 1000+n, root(number=n, issue=n))
+                   for n in range(100, 141)]
+        snap = index_with(*entries)
+        fresh = root(number=500, issue=900)
+        calls = []
+        def read_issue(repo, number):
+            calls.append((repo, number))
+            return issue_object(number)
+        def read_comments(repo, number):
+            if number == 900:
+                return source_page((9999, fresh, "kinoko34077"))
+            return source_page((1000+number, root(number=number, issue=number),
+                                "kinoko34077"))
+        out = union.read_union(
+            snap, recipient="claude-code", scoped_repository=REPO,
+            recent_read=lambda repo, since=None: [recent(900, cid=9999),
+                recent(140, cid=1140), recent(900, cid=9998)],
+            issue_read=read_issue, comments_read=read_comments,
+        )
+        self.assertEqual(len(calls), 40)
+        self.assertEqual(len(set(calls)), 40)
+        self.assertIn((REPO, 900), calls)
+        self.assertIn((REPO, 140), calls)
+        self.assertEqual(out["status"], "PARTIAL_UNKNOWN")
+        self.assertEqual(out["source_candidate_total_count"], 42)
+        self.assertEqual(out["source_candidates_not_checked"], 2)
+        self.assertEqual(out["source_issue_count"], 40)
+        self.assertEqual(out["indexed_issue_count_in_batch"], 39)
+        self.assertEqual(out["cached_rows_not_verified_live"], 0)
+        self.assertIn(900, [row["issue_number"] for row in out["live_rows"]])
+        self.assertIn("UNION_SOURCE_LIMIT_PARTIAL",
+                      [w["reason_code"] for w in out["warnings"]])
+        self.assertIsNone(out["source_next_offset"])
+        self.assertFalse(out["source_batch_snapshot_stable"])
+        self.assertTrue(out["has_unknown_work"])
+        self.assertFalse(out["complete_source_universe"])
+        self.assertFalse(out["can_authorize_execution"])
+        self.assertFalse(out["absence_of_work_proven"])
+
+    def test_since_only_bounds_discovery_not_original_root_or_reply(self):
+        msg = root(number=314, issue=576)
+        reply = dict(msg)
+        reply.update({
+            "message_id": "msg_union_outside_window_answer",
+            "idempotency_key": "union.outside.window.answer.001",
+            "in_reply_to": msg["message_id"],
+            "recipient": "chatgpt",
+            "kind": "ANSWER",
+            "payload": {"text": "correlated read-only response"},
+        })
+        snap = index_with((576, 101, msg), status="BOUNDED_SEARCH_READ")
+        calls = []
+        since = "2026-11-20T00:00:00Z"
+
+        def read_recent(repo, since=None):
+            calls.append(("recent", repo, since))
+            return []
+
+        def read_issue(repo, number):
+            calls.append(("issue", repo, number))
+            return issue_object(number)
+
+        def read_comments(repo, number):
+            calls.append(("comments", repo, number))
+            return source_page((101, msg, "kinoko34077"), (102, reply, "kinoko34077"))
+
+        result = union.read_union(
+            snap, recipient="claude-code", since=since,
+            recent_read=read_recent, issue_read=read_issue, comments_read=read_comments)
+        self.assertEqual(result["status"], "BOUNDED_UNION_READ")
+        self.assertEqual(calls, [("recent", REPO, since), ("issue", REPO, 576),
+                                 ("comments", REPO, 576)])
+        self.assertEqual(result["recent_marker_issue_count"], 0)
+        self.assertEqual(result["live_original_roots"], 1)
+        self.assertEqual(result["live_rows"][0]["reply_observation"], "ANSWER_OBSERVED")
+        self.assertTrue(result["has_unknown_work"])
+        self.assertFalse(result["complete_source_universe"])
+        self.assertFalse(result["can_authorize_execution"])
+
     def test_issue_closed_without_new_comment_is_detected_for_indexed_source(self):
         msg = root(number=4)
         snap = index_with((576, 133, msg), status="BOUNDED_SEARCH_READ")

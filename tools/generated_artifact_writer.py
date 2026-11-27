@@ -247,6 +247,30 @@ def _replay_is_exact(
     )
 
 
+def _build_verified_commit(api: GitHubWriteApi, *, base_head: str, base_tree: str,
+                           changes: list[dict[str, Any]], verified: Mapping[str, bytes],
+                           message: str) -> str:
+    """Shared immutable object construction; only an admitted caller may use it.
+
+    Does not create or move refs, open PRs or authenticate a producer.
+    """
+    blobs = {}
+    for change in changes:
+        path = change["path"]
+        blob = _post_blob(api, path, verified[path])
+        blobs[path] = _sha(_mapping(blob, "created blob").get("sha"), "created blob SHA")
+    tree = api.post("/git/trees", {
+        "base_tree": base_tree,
+        "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": blobs[path]}
+                 for path in sorted(blobs)],
+    })
+    new_tree = _sha(_mapping(tree, "new tree").get("sha"), "new tree SHA")
+    new_commit = api.post("/git/commits", {
+        "message": message, "tree": new_tree, "parents": [base_head],
+    })
+    return _sha(_mapping(new_commit, "new commit").get("sha"), "new commit SHA")
+
+
 def verified_writeback(
     api: GitHubWriteApi,
     policy: Mapping[str, Any],
@@ -285,29 +309,17 @@ def verified_writeback(
         return {**archive_plan, "status": "DRY_RUN", "target_head": target["head"], "ci_verified": False}
 
     # Last observed head fence: create immutable Git objects against only that parent.
-    blobs = {}
-    for change in archive_plan["changes"]:
-        path = change["path"]
-        blob = _post_blob(api, path, verified[path])
-        blobs[path] = _sha(_mapping(blob, "created blob").get("sha"), "created blob SHA")
-    tree = api.post("/git/trees", {
-        "base_tree": target["tree_sha"],
-        "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": blobs[path]}
-                 for path in sorted(blobs)],
-    })
-    new_tree = _sha(_mapping(tree, "new tree").get("sha"), "new tree SHA")
-    new_commit = api.post("/git/commits", {
-        "message": (
+    commit_sha = _build_verified_commit(
+        api, base_head=target["head"], base_tree=target["tree_sha"],
+        changes=archive_plan["changes"], verified=verified,
+        message=(
             "chore: apply verified generated artifacts\n\n"
             f"Generated-Writeback-V1: sha256:{manifest_digest(manifest)}\n"
             f"Producer-Run: {admission['producer_run_id']}/{admission['producer_run_attempt']}\n"
             f"Recipe: {admission['recipe_id']}@{admission['recipe_version']}\n"
             f"Source-SHA: {admission['source_sha']}"
         ),
-        "tree": new_tree,
-        "parents": [target["head"]],
-    })
-    commit_sha = _sha(_mapping(new_commit, "new commit").get("sha"), "new commit SHA")
+    )
 
     # REST PATCH force:false is a non-force fast-forward-only fence: if head
     # advanced from the expected parent, this divergent sibling commit cannot land.
