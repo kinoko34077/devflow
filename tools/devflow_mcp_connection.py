@@ -170,10 +170,12 @@ class Connection:
                  *, smoke_name: str, smoke_arguments: dict[str, Any],
                  required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
                  updates_held: Callable[[], bool] = lambda: False,
-                 rollback_epoch: Callable[[], str] = lambda: "INITIAL"):
+                 rollback_epoch: Callable[[], str] = lambda: "INITIAL",
+                 rollback_pending: Callable[[], bool] = lambda: False):
         self.revision = revision
         self.updates_held = updates_held
         self.rollback_epoch = rollback_epoch
+        self.rollback_pending = rollback_pending
         self.launch = launch
         self.required_calls = required_calls
         self.smoke_name = smoke_name
@@ -206,9 +208,9 @@ class Connection:
             init, tools = await worker.start()
             if self.revision() != revision or self.rollback_epoch() != epoch:
                 raise RuntimeError("marker changed during initialization")
-            # The generation is written before rollback changes selection.
-            # A new connection must not capture the old selection in that gap.
-            if (epoch != "INITIAL" and self.updates_held()
+            # Persistent rollback history is not evidence of an in-progress
+            # transition. Only a pending epoch blocks an older selection.
+            if (self.rollback_pending()
                     and epoch.partition(":")[2] != worker.launch.version):
                 raise RuntimeError("rollback selection is not yet active")
             self.worker = worker
@@ -533,11 +535,13 @@ async def serve_connection(revision: Callable[[], str], launch: Callable[[], Lau
                            *, smoke_name: str, smoke_arguments: dict[str, Any],
                            required_calls: Mapping[str, Mapping[str, Any]] = REQUIRED_CALLS,
                            updates_held: Callable[[], bool] = lambda: False,
-                           rollback_epoch: Callable[[], str] = lambda: "INITIAL") -> None:
+                           rollback_epoch: Callable[[], str] = lambda: "INITIAL",
+                           rollback_pending: Callable[[], bool] = lambda: False) -> None:
     """Isolated pilot; the production installer is deliberately unchanged."""
     connection = Connection(revision, launch, required_calls=required_calls,
                             smoke_name=smoke_name, smoke_arguments=smoke_arguments,
-                            updates_held=updates_held, rollback_epoch=rollback_epoch)
+                            updates_held=updates_held, rollback_epoch=rollback_epoch,
+                            rollback_pending=rollback_pending)
     try:
         initial = await connection.start()
         server = Server(

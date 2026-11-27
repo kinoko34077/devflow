@@ -180,7 +180,9 @@ def main(argv: list[str] | None = None) -> int:
         if __package__:
             from .devflow_mcp_connection import serve_connection
             from .devflow_mcp_catalog import REQUIRED_CALLS
-            from .devflow_mcp_release_manager import rollback_epoch, updates_held
+            from .devflow_mcp_release_manager import (
+                rollback_epoch, rollback_pending, updates_held,
+            )
         else:
             # A registered legacy PYTHONPATH must not influence the protected
             # front or SDK. The one-time installer adds -I before this script.
@@ -195,7 +197,9 @@ def main(argv: list[str] | None = None) -> int:
             sys.path.insert(0, str(directory))
             from devflow_mcp_connection import serve_connection
             from devflow_mcp_catalog import REQUIRED_CALLS
-            from devflow_mcp_release_manager import rollback_epoch, updates_held
+            from devflow_mcp_release_manager import (
+                rollback_epoch, rollback_pending, updates_held,
+            )
         asyncio.run(serve_connection(
             lambda: selection_revision(root),
             lambda: launch_parameters(gh_executable, fallback_script, root=root),
@@ -203,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
             smoke_arguments=dict(REQUIRED_CALLS["bootstrap_repository"]),
             updates_held=lambda: updates_held(root),
             rollback_epoch=lambda: rollback_epoch(root),
+            rollback_pending=lambda: rollback_pending(root),
         ))
         return 0
     except AuthenticationUnavailable:

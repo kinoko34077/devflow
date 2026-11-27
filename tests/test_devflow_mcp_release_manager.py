@@ -578,6 +578,12 @@ class ReleaseManagerContractTests(unittest.TestCase):
         self.assertTrue(manager.updates_held(self.root))
         self.assertEqual(manager.rollback_epoch(self.root), "INITIAL")
 
+    def test_legacy_rollback_epoch_is_read_as_completed(self):
+        (self.root / "rollback.epoch").write_text(
+            "1" * 32 + ":" + SHA_A, encoding="ascii")
+        self.assertEqual(manager.rollback_epoch(self.root), "1" * 32 + ":" + SHA_A)
+        self.assertFalse(manager.rollback_pending(self.root))
+
     def test_failed_rollback_keeps_hold_even_when_marker_write_fails(self):
         self._release(SHA_A)
         self._release(SHA_B)
@@ -586,9 +592,15 @@ class ReleaseManagerContractTests(unittest.TestCase):
             with self.assertRaises(manager.ReleaseError):
                 manager.rollback(self.root, self.legacy)
         self.assertEqual(manager.status(self.root), "HELD ACTIVE " + SHA_B)
+        self.assertTrue(manager.rollback_pending(self.root))
         with patch.object(manager, "trusted_latest") as fetch:
             self.assertEqual(manager.promote(**self._runner()), "HELD ACTIVE " + SHA_B)
             fetch.assert_not_called()
+        self.assertEqual(manager.resume_updates(self.root, self.legacy),
+                         "RESUMED ACTIVE " + SHA_B)
+        self.assertFalse(manager.rollback_pending(self.root))
+        self.assertFalse(manager.updates_held(self.root))
+        self.assertEqual(manager.status(self.root), "ACTIVE " + SHA_B)
 
     def test_resume_rejects_tampered_active_release_without_clearing_hold(self):
         old = self._release(SHA_A)

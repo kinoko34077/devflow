@@ -107,11 +107,53 @@ def launch_front(root):
                                required_calls={"read_version": {}},
                                smoke_name="read_version", smoke_arguments={},
                                updates_held=observe_hold,
-                               rollback_epoch=lambda: manager.rollback_epoch(root))
+                               rollback_epoch=lambda: manager.rollback_epoch(root),
+                               rollback_pending=lambda: manager.rollback_pending(root))
     asyncio.run(run())
 
 
 class ConnectionRestartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_later_rollback_does_not_reject_new_connection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = prepare(root, "a" * 40, "A")
+            b = prepare(root, "b" * 40, "B")
+            c = prepare(root, "c" * 40, "C")
+
+            # Leave a persistent completed rollback epoch, then select a later
+            # release whose rollback target is tampered with.
+            manager.write_marker(root, b["sha"], a["sha"],
+                                 tree_sha256=b["tree_sha256"],
+                                 previous_tree_sha256=a["tree_sha256"])
+            self.assertEqual(manager.rollback(root, root / "unused.py"),
+                             "ROLLED_BACK " + a["sha"])
+            self.assertEqual(manager.resume_updates(root, root / "unused.py"),
+                             "RESUMED ACTIVE " + a["sha"])
+            manager.write_marker(root, c["sha"], b["sha"],
+                                 tree_sha256=c["tree_sha256"],
+                                 previous_tree_sha256=b["tree_sha256"])
+            (root / "releases" / b["sha"] / "tools" / "devflow_mcp.py").write_text(
+                "tampered release\n", encoding="utf-8")
+            with self.assertRaises(manager.ReleaseError):
+                manager.rollback(root, root / "unused.py")
+            self.assertTrue(manager.updates_held(root))
+            self.assertFalse(manager.rollback_pending(root))
+
+            front = StdioServerParameters(
+                command=sys.executable,
+                args=["-B", "-m", "tests.test_devflow_mcp_connection", "--front", str(root)],
+                env={**clean_env(), "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            with open(os.devnull, "w") as log:
+                async with stdio_client(front, errlog=log) as (rd, wr):
+                    async with ClientSession(rd, wr) as client:
+                        await asyncio.wait_for(client.initialize(), 35)
+                        result = await asyncio.wait_for(
+                            client.call_tool("read_version", {}), 35)
+                        self.assertFalse(result.is_error)
+                        self.assertEqual(json.loads(result.content[0].text)["version"], "C")
+
     async def test_idle_rollback_resume_continues_only_unchanged_catalog_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

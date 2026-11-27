@@ -31,7 +31,9 @@ The old third argument remains the fallback.
 不正marker/候補起動失敗では正常な旧実行部とcatalogを保つ。catalog変更はSDKの通知と
 実際のtools/list再取得後に反映し、退役した実行部を回収する。
 holdは配布昇格停止のまま維持する。明示rollbackで選択が変わった場合は、旧workerへ新規callを流さず、検証済み復旧先へ切り替える。catalog未再取得時は旧公開契約と一致するtoolだけ復旧先で実行し、変更・退役toolは再取得を案内する。通常切替では既送callを完了させ、接続EOFではその接続のchildを回収する。送信済みcallを自動再送しない。markerや実行ファイルの改変を許可するものではない。
-rollback は選択変更前に `rollback.epoch` を原子的に更新する。各接続は起動時の世代を保持し、hold解除後や同じ版の再昇格後でも世代差があれば旧workerを使わず、現在選択された検証済みworkerへ切り替える。世代の保存に失敗した場合は選択を変更せずholdを維持する。世代が不正・読取不能なら当該接続を安全に拒否し、保護入口のファイル権限と内容を確認して復旧する。世代ファイルはresumeや通常更新で削除しない。接続開始がrollback処理と競合し、世代の復旧先と現在の選択が異なる短い間は新規接続を拒否する。
+rollback は選択変更前に `rollback.epoch` を原子的に更新する。各接続は起動時の世代を保持し、hold解除後や同じ版の再昇格後でも世代差があれば旧workerを使わず、現在選択された検証済みworkerへ切り替える。世代には `PENDING` / `DONE` の段階を記録し、新規接続を止めるのは rollback が選択変更を完了する前の `PENDING` 中だけとする。既存の2フィールド世代形式は完了済みとして読み、resumeや通常更新後も世代記録を保持する。世代の保存に失敗した場合は選択を変更せずholdを維持する。世代が不正・読取不能なら当該接続を安全に拒否し、保護入口のファイル権限と内容を確認して復旧する。
+
+世代を保存した後に選択markerの書込みが失敗した場合もholdを維持する。状態と検証済みreleaseを確認して明示 `resume` を行うと、現在の選択版を復旧先として pending 段階を完了し、holdを解除する。rollback途中で停止した状態を通常更新で自動解除しない。
 旧未注釈read-only名の互換例外は、運用上選択可能な全rollback/fallback版が明示宣言を満たし、旧版への復旧が不要と確認した時点で退役する。
 
 A local read-only state file determines which *newly started* server is selected:
@@ -41,7 +43,7 @@ A local read-only state file determines which *newly started* server is selected
   active.json                    {"schema_version":2,"sha":"<40-hex>","tree_sha256":"<64-hex>",
                                  "previous_sha":null,"previous_tree_sha256":null}
   updates.hold                   存在中は自動更新停止（rollbackが作成）
-  rollback.epoch                 rollback世代と復旧先（resume後も保持）
+  rollback.epoch                 rollback世代・復旧先・進行段階（resume後も保持）
   releases/<sha>/tools/devflow_mcp.py
   releases/<prior_sha>/...
 ```
